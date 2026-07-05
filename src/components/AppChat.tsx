@@ -1,0 +1,2855 @@
+import React, { useState, useEffect, useRef } from "react";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings } from "../types";
+import { getRelevantMemories } from "./AppMemory";
+import {
+  MessageSquare,
+  Users,
+  Compass,
+  User,
+  Send,
+  MoreHorizontal,
+  Bookmark,
+  Pin,
+  Image as ImageIcon,
+  Heart,
+  MessageCircle,
+  FolderHeart,
+  Settings,
+  ChevronLeft,
+  X,
+  Plus,
+  Sliders,
+  Camera,
+  Music,
+  Video,
+  Phone,
+  FileText,
+  MapPin,
+  Gift,
+  DollarSign
+} from "lucide-react";
+
+interface AppChatProps {
+  characters: Character[];
+  settings: UserSettings;
+  messages: Message[];
+  moments: Moment[];
+  onSendMessage: (msg: Message) => void;
+  onSaveCharacter: (char: Character) => void; // Support updating character remark, pinned status, chatBg
+  onAddMoment: (moment: Moment) => void;
+  onAddCommentToMoment: (momentId: string, comment: MomentComment) => void;
+  onLikeMoment: (momentId: string, userName: string) => void;
+  onToggleBookmark: (messageId: string) => void;
+  onClose: () => void;
+  onSaveSettings: (settings: UserSettings) => void;
+  onNavigateToApp: (appId: string) => void;
+  worldBookEntries?: WorldBookEntry[];
+  onClearMessages?: (charId: string, keepLastCount?: number) => void;
+  memories: MemoryItem[];
+  onSaveMemories: (updated: MemoryItem[]) => void;
+  recallSettings: MemoryVaultSettings;
+}
+
+const PRESEED_MOMENTS: Moment[] = [
+  {
+    id: "m-init-lc",
+    characterId: "pre-char-lc",
+    authorName: "陆沉砚",
+    authorAvatar: "https://images.unsplash.com/photo-1620662056044-1253857f6edd?w=100&h=100&fit=crop",
+    content: "刚整理完新一期的人文空间设计图，给自己泡了一杯热美式。深夜的城市很安静，希望每个在梦想路上前行的人，今晚都有个温柔的梦.☕✍️",
+    timestamp: Date.now() - 3600000,
+    likes: ["饭饭"],
+    comments: []
+  }
+];
+
+export default function AppChat({
+  characters,
+  settings,
+  messages,
+  moments,
+  onSendMessage,
+  onSaveCharacter,
+  onAddMoment,
+  onAddCommentToMoment,
+  onLikeMoment,
+  onToggleBookmark,
+  onClose,
+  onSaveSettings,
+  onNavigateToApp,
+  worldBookEntries = [],
+  onClearMessages,
+  memories,
+  onSaveMemories,
+  recallSettings,
+}: AppChatProps) {
+  const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
+  
+  // Navigation State
+  const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
+  const activeCharacter = characters.find((c) => c.id === activeChatCharId);
+  const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId);
+
+  const [momentsFilterCharId, setMomentsFilterCharId] = useState<string | null>(null);
+  const [isShowingCardModal, setIsShowingCardModal] = useState(false);
+  const [singleCharacterMomentsId, setSingleCharacterMomentsId] = useState<string | null>(null);
+  const [isShowingAddFriendDialog, setIsShowingAddFriendDialog] = useState(false);
+
+  const [friendIds, setFriendIds] = useState<string[]>(() => {
+    const raw = localStorage.getItem("phone_friend_ids");
+    if (raw) return JSON.parse(raw);
+    return characters.map(c => c.id);
+  });
+
+  useEffect(() => {
+    localStorage.setItem("phone_friend_ids", JSON.stringify(friendIds));
+  }, [friendIds]);
+
+  const friends = characters.filter((c) => friendIds.includes(c.id));
+
+  // Get location addresses from World Book entries related to this character
+  const getDynamicLocations = () => {
+    if (!activeCharacter) return [];
+    
+    const locations: string[] = [];
+    
+    // 1. Filter entries related to the current character
+    const charEntries = worldBookEntries.filter(
+      (entry) => entry.characterId === activeCharacter.id
+    );
+    
+    charEntries.forEach((entry) => {
+      // Check if entry category is location-related, or title is a place
+      const isLocCategory = ["地点", "地名", "地址", "位置", "场景", "场景设定", "场景信息", "空间"].includes(entry.category || "");
+      const isLocTitle = /地点|地址|地名|位置|场所|场景|住所|公寓|工作室|办公室|大厅|飞船|星空|学校|家/i.test(entry.title || "");
+      
+      // If it's a location entry, the title itself is a perfect place name
+      if (isLocCategory || isLocTitle) {
+        if (entry.title && !locations.includes(entry.title)) {
+          locations.push(entry.title);
+        }
+      }
+      
+      // Parse content for explicit address indicators: e.g. "地址：xxx", "位置：xxx", "地点：xxx"
+      if (entry.content) {
+        const lines = entry.content.split(/\r?\n/);
+        lines.forEach((line) => {
+          const match = line.match(/(?:地址|位置|地点|地名)[:：]\s*(.+)/);
+          if (match && match[1]) {
+            const val = match[1].trim();
+            if (val && !locations.includes(val) && val.length < 50) {
+              locations.push(val);
+            }
+          }
+        });
+      }
+    });
+    
+    // 2. Also check global entries if specific character entries are empty or to enrich the list
+    const globalEntries = worldBookEntries.filter(
+      (entry) => entry.characterId === "global"
+    );
+    globalEntries.forEach((entry) => {
+      const isLocCategory = ["地点", "地名", "地址", "位置", "场景", "场景设定"].includes(entry.category || "");
+      if (isLocCategory) {
+        if (entry.title && !locations.includes(entry.title)) {
+          locations.push(entry.title);
+        }
+      }
+      
+      if (entry.content) {
+        const lines = entry.content.split(/\r?\n/);
+        lines.forEach((line) => {
+          const match = line.match(/(?:地址|位置|地点|地名)[:：]\s*(.+)/);
+          if (match && match[1]) {
+            const val = match[1].trim();
+            if (val && !locations.includes(val) && val.length < 50) {
+              locations.push(val);
+            }
+          }
+        });
+      }
+    });
+
+    // 3. Fallback to default locations if no locations extracted from World Book entries
+    if (locations.length === 0) {
+      if (activeCharacter.name.includes("陆沉砚")) {
+        return [
+          "陆沉砚的设计工作室「静空间」",
+          "工作室一楼手绘写生区",
+          "常德路12号人文概念展厅",
+          "静溢半山私享住宅项目现场",
+          "老街梧桐树下的街角咖啡馆",
+          "落日湖畔的深夜写生露台"
+        ];
+      }
+      return [
+        "废墟图书馆总理大堂",
+        "塞伯坦星巡航飞船第一总署",
+        "星空银河系瞭望第十二哨站",
+        "温馨小屋一楼客厅沙发",
+        "繁华商业街中央喷泉广场",
+        "静谧森林樱花树下"
+      ];
+    }
+    
+    return locations;
+  };
+
+  // User profile edit states
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editMyName, setEditMyName] = useState(settings.name);
+  const [editMySignature, setEditMySignature] = useState(settings.signature);
+  const [editMyBio, setEditMyBio] = useState(settings.bio);
+  const [editMyAvatar, setEditMyAvatar] = useState(settings.avatar);
+
+  // Sync edits when isEditingProfile toggled
+  useEffect(() => {
+    if (isEditingProfile) {
+      setEditMyName(settings.name);
+      setEditMySignature(settings.signature);
+      setEditMyBio(settings.bio);
+      setEditMyAvatar(settings.avatar);
+    }
+  }, [isEditingProfile, settings]);
+
+  // Inputs
+  const [chatInputText, setChatInputText] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const [manualLocationText, setManualLocationText] = useState("");
+
+  // Moments form state
+  const [momentInputText, setMomentInputText] = useState("");
+  const [momentAttachedImage, setMomentAttachedImage] = useState<string | null>(null);
+  const [showMomentPublisher, setShowMomentPublisher] = useState(false);
+  const [inlineCommentsTexts, setInlineCommentsTexts] = useState<Record<string, string>>({});
+
+  // Settings draft states
+  const [draftRemark, setDraftRemark] = useState("");
+  const [draftIsPinned, setDraftIsPinned] = useState(false);
+  const [draftChatBg, setDraftChatBg] = useState<string | undefined>(undefined);
+  const [draftCustomCss, setDraftCustomCss] = useState("");
+  const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
+  const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
+
+  // Rich Attachment states
+  const [showAttachPanel, setShowAttachPanel] = useState(false);
+  const [activeAttachModal, setActiveAttachModal] = useState<"redpacket" | "music" | "location" | "file" | "calling" | null>(null);
+  const [callingType, setCallingType] = useState<"voice" | "video">("voice");
+  const [callingStatus, setCallingStatus] = useState<"ringing" | "connected" | "ended">("ringing");
+  const [callingDuration, setCallingDuration] = useState(0);
+  const [redPacketAmount, setRedPacketAmount] = useState("8.88");
+  const [redPacketGreeting, setRedPacketGreeting] = useState("恭喜发财，万事如意");
+  const [showRedPacketOpenModal, setShowRedPacketOpenModal] = useState<boolean>(false);
+  const [openRedPacketDetail, setOpenRedPacketDetail] = useState<{ amount: string; greeting: string } | null>(null);
+
+  // Memory Compression and Proactive Chat states
+  const [isCompressingMemory, setIsCompressingMemory] = useState(false);
+  const [isTriggeringProactive, setIsTriggeringProactive] = useState(false);
+  const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
+  const [editingMemoryText, setEditingMemoryText] = useState("");
+
+  // Close attachment panel when switching chats
+  useEffect(() => {
+    setShowAttachPanel(false);
+  }, [activeChatCharId]);
+
+  // Sync editing memory text
+  useEffect(() => {
+    if (activeCharacter) {
+      setEditingMemoryText(activeCharacter.compressedMemory || "");
+    }
+  }, [activeCharacter, isShowingCardModal]);
+
+  // Update character's last active time when user interacts with chat
+  useEffect(() => {
+    if (activeChatCharId && activeCharacter) {
+      onSaveCharacter({
+        ...activeCharacter,
+        lastActiveTime: Date.now(),
+      });
+    }
+  }, [activeChatCharId]);
+
+  // Send character's custom opening speech / greeting if there are no messages in the chat history
+  useEffect(() => {
+    if (activeChatCharId && activeCharacter && activeCharacter.greeting) {
+      const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId);
+      if (currentChatMessages.length === 0) {
+        const charMsg: Message = {
+          id: `msg-greeting-${Date.now()}`,
+          characterId: activeChatCharId,
+          sender: "character",
+          content: activeCharacter.greeting,
+          timestamp: Date.now(),
+        };
+        onSendMessage(charMsg);
+      }
+    }
+  }, [activeChatCharId, activeCharacter, messages, onSendMessage]);
+
+  // Background proactive check (every minute)
+  useEffect(() => {
+    const checkProactive = setInterval(() => {
+      friends.forEach((friend) => {
+        const lastActive = friend.lastActiveTime || Date.now();
+        const threeHoursMs = 3 * 60 * 60 * 1000;
+        if (
+          friend.enableProactiveChat &&
+          Date.now() - lastActive >= threeHoursMs
+        ) {
+          // Reset timer first to avoid flooding
+          onSaveCharacter({
+            ...friend,
+            lastActiveTime: Date.now(),
+          });
+          triggerProactiveFor(friend.id);
+        }
+      });
+    }, 60000);
+    return () => clearInterval(checkProactive);
+  }, [friends]);
+
+  // Calling timer
+  useEffect(() => {
+    let timer: any;
+    if (activeAttachModal === "calling" && callingStatus === "connected") {
+      timer = setInterval(() => {
+        setCallingDuration((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setCallingDuration(0);
+    }
+    return () => clearInterval(timer);
+  }, [activeAttachModal, callingStatus]);
+
+  const sendCustomMessage = (contentString: string) => {
+    if (!activeChatCharId || !activeCharacter) return;
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      characterId: activeChatCharId,
+      sender: "user",
+      content: contentString,
+      timestamp: Date.now(),
+    };
+    onSendMessage(userMsg);
+    
+    setIsTyping(true);
+    setTimeout(() => {
+      setIsTyping(false);
+      let replyContent = "收到啦！";
+      if (contentString.startsWith("data:image/")) {
+        replyContent = "哇，照片收到了，好好看呀！✨";
+      } else if (contentString.startsWith("[红包]")) {
+        const parts = contentString.split("|");
+        const amount = parts[1] || "8.88";
+        replyContent = `天呐！居然有 ${amount} 元大红包！谢谢你，恭喜发财，贴贴~ 🍊🧧`;
+      } else if (contentString.startsWith("[音乐]")) {
+        const parts = contentString.split("|");
+        const title = parts[1] || "音乐";
+        replyContent = `这首《${title}》好好听呀，我已经加入单曲循环列表啦！🎧🎶`;
+      } else if (contentString.startsWith("[位置]")) {
+        const parts = contentString.split("|");
+        const loc = parts[1] || "位置";
+        replyContent = `收到你分享的位置 [${loc}] 啦！我这就收拾行李过去找你~ 📍🚀`;
+      } else if (contentString.startsWith("[文件]")) {
+        const parts = contentString.split("|");
+        const file = parts[1] || "文件";
+        replyContent = `文件《${file}》我已经收到了！多谢分享，么么哒！📁`;
+      } else if (contentString.startsWith("[视频通话]")) {
+        replyContent = "刚才的视频通话聊得好开心，下次我们再打呀！🎥🥰";
+      } else if (contentString.startsWith("[语音通话]")) {
+        replyContent = "声音很好听，刚才聊得很愉快！比心~ 📞❤️";
+      }
+      
+      const charMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        characterId: activeChatCharId,
+        sender: "character",
+        content: replyContent,
+        timestamp: Date.now(),
+      };
+      onSendMessage(charMsg);
+    }, 1500);
+  };
+
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Pre-seed moments if state empty
+  const allMoments = moments.length === 0 ? PRESEED_MOMENTS : moments;
+
+  // Auto scroll in chats
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, activeChatCharId, isTyping]);
+
+  // Handle Send Message and API generation trigger
+  const handleSendChatMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
+
+    const userMsgText = chatInputText.trim();
+    setChatInputText("");
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      characterId: activeChatCharId,
+      sender: "user",
+      content: userMsgText,
+      timestamp: Date.now(),
+    };
+
+    onSendMessage(userMsg);
+    setIsTyping(true);
+
+    try {
+      // Collect message history of this specific character to pass to backend
+      const history = currentChatMessages.map((m) => ({
+        role: m.sender === "user" ? "user" : "model",
+        text: m.content,
+      }));
+
+      // Construct system instructions based on multi-block SillyTavern positioning rules
+      const mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
+WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
+Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
+Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+
+      let charDefText = `Roleplay Profile:
+- Name: ${activeCharacter.name}
+- Age: ${activeCharacter.age}
+- Gender: ${activeCharacter.gender}
+- MBTI: ${activeCharacter.mbti}
+- Personality & Behavior: ${activeCharacter.personality}
+- Background Story: ${activeCharacter.backstory}`;
+
+      if (activeCharacter.compressedMemory) {
+        charDefText += `\n- Previous Background: ${activeCharacter.compressedMemory}`;
+      }
+
+      // Recall memories from Memory Vault
+      const topK = recallSettings?.recallCount || 5;
+      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", userMsgText, topK);
+      if (relevantMemories.length > 0) {
+        charDefText += `\n- Reclaimed Memories from previous conversations (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+      }
+
+      const userProfileText = `User Profile (interacting with you):
+- Nickname: ${settings.name}
+- Personality/Bio: ${settings.bio}`;
+
+      // World Book triggering logic
+      const triggeredEntries: {
+        entry: WorldBookEntry;
+        text: string;
+      }[] = [];
+
+      const lowerUserMsg = userMsgText.toLowerCase();
+
+      for (const entry of worldBookEntries) {
+        // Skip inactive entries
+        if (entry.isActive === false) continue;
+
+        // Check if bound to global or active character
+        const isGlobal = !entry.characterId || entry.characterId === "global";
+        if (!isGlobal && entry.characterId !== activeChatCharId) {
+          continue;
+        }
+
+        let isTriggered = false;
+        if (entry.triggerType === "constant") {
+          isTriggered = true;
+        } else if (entry.triggerType === "vector") {
+          // Smart simulated vector term-overlap matching
+          const textToMatch = (entry.title + " " + (entry.keywords || "") + " " + entry.content).toLowerCase();
+          const userWords = lowerUserMsg.split(/[\s,.:;!?，。！？、]/).filter(w => w.length >= 2);
+          if (userWords.some(word => textToMatch.includes(word)) || lowerUserMsg.includes(entry.title.toLowerCase())) {
+            isTriggered = true;
+          }
+        } else {
+          // "keys" trigger
+          const kwStr = entry.keywords || entry.title || "";
+          const kws = kwStr
+            .split(/[,，]/)
+            .map((k) => k.trim().toLowerCase())
+            .filter(Boolean);
+
+          if (kws.some((kw) => lowerUserMsg.includes(kw))) {
+            isTriggered = true;
+          }
+        }
+
+        if (isTriggered) {
+          triggeredEntries.push({
+            entry,
+            text: `【设定 - ${entry.title}】\n${entry.content}`
+          });
+        }
+      }
+
+      // Group triggered entries by SillyTavern insertion position
+      const entriesByPos = {
+        after_main_prompt: [] as string[],
+        before_char_def: [] as string[],
+        after_char_def: [] as string[],
+        before_chat_history: [] as string[]
+      };
+
+      // Sort entries by depth ascending (smaller depth is closer / higher priority)
+      const sortedTriggered = [...triggeredEntries].sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5));
+
+      sortedTriggered.forEach(({ entry, text }) => {
+        const pos = entry.position || "after_char_def";
+        if (pos in entriesByPos) {
+          entriesByPos[pos as keyof typeof entriesByPos].push(text);
+        } else {
+          entriesByPos.after_char_def.push(text);
+        }
+      });
+
+      // Assemble system instruction blocks
+      let assembledInstructions: string[] = [];
+
+      // 1. Main Prompt
+      assembledInstructions.push(mainPromptText);
+
+      // 2. After Main Prompt entries
+      if (entriesByPos.after_main_prompt.length > 0) {
+        assembledInstructions.push(`[World Book Background: Main Prompt Extensions]\n` + entriesByPos.after_main_prompt.join("\n\n"));
+      }
+
+      // 3. Before Character Definition entries
+      if (entriesByPos.before_char_def.length > 0) {
+        assembledInstructions.push(`[World Book Background: Context Primers]\n` + entriesByPos.before_char_def.join("\n\n"));
+      }
+
+      // 4. Character Definition
+      assembledInstructions.push(charDefText);
+
+      // 5. After Character Definition entries
+      if (entriesByPos.after_char_def.length > 0) {
+        assembledInstructions.push(`[World Book Background: Profile Extensions]\n` + entriesByPos.after_char_def.join("\n\n"));
+      }
+
+      // 6. User Profile
+      assembledInstructions.push(userProfileText);
+
+      // 7. Before Chat History entries
+      if (entriesByPos.before_chat_history.length > 0) {
+        assembledInstructions.push(`[World Book Background: Story Anchor]\n` + entriesByPos.before_chat_history.join("\n\n"));
+      }
+
+      const systemInstruction = assembledInstructions.join("\n\n---\n\n");
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMsgText,
+          history,
+          systemInstruction,
+          apiKey: settings.apiKey,
+          model: settings.selectedModel || "gemini-3.5-flash",
+          apiEndpoint: settings.apiEndpoint,
+          apiTemperature: settings.apiTemperature,
+          streamCompatible: settings.streamCompatible,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.text) {
+        const charMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          characterId: activeChatCharId,
+          sender: "character",
+          content: data.text,
+          timestamp: Date.now(),
+        };
+        onSendMessage(charMsg);
+
+        // Check if auto extraction is enabled and we have reached the trigger round count
+        const isAutoExtractEnabled = activeCharacter.enableAutoSummary !== undefined
+          ? activeCharacter.enableAutoSummary
+          : (recallSettings?.autoExtract !== false);
+
+        const extractIntervalRounds = activeCharacter.summaryTriggerRound !== undefined
+          ? activeCharacter.summaryTriggerRound
+          : (recallSettings?.extractInterval || 10);
+
+        if (isAutoExtractEnabled) {
+          const triggerCount = extractIntervalRounds * 2;
+          const currentMsgs = [...currentChatMessages, userMsg, charMsg];
+          
+          let eligibleMsgs = currentMsgs;
+          if (activeCharacter.lastImmediateSummaryMsgId) {
+            const idx = currentMsgs.findIndex(m => m.id === activeCharacter.lastImmediateSummaryMsgId);
+            if (idx !== -1) {
+              eligibleMsgs = currentMsgs.slice(idx + 1);
+            }
+          }
+
+          if (eligibleMsgs.length >= triggerCount) {
+            // Trigger automatic memory extraction in background
+            setTimeout(async () => {
+              const count = await handleExtractMemories(eligibleMsgs);
+              if (count > 0 && onClearMessages) {
+                // Keep the last 4 messages to preserve conversational thread
+                onClearMessages(activeChatCharId, 4);
+              }
+            }, 200);
+          }
+        }
+
+        // AI autonomously decides on Moments background cover from their own album
+        if (activeCharacter.album && activeCharacter.album.length > 0) {
+          const needsCover = !activeCharacter.momentsCover;
+          const shouldChangeCover = needsCover || Math.random() < 0.35;
+          if (shouldChangeCover) {
+            const albumList = activeCharacter.album;
+            const randomIndex = Math.floor(Math.random() * albumList.length);
+            const selectedCover = albumList[randomIndex];
+            if (selectedCover !== activeCharacter.momentsCover) {
+              onSaveCharacter({
+                ...activeCharacter,
+                momentsCover: selectedCover,
+              });
+            }
+          }
+        }
+      } else {
+        const errMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          characterId: activeChatCharId,
+          sender: "character",
+          content: `⚠️ [系统出错]：${data.error || "智能体未能理解该消息。"}`,
+          timestamp: Date.now(),
+        };
+        onSendMessage(errMsg);
+      }
+    } catch (err: any) {
+      const errMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        characterId: activeChatCharId,
+        sender: "character",
+        content: "⚠️ [离线错误]：无法建立与智能体服务器的连接，请确认网络并重试。",
+        timestamp: Date.now(),
+      };
+      onSendMessage(errMsg);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  // Save settings draft
+  const handleSaveSettings = () => {
+    if (activeCharacter) {
+      onSaveCharacter({
+        ...activeCharacter,
+        remark: draftRemark.trim() || undefined,
+        isPinned: draftIsPinned,
+        chatBg: draftChatBg,
+        customCss: draftCustomCss,
+        enableProactiveChat: draftEnableProactiveChat,
+        proactiveChatInterval: draftProactiveChatInterval,
+      });
+      setIsShowingCardModal(false);
+    }
+  };
+
+  // Set chat specific background wallpaper (draft)
+  const handleDraftChatBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          setDraftChatBg(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Memory Extraction Handler (Extracting facts & moments instead of a big blob)
+  const handleExtractMemories = async (manualMessagesOverride?: Message[]) => {
+    if (!activeChatCharId || !activeCharacter) return 0;
+
+    setIsCompressingMemory(true);
+    try {
+      const messagesToCompress = manualMessagesOverride || currentChatMessages;
+      if (messagesToCompress.length === 0) {
+        return 0;
+      }
+      
+      const history = messagesToCompress.map((m) => ({
+        role: m.sender === "user" ? "user" : "model",
+        text: m.content,
+      }));
+
+      const response = await fetch("/api/extract-memories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          history,
+          characterName: activeCharacter.name,
+          apiKey: settings.apiKey,
+          model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model")
+            ? (settings.selectedModel || "gemini-3.5-flash")
+            : recallSettings.extractModel,
+          apiEndpoint: settings.apiEndpoint,
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok && data.items && Array.isArray(data.items)) {
+        const newItems: MemoryItem[] = [];
+        data.items.forEach((content: string) => {
+          const trimmed = content.trim();
+          if (!trimmed) return;
+          // De-duplicate against existing memories for this character
+          const isDup = (memories || []).some(
+            (m) =>
+              m.characterId === activeChatCharId &&
+              m.content.toLowerCase().replace(/[\s,.:;!?"']/g, "") ===
+                trimmed.toLowerCase().replace(/[\s,.:;!?"']/g, "")
+          );
+          if (!isDup) {
+            newItems.push({
+              id: (Date.now() + Math.random()).toString(),
+              characterId: activeChatCharId,
+              content: trimmed,
+              timestamp: Date.now(),
+              importance: 5,
+              isManual: false,
+            });
+          }
+        });
+
+        if (newItems.length > 0) {
+          onSaveMemories([...newItems, ...(memories || [])]);
+        }
+        return newItems.length;
+      } else {
+        console.error("Extract memory API error:", data.error);
+      }
+    } catch (err: any) {
+      console.error("Memory extraction error:", err);
+    } finally {
+      setIsCompressingMemory(false);
+    }
+    return 0;
+  };
+
+  // Manual Trigger Proactive Message simulation
+  const handleTriggerProactiveMessage = async () => {
+    if (!activeChatCharId || !activeCharacter) return;
+
+    setIsTriggeringProactive(true);
+    setIsTyping(true);
+    try {
+      const systemInstruction = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
+Roleplay Profile:
+- Age: ${activeCharacter.age}
+- Gender: ${activeCharacter.gender}
+- MBTI: ${activeCharacter.mbti}
+- Personality & Behavior: ${activeCharacter.personality}
+- Background Story: ${activeCharacter.backstory}
+
+${activeCharacter.compressedMemory ? `Compressed Memories (Important context from previous conversations): ${activeCharacter.compressedMemory}` : ""}
+
+User Profile (interacting with you):
+- Nickname: ${settings.name}
+- Personality/Bio: ${settings.bio}
+
+PROACTIVE CONTACT TASK:
+It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
+
+Instructions:
+1. Speak in Chinese. Maintain character role-play thoroughly.
+2. WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
+3. This is an initiator message, so check in on the user or share something from your day.
+4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: "(用户失联3小时，你主动给其发送了一条信息)",
+          history: [],
+          systemInstruction,
+          apiKey: settings.apiKey,
+          model: settings.selectedModel || "gemini-3.5-flash",
+          apiEndpoint: settings.apiEndpoint,
+          apiTemperature: settings.apiTemperature,
+          streamCompatible: settings.streamCompatible,
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok && data.text) {
+        const proactiveMsg: Message = {
+          id: Date.now().toString(),
+          characterId: activeChatCharId,
+          sender: "character",
+          content: data.text,
+          timestamp: Date.now(),
+        };
+        onSendMessage(proactiveMsg);
+      } else {
+        alert(`主动联络失败: ${data.error || "智能体无响应"}`);
+      }
+    } catch (err: any) {
+      alert(`主动联络错误: ${err.message || err}`);
+    } finally {
+      setIsTriggeringProactive(false);
+      setIsTyping(false);
+    }
+  };
+
+  // Automated background proactive message generator for any character
+  const triggerProactiveFor = async (charId: string) => {
+    const friend = characters.find((c) => c.id === charId);
+    if (!friend) return;
+
+    try {
+      const systemInstruction = `You are playing the role of "${friend.name}" in a WeChat chat.
+Roleplay Profile:
+- Age: ${friend.age}
+- Gender: ${friend.gender}
+- MBTI: ${friend.mbti}
+- Personality & Behavior: ${friend.personality}
+- Background Story: ${friend.backstory}
+
+${friend.compressedMemory ? `Compressed Memories (Important context from previous conversations): ${friend.compressedMemory}` : ""}
+
+User Profile (interacting with you):
+- Nickname: ${settings.name}
+- Personality/Bio: ${settings.bio}
+
+PROACTIVE CONTACT TASK:
+It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.
+
+Instructions:
+1. Speak in Chinese. Maintain character role-play thoroughly.
+2. WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
+3. This is an initiator message, so check in on the user or share something from your day.
+4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: "(你主动给用户发送了一条信息)",
+          history: [],
+          systemInstruction,
+          apiKey: settings.apiKey,
+          model: settings.selectedModel || "gemini-3.5-flash",
+          apiEndpoint: settings.apiEndpoint,
+          apiTemperature: settings.apiTemperature,
+          streamCompatible: settings.streamCompatible,
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok && data.text) {
+        const proactiveMsg: Message = {
+          id: Date.now().toString(),
+          characterId: charId,
+          sender: "character",
+          content: data.text,
+          timestamp: Date.now(),
+        };
+        onSendMessage(proactiveMsg);
+      }
+    } catch (err) {
+      console.error("Proactive message auto-trigger error:", err);
+    }
+  };
+
+  // Moments publication
+  const handleMomentImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          setMomentAttachedImage(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handlePublishMoment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!momentInputText.trim() && !momentAttachedImage) return;
+
+    const newMo: Moment = {
+      id: Date.now().toString(),
+      authorName: settings.name,
+      authorAvatar: settings.avatar,
+      content: momentInputText.trim(),
+      timestamp: Date.now(),
+      likes: [],
+      comments: [],
+      image: momentAttachedImage || undefined,
+    };
+
+    onAddMoment(newMo);
+    setMomentInputText("");
+    setMomentAttachedImage(null);
+    setShowMomentPublisher(false);
+  };
+
+  const handleMomentsCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          onSaveSettings({ ...settings, momentsCover: reader.result });
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handlePublishComment = (momentId: string) => {
+    const text = inlineCommentsTexts[momentId];
+    if (!text || !text.trim()) return;
+
+    const newComment: MomentComment = {
+      id: Date.now().toString(),
+      authorName: settings.name,
+      authorAvatar: settings.avatar,
+      content: text.trim(),
+      timestamp: Date.now(),
+    };
+
+    onAddCommentToMoment(momentId, newComment);
+    setInlineCommentsTexts({ ...inlineCommentsTexts, [momentId]: "" });
+  };
+
+  // Active chat threads list builder
+  const chatThreads = characters.map((char) => {
+    const threadMsgs = messages.filter((m) => m.characterId === char.id);
+    const lastMsg = threadMsgs.length > 0 ? threadMsgs[threadMsgs.length - 1] : null;
+    return {
+      character: char,
+      lastMessage: lastMsg,
+      isPinned: char.isPinned || false,
+    };
+  }).sort((a, b) => {
+    if (a.isPinned && !b.isPinned) return -1;
+    if (!a.isPinned && b.isPinned) return 1;
+    return (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0);
+  });
+
+  const savedBookmarks = messages.filter((m) => m.isBookmarked);
+
+  // Moments feed filtering
+  const filteredMoments = momentsFilterCharId
+    ? allMoments.filter((m) => m.characterId === momentsFilterCharId)
+    : allMoments;
+
+  const navigateToMomentsOf = (charId: string) => {
+    setMomentsFilterCharId(charId);
+    setActiveTab("moments");
+    setActiveChatCharId(null);
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-neutral-100 text-neutral-800 font-sans select-none overflow-hidden relative">
+      
+      {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
+      {activeChatCharId && activeCharacter ? (
+        <div className="absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up">
+          {activeCharacter.customCss && (
+            <style>{activeCharacter.customCss}</style>
+          )}
+          {/* Chat Window Header */}
+          <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
+            <button
+              onClick={() => {
+                setActiveChatCharId(null);
+                setIsShowingCardModal(false);
+              }}
+              className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+            >
+              <ChevronLeft className="w-4 h-4 text-slate-700" />
+            </button>
+            <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max max-w-[160px] truncate">
+              {activeCharacter.remark || activeCharacter.name}
+            </h2>
+            <button
+              onClick={() => {
+                setDraftRemark(activeCharacter.remark || "");
+                setDraftIsPinned(activeCharacter.isPinned || false);
+                setDraftChatBg(activeCharacter.chatBg);
+                setDraftCustomCss(activeCharacter.customCss || "");
+                setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
+                setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
+                setIsShowingCardModal(!isShowingCardModal);
+              }}
+              className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+            >
+              <MoreHorizontal className="w-4 h-4 text-slate-700" />
+            </button>
+          </div>
+
+          {/* Character Details / Settings Full-Screen Page */}
+          {isShowingCardModal && (
+            <div className="absolute inset-0 z-50 bg-slate-50 flex flex-col h-full animate-slide-up">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
+                <button
+                  onClick={() => setIsShowingCardModal(false)}
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+                >
+                  <ChevronLeft className="w-4 h-4 text-slate-700" />
+                </button>
+                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">设置</h2>
+                <div className="w-8 shrink-0" />
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* Character Profile Summary & Remark Settings */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                  <img
+                    src={activeCharacter.avatar}
+                    alt={activeCharacter.name}
+                    className="w-16 h-16 rounded-full border border-slate-100 object-cover shrink-0"
+                  />
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="text-base font-bold text-slate-800 truncate">
+                      {activeCharacter.name}
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        value={draftRemark}
+                        onChange={(e) => setDraftRemark(e.target.value)}
+                        placeholder="设置备注昵称..."
+                        className="w-full bg-slate-50 px-3 py-1.5 rounded-[32px] border border-slate-200 focus:outline-none text-xs text-slate-600 placeholder-slate-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Operations Group Card */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-4 text-xs">
+                  {/* Settings toggles */}
+                  <div className="divide-y divide-slate-100 pt-1 space-y-4">
+                    {/* Pin Chat */}
+                    <div className="flex items-center justify-between pb-1">
+                      <span className="text-[#52525b] font-bold text-xs">置顶聊天</span>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={draftIsPinned}
+                          onChange={(e) => setDraftIsPinned(e.target.checked)}
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Chat Background customizer */}
+                    <div className="py-3 space-y-2 border-t border-slate-100">
+                      <span className="text-[#52525b] font-bold block text-xs">专属背景壁纸</span>
+                      {draftChatBg ? (
+                        <div className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-50 h-24 flex items-center justify-center">
+                          <img src={draftChatBg} className="absolute inset-0 w-full h-full object-cover opacity-60" />
+                          <div className="relative z-10 flex gap-2">
+                            <label className="cursor-pointer bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-colors shadow-sm border border-slate-200">
+                              更换背景
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleDraftChatBgUpload}
+                                className="hidden"
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setDraftChatBg(undefined)}
+                              className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold transition-colors shadow-sm"
+                            >
+                              移除
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-4 rounded-xl text-xs transition-colors group">
+                          <span className="text-slate-500 font-medium group-hover:text-slate-700">点击上传专属背景图片</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">支持 PNG, JPG 等格式</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleDraftChatBgUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    {/* Character Specific CSS Customizer */}
+                    <div className="py-3 space-y-1.5 border-t border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#52525b] font-bold text-xs">单人专属聊天页 CSS 样式</span>
+                        <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">优先于全局气泡</span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={draftCustomCss}
+                        onChange={(e) => setDraftCustomCss(e.target.value)}
+                        placeholder={`例如：\n.chat-bubble-self {\n  background: #f43f5e !important;\n  color: #fff !important;\n}`}
+                        className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[32px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none font-mono leading-relaxed"
+                      />
+                    </div>
+
+                    {/* Proactive Chat Toggles */}
+                    <div className="py-3.5 space-y-2.5 border-t border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
+                          <span className="text-[10px] text-slate-400 block">失联一定时间后根据性格主动给您发信息</span>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={draftEnableProactiveChat}
+                            onChange={(e) => setDraftEnableProactiveChat(e.target.checked)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                          />
+                        </label>
+                      </div>
+
+                      {draftEnableProactiveChat && (
+                        <div className="space-y-3 pt-2.5 border-t border-slate-100">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-[#52525b] font-medium">联络时间间隔</span>
+                            <span className="text-xs font-bold text-slate-700 font-mono">{draftProactiveChatInterval} 小时</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={1}
+                            max={24}
+                            value={draftProactiveChatInterval}
+                            onChange={(e) => setDraftProactiveChatInterval(parseInt(e.target.value))}
+                            className="w-full accent-neutral-950 h-1 bg-slate-100 rounded-lg appearance-none cursor-pointer"
+                          />
+                          <div className="flex justify-between text-[9px] text-slate-400 font-mono">
+                            <span>1h</span>
+                            <span>6h</span>
+                            <span>12h</span>
+                            <span>18h</span>
+                            <span>24h</span>
+                          </div>
+
+                          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-slate-400 leading-snug">
+                              失联后 Ta 将分享日常或关心您。
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleTriggerProactiveMessage}
+                              disabled={isTriggeringProactive}
+                              className="shrink-0 px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white font-bold rounded-lg text-[9px] transition-colors shadow-sm disabled:opacity-50"
+                            >
+                              {isTriggeringProactive ? "正在发送..." : "⚡ 模拟主动发信"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Save button and clear record buttons at bottom of the page */}
+                  <div className="pt-4 space-y-3 border-t border-slate-100">
+                    <button
+                      onClick={handleSaveSettings}
+                      className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                    >
+                      保存设置
+                    </button>
+                    
+                    <div className="flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => setShowClearHistoryModal(true)}
+                        className="text-xs text-red-500 hover:text-red-600 font-medium py-1 px-4 rounded-xl hover:bg-red-50/50 transition-colors"
+                      >
+                        清空对话记录
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Clear History Choice Modal Overlay */}
+              {showClearHistoryModal && (
+                <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white rounded-3xl p-6 max-w-xs w-full shadow-2xl border border-slate-100 text-center space-y-4">
+                    <div className="w-12 h-12 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto">
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="font-bold text-slate-800 text-sm">清空对话记录</h3>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        请选择如何处理当前对话。提炼整理记忆可让角色长久记住你们的互动与好感。
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2.5 pt-2">
+                      <button
+                        onClick={async () => {
+                          setShowClearHistoryModal(false);
+                          // Step 1: Extract memories to Memory Vault
+                          const count = await handleExtractMemories();
+                          // Step 2: Clear messages
+                          if (onClearMessages) {
+                            onClearMessages(activeChatCharId);
+                          }
+                          alert(`成功提取并整理了 ${count} 条核心记忆存入“记忆书”，当前对话已安全清除！`);
+                        }}
+                        disabled={isCompressingMemory}
+                        className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm disabled:opacity-50"
+                      >
+                        {isCompressingMemory ? "正在提炼并清空..." : "💡 提炼记忆存入记忆书再清空"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm("确定要直接清空所有对话记录吗？该操作不可撤销，且不会保存任何新记忆。")) {
+                            setShowClearHistoryModal(false);
+                            if (onClearMessages) {
+                              onClearMessages(activeChatCharId);
+                            }
+                          }
+                        }}
+                        className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-xs transition-colors border border-red-200"
+                      >
+                        直接彻底清空
+                      </button>
+                      <button
+                        onClick={() => setShowClearHistoryModal(false)}
+                        className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs transition-colors"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Active Chat Messages body */}
+          <div
+            className="flex-1 overflow-y-auto p-4 space-y-4"
+            style={{
+              background: activeCharacter.chatBg
+                ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
+                : "transparent",
+            }}
+          >
+            {/* Disclaimer */}
+            <div className="flex justify-center">
+              <span className="bg-slate-200/50 text-slate-500 backdrop-blur-md px-3 py-0.5 rounded-full text-[9px] font-bold tracking-wide">
+                模型大脑正在运行 &bull; 聊天支持对话收藏
+              </span>
+            </div>
+
+            {currentChatMessages.map((msg) => {
+              const isSelf = msg.sender === "user";
+              return (
+                <div
+                  key={msg.id}
+                  className={`flex items-start gap-2.5 max-w-[85%] ${
+                    isSelf ? "ml-auto flex-row-reverse" : "mr-auto"
+                  }`}
+                >
+                  {/* Avatar */}
+                  <img
+                    src={isSelf ? settings.avatar : activeCharacter.avatar}
+                    alt=""
+                    onClick={() => {
+                      if (!isSelf) {
+                        setSingleCharacterMomentsId(activeCharacter.id);
+                      }
+                    }}
+                    className="w-9 h-9 rounded-full bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square"
+                  />
+
+                  {/* Message Bubble Block */}
+                  <div className="space-y-0.5 max-w-full">
+                    <div className="flex items-center gap-1 group relative">
+                      {/* Saved Bookmark Action */}
+                      <button
+                        onClick={() => onToggleBookmark(msg.id)}
+                        className={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+                          msg.isBookmarked ? "text-amber-500 opacity-100" : "text-slate-300 hover:text-slate-500"
+                        }`}
+                        title={msg.isBookmarked ? "取消收藏" : "收藏该话语"}
+                      >
+                        <Bookmark className="w-3.5 h-3.5 fill-current" />
+                      </button>
+
+                      {/* Actual chat bubble */}
+                      <div className="max-w-full">
+                        {msg.content.startsWith("data:image/") ? (
+                          <img
+                            src={msg.content}
+                            alt="chat-pic"
+                            className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
+                          />
+                        ) : msg.content.startsWith("[红包]") ? (() => {
+                          const [_, amount, greeting] = msg.content.split("|");
+                          return (
+                            <div 
+                              onClick={() => {
+                                setOpenRedPacketDetail({ amount: amount || "8.88", greeting: greeting || "恭喜发财" });
+                                setShowRedPacketOpenModal(true);
+                              }}
+                              className="bg-[#fa9e3b] text-white rounded-xl w-56 overflow-hidden cursor-pointer shadow hover:opacity-95 transition-all flex flex-col"
+                            >
+                              <div className="bg-[#f35543] p-3 flex items-start gap-2.5">
+                                <div className="p-1.5 bg-[#fa9e3b] rounded-md text-white text-lg leading-none shrink-0 font-bold">
+                                  🧧
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-bold truncate">{greeting || "恭喜发财，万事如意"}</p>
+                                  <p className="text-[9px] text-white/80 mt-1">查看红包</p>
+                                </div>
+                              </div>
+                              <div className="px-3 py-1.5 bg-white text-[#888] text-[9px] font-bold flex items-center justify-between border-t border-stone-100">
+                                <span>微信红包</span>
+                                <span>单个金额 ¥{amount || "8.88"}</span>
+                              </div>
+                            </div>
+                          );
+                        })() : msg.content.startsWith("[音乐]") ? (() => {
+                          const [_, songTitle, artist] = msg.content.split("|");
+                          return (
+                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 p-3 flex items-center gap-3 shadow-sm">
+                              <div className="w-10 h-10 bg-gradient-to-tr from-amber-500 to-yellow-400 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm animate-pulse">
+                                <Music className="w-5 h-5" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-stone-900 truncate">{songTitle || "神秘音乐"}</p>
+                                <p className="text-[10px] text-stone-400 truncate mt-0.5">{artist || "未知歌手"}</p>
+                              </div>
+                              <div className="flex flex-col gap-0.5 shrink-0 text-amber-500 animate-pulse">
+                                <div className="w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
+                                <div className="w-1.5 h-3 bg-amber-500 rounded-full"></div>
+                                <div className="w-1.5 h-2 bg-amber-500 rounded-full"></div>
+                              </div>
+                            </div>
+                          );
+                        })() : msg.content.startsWith("[位置]") ? (() => {
+                          const [_, locName] = msg.content.split("|");
+                          return (
+                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 overflow-hidden shadow-sm">
+                              <div className="p-3">
+                                <p className="text-xs font-bold text-stone-900 truncate flex items-center gap-1">
+                                  <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                  <span>{locName || "未知位置"}</span>
+                                </p>
+                                <p className="text-[10px] text-stone-400 mt-1 truncate">共享的实时地理位置</p>
+                              </div>
+                              <div className="h-16 bg-slate-100 relative flex items-center justify-center overflow-hidden border-t border-stone-100">
+                                <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                                <div className="absolute top-2 left-0 right-0 h-0.5 bg-slate-200 rotate-12"></div>
+                                <div className="absolute top-8 left-0 right-0 h-0.5 bg-slate-200 -rotate-6"></div>
+                                <div className="absolute top-0 bottom-0 left-12 w-0.5 bg-slate-200 rotate-45"></div>
+                                <div className="absolute top-0 bottom-0 left-28 w-0.5 bg-slate-200 -rotate-12"></div>
+                                <div className="w-4 h-4 bg-rose-500 rounded-full flex items-center justify-center text-white relative animate-bounce shadow-md">
+                                  <MapPin className="w-2.5 h-2.5" />
+                                  <div className="absolute inset-0 bg-rose-500 rounded-full animate-ping opacity-75"></div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })() : msg.content.startsWith("[文件]") ? (() => {
+                          const [_, fileName, fileSize] = msg.content.split("|");
+                          return (
+                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 p-3 flex items-center gap-3 shadow-sm">
+                              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center shrink-0 border border-blue-200">
+                                <FileText className="w-5 h-5" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-stone-900 truncate leading-snug">{fileName || "未知文件.pdf"}</p>
+                                <p className="text-[9px] text-stone-400 mt-1">{fileSize || "1.2 MB"}</p>
+                              </div>
+                            </div>
+                          );
+                        })() : (msg.content.startsWith("[视频通话]") || msg.content.startsWith("[语音通话]")) ? (() => {
+                          const [tag, status] = msg.content.split("|");
+                          const isVideo = tag === "[视频通话]";
+                          return (
+                            <div className={`px-3 py-2 rounded-2xl text-xs flex items-center gap-2 shadow-sm ${
+                              isSelf
+                                ? "bg-blue-500 text-white"
+                                : "bg-white text-slate-800 border border-slate-100"
+                            }`}>
+                              {isVideo ? <Video className="w-3.5 h-3.5 shrink-0" /> : <Phone className="w-3.5 h-3.5 shrink-0" />}
+                              <span>{status || "通话已结束"}</span>
+                            </div>
+                          );
+                        })() : (
+                          <div
+                            className={`px-3 py-2 rounded-2xl text-xs whitespace-pre-wrap leading-relaxed shadow-sm ${
+                              isSelf
+                                ? "bg-blue-500 text-white chat-bubble-self rounded-tr-sm"
+                                : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100"
+                            }`}
+                          >
+                            {msg.content}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* AI is writing/typing indicator */}
+            {isTyping && (
+              <div className="flex items-start gap-2.5 max-w-[80%] mr-auto">
+                <img src={activeCharacter.avatar} alt="" className="w-9 h-9 rounded-full border object-cover shrink-0 aspect-square" />
+                <div className="space-y-1">
+                  <span className="text-[9px] text-slate-400 font-bold">对方正在输入...</span>
+                  <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 rounded-2xl shadow-sm text-xs flex items-center space-x-1">
+                    <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Active Chat Footer Input form */}
+          <div className="bg-white border-t border-slate-100 shrink-0 flex flex-col">
+            <form
+              onSubmit={handleSendChatMessage}
+              className="px-3 py-2 flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={chatInputText}
+                onChange={(e) => setChatInputText(e.target.value)}
+                placeholder={`发送消息给 ${activeCharacter.name}...`}
+                className="flex-1 h-10 bg-slate-50 border border-slate-200 focus:outline-none rounded-xl px-4 text-xs text-slate-800"
+              />
+              
+              {/* Plus Button */}
+              <button
+                type="button"
+                onClick={() => setShowAttachPanel(!showAttachPanel)}
+                className={`w-10 h-10 rounded-xl transition-all shrink-0 flex items-center justify-center border ${
+                  showAttachPanel
+                    ? "bg-stone-100 border-stone-300 text-stone-850 rotate-45"
+                    : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600 hover:text-slate-800"
+                }`}
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+
+              <button
+                type="submit"
+                disabled={!chatInputText.trim() || isTyping}
+                className="w-10 h-10 bg-neutral-950 hover:bg-neutral-900 disabled:bg-slate-200 text-white rounded-xl transition-all flex items-center justify-center shrink-0 shadow-sm"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+
+            {/* Attach Panel */}
+            {showAttachPanel && (
+              <div className="bg-slate-50 border-t border-slate-100 py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto">
+                {/* 1. 相册 (Album) */}
+                <label className="flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                    <ImageIcon className="w-4 h-4 text-slate-700" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">相册</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          if (typeof reader.result === "string") {
+                            sendCustomMessage(reader.result);
+                            setShowAttachPanel(false);
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    className="hidden"
+                  />
+                </label>
+
+                {/* 2. 红包 (Red Packet) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRedPacketAmount("8.88");
+                    setRedPacketGreeting("恭喜发财，万事如意");
+                    setActiveAttachModal("redpacket");
+                    setShowAttachPanel(false);
+                  }}
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                >
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                    <Gift className="w-4 h-4 text-slate-700" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
+                </button>
+
+                {/* 3. 音乐 (Music) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveAttachModal("music");
+                    setShowAttachPanel(false);
+                  }}
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                >
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                    <Music className="w-4 h-4 text-slate-700" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">音乐</span>
+                </button>
+
+                {/* 5. 电话 (Phone) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCallingType("voice");
+                    setCallingStatus("ringing");
+                    setActiveAttachModal("calling");
+                    setShowAttachPanel(false);
+                  }}
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                >
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                    <Phone className="w-4 h-4 text-slate-700" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
+                </button>
+
+                {/* 6. 文件 (File) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveAttachModal("file");
+                    setShowAttachPanel(false);
+                  }}
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                >
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                    <FileText className="w-4 h-4 text-slate-700" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">文件</span>
+                </button>
+
+                {/* 7. 位置 (Location) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveAttachModal("location");
+                    setShowAttachPanel(false);
+                  }}
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                >
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                    <MapPin className="w-4 h-4 text-slate-700" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Red Envelope Editor Modal Overlay */}
+          {activeAttachModal === "redpacket" && (
+            <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
+              <div className="bg-[#f35543] text-white rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-rose-500 animate-scale-up">
+                {/* Red Envelope Top Arch Header decoration */}
+                <div className="bg-[#e44d3c] px-4 py-5 text-center relative rounded-b-[40%] border-b border-yellow-500/10 shadow-sm">
+                  <button 
+                    onClick={() => setActiveAttachModal(null)}
+                    className="absolute top-4 left-4 text-white/70 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  <h3 className="text-sm font-bold text-yellow-100">发红包</h3>
+                </div>
+
+                <div className="p-5 space-y-4 flex-1">
+                  {/* Amount Field */}
+                  <div className="bg-white/10 rounded-xl p-3 border border-white/5">
+                    <label className="block text-[10px] text-yellow-100/70 font-semibold uppercase tracking-wider mb-1">红包金额 (元)</label>
+                    <div className="flex items-center">
+                      <span className="text-xl font-bold text-yellow-300 mr-1">¥</span>
+                      <input 
+                        type="number"
+                        step="0.01"
+                        value={redPacketAmount}
+                        onChange={(e) => setRedPacketAmount(e.target.value)}
+                        className="bg-transparent text-white font-bold text-lg focus:outline-none flex-1 w-full"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Greeting Field */}
+                  <div className="bg-white/10 rounded-xl p-3 border border-white/5">
+                    <label className="block text-[10px] text-yellow-100/70 font-semibold uppercase tracking-wider mb-1">留言祝福</label>
+                    <input 
+                      type="text"
+                      value={redPacketGreeting}
+                      onChange={(e) => setRedPacketGreeting(e.target.value)}
+                      className="bg-transparent text-white font-medium text-xs focus:outline-none w-full"
+                      placeholder="恭喜发财，万事如意"
+                    />
+                  </div>
+
+                  {/* Quick select buttons */}
+                  <div className="flex gap-1.5 justify-center">
+                    {["5.20", "8.88", "13.14", "66.66"].map((val) => (
+                      <button 
+                        key={val}
+                        onClick={() => setRedPacketAmount(val)}
+                        className="px-2 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[9px] font-bold text-yellow-100 transition-colors"
+                      >
+                        {val}元
+                      </button>
+                    ))}
+                  </div>
+
+                  <button 
+                    onClick={() => {
+                      const finalAmount = parseFloat(redPacketAmount) > 0 ? redPacketAmount : "8.88";
+                      const finalGreeting = redPacketGreeting.trim() || "恭喜发财，万事如意";
+                      sendCustomMessage(`[红包]|${finalAmount}|${finalGreeting}`);
+                      setActiveAttachModal(null);
+                    }}
+                    className="w-full py-2.5 bg-[#fa9e3b] hover:bg-[#e48e2f] text-[#3c1e0e] font-extrabold text-xs rounded-xl shadow-md transition-all border-b-2 border-amber-700/50"
+                  >
+                    塞钱进红包
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Red Envelope Opened Modal Overlay */}
+          {showRedPacketOpenModal && openRedPacketDetail && (
+            <div className="absolute inset-0 bg-black/75 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
+              <div className="bg-[#f35543] text-white rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-yellow-500/20 animate-scale-up text-center p-6 space-y-6">
+                <button 
+                  onClick={() => setShowRedPacketOpenModal(false)}
+                  className="absolute top-4 left-4 text-white/70 hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <div className="flex flex-col items-center mt-2">
+                  <div className="w-14 h-14 bg-[#fa9e3b] rounded-full flex items-center justify-center text-2xl font-bold text-[#3c1e0e] shadow-md border border-yellow-300">
+                    開
+                  </div>
+                  <h3 className="text-sm font-bold text-yellow-100 mt-4">已成功开启红包！</h3>
+                  <p className="text-[10px] text-yellow-100/70 mt-1">"{openRedPacketDetail.greeting}"</p>
+                </div>
+
+                <div className="bg-white/10 rounded-2xl p-4 border border-white/5">
+                  <span className="text-[10px] text-yellow-100/80">获得金额</span>
+                  <div className="text-2xl font-black text-yellow-300 mt-1">
+                    ¥{openRedPacketDetail.amount}
+                  </div>
+                  <span className="text-[9px] text-white/40 block mt-2">已自动存入钱包零钱</span>
+                </div>
+
+                <button 
+                  onClick={() => setShowRedPacketOpenModal(false)}
+                  className="py-2 bg-yellow-400 hover:bg-yellow-500 text-stone-900 text-[10px] font-bold rounded-xl transition-all"
+                >
+                  好的，谢谢
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Music Selector Modal Overlay */}
+          {activeAttachModal === "music" && (
+            <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
+              <div className="bg-white text-stone-800 rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-stone-100 animate-scale-up max-h-[65%]">
+                <div className="px-4 py-3 bg-stone-50 border-b border-stone-100 flex items-center justify-between shrink-0">
+                  <h3 className="text-xs font-bold text-stone-800">分享音乐</h3>
+                  <button onClick={() => setActiveAttachModal(null)} className="p-1 hover:bg-stone-200 rounded-full transition-colors">
+                    <X className="w-4 h-4 text-stone-500" />
+                  </button>
+                </div>
+                <div className="p-3 overflow-y-auto space-y-2 flex-1">
+                  {[
+                    { title: "晴天", artist: "周杰伦" },
+                    { title: "一万次悲伤", artist: "逃跑计划" },
+                    { title: "温柔", artist: "五月天" },
+                    { title: "幻听", artist: "许嵩" },
+                    { title: "起风了", artist: "买辣椒也用券" },
+                    { title: "消愁", artist: "毛不易" }
+                  ].map((track, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        sendCustomMessage(`[音乐]|${track.title}|${track.artist}`);
+                        setActiveAttachModal(null);
+                      }}
+                      className="w-full text-left p-2 rounded-xl bg-stone-50 hover:bg-amber-50 hover:text-white transition-all flex items-center justify-between border border-stone-100/80 group"
+                    >
+                      <div className="min-w-0 flex-1 pr-2">
+                        <p className="text-xs font-bold truncate group-hover:text-white">{track.title}</p>
+                        <p className="text-[10px] text-stone-400 truncate mt-0.5 group-hover:text-amber-100">{track.artist}</p>
+                      </div>
+                      <Music className="w-4 h-4 shrink-0 text-amber-500 group-hover:text-white" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Location Selector Modal Overlay */}
+          {activeAttachModal === "location" && (
+            <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
+              <div className="bg-white text-stone-800 rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-stone-100 animate-scale-up max-h-[75%]">
+                <div className="px-4 py-3 bg-stone-50 border-b border-stone-100 flex items-center justify-between shrink-0">
+                  <h3 className="text-xs font-bold text-stone-800">发送位置</h3>
+                  <button 
+                    onClick={() => {
+                      setManualLocationText("");
+                      setActiveAttachModal(null);
+                    }} 
+                    className="p-1 hover:bg-stone-200 rounded-full transition-colors"
+                  >
+                    <X className="w-4 h-4 text-stone-500" />
+                  </button>
+                </div>
+                
+                {/* Manual Input Form */}
+                <div className="p-4 border-b border-stone-100 bg-stone-50/50 shrink-0 space-y-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">手动输入位置</label>
+                  <div className="flex gap-1.5">
+                    <div className="relative flex-1">
+                      <MapPin className="absolute left-3 top-2.5 w-3.5 h-3.5 text-rose-500" />
+                      <input
+                        type="text"
+                        placeholder="输入自定义位置..."
+                        value={manualLocationText}
+                        onChange={(e) => setManualLocationText(e.target.value)}
+                        className="w-full pl-8 pr-3 py-2 bg-white border border-stone-200 rounded-xl text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-rose-500/30 focus:border-rose-500"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && manualLocationText.trim()) {
+                            sendCustomMessage(`[位置]|${manualLocationText.trim()}`);
+                            setManualLocationText("");
+                            setActiveAttachModal(null);
+                          }
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!manualLocationText.trim()}
+                      onClick={() => {
+                        sendCustomMessage(`[位置]|${manualLocationText.trim()}`);
+                        setManualLocationText("");
+                        setActiveAttachModal(null);
+                      }}
+                      className="px-3 bg-rose-500 hover:bg-rose-600 disabled:bg-stone-200 disabled:text-stone-400 text-white rounded-xl text-xs font-bold transition-all shadow-sm shrink-0"
+                    >
+                      发送
+                    </button>
+                  </div>
+                </div>
+
+                {/* World Book / Suggested List */}
+                <div className="p-3 overflow-y-auto space-y-1.5 flex-1 max-h-[220px]">
+                  <p className="text-[10px] font-bold text-slate-400 px-1 uppercase tracking-wider mb-1">
+                    世界书地址参考 (点击填入)
+                  </p>
+                  {getDynamicLocations().map((loc, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setManualLocationText(loc);
+                      }}
+                      className={`w-full text-left px-2.5 py-2 rounded-xl border transition-all flex items-center gap-2 group ${
+                        manualLocationText === loc 
+                          ? "bg-rose-50 border-rose-200 text-rose-700" 
+                          : "bg-stone-50/50 hover:bg-stone-50 border-stone-100/80 hover:border-stone-200 text-stone-700"
+                      }`}
+                    >
+                      <MapPin className={`w-3.5 h-3.5 shrink-0 ${manualLocationText === loc ? "text-rose-500" : "text-stone-400 group-hover:text-rose-500"}`} />
+                      <span className="text-[11px] font-semibold truncate flex-1">{loc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* File Selector Modal Overlay */}
+          {activeAttachModal === "file" && (
+            <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
+              <div className="bg-white text-stone-800 rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-stone-100 animate-scale-up max-h-[65%]">
+                <div className="px-4 py-3 bg-stone-50 border-b border-stone-100 flex items-center justify-between shrink-0">
+                  <h3 className="text-xs font-bold text-stone-800">发送文件</h3>
+                  <button onClick={() => setActiveAttachModal(null)} className="p-1 hover:bg-stone-200 rounded-full transition-colors">
+                    <X className="w-4 h-4 text-stone-500" />
+                  </button>
+                </div>
+                <div className="p-3 overflow-y-auto space-y-2 flex-1">
+                  {[
+                    { name: "人设记忆矩阵深度更新.pdf", size: "2.4 MB" },
+                    { name: "星际巡防装甲计划草案.docx", size: "4.8 MB" },
+                    { name: "瓦尔哈拉编年史.txt", size: "112 KB" },
+                    { name: "今日午餐秘密食谱.xlsx", size: "14 KB" }
+                  ].map((f, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        sendCustomMessage(`[文件]|${f.name}|${f.size}`);
+                        setActiveAttachModal(null);
+                      }}
+                      className="w-full text-left p-2.5 rounded-xl bg-stone-50 hover:bg-blue-500 hover:text-white transition-all flex items-center justify-between border border-stone-100/80 group"
+                    >
+                      <div className="min-w-0 flex-1 pr-2">
+                        <p className="text-xs font-bold truncate group-hover:text-white leading-normal">{f.name}</p>
+                        <p className="text-[9px] text-stone-400 mt-0.5 group-hover:text-blue-100">{f.size}</p>
+                      </div>
+                      <FileText className="w-4 h-4 shrink-0 text-blue-500 group-hover:text-white" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Calling Screen Modal Overlay */}
+          {activeAttachModal === "calling" && (
+            <div className="absolute inset-0 bg-stone-950 z-50 flex flex-col justify-between p-10 animate-fade-in text-white text-center">
+              <div className="space-y-4 mt-16 shrink-0">
+                <img 
+                  src={activeCharacter.avatar} 
+                  alt="" 
+                  className="w-24 h-24 rounded-full mx-auto border-2 border-white/25 object-cover shadow-2xl" 
+                />
+                <div>
+                  <h3 className="text-lg font-black">{activeCharacter.remark || activeCharacter.name}</h3>
+                  <p className="text-xs text-white/50 mt-1">
+                    {callingStatus === "connected" ? "通话中" : (callingType === "video" ? "正在发起视频通话..." : "正在发起语音通话...")}
+                  </p>
+                </div>
+
+                {callingStatus === "connected" && (
+                  <div className="text-sm font-bold text-emerald-400 tracking-wider">
+                    {Math.floor(callingDuration / 60).toString().padStart(2, "0")}:
+                    {(callingDuration % 60).toString().padStart(2, "0")}
+                  </div>
+                )}
+              </div>
+
+              {/* Action controls */}
+              <div className="space-y-12 mb-10 shrink-0">
+                {callingStatus === "ringing" ? (
+                  <div className="flex justify-around items-center px-4">
+                    {/* Decline */}
+                    <button
+                      onClick={() => {
+                        sendCustomMessage(`[${callingType === "video" ? "视频通话" : "语音通话"}]|已取消`);
+                        setActiveAttachModal(null);
+                      }}
+                      className="flex flex-col items-center gap-2"
+                    >
+                      <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all">
+                        <X className="w-6 h-6 text-white" />
+                      </div>
+                      <span className="text-[10px] text-white/70">挂断</span>
+                    </button>
+
+                    {/* Accept (Simulate reply) */}
+                    <button
+                      onClick={() => {
+                        setCallingStatus("connected");
+                      }}
+                      className="flex flex-col items-center gap-2 animate-bounce"
+                    >
+                      <div className="w-14 h-14 bg-emerald-500 hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg transition-all">
+                        <Phone className="w-6 h-6 text-white" />
+                      </div>
+                      <span className="text-[10px] text-white/70">接听</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex justify-center">
+                    {/* Decline */}
+                    <button
+                      onClick={() => {
+                        const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
+                        const secs = (callingDuration % 60).toString().padStart(2, "0");
+                        sendCustomMessage(`[${callingType === "video" ? "视频通话" : "语音通话"}]|通话已结束 ${mins}:${secs}`);
+                        setActiveAttachModal(null);
+                      }}
+                      className="flex flex-col items-center gap-2"
+                    >
+                      <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all">
+                        <X className="w-6 h-6 text-white" />
+                      </div>
+                      <span className="text-[10px] text-white/70">挂断</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {/* Main Apps Inner Navbar inside Chat Application */}
+      <div className="flex-1 overflow-hidden flex flex-col h-full bg-white">
+        
+        {/* Main tabs viewports */}
+        <div className="flex-1 overflow-y-auto">
+          
+          {/* TABS: CHATS LIST (聊天首页) */}
+          {activeTab === "chats" && (
+            <div className="divide-y divide-slate-100">
+              <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative">
+                <button
+                  onClick={onClose}
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+                  title="返回主页"
+                >
+                  <ChevronLeft className="w-4 h-4 text-slate-700" />
+                </button>
+                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">聊天 ({chatThreads.length})</h2>
+                <div className="w-8 shrink-0" />
+              </div>
+
+              {chatThreads.length === 0 ? (
+                <div className="text-center py-20 px-4">
+                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-3">
+                    <MessageSquare className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-xs font-bold text-slate-700">暂无任何对话</h4>
+                  <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
+                    您还没有开始任何聊天。请前往底部的“通讯录”，选择一位档案馆中的虚拟伙伴发起首条对话！
+                  </p>
+                </div>
+              ) : (
+                chatThreads.map(({ character, lastMessage, isPinned }) => (
+                  <div
+                    key={character.id}
+                    onClick={() => setActiveChatCharId(character.id)}
+                    className={`flex items-center p-3 cursor-pointer transition-colors relative ${
+                      isPinned ? "bg-blue-50/20 hover:bg-blue-50/40" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    {isPinned && (
+                      <Pin className="w-3 h-3 text-blue-500 absolute top-2 right-2 rotate-45 opacity-60" />
+                    )}
+
+                    {/* Avatar */}
+                    <img
+                      src={character.avatar}
+                      alt={character.name}
+                      className="w-11 h-11 rounded-full object-cover mr-3 bg-slate-100 border border-slate-100 shrink-0 aspect-square"
+                    />
+
+                    {/* Last details */}
+                    <div className="flex-1 min-w-0 pr-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-slate-800 truncate">
+                          {character.remark || character.name}
+                        </h4>
+                        {lastMessage && (
+                          <span className="text-[9px] text-slate-400 font-medium">
+                            {new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 truncate mt-0.5 leading-normal">
+                        {lastMessage ? lastMessage.content : `[点击开启与${character.name}的首次对话...]`}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* TABS: CONTACTS LIST (通讯录) */}
+          {activeTab === "contacts" && (
+            <div className="divide-y divide-slate-100">
+              <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative">
+                <button
+                  onClick={onClose}
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+                  title="返回主页"
+                >
+                  <ChevronLeft className="w-4 h-4 text-slate-700" />
+                </button>
+                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">通讯录 ({friends.length})</h2>
+                <button
+                  onClick={() => setIsShowingAddFriendDialog(true)}
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10"
+                  title="添加好友"
+                >
+                  <Plus className="w-4 h-4 text-slate-700" />
+                </button>
+              </div>
+
+              {friends.length === 0 ? (
+                <div className="text-center py-20 px-4">
+                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-3">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-xs font-bold text-slate-700">通讯录空空如也</h4>
+                  <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
+                    暂无好友。请点击右上角“+”号直接从档案馆添加已创建的角色，或到桌面打开“档案馆”新建！
+                  </p>
+                </div>
+              ) : (
+                friends.map((char) => (
+                  <div
+                    key={char.id}
+                    onClick={() => setActiveChatCharId(char.id)}
+                    className="flex items-center p-3 hover:bg-slate-50 cursor-pointer transition-colors"
+                  >
+                    <img
+                      src={char.avatar}
+                      alt={char.name}
+                      className="w-10 h-10 rounded-full object-cover mr-3 bg-slate-100 border border-slate-100 shrink-0 aspect-square"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-xs font-bold text-slate-800 truncate">
+                        {char.remark || char.name}
+                        {char.remark && <span className="text-[10px] font-normal text-slate-400 ml-1.5">({char.name})</span>}
+                      </h4>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* TABS: MOMENTS FEED (朋友圈) */}
+          {activeTab === "moments" && (() => {
+            const filterChar = momentsFilterCharId ? characters.find((c) => c.id === momentsFilterCharId) : null;
+            const momentsTabName = filterChar ? (filterChar.remark || filterChar.name) : settings.name;
+            const momentsTabAvatar = filterChar ? filterChar.avatar : settings.avatar;
+            const momentsTabCover = filterChar ? (filterChar.momentsCover || "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop") : (settings.momentsCover || "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop");
+            return (
+              <div className="bg-white min-h-full pb-20 overflow-y-auto">
+                {/* Moments Cover banner */}
+                <div className="h-64 bg-slate-200 relative shrink-0">
+                  <img
+                    src={momentsTabCover}
+                    alt="Moments Cover"
+                    className="w-full h-full object-cover"
+                  />
+                  
+                  {/* Overlay Controls */}
+                  <button
+                    onClick={onClose}
+                    className="absolute top-4 left-4 p-1.5 rounded-full bg-black/40 hover:bg-black/65 text-white z-20 transition-colors shadow-sm"
+                    title="返回主页"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+
+                  <div className="absolute top-4 right-4 flex gap-2.5 z-20">
+                    <label
+                      className="p-1.5 rounded-full bg-black/40 hover:bg-black/65 text-white cursor-pointer transition-colors shadow-sm"
+                      title="更换封面图"
+                    >
+                      <Camera className="w-5 h-5" />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleMomentsCoverUpload}
+                      />
+                    </label>
+                    <button
+                      onClick={() => setShowMomentPublisher(true)}
+                      className="p-1.5 rounded-full bg-black/40 hover:bg-black/65 text-white transition-colors shadow-sm"
+                      title="发布新动态"
+                    >
+                      <Plus className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Overlapping User Avatar & Name */}
+                  <div className="absolute right-4 -bottom-6 flex items-end gap-3 z-30">
+                    <span className="text-sm font-bold text-white tracking-tight pb-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] select-none">
+                      {momentsTabName}
+                    </span>
+                    <img
+                      src={momentsTabAvatar}
+                      alt=""
+                      className="w-16 h-16 rounded-[12px] border-2 border-white object-cover bg-white shadow-md z-40"
+                    />
+                  </div>
+                </div>
+
+                {/* Top Spacing for Overlapping Avatar */}
+                <div className="h-10"></div>
+
+              {/* Filter State Banner */}
+              {momentsFilterCharId && (
+                <div className="mx-4 my-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl flex justify-between items-center text-xs">
+                  <span className="font-medium text-slate-500">正在查看好友的朋友圈</span>
+                  <button
+                    onClick={() => setMomentsFilterCharId(null)}
+                    className="text-blue-500 hover:text-blue-600 font-bold"
+                  >
+                    查看全部
+                  </button>
+                </div>
+              )}
+
+              {/* Moments publishing Modal inline */}
+              {showMomentPublisher && (
+                <form
+                  onSubmit={handlePublishMoment}
+                  className="bg-white p-4 border border-slate-100 space-y-3 mx-4 my-3 rounded-2xl shadow-sm"
+                >
+                  <div className="flex justify-between items-center pb-1">
+                    <span className="text-xs font-bold text-slate-400">分享新鲜事...</span>
+                    <button type="button" onClick={() => setShowMomentPublisher(false)} className="text-slate-400">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <textarea
+                    rows={3}
+                    required
+                    value={momentInputText}
+                    onChange={(e) => setMomentInputText(e.target.value)}
+                    placeholder="说点什么吧，可以配个好看的插图..."
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed"
+                  />
+
+                  <div className="flex justify-between items-center">
+                    <label className="cursor-pointer text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold">
+                      <ImageIcon className="w-4 h-4" />
+                      <span>添加配图</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleMomentImageUpload}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 bg-neutral-950 hover:bg-neutral-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                    >
+                      发布动态
+                    </button>
+                  </div>
+
+                  {momentAttachedImage && (
+                    <div className="relative w-24 h-24 rounded-lg overflow-hidden border">
+                      <img src={momentAttachedImage} alt="" className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setMomentAttachedImage(null)}
+                        className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </form>
+              )}
+
+              {/* Moments list */}
+              <div className="px-4 divide-y divide-slate-100 max-w-md mx-auto">
+                {filteredMoments.length === 0 ? (
+                  <div className="text-center py-16 text-slate-400 text-xs">
+                    暂无动态，点击右上角相机发布第一条朋友圈吧！
+                  </div>
+                ) : (
+                  filteredMoments.map((mom) => {
+                    const hasLiked = mom.likes.includes(settings.name);
+                    const momChar = mom.characterId ? characters.find((c) => c.id === mom.characterId) : null;
+                    const momAuthorName = momChar ? (momChar.remark || momChar.name) : mom.authorName;
+                    const momAuthorAvatar = momChar ? momChar.avatar : mom.authorAvatar;
+                    return (
+                      <div key={mom.id} className="py-5 flex gap-3">
+                        
+                        {/* Author Avatar */}
+                        <img
+                          src={momAuthorAvatar}
+                          alt=""
+                          className="w-10 h-10 rounded-[6px] object-cover bg-slate-50 shrink-0 border border-slate-100"
+                        />
+
+                        {/* Right Content Column */}
+                        <div className="flex-1 min-w-0">
+                          {/* Name */}
+                          <h4 className="text-xs font-bold text-[#576b95] hover:underline cursor-pointer">
+                            {momAuthorName}
+                          </h4>
+
+                          {/* Content text */}
+                          <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1">
+                            {mom.content}
+                          </p>
+
+                          {/* Attached Photo */}
+                          {mom.image && (
+                            <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
+                              <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
+                            </div>
+                          )}
+
+                          {/* Footer Action Row */}
+                          <div className="flex justify-between items-center mt-3">
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              {new Date(mom.timestamp).toLocaleDateString([], { month: '2-digit', day: '2-digit' })}{" "}
+                              {new Date(mom.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                            </span>
+
+                            {/* Like / Comment small buttons */}
+                            <div className="flex items-center gap-4">
+                              <button
+                                onClick={() => onLikeMoment(mom.id, settings.name)}
+                                className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${
+                                  hasLiked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"
+                                }`}
+                              >
+                                <Heart className={`w-3.5 h-3.5 ${hasLiked ? "fill-rose-500 text-rose-500" : ""}`} />
+                                <span>{mom.likes.length || "赞"}</span>
+                              </button>
+
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
+                                <MessageCircle className="w-3.5 h-3.5" />
+                                <span>{mom.comments.length || "评论"}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Integrated Like & Comment Block (WeChat style) */}
+                          {(mom.likes.length > 0 || mom.comments.length > 0) && (
+                            <div className="bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
+                              {/* Likes list */}
+                              {mom.likes.length > 0 && (
+                                <div className="flex items-center gap-1.5 text-[#576b95] font-bold flex-wrap pb-1 border-b border-slate-200/40">
+                                  <Heart className="w-3 h-3 text-rose-500 fill-current shrink-0" />
+                                  <span className="leading-tight">{mom.likes.join(", ")}</span>
+                                </div>
+                              )}
+
+                              {/* Comments list */}
+                              {mom.comments.length > 0 && (
+                                <div className="space-y-1.5">
+                                  {mom.comments.map((comm) => {
+                                    const commChar = characters.find((c) => c.name === comm.authorName);
+                                    const commAuthorName = commChar ? (commChar.remark || commChar.name) : comm.authorName;
+                                    return (
+                                      <div key={comm.id} className="leading-relaxed text-slate-800">
+                                        <span className="font-bold text-[#576b95] mr-1">
+                                          {commAuthorName}
+                                        </span>
+                                        <span className="text-slate-700">{comm.content}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Quick inline comment input */}
+                          <div className="flex gap-2 items-center bg-[#f7f7f7] border border-slate-200/30 rounded-lg px-2.5 py-1 mt-2">
+                            <input
+                              type="text"
+                              value={inlineCommentsTexts[mom.id] || ""}
+                              onChange={(e) =>
+                                setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
+                              }
+                              placeholder="发表评论..."
+                              className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  handlePublishComment(mom.id);
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={() => handlePublishComment(mom.id)}
+                              className="text-[10px] text-blue-500 hover:text-blue-600 font-bold px-1"
+                            >
+                              发送
+                            </button>
+                          </div>
+
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )})()}
+
+          {/* TABS: ME PROFILE (我) */}
+          {activeTab === "me" && (
+            <div className="bg-slate-50 min-h-full pb-20">
+              {/* Sticky header */}
+              <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative">
+                <button
+                  onClick={onClose}
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+                  title="返回主页"
+                >
+                  <ChevronLeft className="w-4 h-4 text-slate-700" />
+                </button>
+                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">我</h2>
+                <button
+                  onClick={() => setIsEditingProfile(true)}
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+                  title="编辑资料"
+                >
+                  <Settings className="w-4 h-4 text-slate-700" />
+                </button>
+              </div>
+
+              {/* Profile Card banner */}
+              <div className="bg-white p-5 border-b border-slate-100 shadow-sm flex items-center gap-4">
+                <img
+                  src={settings.avatar}
+                  alt="My avatar"
+                  className="w-14 h-14 rounded-2xl border bg-slate-100 object-cover"
+                />
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-base font-bold text-slate-800 truncate">{settings.name}</h3>
+                  <p className="text-[11px] text-slate-400 mt-1 truncate leading-normal italic">
+                    "{settings.signature || "这家伙很懒，什么都没写~"}"
+                  </p>
+                </div>
+              </div>
+
+              {/* Personal Biography description */}
+              <div className="m-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-2">
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">我的人设背景</h4>
+                <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">
+                  {settings.bio || "暂无定义人设背景。在桌面打开“设置”即可配置我的人设背景，让档案馆里的伙伴们更好地认识您，展开更个性化的超现实对话！"}
+                </p>
+              </div>
+
+              {/* SAVED BOOKMARKS LIST (信息收藏) */}
+              <div className="m-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <FolderHeart className="w-4 h-4 text-amber-500" />
+                  <span>信息收藏 ({savedBookmarks.length})</span>
+                </h4>
+
+                {savedBookmarks.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 text-center py-4">
+                    暂无收藏的聊天话语。在聊天窗口中，长按或点击气泡左侧的收藏标签即可将特定对话保存在这里！
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {savedBookmarks.map((bm) => {
+                      const owner = characters.find((c) => c.id === bm.characterId);
+                      return (
+                        <div
+                          key={bm.id}
+                          className="p-3 bg-slate-50 border border-slate-100 rounded-xl relative group flex gap-2.5 items-start"
+                        >
+                          <img
+                            src={bm.sender === "user" ? settings.avatar : (owner?.avatar || "")}
+                            alt=""
+                            className="w-7 h-7 rounded-full object-cover shrink-0"
+                          />
+                          <div className="flex-1 min-w-0 text-xs">
+                            <span className="font-bold text-slate-500">
+                              {bm.sender === "user" ? "我" : (owner?.name || "未知")}
+                            </span>
+                            <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-white p-2 rounded border border-slate-100">
+                              "{bm.content}"
+                            </p>
+                            <span className="text-[9px] text-slate-400 block mt-1">
+                              收藏于 {new Date(bm.timestamp).toLocaleDateString()}
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={() => onToggleBookmark(bm.id)}
+                            className="text-rose-400 hover:text-rose-600 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="取消收藏"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+
+        </div>
+
+        {/* BOTTOM NAVIGATION BAR FOR CHAT APP (聊天、通讯录、朋友圈、我) */}
+        <div className="bg-slate-50 border-t border-slate-200/60 py-2 shrink-0 flex justify-around items-center text-[10px] font-bold text-slate-400 z-10">
+          <button
+            onClick={() => setActiveTab("chats")}
+            className={`flex flex-col items-center space-y-1 ${
+              activeTab === "chats" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
+            }`}
+          >
+            <MessageSquare className="w-5 h-5" />
+            <span>聊天</span>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab("contacts")}
+            className={`flex flex-col items-center space-y-1 ${
+              activeTab === "contacts" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
+            }`}
+          >
+            <Users className="w-5 h-5" />
+            <span>通讯录</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("moments")}
+            className={`flex flex-col items-center space-y-1 ${
+              activeTab === "moments" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
+            }`}
+          >
+            <Compass className="w-5 h-5" />
+            <span>朋友圈</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("me")}
+            className={`flex flex-col items-center space-y-1 ${
+              activeTab === "me" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
+            }`}
+          >
+            <User className="w-5 h-5" />
+            <span>我</span>
+          </button>
+        </div>
+
+      </div>
+
+      {singleCharacterMomentsId && (
+        <div className="absolute inset-0 z-50 bg-white flex flex-col h-full animate-slide-up">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-100 shrink-0 z-25">
+            <button
+              onClick={() => setSingleCharacterMomentsId(null)}
+              className="p-1.5 rounded-full hover:bg-slate-100 transition-colors"
+            >
+              <ChevronLeft className="w-6 h-6 text-slate-600" />
+            </button>
+            <h2 className="font-bold text-slate-800 text-sm">
+              {(characters.find(c => c.id === singleCharacterMomentsId)?.remark || 
+                characters.find(c => c.id === singleCharacterMomentsId)?.name || "")} 的朋友圈
+            </h2>
+            <div className="w-8 h-8" />
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto bg-white pb-12">
+            {/* Cover banner */}
+            <div className="h-52 bg-slate-200 relative shrink-0">
+              <img
+                src={characters.find(c => c.id === singleCharacterMomentsId)?.momentsCover || "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800&h=500&fit=crop"}
+                alt="Cover"
+                className="w-full h-full object-cover rounded-none"
+              />
+              {/* Overlapping Character Avatar & Name */}
+              <div className="absolute right-4 -bottom-6 flex items-end gap-3 z-30">
+                <span className="text-sm font-bold text-white tracking-tight pb-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] select-none">
+                  {(characters.find(c => c.id === singleCharacterMomentsId)?.remark || 
+                    characters.find(c => c.id === singleCharacterMomentsId)?.name || "")}
+                </span>
+                <img
+                  src={characters.find(c => c.id === singleCharacterMomentsId)?.avatar || ""}
+                  alt=""
+                  className="w-16 h-16 rounded-[12px] border-2 border-white object-cover bg-white shadow-md z-40"
+                />
+              </div>
+            </div>
+
+            {/* Top Spacing for Overlapping Avatar */}
+            <div className="h-10"></div>
+
+            {/* List of moments by this character */}
+            <div className="px-4 divide-y divide-slate-100 max-w-md mx-auto">
+              {allMoments.filter(m => m.characterId === singleCharacterMomentsId).length === 0 ? (
+                <div className="text-center py-20 text-slate-400 text-xs">
+                  Ta 还没有发布过朋友圈动态
+                </div>
+              ) : (
+                allMoments
+                  .filter(m => m.characterId === singleCharacterMomentsId)
+                  .map((mom) => {
+                    const hasLiked = mom.likes.includes(settings.name);
+                    const momChar = mom.characterId ? characters.find((c) => c.id === mom.characterId) : null;
+                    const momAuthorName = momChar ? (momChar.remark || momChar.name) : mom.authorName;
+                    const momAuthorAvatar = momChar ? momChar.avatar : mom.authorAvatar;
+                    return (
+                      <div key={mom.id} className="py-5 flex gap-3">
+                        
+                        {/* Author Avatar */}
+                        <img
+                          src={momAuthorAvatar}
+                          alt=""
+                          className="w-10 h-10 rounded-[6px] object-cover bg-slate-50 shrink-0 border border-slate-100"
+                        />
+
+                        {/* Right Content Column */}
+                        <div className="flex-1 min-w-0">
+                          {/* Name */}
+                          <h4 className="text-xs font-bold text-[#576b95]">
+                            {momAuthorName}
+                          </h4>
+
+                          {/* Content text */}
+                          <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1">
+                            {mom.content}
+                          </p>
+
+                          {/* Photo if attached */}
+                          {mom.image && (
+                            <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
+                              <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
+                            </div>
+                          )}
+
+                          {/* Actions footer */}
+                          <div className="flex justify-between items-center mt-3">
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              {new Date(mom.timestamp).toLocaleDateString([], { month: '2-digit', day: '2-digit' })}{" "}
+                              {new Date(mom.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                            </span>
+
+                            {/* Like / Comment small buttons */}
+                            <div className="flex items-center gap-4">
+                              <button
+                                onClick={() => onLikeMoment(mom.id, settings.name)}
+                                className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${
+                                  hasLiked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"
+                                }`}
+                              >
+                                <Heart className={`w-3.5 h-3.5 ${hasLiked ? "fill-rose-500 text-rose-500" : ""}`} />
+                                <span>{mom.likes.length || "赞"}</span>
+                              </button>
+
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
+                                <MessageCircle className="w-3.5 h-3.5" />
+                                <span>{mom.comments.length || "评论"}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* WeChat-style integrated Like & Comment Shelf */}
+                          {(mom.likes.length > 0 || mom.comments.length > 0) && (
+                            <div className="bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
+                              {/* Likes shelf details */}
+                              {mom.likes.length > 0 && (
+                                <div className="flex items-center gap-1.5 text-[#576b95] font-bold flex-wrap pb-1 border-b border-slate-200/40">
+                                  <Heart className="w-3 h-3 text-rose-500 fill-current shrink-0" />
+                                  <span className="leading-tight">{mom.likes.join(", ")}</span>
+                                </div>
+                              )}
+
+                              {/* Comments list shelf */}
+                              {mom.comments.length > 0 && (
+                                <div className="space-y-1.5">
+                                  {mom.comments.map((comm) => {
+                                    const commChar = characters.find((c) => c.name === comm.authorName);
+                                    const commAuthorName = commChar ? (commChar.remark || commChar.name) : comm.authorName;
+                                    return (
+                                      <div key={comm.id} className="leading-relaxed text-slate-800">
+                                        <span className="font-bold text-[#576b95] mr-1">{commAuthorName}</span>
+                                        <span className="text-slate-700">{comm.content}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Inline comment form */}
+                          <div className="flex gap-2 items-center bg-[#f7f7f7] border border-slate-200/30 rounded-lg px-2.5 py-1 mt-2">
+                            <input
+                              type="text"
+                              value={inlineCommentsTexts[mom.id] || ""}
+                              onChange={(e) =>
+                                setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
+                              }
+                              placeholder="发表评论..."
+                              className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  handlePublishComment(mom.id);
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={() => handlePublishComment(mom.id)}
+                              className="text-[10px] text-blue-500 hover:text-blue-600 font-bold px-1"
+                            >
+                              发送
+                            </button>
+                          </div>
+
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Profile Page Overlay (编辑个人资料页面) */}
+      {isEditingProfile && (
+        <div className="absolute inset-0 z-50 bg-slate-50 flex flex-col h-full animate-slide-up">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-100 shrink-0">
+            <button
+              onClick={() => setIsEditingProfile(false)}
+              className="p-1.5 rounded-full hover:bg-slate-100 transition-colors"
+            >
+              <ChevronLeft className="w-6 h-6 text-slate-600" />
+            </button>
+            <h2 className="font-bold text-slate-800 text-sm">编辑个人资料</h2>
+            <div className="w-8 h-8" />
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+              {/* Avatar upload */}
+              <div className="flex flex-col items-center py-2 border-b border-slate-50 pb-4">
+                <div className="relative">
+                  <img
+                    src={editMyAvatar}
+                    alt="Avatar"
+                    className="w-16 h-16 rounded-full object-cover border border-slate-200 shadow-sm bg-slate-100"
+                  />
+                  <label className="absolute -bottom-1 -right-1 bg-blue-500 text-white rounded-full p-1 border-2 border-white cursor-pointer shadow-sm hover:bg-blue-600 transition-colors">
+                    <Sliders className="w-3 h-3" />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            if (typeof reader.result === "string") {
+                              setEditMyAvatar(reader.result);
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-2">更换我的头像</span>
+              </div>
+
+              {/* Name Input */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1">我的昵称</label>
+                <input
+                  type="text"
+                  value={editMyName}
+                  onChange={(e) => setEditMyName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold text-slate-800"
+                />
+              </div>
+
+              {/* Signature Input */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1">个性签名</label>
+                <input
+                  type="text"
+                  value={editMySignature}
+                  onChange={(e) => setEditMySignature(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs text-slate-800"
+                />
+              </div>
+
+              {/* Bio TextArea */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1">我的背景人设介绍</label>
+                <textarea
+                  rows={4}
+                  value={editMyBio}
+                  onChange={(e) => setEditMyBio(e.target.value)}
+                  placeholder="说点关于你的人设，伙伴们互动时会参考这里哦..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs resize-none leading-relaxed text-slate-800"
+                />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsEditingProfile(false)}
+                className="flex-1 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  onSaveSettings({
+                    ...settings,
+                    name: editMyName,
+                    avatar: editMyAvatar,
+                    signature: editMySignature,
+                    bio: editMyBio,
+                  });
+                  setIsEditingProfile(false);
+                }}
+                className="flex-1 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
+              >
+                保存修改
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Friend Confirmation Overlay */}
+      {isShowingAddFriendDialog && (() => {
+        const unaddedCharacters = characters.filter((c) => !friendIds.includes(c.id));
+        return (
+          <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl p-5 shadow-2xl max-w-[320px] w-full flex flex-col max-h-[85%] animate-slide-up border border-slate-100">
+              
+              {/* Modal Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-blue-500" />
+                  <span>添加联系人</span>
+                </h3>
+                <button
+                  onClick={() => setIsShowingAddFriendDialog(false)}
+                  className="p-1 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto py-3 space-y-3 pr-1">
+                {unaddedCharacters.length === 0 ? (
+                  <div className="text-center py-6 px-2 space-y-2">
+                    <div className="w-10 h-10 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      档案馆里所有的角色都已经是您的好友啦！
+                    </p>
+                    <button
+                      onClick={() => {
+                        setIsShowingAddFriendDialog(false);
+                        onNavigateToApp("archives");
+                      }}
+                      className="mt-2 w-full py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-[11px] font-bold transition-all shadow-sm"
+                    >
+                      去档案馆新建更多角色
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-[10px] text-slate-400 leading-normal mb-1">
+                      选择已在“档案馆”创建好的虚拟角色，一键添加好友：
+                    </p>
+                    <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                      {unaddedCharacters.map((char) => (
+                        <div
+                          key={char.id}
+                          className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100 gap-2 hover:bg-slate-100/50 transition-colors"
+                        >
+                          <img
+                            src={char.avatar}
+                            alt={char.name}
+                            className="w-8 h-8 rounded-full object-cover bg-slate-200 border border-slate-200 shrink-0"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] font-bold text-slate-800 truncate">
+                              {char.name}
+                            </div>
+                            <div className="text-[9px] text-slate-400">
+                              {char.mbti} &bull; {char.age}岁 &bull; {char.gender}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setFriendIds((prev) => [...prev, char.id]);
+                            }}
+                            className="px-2.5 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
+                          >
+                            添加
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="pt-2 border-t border-slate-100 shrink-0">
+                <button
+                  onClick={() => setIsShowingAddFriendDialog(false)}
+                  className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all"
+                >
+                  关闭窗口
+                </button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+    </div>
+  );
+}
