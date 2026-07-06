@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { UserSettings, StylePreset, ApiPreset } from "../types";
 import {
   ChevronLeft,
@@ -51,48 +51,6 @@ const DEFAULT_PRESETS: StylePreset[] = [
 }`,
     wallpaper: "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)",
     themeColor: "#3b82f6"
-  },
-  {
-    id: "p-sunset",
-    name: "落日晚霞 (Sunset Glow)",
-    bubbleCss: `.chat-bubble-self {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%) !important;
-  color: #ffffff !important;
-  border-radius: 20px !important;
-  box-shadow: 0 4px 10px rgba(245, 87, 108, 0.25);
-}
-.chat-bubble-other {
-  background: rgba(255, 255, 255, 0.9) !important;
-  color: #4a154b !important;
-  border-radius: 20px !important;
-  border: 1px solid #fed6e3;
-}`,
-    globalCss: ``,
-    wallpaper: "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=400&h=700&fit=crop",
-    themeColor: "#f5576c"
-  },
-  {
-    id: "p-cyber",
-    name: "赛博霓虹 (Cyber Neon)",
-    bubbleCss: `.chat-bubble-self {
-  background: #00f2fe !important;
-  color: #010a15 !important;
-  border-radius: 4px 16px 16px 16px !important;
-  font-weight: bold;
-  box-shadow: 0 0 10px #00f2fe;
-}
-.chat-bubble-other {
-  background: #1e1b4b !important;
-  color: #ff007f !important;
-  border-radius: 16px 4px 16px 16px !important;
-  border: 1px solid #ff007f;
-  box-shadow: 0 0 10px rgba(255, 0, 127, 0.3);
-}`,
-    globalCss: `.phone-screen-container {
-  filter: contrast(1.05);
-}`,
-    wallpaper: "https://images.unsplash.com/photo-1528459801416-a9e53bbf4e17?w=400&h=700&fit=crop",
-    themeColor: "#00f2fe"
   }
 ];
 
@@ -104,7 +62,8 @@ export default function AppSettings({
   onDeletePreset,
   onClose,
 }: AppSettingsProps) {
-  const [activeTab, setActiveTab] = useState<"profile" | "api" | "beauty" | "system" | null>(null);
+  const [activeTab, setActiveTab] = useState<"profile" | "api" | "beauty" | "system_config" | "system" | null>(null);
+  const [enableTimeAwareness, setEnableTimeAwareness] = useState(settings.enableTimeAwareness !== false);
 
   // Local Form state
   const [name, setName] = useState(settings.name);
@@ -119,6 +78,9 @@ export default function AppSettings({
   const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
   const [widgetOpacity, setWidgetOpacity] = useState(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70);
   const [iconBorderRadius, setIconBorderRadius] = useState(settings.iconBorderRadius !== undefined ? settings.iconBorderRadius : 35);
+  const [iconBgOpacity, setIconBgOpacity] = useState(settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100);
+  const [iconBorderWidth, setIconBorderWidth] = useState(settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1);
+  const [iconBorderOpacity, setIconBorderOpacity] = useState(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100);
   const [hideAppNames, setHideAppNames] = useState(!!settings.hideAppNames);
 
   // Connection testing state
@@ -208,6 +170,34 @@ export default function AppSettings({
 
   const handleFetchModels = async () => {
     setIsFetchingModels(true);
+    let fetchedList: string[] | null = null;
+
+    // Helper to parse different models response formats
+    const parseModels = (data: any): string[] | null => {
+      if (!data) return null;
+      if (Array.isArray(data)) {
+        if (data.length > 0 && typeof data[0] === "string") return data;
+        if (data.length > 0 && typeof data[0] === "object") {
+          return data.map((m: any) => m.id || m.name || m.model || m.model_id).filter(Boolean);
+        }
+      }
+      if (data.data && Array.isArray(data.data)) {
+        return data.data.map((m: any) => m.id || m.name || m.model || m.model_id).filter(Boolean);
+      }
+      if (data.models && Array.isArray(data.models)) {
+        return data.models.map((m: any) => {
+          if (typeof m === "string") return m;
+          const rawName = m.name || m.id || m.model || m.model_id;
+          if (typeof rawName === "string") {
+            return rawName.startsWith("models/") ? rawName.substring(7) : rawName;
+          }
+          return null;
+        }).filter(Boolean);
+      }
+      return null;
+    };
+
+    // Step 1: Try backend /api/models first
     try {
       const res = await fetch("/api/models", {
         method: "POST",
@@ -217,18 +207,80 @@ export default function AppSettings({
           apiEndpoint
         })
       });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.models)) {
-        setModelSuggestions(data.models);
-        if (data.models.length > 0 && !data.models.includes(selectedModel)) {
-          setSelectedModel(data.models[0]);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.models) && data.models.length > 0) {
+          fetchedList = data.models;
         }
       }
     } catch (error) {
-      console.error("Fetch models error:", error);
-    } finally {
-      setIsFetchingModels(false);
+      console.warn("Backend model fetch failed, trying client-side direct fetch...", error);
     }
+
+    // Step 2: If backend failed, try client-side direct fetch
+    if (!fetchedList) {
+      try {
+        const apiKeyValue = apiKey.trim() || settings.apiKey;
+        const endpointValue = apiEndpoint.trim();
+
+        if (endpointValue && apiKeyValue) {
+          // Custom endpoint client-side fetch
+          let baseUrl = endpointValue.replace(/\/+$/, "");
+          baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
+          const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : (baseUrl + "/models");
+
+          const responseFetch = await fetch(modelsUrl, {
+            method: "GET",
+            headers: {
+              "Authorization": `Bearer ${apiKeyValue}`
+            }
+          });
+          if (responseFetch.ok) {
+            const data = await responseFetch.json();
+            fetchedList = parseModels(data);
+          }
+        } else if (apiKeyValue) {
+          // Gemini default client-side models fetch
+          const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKeyValue}`;
+          const responseFetch = await fetch(modelsUrl);
+          if (responseFetch.ok) {
+            const data = await responseFetch.json();
+            fetchedList = parseModels(data);
+          }
+        }
+      } catch (err) {
+        console.error("Client-side direct fetch also failed:", err);
+      }
+    }
+
+    // Step 3: Fallback list if all else fails
+    if (fetchedList && fetchedList.length > 0) {
+      setModelSuggestions(fetchedList);
+      if (!fetchedList.includes(selectedModel)) {
+        setSelectedModel(fetchedList[0]);
+      }
+    } else {
+      // Elegant default fallback list so model list is never empty
+      const defaultModels = [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "deepseek-chat",
+        "deepseek-reasoner",
+        "deepseek-v3",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "claude-3-5-sonnet"
+      ];
+      setModelSuggestions(defaultModels);
+      if (!defaultModels.includes(selectedModel)) {
+        setSelectedModel(defaultModels[0]);
+      }
+      alert("无法通过接口拉取模型列表（可能因部署环境或网络限制），已为您加载默认的推荐模型列表。");
+    }
+
+    setIsFetchingModels(false);
   };
 
   const handleSaveApiConfig = () => {
@@ -264,9 +316,52 @@ export default function AppSettings({
   };
 
   const handleSave = (updatedFields: Partial<UserSettings>) => {
-    const updated = { ...settings, ...updatedFields };
+    const updatedIdentities = (settings.identities || []).map(idty => {
+      if (idty.id === (settings.activeIdentityId || "identity-1")) {
+        return {
+          ...idty,
+          name: updatedFields.name !== undefined ? updatedFields.name : idty.name,
+          avatar: updatedFields.avatar !== undefined ? updatedFields.avatar : idty.avatar,
+          signature: updatedFields.signature !== undefined ? updatedFields.signature : idty.signature,
+          bio: updatedFields.bio !== undefined ? updatedFields.bio : idty.bio,
+        };
+      }
+      return idty;
+    });
+
+    const updated = {
+      ...settings,
+      ...updatedFields,
+      identities: updatedIdentities
+    };
     onSaveSettings(updated);
   };
+
+  const handleSwitchIdentity = (id: string) => {
+    const idty = (settings.identities || []).find(i => i.id === id);
+    if (idty) {
+      setName(idty.name);
+      setAvatar(idty.avatar);
+      setSignature(idty.signature);
+      setBio(idty.bio);
+      
+      onSaveSettings({
+        ...settings,
+        activeIdentityId: id,
+        name: idty.name,
+        avatar: idty.avatar,
+        signature: idty.signature,
+        bio: idty.bio
+      });
+    }
+  };
+
+  useEffect(() => {
+    setName(settings.name);
+    setAvatar(settings.avatar);
+    setSignature(settings.signature);
+    setBio(settings.bio);
+  }, [settings.activeIdentityId, settings.name, settings.avatar, settings.signature, settings.bio]);
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -393,10 +488,12 @@ export default function AppSettings({
         return "API 设置";
       case "beauty":
         return "美化设置";
+      case "system_config":
+        return "系统设置";
       case "system":
         return "系统备份";
       default:
-        return "系统设置";
+        return "设置";
     }
   };
 
@@ -476,7 +573,7 @@ export default function AppSettings({
               <div className="space-y-1.5 pt-2 border-t border-slate-100/60 relative z-10 text-left">
                 <div className="text-xs text-slate-700 flex items-start gap-1">
                   <span className="text-slate-400 font-medium shrink-0">签名:</span>
-                  <span className="italic text-slate-600 font-medium line-clamp-1">“{signature || "正在用小手机发掘星空新大陆呢~"}”</span>
+                  <span className="italic text-slate-600 font-medium line-clamp-1">{signature || "暂无签名"}</span>
                 </div>
               </div>
             </div>
@@ -517,14 +614,31 @@ export default function AppSettings({
                 <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
               </button>
 
-              {/* 4. System Backup */}
+              {/* 4. System Config */}
+              <button
+                onClick={() => setActiveTab("system_config")}
+                className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
+                    <Sliders className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-slate-800">系统设置</span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">控制一键回到桌面悬浮按钮与时间感知开启状态</p>
+                  </div>
+                </div>
+                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
+              </button>
+
+              {/* 5. System Backup */}
               <button
                 onClick={() => setActiveTab("system")}
                 className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
               >
                 <div className="flex items-center gap-3.5">
                   <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
-                    <Sliders className="w-5 h-5" />
+                    <RefreshCw className="w-5 h-5" />
                   </div>
                   <div>
                     <span className="text-sm font-bold text-slate-800">系统备份</span>
@@ -546,9 +660,34 @@ export default function AppSettings({
           
           {/* PROFILE SETTINGS TAB */}
           {activeTab === "profile" && (
-            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+            <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">个人资料</h3>
               
+              {/* Identity Switcher */}
+              <div className="border-b border-slate-50 pb-4">
+                <div className="grid grid-cols-3 gap-2">
+                  {(settings.identities || []).map((idty, index) => {
+                    const isSelected = idty.id === (settings.activeIdentityId || "identity-1");
+                    return (
+                      <button
+                        key={idty.id}
+                        type="button"
+                        onClick={() => handleSwitchIdentity(idty.id)}
+                        className={`flex items-center justify-center py-2 px-3 rounded-xl border text-center transition-all ${
+                          isSelected
+                            ? "border-neutral-950 ring-1 ring-neutral-950 text-neutral-950 font-bold bg-white"
+                            : "border-slate-200 text-slate-400 bg-white hover:bg-slate-50 hover:text-slate-600"
+                        }`}
+                      >
+                        <span className="text-[10px] font-bold truncate max-w-full block w-full">
+                          {idty.name || `预设 ${index + 1}`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Avatar Selector */}
               <div className="flex flex-col items-center py-2 border-b border-slate-50 pb-4">
                 <div className="relative">
@@ -600,7 +739,7 @@ export default function AppSettings({
 
               {/* Personal Bio */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">我的人设介绍 (供AI交互参考)</label>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1">我的人设介绍</label>
                 <textarea
                   rows={4}
                   value={bio}
@@ -608,7 +747,7 @@ export default function AppSettings({
                     setBio(e.target.value);
                     handleSave({ bio: e.target.value });
                   }}
-                  placeholder="简单描述你的人设、背景、与创建的角色是何种关系。例如: '档案馆的一名记录员，冷静、观察力敏锐，与角色们是长久的朋友。'"
+                  placeholder=""
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs resize-none leading-relaxed"
                 />
               </div>
@@ -617,7 +756,7 @@ export default function AppSettings({
 
           {/* API SETTINGS TAB */}
           {activeTab === "api" && (
-            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+            <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <Lock className="w-3.5 h-3.5" />
                 <span>智能体模型设置</span>
@@ -826,14 +965,17 @@ export default function AppSettings({
 
           {/* BEAUTY SETTINGS TAB */}
           {activeTab === "beauty" && (
-            <div className="space-y-4">
-              {/* Wallpaper customizer */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">手机壁纸</h3>
+            <div className="space-y-4 text-left">
+              {/* 1. 桌面视觉底层模块 */}
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Image className="w-3.5 h-3.5 text-slate-400" />
+                  <span>1. 桌面视觉底层模块</span>
+                </h3>
                 
-                <div className="flex flex-col items-center py-4 border border-dashed border-slate-200 bg-slate-50/50 rounded-2xl">
-                  <Image className="w-8 h-8 text-slate-400 mb-1" />
-                  <label className="cursor-pointer bg-white hover:bg-slate-50 px-4 py-1.5 rounded-xl border border-slate-200 text-xs font-bold shadow-sm transition-colors mt-1.5">
+                {/* 手机壁纸上传区 */}
+                <div className="flex flex-row items-center justify-center gap-4 py-2.5 border border-dashed border-slate-200 bg-slate-50/50 rounded-[32px] w-full">
+                  <label className="cursor-pointer bg-white hover:bg-slate-50 px-5 py-1.5 rounded-[32px] border border-slate-200 text-[11px] text-[#52525b] font-bold shadow-sm transition-colors flex items-center gap-1.5">
                     <span>点击上传壁纸</span>
                     <input
                       type="file"
@@ -843,69 +985,49 @@ export default function AppSettings({
                     />
                   </label>
                   <button
+                    type="button"
                     onClick={() => {
                       const fallback = "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)";
                       setWallpaper(fallback);
                       handleSave({ wallpaper: fallback });
                     }}
-                    className="text-[11px] text-slate-400 hover:text-neutral-950 hover:underline mt-2.5 font-semibold"
+                    className="text-[11px] text-[#52525b] hover:text-neutral-950 hover:underline font-bold"
                   >
-                    恢复默认背景
+                    恢复默认
                   </button>
                 </div>
-              </div>
 
-              {/* DOCK & WIDGET TRANSPARENCY SETTINGS */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">系统磨砂与透明度</h3>
-                
-                {/* Dock Color and Opacity */}
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-[10.5px] font-bold text-slate-500 mb-1.5 flex items-center justify-between">
-                      <span>Dock栏 颜色与透明度</span>
-                      <span className="text-[10px] text-slate-400 font-mono font-medium">颜色: {dockColor} | 透明度: {dockOpacity}%</span>
-                    </label>
-                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      <div className="relative w-8 h-8 rounded-lg border border-slate-200 overflow-hidden shrink-0 shadow-sm flex items-center justify-center">
-                        <input
-                          type="color"
-                          value={dockColor}
-                          onChange={(e) => {
-                            setDockColor(e.target.value);
-                            handleSave({ dockColor: e.target.value });
-                          }}
-                          className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-                        />
-                        <div className="w-full h-full" style={{ backgroundColor: dockColor }} />
-                      </div>
-                      <div className="flex-1 flex items-center gap-2">
-                        <span className="text-[10px] text-slate-400 shrink-0 font-medium">全透明</span>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          value={dockOpacity}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            setDockOpacity(val);
-                            handleSave({ dockOpacity: val });
-                          }}
-                          className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-850"
-                        />
-                        <span className="text-[10px] text-slate-400 shrink-0 font-medium">不透明</span>
-                      </div>
-                    </div>
+                {/* Dock 栏透明度设置 */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
+                    <span>Dock栏 颜色与透明度</span>
+                    <span className="text-[10px] text-slate-400 font-mono font-medium">{dockOpacity}%</span>
+                  </label>
+                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
+                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">全透明</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={dockOpacity}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setDockOpacity(val);
+                        handleSave({ dockOpacity: val });
+                      }}
+                      className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-850"
+                    />
+                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">不透明</span>
                   </div>
                 </div>
 
-                {/* Widget Opacity */}
+                {/* 小组件卡片透明度设置 */}
                 <div className="space-y-1.5">
-                  <label className="block text-[10.5px] font-bold text-slate-500 flex items-center justify-between">
+                  <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
                     <span>小组件背景卡片透明度</span>
                     <span className="text-[10px] text-slate-400 font-mono font-medium">{widgetOpacity}%</span>
                   </label>
-                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
                     <span className="text-[10px] text-slate-400 shrink-0 font-medium">全透明</span>
                     <input
                       type="range"
@@ -921,62 +1043,117 @@ export default function AppSettings({
                     />
                     <span className="text-[10px] text-slate-400 shrink-0 font-medium">不透明</span>
                   </div>
-                  <p className="text-[9.5px] text-slate-400 leading-relaxed mt-1 pl-1">
-                    统一控制桌面顶部欢迎卡片、待办小组件、音乐播放器与纪念日组件的背景底色不透明度。
-                  </p>
                 </div>
               </div>
 
-              {/* ICON CORNER RADIUS SETTINGS */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              {/* 2. 图标全局美化模块 */}
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Palette className="w-3.5 h-3.5 text-slate-400" />
-                  <span>系统图标圆角</span>
+                  <span>2. 图标全局美化模块</span>
                 </h3>
-                
-                <div className="space-y-1.5">
-                  <label className="block text-[10.5px] font-bold text-slate-500 flex items-center justify-between">
-                    <span>桌面应用图标圆角调整</span>
-                    <span className="text-[10px] text-slate-600 font-bold font-mono">
-                      {iconBorderRadius === 0 ? "0% (直角)" : iconBorderRadius === 50 ? "50% (圆形)" : `${iconBorderRadius}%`}
-                    </span>
-                  </label>
-                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">直角 (0%)</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="50"
-                      value={iconBorderRadius}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setIconBorderRadius(val);
-                        handleSave({ iconBorderRadius: val });
-                      }}
-                      className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
-                    />
-                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">圆形 (50%)</span>
-                  </div>
-                  <p className="text-[9.5px] text-slate-400 leading-relaxed mt-1 pl-1">
-                    一键平滑调整系统所有应用图标（包括记忆书、聊天等）的角半径，让您的个性化桌面视觉更为一体。
-                  </p>
-                </div>
-              </div>
 
-              {/* APP NAMES VISIBILITY SETTINGS */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                  <Palette className="w-3.5 h-3.5 text-slate-400" />
-                  <span>应用名称显示</span>
-                </h3>
-                
-                <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <div className="space-y-0.5 max-w-[80%]">
-                    <span className="block text-[11px] font-bold text-slate-700">隐藏桌面应用名称</span>
-                    <span className="block text-[9.5px] text-slate-400 leading-normal">
-                      开启后将隐藏图标下的应用名称，并自动放大图标以填充空间，确保与小组件完美对齐。
-                    </span>
+                <div className="space-y-3">
+                  {/* 圆角 */}
+                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
+                    <div className="w-[72px] shrink-0 flex flex-col pl-2">
+                      <span className="text-[11px] font-bold text-[#52525b]">圆角</span>
+                      <span className="text-[9px] text-slate-400 font-mono font-medium">{iconBorderRadius}%</span>
+                    </div>
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="text-[9px] text-slate-400 shrink-0">直角</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="50"
+                        value={iconBorderRadius}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setIconBorderRadius(val);
+                          handleSave({ iconBorderRadius: val });
+                        }}
+                        className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                      />
+                      <span className="text-[9px] text-slate-400 shrink-0">圆形</span>
+                    </div>
                   </div>
+
+                  {/* 背景 */}
+                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
+                    <div className="w-[72px] shrink-0 flex flex-col pl-2">
+                      <span className="text-[11px] font-bold text-[#52525b]">背景</span>
+                      <span className="text-[9px] text-slate-400 font-mono font-medium">{iconBgOpacity}%</span>
+                    </div>
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="text-[9px] text-slate-400 shrink-0">透明</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={iconBgOpacity}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setIconBgOpacity(val);
+                          handleSave({ iconBgOpacity: val });
+                        }}
+                        className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                      />
+                      <span className="text-[9px] text-slate-400 shrink-0">不透</span>
+                    </div>
+                  </div>
+
+                  {/* 描边粗细 */}
+                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
+                    <div className="w-[72px] shrink-0 flex flex-col pl-2">
+                      <span className="text-[11px] font-bold text-[#52525b]">描边粗细</span>
+                      <span className="text-[9px] text-slate-400 font-mono font-medium">{iconBorderWidth}px</span>
+                    </div>
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="text-[9px] text-slate-400 shrink-0">无</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        value={iconBorderWidth}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setIconBorderWidth(val);
+                          handleSave({ iconBorderWidth: val });
+                        }}
+                        className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                      />
+                      <span className="text-[9px] text-slate-400 shrink-0">10px</span>
+                    </div>
+                  </div>
+
+                  {/* 描边显示 */}
+                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
+                    <div className="w-[72px] shrink-0 flex flex-col pl-2">
+                      <span className="text-[11px] font-bold text-[#52525b]">描边显示</span>
+                      <span className="text-[9px] text-slate-400 font-mono font-medium">{iconBorderOpacity}%</span>
+                    </div>
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="text-[9px] text-slate-400 shrink-0">全透</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={iconBorderOpacity}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setIconBorderOpacity(val);
+                          handleSave({ iconBorderOpacity: val });
+                        }}
+                        className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                      />
+                      <span className="text-[9px] text-slate-400 shrink-0">不透</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 隐藏应用名称 */}
+                <div className="flex items-center justify-between bg-slate-50 p-3 rounded-[32px] border border-slate-100">
+                  <span className="text-[11px] font-bold text-[#52525b]">隐藏桌面应用名称</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -995,85 +1172,87 @@ export default function AppSettings({
                     />
                   </button>
                 </div>
-              </div>
 
-              {/* CUSTOM ICONS GRID (AS IN SCREENSHOT) */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
-                <div className="flex items-center justify-between pb-1 border-b border-slate-50">
-                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">自定义图标 / ICONS</h3>
-                  <button
-                    onClick={handleRestoreAllIcons}
-                    className="text-[10px] text-slate-400 hover:text-neutral-950 font-semibold"
-                  >
-                    恢复所有图标默认
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-400 leading-relaxed mb-2">
-                  点击下方对应应用位置卡片，可直接上传本地图片自定义更换桌面应用图标：
-                </p>
+                {/* 自定义应用图标替换区域 */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between pb-1 border-b border-slate-50">
+                    <span className="text-[11px] font-bold text-[#52525b]">自定义应用图标</span>
+                    <button
+                      onClick={handleRestoreAllIcons}
+                      className="text-[10px] text-slate-400 hover:text-neutral-950 font-semibold"
+                    >
+                      恢复所有默认
+                    </button>
+                  </div>
 
-                {/* Icons rounded-card grid */}
-                <div className="grid grid-cols-4 gap-2.5">
-                  {appKeys.map((item) => {
-                    const customImg = settings.customIcons[item.key];
-                    return (
-                      <div
-                        key={item.key}
-                        className="flex flex-col items-center bg-slate-50/60 p-2 rounded-xl border border-slate-100 hover:bg-slate-50 relative group cursor-pointer"
-                      >
-                        <label className="cursor-pointer flex flex-col items-center w-full">
-                          <div 
-                            className="w-10 h-10 bg-white border border-slate-200 flex items-center justify-center shadow-sm overflow-hidden shrink-0 group-hover:border-neutral-950 transition-colors"
-                            style={{ borderRadius: "var(--app-icon-radius, 35%)" }}
-                          >
-                            {customImg ? (
-                              <img src={customImg} alt={item.label} className="w-full h-full object-cover" />
-                            ) : (
-                              <Sliders className="w-4 h-4 text-slate-400" />
-                            )}
-                          </div>
-                          <span className="text-[9px] font-bold text-slate-600 mt-1.5 tracking-tight truncate w-full text-center">
-                            {item.label}
-                          </span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => handleIconUpload(item.key, e)}
-                            className="hidden"
-                          />
-                        </label>
-                      </div>
-                    );
-                  })}
+                  <div className="grid grid-cols-4 gap-2.5">
+                    {appKeys.map((item) => {
+                      const customImg = settings.customIcons[item.key];
+                      return (
+                        <div
+                          key={item.key}
+                          className="flex flex-col items-center bg-slate-50/60 p-2 rounded-[32px] border border-slate-100 hover:bg-slate-50 relative group cursor-pointer"
+                        >
+                          <label className="cursor-pointer flex flex-col items-center w-full">
+                            <div 
+                              className="w-10 h-10 bg-white border border-slate-200 flex items-center justify-center shadow-sm overflow-hidden shrink-0 group-hover:border-neutral-950 transition-colors"
+                              style={{ borderRadius: "var(--app-icon-radius, 35%)" }}
+                            >
+                              {customImg ? (
+                                <img src={customImg} alt={item.label} className="w-full h-full object-cover" />
+                              ) : (
+                                <Sliders className="w-4 h-4 text-slate-400" />
+                              )}
+                            </div>
+                            <span className="text-[9px] font-bold text-slate-600 mt-1.5 tracking-tight truncate w-full text-center">
+                              {item.label}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleIconUpload(item.key, e)}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
-              {/* Custom CSS textareas */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">自定义 CSS 样式注入</h3>
+              {/* 3. 聊天界面样式模块 */}
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-slate-400" />
+                  <span>3. 聊天界面样式模块</span>
+                </h3>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-[#52525b]">
                     聊天气泡 CSS样式 (.chat-bubble-self, .chat-bubble-other)
                   </label>
                   <textarea
-                    rows={4}
+                    rows={3}
                     value={bubbleCss}
                     onChange={(e) => {
                       setBubbleCss(e.target.value);
                       handleSave({ bubbleCss: e.target.value });
                     }}
                     placeholder={`.chat-bubble-self { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%) !important; }`}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
+                    className="w-full px-4 py-3 rounded-[32px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
                   />
                 </div>
               </div>
 
-              {/* Preset management */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">样式预设 (Themes)</h3>
-                
-                {/* Save Current Preset Form */}
+              {/* 4. 主题预设模块 */}
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-slate-400" />
+                  <span>4. 主题预设模块</span>
+                </h3>
+
+                {/* 样式预设保存 */}
                 <form onSubmit={handleSaveCurrentAsPreset} className="flex gap-2">
                   <input
                     type="text"
@@ -1081,26 +1260,26 @@ export default function AppSettings({
                     value={newPresetName}
                     onChange={(e) => setNewPresetName(e.target.value)}
                     placeholder="保存当前样式为新预设..."
-                    className="flex-1 bg-slate-50 rounded-xl px-3 py-1.5 text-xs text-slate-800 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                    className="flex-1 bg-slate-50 rounded-[32px] px-4 py-2 text-xs text-slate-800 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
                   />
                   <button
                     type="submit"
-                    className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1 shrink-0 shadow-sm"
+                    className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[32px] text-xs transition-colors flex items-center gap-1 shrink-0 shadow-sm"
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>保存</span>
                   </button>
                 </form>
 
-                <div className="space-y-1.5 pt-2">
-                  <span className="text-[10px] font-bold text-slate-400 block mb-1">切换视觉预设:</span>
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[11px] font-bold text-[#52525b] block mb-1">切换视觉预设:</span>
                   {activePresetsList.map((preset) => {
                     const isActive = settings.activePreset === preset.name || 
                                      (preset.id === "p-classic" && !settings.activePreset);
                     return (
                       <div
                         key={preset.id}
-                        className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                        className={`flex items-center justify-between p-2.5 rounded-[32px] border transition-all ${
                           isActive
                             ? "bg-stone-100 border-stone-300 text-stone-905"
                             : "bg-slate-50 border-slate-100 text-slate-700 hover:bg-slate-100"
@@ -1111,7 +1290,7 @@ export default function AppSettings({
                           className="flex-1 text-left font-bold text-xs flex items-center gap-2"
                         >
                           <div className="w-4 h-4 rounded-full border border-slate-200" style={{ background: preset.wallpaper }} />
-                          <span>{preset.name}</span>
+                          <span className="text-[11px] text-[#52525b]">{preset.name}</span>
                           {isActive && <Check className="w-3.5 h-3.5 text-neutral-950" />}
                         </button>
 
@@ -1131,16 +1310,16 @@ export default function AppSettings({
             </div>
           )}
 
-          {/* SYSTEM SETTINGS & BACKUP TAB */}
-          {activeTab === "system" && (
-            <div className="space-y-4">
+          {/* SYSTEM CONFIG TAB */}
+          {activeTab === "system_config" && (
+            <div className="space-y-4 text-left">
               {/* Floating Home Button Settings */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="text-xs font-bold text-slate-800 tracking-wide">一键回到主页悬浮按钮</h4>
                     <p className="text-[10px] text-slate-400 mt-1 leading-normal">
-                      在屏幕边缘显示一个半透明悬浮按钮，点击可一键回到桌面主页
+                      在屏幕边缘显示一个半透明悬浮按钮，支持自由拖拽移动位置。点击可一键回到桌面主页。
                     </p>
                   </div>
                   <button
@@ -1163,8 +1342,42 @@ export default function AppSettings({
                 </div>
               </div>
 
+              {/* Time Awareness Settings */}
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 tracking-wide">时间感知功能</h4>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-normal">
+                      开启后，AI 角色在对话时能够感知到当前的真实物理时间（如深夜、清晨、午后），并基于此动态生成贴合语境的时间段对话。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextVal = !enableTimeAwareness;
+                      setEnableTimeAwareness(nextVal);
+                      handleSave({ enableTimeAwareness: nextVal });
+                    }}
+                    className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-1 shrink-0 ${
+                      enableTimeAwareness ? "bg-neutral-950" : "bg-slate-200"
+                    }`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                        enableTimeAwareness ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SYSTEM SETTINGS & BACKUP TAB */}
+          {activeTab === "system" && (
+            <div className="space-y-4 text-left">
               {/* Data Backup and Restore */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">数据备份与还原</h3>
                 
                 <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -1242,7 +1455,7 @@ export default function AppSettings({
                               throw new Error("非有效的小手机备份文件！");
                             }
 
-                            if (confirm("确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置和世界书数据且不可撤销！")) {
+                            if (confirm("确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置 and 世界书数据且不可撤销！")) {
                               Object.entries(json).forEach(([key, val]) => {
                                 if (val !== null && typeof val === "string") {
                                   localStorage.setItem(key, val);
@@ -1261,6 +1474,28 @@ export default function AppSettings({
                     />
                   </label>
                 </div>
+              </div>
+
+              {/* Reset Cache and Return to Default */}
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                <h3 className="text-xs font-bold text-rose-500 uppercase tracking-wider">危险区域</h3>
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  清除缓存将删除此设备上的所有自定义角色、历史对话、世界书、日程、备忘录和朋友圈，系统也将恢复为最干净的初始设置。请注意此操作无法撤销。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm("⚠️ 确定要清除所有缓存并恢复为默认设置吗？这会清空全部对话和角色数据且无法恢复！")) {
+                      localStorage.clear();
+                      alert("所有数据和缓存已成功清除，应用将刷新重置为出厂状态。");
+                      window.location.reload();
+                    }
+                  }}
+                  className="w-full py-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 text-rose-600 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>清除缓存并恢复为默认</span>
+                </button>
               </div>
             </div>
           )}

@@ -138,12 +138,10 @@ export default function AppNotes({ onClose }: AppNotesProps) {
 
   const handleDeleteNote = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm("确定要删除这篇笔记吗？")) {
-      setNotes(notes.filter((n) => n.id !== id));
-      if (currentNote?.id === id) {
-        setIsEditingNote(false);
-        setCurrentNote(null);
-      }
+    setNotes(notes.filter((n) => n.id !== id));
+    if (currentNote?.id === id) {
+      setIsEditingNote(false);
+      setCurrentNote(null);
     }
   };
 
@@ -172,9 +170,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
   };
 
   const handleClearCompletedTodos = () => {
-    if (confirm("确定要清除所有已完成的待办吗？")) {
-      setTodos(todos.filter((t) => !t.checked));
-    }
+    setTodos(todos.filter((t) => !t.checked));
   };
 
   // Search filter
@@ -206,7 +202,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
           {isEditingNote ? (
             <button 
               onClick={handleSaveNote}
-              className="w-8 h-8 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white transition-all flex items-center justify-center shadow-sm"
+              className="w-8 h-8 rounded-full bg-neutral-950 hover:bg-neutral-900 text-white transition-all flex items-center justify-center shadow-sm"
               title="保存"
             >
               <Save className="w-4 h-4" />
@@ -253,7 +249,25 @@ export default function AppNotes({ onClose }: AppNotesProps) {
       <div className="flex-1 overflow-y-auto">
         {isEditingNote ? (
           /* NOTE EDITOR VIEW */
-          <div className="h-full flex flex-col bg-white p-5 space-y-4">
+          <div className="h-full flex flex-col bg-white p-5 space-y-4 memo-editor-container">
+            <style>{`
+              .memo-editor-container input,
+              .memo-editor-container textarea {
+                border-radius: 4px !important;
+                border: none !important;
+                background-color: transparent !important;
+                box-shadow: none !important;
+                padding: 4px !important;
+                margin: 0 !important;
+              }
+              .memo-editor-container input {
+                font-size: 16px !important;
+                font-weight: 800 !important;
+              }
+              .memo-editor-container textarea {
+                font-size: 14px !important;
+              }
+            `}</style>
             <input
               type="text"
               placeholder="请输入标题..."
@@ -308,7 +322,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
 
                   <button
                     onClick={(e) => handleDeleteNote(note.id, e)}
-                    className="absolute top-4 right-4 p-1.5 text-slate-300 hover:text-rose-500 rounded-lg hover:bg-rose-50 transition-colors opacity-0 group-hover:opacity-100"
+                    className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors z-20"
                     title="删除笔记"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -414,7 +428,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
                     placeholder="输入要准备的事务，如: 约陆沉砚去写生..."
                     value={newTodoText}
                     onChange={(e) => setNewTodoText(e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-base focus:outline-none focus:ring-1 focus:ring-neutral-950"
                   />
                   <button
                     type="submit"
@@ -440,7 +454,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
                     ) : (
                       <div className="w-4 h-4 rounded-md border-2 border-slate-300 shrink-0 group-hover/todo:border-neutral-950 transition-colors"></div>
                     )}
-                    <span className={`text-xs truncate font-semibold leading-none ${todo.checked ? "text-slate-300 line-through" : "text-slate-700"}`}>
+                    <span className={`text-base truncate font-semibold leading-none ${todo.checked ? "text-slate-300 line-through" : "text-slate-700"}`}>
                       {todo.text}
                     </span>
                   </div>

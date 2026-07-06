@@ -91,7 +91,7 @@ interface AppStoreProps {
 }
 
 export default function AppStore({
-  installedAppIds = ["chat", "archives", "worldbook", "music", "forum"],
+  installedAppIds = ["chat", "archives", "worldbook", "music", "notes"],
   onInstallApp,
   onUninstallApp,
   onClose,
@@ -149,20 +149,6 @@ export default function AppStore({
 
       <div className="flex-1 overflow-y-auto p-4 pb-24">
         <div className="max-w-md mx-auto space-y-5">
-          {/* Hero Banner card */}
-          <div className="bg-neutral-950 rounded-3xl p-5 text-white shadow-lg relative overflow-hidden">
-            <div className="absolute right-0 bottom-0 opacity-10 text-9xl font-bold select-none translate-x-4 translate-y-8">
-              Store
-            </div>
-            <span className="bg-white/20 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase">
-              手机管家装机推荐
-            </span>
-            <h2 className="text-lg font-extrabold mt-2 leading-snug">自由装卸 · 纯净体验</h2>
-            <p className="text-xs text-stone-300 mt-1 max-w-xs leading-relaxed">
-              在此页可对“小手机”里的各核心应用进行自由安装与卸载。删除应用不会丢失您的本地核心数据。
-            </p>
-          </div>
-
           {/* Quick Search */}
           <div className="relative">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
@@ -269,17 +255,6 @@ export default function AppStore({
                   未找到匹配的应用。
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* Policy Info */}
-          <div className="p-4 bg-slate-100 rounded-2xl border border-slate-200/60 flex gap-3 text-slate-600">
-            <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5 text-slate-500" />
-            <div>
-              <h4 className="text-xs font-bold text-slate-700">小手机纯净隐私保证</h4>
-              <p className="text-[11px] text-slate-500 leading-relaxed mt-0.5">
-                所有安装的应用均运行在纯沙盒本地环境下，不收集、不外泄您的个人交谈内容和创作人设数据，敬请安心体验。
-              </p>
             </div>
           </div>
         </div>

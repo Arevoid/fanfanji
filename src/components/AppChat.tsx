@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { motion } from "motion/react";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings } from "../types";
 import { getRelevantMemories } from "./AppMemory";
 import {
@@ -26,7 +27,13 @@ import {
   FileText,
   MapPin,
   Gift,
-  DollarSign
+  DollarSign,
+  Trash2,
+  AlertCircle,
+  Quote,
+  Mic,
+  Volume2,
+  Smile
 } from "lucide-react";
 
 interface AppChatProps {
@@ -40,6 +47,7 @@ interface AppChatProps {
   onAddCommentToMoment: (momentId: string, comment: MomentComment) => void;
   onLikeMoment: (momentId: string, userName: string) => void;
   onToggleBookmark: (messageId: string) => void;
+  onDeleteMessage?: (messageId: string) => void;
   onClose: () => void;
   onSaveSettings: (settings: UserSettings) => void;
   onNavigateToApp: (appId: string) => void;
@@ -74,6 +82,7 @@ export default function AppChat({
   onAddCommentToMoment,
   onLikeMoment,
   onToggleBookmark,
+  onDeleteMessage,
   onClose,
   onSaveSettings,
   onNavigateToApp,
@@ -89,6 +98,8 @@ export default function AppChat({
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
   const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId);
+  const activeStylePreset = (activeCharacter?.chatStylePreset) || (settings.globalChatStylePreset) || "default";
+  const isFloatingCute = activeStylePreset === "floating-cute";
 
   const [momentsFilterCharId, setMomentsFilterCharId] = useState<string | null>(null);
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
@@ -202,6 +213,7 @@ export default function AppChat({
   const [editMySignature, setEditMySignature] = useState(settings.signature);
   const [editMyBio, setEditMyBio] = useState(settings.bio);
   const [editMyAvatar, setEditMyAvatar] = useState(settings.avatar);
+  const [editGlobalChatStylePreset, setEditGlobalChatStylePreset] = useState<"default" | "floating-cute">("default");
 
   // Sync edits when isEditingProfile toggled
   useEffect(() => {
@@ -210,6 +222,7 @@ export default function AppChat({
       setEditMySignature(settings.signature);
       setEditMyBio(settings.bio);
       setEditMyAvatar(settings.avatar);
+      setEditGlobalChatStylePreset(settings.globalChatStylePreset || "default");
     }
   }, [isEditingProfile, settings]);
 
@@ -223,19 +236,22 @@ export default function AppChat({
   const [momentAttachedImage, setMomentAttachedImage] = useState<string | null>(null);
   const [showMomentPublisher, setShowMomentPublisher] = useState(false);
   const [inlineCommentsTexts, setInlineCommentsTexts] = useState<Record<string, string>>({});
+  const [showCommentInputMap, setShowCommentInputMap] = useState<Record<string, boolean>>({});
 
   // Settings draft states
   const [draftRemark, setDraftRemark] = useState("");
   const [draftIsPinned, setDraftIsPinned] = useState(false);
   const [draftChatBg, setDraftChatBg] = useState<string | undefined>(undefined);
   const [draftCustomCss, setDraftCustomCss] = useState("");
+  const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
-  const [activeAttachModal, setActiveAttachModal] = useState<"redpacket" | "music" | "location" | "file" | "calling" | null>(null);
+  const [activeAttachModal, setActiveAttachModal] = useState<"redpacket" | "music" | "location" | "file" | "calling" | "voice" | null>(null);
   const [callingType, setCallingType] = useState<"voice" | "video">("voice");
+  const [voiceDuration, setVoiceDuration] = useState("5");
   const [callingStatus, setCallingStatus] = useState<"ringing" | "connected" | "ended">("ringing");
   const [callingDuration, setCallingDuration] = useState(0);
   const [redPacketAmount, setRedPacketAmount] = useState("8.88");
@@ -248,6 +264,30 @@ export default function AppChat({
   const [isTriggeringProactive, setIsTriggeringProactive] = useState(false);
   const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
   const [editingMemoryText, setEditingMemoryText] = useState("");
+
+  // New features: Notes attachment, Quoting, Bubble Menu, Note Reader, OOC Annotation
+  const [memoNotes, setMemoNotes] = useState<any[]>([]);
+  const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
+  const [activeMenuMsg, setActiveMenuMsg] = useState<Message | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [selectedFileNote, setSelectedFileNote] = useState<{ title: string; content: string } | null>(null);
+  const [showOocCommentModal, setShowOocCommentModal] = useState<Message | null>(null);
+  const [oocCommentText, setOocCommentText] = useState("");
+
+  useEffect(() => {
+    if (activeAttachModal === "file") {
+      const raw = localStorage.getItem("phone_memo_notes");
+      if (raw) {
+        try {
+          setMemoNotes(JSON.parse(raw));
+        } catch (e) {
+          setMemoNotes([]);
+        }
+      } else {
+        setMemoNotes([]);
+      }
+    }
+  }, [activeAttachModal]);
 
   // Close attachment panel when switching chats
   useEffect(() => {
@@ -323,85 +363,8 @@ export default function AppChat({
     return () => clearInterval(timer);
   }, [activeAttachModal, callingStatus]);
 
-  const sendCustomMessage = (contentString: string) => {
+  const generateResponseForUserMessage = async (userMsg: Message) => {
     if (!activeChatCharId || !activeCharacter) return;
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      characterId: activeChatCharId,
-      sender: "user",
-      content: contentString,
-      timestamp: Date.now(),
-    };
-    onSendMessage(userMsg);
-    
-    setIsTyping(true);
-    setTimeout(() => {
-      setIsTyping(false);
-      let replyContent = "收到啦！";
-      if (contentString.startsWith("data:image/")) {
-        replyContent = "哇，照片收到了，好好看呀！✨";
-      } else if (contentString.startsWith("[红包]")) {
-        const parts = contentString.split("|");
-        const amount = parts[1] || "8.88";
-        replyContent = `天呐！居然有 ${amount} 元大红包！谢谢你，恭喜发财，贴贴~ 🍊🧧`;
-      } else if (contentString.startsWith("[音乐]")) {
-        const parts = contentString.split("|");
-        const title = parts[1] || "音乐";
-        replyContent = `这首《${title}》好好听呀，我已经加入单曲循环列表啦！🎧🎶`;
-      } else if (contentString.startsWith("[位置]")) {
-        const parts = contentString.split("|");
-        const loc = parts[1] || "位置";
-        replyContent = `收到你分享的位置 [${loc}] 啦！我这就收拾行李过去找你~ 📍🚀`;
-      } else if (contentString.startsWith("[文件]")) {
-        const parts = contentString.split("|");
-        const file = parts[1] || "文件";
-        replyContent = `文件《${file}》我已经收到了！多谢分享，么么哒！📁`;
-      } else if (contentString.startsWith("[视频通话]")) {
-        replyContent = "刚才的视频通话聊得好开心，下次我们再打呀！🎥🥰";
-      } else if (contentString.startsWith("[语音通话]")) {
-        replyContent = "声音很好听，刚才聊得很愉快！比心~ 📞❤️";
-      }
-      
-      const charMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        characterId: activeChatCharId,
-        sender: "character",
-        content: replyContent,
-        timestamp: Date.now(),
-      };
-      onSendMessage(charMsg);
-    }, 1500);
-  };
-
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-
-  // Pre-seed moments if state empty
-  const allMoments = moments.length === 0 ? PRESEED_MOMENTS : moments;
-
-  // Auto scroll in chats
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, activeChatCharId, isTyping]);
-
-  // Handle Send Message and API generation trigger
-  const handleSendChatMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
-
-    const userMsgText = chatInputText.trim();
-    setChatInputText("");
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      characterId: activeChatCharId,
-      sender: "user",
-      content: userMsgText,
-      timestamp: Date.now(),
-    };
-
-    onSendMessage(userMsg);
     setIsTyping(true);
 
     try {
@@ -431,7 +394,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", userMsgText, topK);
+      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", userMsg.content, topK);
       if (relevantMemories.length > 0) {
         charDefText += `\n- Reclaimed Memories from previous conversations (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
       }
@@ -446,7 +409,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
         text: string;
       }[] = [];
 
-      const lowerUserMsg = userMsgText.toLowerCase();
+      const lowerUserMsg = userMsg.content.toLowerCase();
 
       for (const entry of worldBookEntries) {
         // Skip inactive entries
@@ -543,11 +506,53 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
+      // Custom tool/attachment format descriptions for character context
+      let promptMessage = userMsg.content;
+      if (promptMessage.startsWith("data:image/")) {
+        promptMessage = `[发送图片/照片] 我给你发送了一张照片，请对此做出符合你人设、生动有趣、短小、像真正情侣或朋友一样的回复。`;
+      } else if (promptMessage.startsWith("[红包]")) {
+        const parts = promptMessage.split("|");
+        const amount = parts[1] || "8.88";
+        const greeting = parts[2] || "恭喜发财，万事如意";
+        promptMessage = `[发送红包] 我给你发送了一个金额为 ${amount} 元的微信红包，祝福语是：“${greeting}”。请对此做出非常符合你人设、自然且简短可亲的回复，表达谢谢并表达心意。`;
+      } else if (promptMessage.startsWith("[位置]")) {
+        const parts = promptMessage.split("|");
+        const loc = parts[1] || "位置";
+        promptMessage = `[发送位置] 我给你分享了一个微信位置：[${loc}]。请对此做出非常符合你人设、极其自然简短的回复，展现你听到这个地点时的真实性格反应。`;
+      } else if (promptMessage.startsWith("[音乐]")) {
+        const parts = promptMessage.split("|");
+        const title = parts[1] || "音乐";
+        promptMessage = `[分享音乐] 我给你分享了一首好听的音乐：《${title}》。请以此为话题，表达符合你人设的简短、真实的感受。`;
+      } else if (promptMessage.startsWith("[文件]")) {
+        const parts = promptMessage.split("|");
+        const title = parts[1] || "无标题";
+        const fileContentRaw = parts[2] || "";
+        let decodedContent = "";
+        try {
+          decodedContent = decodeURIComponent(fileContentRaw);
+        } catch (e) {
+          decodedContent = fileContentRaw;
+        }
+        promptMessage = `[分享文件] 我给你分享了一篇备忘录笔记，标题是《${title}》，内容如下：\n"""\n${decodedContent}\n"""\n请针对这篇笔记的标题和具体内容，做出非常符合你人设、温暖、极具代入感且简短亲密的回复。`;
+      } else if (promptMessage.startsWith("[视频通话]")) {
+        const parts = promptMessage.split("|");
+        const status = parts[1] || "已结束";
+        promptMessage = `[视频通话结束] 刚才我们进行了视频通话（通话状态：${status}）。请对此做出一个非常符合你人设、温暖、有爱的微信回复。`;
+      } else if (promptMessage.startsWith("[语音通话]")) {
+        const parts = promptMessage.split("|");
+        const status = parts[1] || "已结束";
+        promptMessage = `[语音通话结束] 刚才我们进行了语音通话（通话状态：${status}）。请对此做出一个非常符合 you 人设、温暖、有爱的微信回复。`;
+      } else if (promptMessage.startsWith("[语音]|")) {
+        const parts = promptMessage.split("|");
+        const secs = parts[1] || "5";
+        promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒）。由于微信语音默认无法直接识别文字，请假设你听到了我用温暖/俏皮的声音发给你的语音（内容可以由你自行结合之前的话题进行脑补/想象，或者是日常可爱的闲聊）。请对此做出一个非常符合你人设、温暖、极其简短像真人在微信回语音或文字一样的回复。`;
+      }
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: userMsgText,
+          message: promptMessage,
           history,
           systemInstruction,
           apiKey: settings.apiKey,
@@ -643,6 +648,162 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
     }
   };
 
+  const sendCustomMessage = (contentString: string) => {
+    if (!activeChatCharId || !activeCharacter) return;
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      characterId: activeChatCharId,
+      sender: "user",
+      content: contentString,
+      timestamp: Date.now(),
+    };
+    onSendMessage(userMsg);
+    generateResponseForUserMessage(userMsg);
+  };
+
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Pre-seed moments if state empty
+  const allMoments = moments.length === 0 ? PRESEED_MOMENTS : moments;
+
+  // Auto scroll in chats
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, activeChatCharId, isTyping]);
+
+  // Handle Send Message and API generation trigger
+  const handleSendChatMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
+
+    let userMsgText = chatInputText.trim();
+    if (quotedMessage) {
+      const senderName = quotedMessage.sender === "user" ? "我" : (activeCharacter.remark || activeCharacter.name);
+      let shortContent = quotedMessage.content;
+      if (shortContent.startsWith("[文件]")) {
+        const parts = shortContent.split("|");
+        shortContent = `[文件] ${parts[1] || "笔记"}`;
+      } else if (shortContent.startsWith("[红包]")) {
+        shortContent = "[红包]";
+      } else if (shortContent.startsWith("[位置]")) {
+        shortContent = "[位置]";
+      } else if (shortContent.startsWith("[音乐]")) {
+        shortContent = "[音乐]";
+      }
+      userMsgText = `「引用 ${senderName}：${shortContent}」\n${userMsgText}`;
+      setQuotedMessage(null);
+    }
+
+    setChatInputText("");
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      characterId: activeChatCharId,
+      sender: "user",
+      content: userMsgText,
+      timestamp: Date.now(),
+    };
+
+    onSendMessage(userMsg);
+    generateResponseForUserMessage(userMsg);
+  };
+
+  const handleRegenerateResponse = async (targetMsg: Message, oocComment: string) => {
+    if (!activeChatCharId || !activeCharacter) return;
+
+    // 1. Delete target message
+    if (onDeleteMessage) {
+      onDeleteMessage(targetMsg.id);
+    }
+
+    // 2. Find the chat history excluding the targetMsg
+    const previousMessages = currentChatMessages.filter((m) => m.id !== targetMsg.id);
+    // Find the last user message
+    const lastUserMsg = [...previousMessages].reverse().find((m) => m.sender === "user");
+    if (!lastUserMsg) return;
+
+    setIsTyping(true);
+
+    try {
+      // Map history
+      const history = previousMessages.map((m) => ({
+        role: m.sender === "user" ? "user" : "model",
+        text: m.content,
+      }));
+
+      // Construct system instructions
+      const mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
+WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
+Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
+Do NOT say you are an AI or Gemini.`;
+
+      let charDefText = `Roleplay Profile:
+- Name: ${activeCharacter.name}
+- Age: ${activeCharacter.age}
+- Gender: ${activeCharacter.gender}
+- MBTI: ${activeCharacter.mbti}
+- Personality & Behavior: ${activeCharacter.personality}
+- Background Story: ${activeCharacter.backstory}`;
+
+      if (activeCharacter.compressedMemory) {
+        charDefText += `\n- Previous Background: ${activeCharacter.compressedMemory}`;
+      }
+
+      // Add OOC comment correction as high priority instruction
+      charDefText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
+Your previous response was marked as "OOC" (Out Of Character). 
+Feedback from the user: "${oocComment}".
+Please read the feedback carefully and rewrite your response to perfectly match your profile. Do NOT repeat the previous tone/behavior!`;
+
+      // Recall memories
+      const topK = recallSettings?.recallCount || 5;
+      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", lastUserMsg.content, topK);
+      if (relevantMemories.length > 0) {
+        charDefText += `\n- Reclaimed Memories:\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+      }
+
+      const userProfileText = `User Profile:
+- Nickname: ${settings.name}
+- Personality/Bio: ${settings.bio}`;
+
+      const systemInstruction = [mainPromptText, charDefText, userProfileText].join("\n\n---\n\n");
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: lastUserMsg.content,
+          history,
+          systemInstruction,
+          apiKey: settings.apiKey,
+          model: settings.selectedModel || "gemini-3.5-flash",
+          apiEndpoint: settings.apiEndpoint,
+          apiTemperature: settings.apiTemperature,
+          streamCompatible: settings.streamCompatible,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.text) {
+        const charMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          characterId: activeChatCharId,
+          sender: "character",
+          content: data.text,
+          timestamp: Date.now(),
+        };
+        onSendMessage(charMsg);
+      }
+    } catch (err: any) {
+      console.error("Regeneration error:", err);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
   // Save settings draft
   const handleSaveSettings = () => {
     if (activeCharacter) {
@@ -652,6 +813,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
         isPinned: draftIsPinned,
         chatBg: draftChatBg,
         customCss: draftCustomCss,
+        chatStylePreset: draftChatStylePreset,
         enableProactiveChat: draftEnableProactiveChat,
         proactiveChatInterval: draftProactiveChatInterval,
       });
@@ -931,6 +1093,7 @@ Instructions:
 
     onAddCommentToMoment(momentId, newComment);
     setInlineCommentsTexts({ ...inlineCommentsTexts, [momentId]: "" });
+    setShowCommentInputMap(prev => ({ ...prev, [momentId]: false }));
   };
 
   // Active chat threads list builder
@@ -966,39 +1129,53 @@ Instructions:
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
-        <div className="absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up">
-          {activeCharacter.customCss && (
-            <style>{activeCharacter.customCss}</style>
-          )}
-          {/* Chat Window Header */}
-          <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
-            <button
-              onClick={() => {
-                setActiveChatCharId(null);
-                setIsShowingCardModal(false);
-              }}
-              className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-            >
-              <ChevronLeft className="w-4 h-4 text-slate-700" />
-            </button>
-            <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max max-w-[160px] truncate">
-              {activeCharacter.remark || activeCharacter.name}
-            </h2>
-            <button
-              onClick={() => {
-                setDraftRemark(activeCharacter.remark || "");
-                setDraftIsPinned(activeCharacter.isPinned || false);
-                setDraftChatBg(activeCharacter.chatBg);
-                setDraftCustomCss(activeCharacter.customCss || "");
-                setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
-                setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
-                setIsShowingCardModal(!isShowingCardModal);
-              }}
-              className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-            >
-              <MoreHorizontal className="w-4 h-4 text-slate-700" />
-            </button>
-          </div>
+        <div className="absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up" id="conv-screen">
+          <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content">
+            {activeCharacter.customCss && (
+              <style>{activeCharacter.customCss}</style>
+            )}
+            {/* Chat Window Header with standard classes and compact size */}
+            <div className={`flex items-center justify-between z-10 shrink-0 relative cv-header header app-top-container default-controls selection-controls ${
+              isFloatingCute 
+                ? "mx-3.5 mt-3.5 mb-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] px-4 py-2" 
+                : "px-4 py-1.5 bg-transparent"
+            }`}>
+              <button
+                onClick={() => {
+                  setActiveChatCharId(null);
+                  setIsShowingCardModal(false);
+                }}
+                className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn back-btn"
+              >
+                <ChevronLeft className="w-4 h-4 text-slate-700" />
+              </button>
+              
+              <div className="flex items-center gap-1.5 absolute left-1/2 -translate-x-1/2 w-max max-w-[160px] header-title">
+                <h2 className="text-base font-bold text-slate-800 tracking-tight truncate">
+                  {activeCharacter.remark || activeCharacter.name}
+                </h2>
+                <div className="flex items-center gap-0.5 character-status">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 status-indicator online" />
+                  <span className="text-[9px] text-slate-400 font-medium tracking-wide">在线</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  setDraftRemark(activeCharacter.remark || "");
+                  setDraftIsPinned(activeCharacter.isPinned || false);
+                  setDraftChatBg(activeCharacter.chatBg);
+                  setDraftCustomCss(activeCharacter.customCss || "");
+                  setDraftChatStylePreset(activeCharacter.chatStylePreset || "default");
+                  setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
+                  setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
+                  setIsShowingCardModal(!isShowingCardModal);
+                }}
+                className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
+              >
+                <MoreHorizontal className="w-4 h-4 text-slate-700" />
+              </button>
+            </div>
 
           {/* Character Details / Settings Full-Screen Page */}
           {isShowingCardModal && (
@@ -1094,6 +1271,37 @@ Instructions:
                           />
                         </label>
                       )}
+                    </div>
+
+                    {/* Chat Style Preset Customizer */}
+                    <div className="py-3.5 space-y-2 border-t border-slate-100">
+                      <span className="text-[#52525b] font-bold block text-xs">聊天页预设样式风格</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDraftChatStylePreset("default")}
+                          className={`py-2.5 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            draftChatStylePreset === "default"
+                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
+                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
+                          }`}
+                        >
+                          <span className="text-[11px]">默认经典</span>
+                          <span className="text-[9px] opacity-75">官方标准布局</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDraftChatStylePreset("floating-cute")}
+                          className={`py-2.5 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            draftChatStylePreset === "floating-cute"
+                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
+                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
+                          }`}
+                        >
+                          <span className="text-[11px]">悬浮磨砂萌风</span>
+                          <span className="text-[9px] opacity-75">圆角卡片·气泡合并</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Character Specific CSS Customizer */}
@@ -1264,41 +1472,73 @@ Instructions:
               </span>
             </div>
 
-            {currentChatMessages.map((msg) => {
+            {currentChatMessages.map((msg, idx) => {
               const isSelf = msg.sender === "user";
+              const prevMsg = idx > 0 ? currentChatMessages[idx - 1] : null;
+              const isConsecutivePrev = prevMsg && prevMsg.sender === msg.sender;
+              const showAvatar = !isFloatingCute || !isConsecutivePrev;
+              
               return (
                 <div
                   key={msg.id}
-                  className={`flex items-start gap-2.5 max-w-[85%] ${
-                    isSelf ? "ml-auto flex-row-reverse" : "mr-auto"
+                  className={`flex items-start gap-2.5 max-w-[85%] cv-msg-row message message-container ${
+                    isSelf ? "ml-auto flex-row-reverse user sent" : "mr-auto ai received"
+                  } ${
+                    isFloatingCute 
+                      ? (isConsecutivePrev ? "!mt-1" : "!mt-4") 
+                      : ""
                   }`}
                 >
                   {/* Avatar */}
-                  <img
-                    src={isSelf ? settings.avatar : activeCharacter.avatar}
-                    alt=""
-                    onClick={() => {
-                      if (!isSelf) {
-                        setSingleCharacterMomentsId(activeCharacter.id);
-                      }
-                    }}
-                    className="w-9 h-9 rounded-full bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square"
-                  />
+                  {showAvatar ? (
+                    <img
+                      src={isSelf ? settings.avatar : activeCharacter.avatar}
+                      alt=""
+                      onClick={() => {
+                        if (!isSelf) {
+                          setSingleCharacterMomentsId(activeCharacter.id);
+                        }
+                      }}
+                      className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
+                        isSelf ? "user-avatar" : "ai-avatar"
+                      } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
+                    />
+                  ) : (
+                    <div className="w-9 h-9 shrink-0" />
+                  )}
 
                   {/* Message Bubble Block */}
                   <div className="space-y-0.5 max-w-full">
-                    <div className="flex items-center gap-1 group relative">
-                      {/* Saved Bookmark Action */}
-                      <button
-                        onClick={() => onToggleBookmark(msg.id)}
-                        className={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
-                          msg.isBookmarked ? "text-amber-500 opacity-100" : "text-slate-300 hover:text-slate-500"
-                        }`}
-                        title={msg.isBookmarked ? "取消收藏" : "收藏该话语"}
-                      >
-                        <Bookmark className="w-3.5 h-3.5 fill-current" />
-                      </button>
-
+                    <div 
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setActiveMenuMsg(msg);
+                        setMenuPosition({ x: e.clientX, y: e.clientY });
+                      }}
+                      onPointerDown={(e) => {
+                        if (e.pointerType === "mouse" && e.button !== 0) return;
+                        const clientX = e.clientX;
+                        const clientY = e.clientY;
+                        const timer = setTimeout(() => {
+                          setActiveMenuMsg(msg);
+                          setMenuPosition({ x: clientX, y: clientY });
+                        }, 500);
+                        (e.currentTarget as any)._longPressTimer = timer;
+                      }}
+                      onPointerUp={(e) => {
+                        const timer = (e.currentTarget as any)._longPressTimer;
+                        if (timer) clearTimeout(timer);
+                      }}
+                      onPointerCancel={(e) => {
+                        const timer = (e.currentTarget as any)._longPressTimer;
+                        if (timer) clearTimeout(timer);
+                      }}
+                      onPointerLeave={(e) => {
+                        const timer = (e.currentTarget as any)._longPressTimer;
+                        if (timer) clearTimeout(timer);
+                      }}
+                      className="flex items-center gap-1 group relative cursor-pointer select-none"
+                    >
                       {/* Actual chat bubble */}
                       <div className="max-w-full">
                         {msg.content.startsWith("data:image/") ? (
@@ -1315,27 +1555,29 @@ Instructions:
                                 setOpenRedPacketDetail({ amount: amount || "8.88", greeting: greeting || "恭喜发财" });
                                 setShowRedPacketOpenModal(true);
                               }}
-                              className="bg-[#fa9e3b] text-white rounded-xl w-56 overflow-hidden cursor-pointer shadow hover:opacity-95 transition-all flex flex-col"
+                              className={`bg-[#fff6f5] border border-[#fecdd3]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#fff0ef] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
+                                isSelf ? "transfer-card" : "received-transfer-card"
+                              }`}
                             >
-                              <div className="bg-[#f35543] p-3 flex items-start gap-2.5">
-                                <div className="p-1.5 bg-[#fa9e3b] rounded-md text-white text-lg leading-none shrink-0 font-bold">
+                              <div className="p-3.5 flex items-center gap-3 cv-transfer-body transfer-body">
+                                <div className="w-9 h-9 bg-[#e15241]/10 rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold text-[#e15241] shadow-inner cv-transfer-status transfer-icon confirm-icon">
                                   🧧
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-bold truncate">{greeting || "恭喜发财，万事如意"}</p>
-                                  <p className="text-[9px] text-white/80 mt-1">查看红包</p>
+                                <div className="flex-1 min-w-0 text-left">
+                                  <p className="text-xs font-bold text-stone-800 truncate">{greeting || "恭喜发财，万事如意"}</p>
+                                  <p className="text-[10px] text-[#e15241] font-bold mt-0.5 cv-transfer-amount transfer-amount">查看红包</p>
                                 </div>
                               </div>
-                              <div className="px-3 py-1.5 bg-white text-[#888] text-[9px] font-bold flex items-center justify-between border-t border-stone-100">
-                                <span>微信红包</span>
-                                <span>单个金额 ¥{amount || "8.88"}</span>
+                              <div className="px-3.5 py-2 bg-stone-50 text-stone-400 text-[9px] font-bold flex items-center justify-between border-t border-rose-100/50 cv-transfer-ribbon transfer-status select-none">
+                                <span className="font-semibold text-stone-400">微信红包</span>
+                                <span className="font-mono text-stone-400/80">金额 ¥{amount || "8.88"}</span>
                               </div>
                             </div>
                           );
                         })() : msg.content.startsWith("[音乐]") ? (() => {
                           const [_, songTitle, artist] = msg.content.split("|");
                           return (
-                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 p-3 flex items-center gap-3 shadow-sm">
+                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 p-3 flex items-center gap-3 shadow-sm cv-bubble">
                               <div className="w-10 h-10 bg-gradient-to-tr from-amber-500 to-yellow-400 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm animate-pulse">
                                 <Music className="w-5 h-5" />
                               </div>
@@ -1353,7 +1595,7 @@ Instructions:
                         })() : msg.content.startsWith("[位置]") ? (() => {
                           const [_, locName] = msg.content.split("|");
                           return (
-                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 overflow-hidden shadow-sm">
+                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 overflow-hidden shadow-sm cv-bubble">
                               <div className="p-3">
                                 <p className="text-xs font-bold text-stone-900 truncate flex items-center gap-1">
                                   <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
@@ -1375,42 +1617,116 @@ Instructions:
                             </div>
                           );
                         })() : msg.content.startsWith("[文件]") ? (() => {
-                          const [_, fileName, fileSize] = msg.content.split("|");
+                          const [_, fileName, fileContentRaw] = msg.content.split("|");
+                          let contentText = "";
+                          try {
+                            contentText = decodeURIComponent(fileContentRaw || "");
+                          } catch (e) {
+                            contentText = fileContentRaw || "";
+                          }
+                          const wordCount = contentText.length;
                           return (
-                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 p-3 flex items-center gap-3 shadow-sm">
+                            <div 
+                              onClick={() => {
+                                setSelectedFileNote({ title: fileName || "无标题笔记", content: contentText });
+                              }}
+                              className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 p-3 flex items-center gap-3 shadow-sm hover:bg-slate-50 cursor-pointer active:scale-95 transition-all cv-bubble"
+                            >
                               <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center shrink-0 border border-blue-200">
                                 <FileText className="w-5 h-5" />
                               </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-bold text-stone-900 truncate leading-snug">{fileName || "未知文件.pdf"}</p>
-                                <p className="text-[9px] text-stone-400 mt-1">{fileSize || "1.2 MB"}</p>
+                              <div className="flex-1 min-w-0 text-left">
+                                <p className="text-xs font-bold text-stone-900 truncate leading-snug">{fileName || "备忘录笔记"}</p>
+                                <p className="text-[9px] text-blue-600 font-semibold mt-1 flex items-center gap-1">
+                                  <span>{wordCount} 字</span>
+                                  <span>•</span>
+                                  <span>点击阅读笔记</span>
+                                </p>
                               </div>
+                            </div>
+                          );
+                        })() : msg.content.startsWith("[语音]|") ? (() => {
+                          const [_, seconds] = msg.content.split("|");
+                          const secs = seconds || "5";
+                          const widthPx = Math.min(180, 60 + parseInt(secs) * 8);
+                          return (
+                            <div 
+                              className={`voice-message-bar cv-audio-bubble message-content message-bubble flex items-center gap-2 justify-between cursor-pointer py-2 px-3 text-xs shadow-sm ${
+                                isSelf
+                                  ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white rounded-tr-sm chat-bubble-self")
+                                  : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100 chat-bubble-other")
+                              }`}
+                              style={{ width: `${widthPx}px` }}
+                              onClick={() => {
+                                const audio = new Audio("https://assets.mixkit.co/active_storage/sfx/2568/2568-84.wav");
+                                audio.volume = 0.4;
+                                audio.play().catch(() => {});
+                              }}
+                            >
+                              {isSelf ? (
+                                <>
+                                  <span className="voice-duration text-[11px] select-none font-mono font-medium">{secs}"</span>
+                                  <Volume2 className="w-4 h-4 voice-icon" />
+                                </>
+                              ) : (
+                                <>
+                                  <Volume2 className="w-4 h-4 voice-icon rotate-180" />
+                                  <span className="voice-duration text-[11px] select-none font-mono font-medium">{secs}"</span>
+                                </>
+                              )}
                             </div>
                           );
                         })() : (msg.content.startsWith("[视频通话]") || msg.content.startsWith("[语音通话]")) ? (() => {
                           const [tag, status] = msg.content.split("|");
                           const isVideo = tag === "[视频通话]";
                           return (
-                            <div className={`px-3 py-2 rounded-2xl text-xs flex items-center gap-2 shadow-sm ${
+                            <div className={`px-3 py-2 text-xs flex items-center gap-2 shadow-sm cv-bubble message-bubble ${
                               isSelf
-                                ? "bg-blue-500 text-white"
-                                : "bg-white text-slate-800 border border-slate-100"
+                                ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
+                                : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 border border-slate-100 chat-bubble-other")
                             }`}>
                               {isVideo ? <Video className="w-3.5 h-3.5 shrink-0" /> : <Phone className="w-3.5 h-3.5 shrink-0" />}
                               <span>{status || "通话已结束"}</span>
                             </div>
                           );
-                        })() : (
-                          <div
-                            className={`px-3 py-2 rounded-2xl text-xs whitespace-pre-wrap leading-relaxed shadow-sm ${
-                              isSelf
-                                ? "bg-blue-500 text-white chat-bubble-self rounded-tr-sm"
-                                : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100"
-                            }`}
-                          >
-                            {msg.content}
-                          </div>
-                        )}
+                        })() : (() => {
+                          const match = msg.content.match(/^「引用 (.*?)：([\s\S]*?)」\n([\s\S]*)$/);
+                          if (match) {
+                            const [_, senderName, quotedText, replyText] = match;
+                            return (
+                              <div
+                                className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble ${
+                                  isSelf
+                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
+                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
+                                }`}
+                              >
+                                <div className={`p-1.5 rounded-lg text-[10px] mb-1.5 border-l-2 text-left cv-quote-ref ${
+                                  isSelf 
+                                    ? (isFloatingCute ? "bg-slate-300/40 border-slate-400 text-slate-700" : "bg-blue-600/40 border-blue-200 text-blue-100") 
+                                    : "bg-stone-50 border-stone-300 text-stone-500"
+                                }`}>
+                                  <span className="font-bold">{senderName}: </span>
+                                  <span>{quotedText}</span>
+                                </div>
+                                <div className="text-left">{replyText}</div>
+                                <div className="cv-bubble-tail hidden" />
+                              </div>
+                            );
+                          }
+                          return (
+                            <div
+                              className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble ${
+                                isSelf
+                                  ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
+                                  : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
+                              }`}
+                            >
+                              <div className="text-left">{msg.content}</div>
+                              <div className="cv-bubble-tail hidden" />
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -1421,7 +1737,13 @@ Instructions:
             {/* AI is writing/typing indicator */}
             {isTyping && (
               <div className="flex items-start gap-2.5 max-w-[80%] mr-auto">
-                <img src={activeCharacter.avatar} alt="" className="w-9 h-9 rounded-full border object-cover shrink-0 aspect-square" />
+                <img 
+                  src={activeCharacter.avatar} 
+                  alt="" 
+                  className={`w-9 h-9 border object-cover shrink-0 aspect-square ${
+                    isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"
+                  }`} 
+                />
                 <div className="space-y-1">
                   <span className="text-[9px] text-slate-400 font-bold">对方正在输入...</span>
                   <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 rounded-2xl shadow-sm text-xs flex items-center space-x-1">
@@ -1437,39 +1759,95 @@ Instructions:
           </div>
 
           {/* Active Chat Footer Input form */}
-          <div className="bg-white border-t border-slate-100 shrink-0 flex flex-col">
+          <div className={`${
+            isFloatingCute 
+              ? "mx-3.5 mb-3.5 mt-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area" 
+              : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
+          }`}>
+            {quotedMessage && (
+              <div className="px-3 py-1.5 bg-stone-50 border-b border-stone-100 flex items-center justify-between text-[11px] text-stone-600 shrink-0 animate-fade-in">
+                <div className="truncate flex-1 pr-4 text-left">
+                  <span className="font-extrabold text-stone-700">引用自 {quotedMessage.sender === "user" ? "自己" : (activeCharacter.remark || activeCharacter.name)}: </span>
+                  <span className="italic">
+                    {quotedMessage.content.startsWith("[文件]") 
+                      ? `[文件] ${quotedMessage.content.split("|")[1] || "笔记"}` 
+                      : quotedMessage.content.startsWith("[") 
+                        ? "[媒体内容]" 
+                        : quotedMessage.content}
+                  </span>
+                </div>
+                <button type="button" onClick={() => setQuotedMessage(null)} className="text-stone-400 hover:text-stone-600 p-0.5">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
             <form
               onSubmit={handleSendChatMessage}
               className="px-3 py-2 flex items-center gap-2"
             >
+              {/* 1. Voice input button (Leftmost) */}
+              <button
+                type="button"
+                onClick={() => {
+                  setVoiceDuration("5");
+                  setActiveAttachModal("voice");
+                }}
+                className="w-9 h-9 border border-slate-300 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors shrink-0 voice-input-btn cv-func-btn chat-action-btn"
+                title="发送语音"
+              >
+                <Volume2 className="w-4 h-4 voice-icon" />
+              </button>
+
+              {/* 2. Chat Input text box */}
               <input
                 type="text"
                 value={chatInputText}
                 onChange={(e) => setChatInputText(e.target.value)}
                 placeholder={`发送消息给 ${activeCharacter.name}...`}
-                className="flex-1 h-10 bg-slate-50 border border-slate-200 focus:outline-none rounded-xl px-4 text-xs text-slate-800"
+                className={`flex-1 h-10 border focus:outline-none rounded-2xl px-4 text-xs text-slate-800 chat-input ${
+                  isFloatingCute 
+                    ? "bg-white/60 border-slate-200/40 focus:bg-white" 
+                    : "bg-slate-50 border-slate-200/80"
+                }`}
               />
-              
-              {/* Plus Button */}
+
+              {/* 3. Emoji placeholder button */}
               <button
                 type="button"
-                onClick={() => setShowAttachPanel(!showAttachPanel)}
-                className={`w-10 h-10 rounded-xl transition-all shrink-0 flex items-center justify-center border ${
-                  showAttachPanel
-                    ? "bg-stone-100 border-stone-300 text-stone-850 rotate-45"
-                    : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600 hover:text-slate-800"
-                }`}
+                onClick={() => {
+                  const emojis = ["😊", "👍", "❤️", "🌹", "🎉", "🔥", "✨", "😆", "🥰", "👀"];
+                  const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+                  setChatInputText(prev => prev + randomEmoji);
+                }}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors shrink-0 emoji-btn cv-func-btn chat-action-btn"
+                title="插入表情"
               >
-                <Plus className="w-4 h-4" />
+                <Smile className="w-5 h-5" />
               </button>
-
-              <button
-                type="submit"
-                disabled={!chatInputText.trim() || isTyping}
-                className="w-10 h-10 bg-neutral-950 hover:bg-neutral-900 disabled:bg-slate-200 text-white rounded-xl transition-all flex items-center justify-center shrink-0 shadow-sm"
-              >
-                <Send className="w-4 h-4" />
-              </button>
+              
+              {/* 4. Plus (+) button OR Send button */}
+              {!chatInputText.trim() ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAttachPanel(!showAttachPanel)}
+                  className={`w-9 h-9 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn text-slate-700 ${
+                    showAttachPanel
+                      ? "bg-stone-100 rotate-45"
+                      : "bg-white hover:bg-slate-100"
+                  }`}
+                  title="附加菜单"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={isTyping}
+                  className="h-9 px-4 bg-[#58bf6a] hover:bg-[#4cb25e] text-white font-medium text-xs rounded-xl transition-all flex items-center justify-center shrink-0 shadow-sm cv-btn-user cv-btn-ai send-button"
+                >
+                  发送
+                </button>
+              )}
             </form>
 
             {/* Attach Panel */}
@@ -1579,50 +1957,118 @@ Instructions:
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
                 </button>
+
+                {/* 8. 语音 (Voice) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVoiceDuration("5");
+                    setActiveAttachModal("voice");
+                    setShowAttachPanel(false);
+                  }}
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                >
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                    <Mic className="w-4 h-4 text-slate-700" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
+                </button>
               </div>
             )}
           </div>
 
+          {/* Voice Duration Picker Modal Overlay */}
+          {activeAttachModal === "voice" && (
+            <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
+              <div className="bg-white rounded-[32px] w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-slate-100 animate-scale-up text-stone-800">
+                <div className="px-5 py-4 bg-stone-50 border-b border-stone-100 flex items-center justify-between shrink-0">
+                  <h3 className="text-xs font-bold text-stone-800">发送语音消息</h3>
+                  <button 
+                    onClick={() => setActiveAttachModal(null)}
+                    className="p-1 hover:bg-stone-200/50 rounded-full transition-colors text-stone-500"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-4 flex-1">
+                  <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-3 focus-within:ring-1 focus-within:ring-emerald-500/30 focus-within:border-emerald-500/50 transition-all">
+                    <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">语音时长 (秒)</label>
+                    <div className="flex items-center">
+                      <span className="text-lg font-bold text-emerald-500 mr-1.5 font-mono">⏱</span>
+                      <input 
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={voiceDuration}
+                        onChange={(e) => setVoiceDuration(e.target.value)}
+                        className="bg-transparent text-stone-800 font-bold text-base focus:outline-none flex-1 w-full font-mono placeholder-stone-300"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-stone-50 border-t border-stone-100 flex gap-2 shrink-0">
+                  <button 
+                    onClick={() => setActiveAttachModal(null)}
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const secs = parseInt(voiceDuration) || 5;
+                      sendCustomMessage(`[语音]|${secs}`);
+                      setActiveAttachModal(null);
+                    }}
+                    className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-650 text-white font-bold rounded-xl text-xs transition-all shadow-sm"
+                  >
+                    发送
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Red Envelope Editor Modal Overlay */}
           {activeAttachModal === "redpacket" && (
             <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
-              <div className="bg-[#f35543] text-white rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-rose-500 animate-scale-up">
-                {/* Red Envelope Top Arch Header decoration */}
-                <div className="bg-[#e44d3c] px-4 py-5 text-center relative rounded-b-[40%] border-b border-yellow-500/10 shadow-sm">
+              <div className="bg-white rounded-[32px] w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-slate-100 animate-scale-up text-stone-800">
+                <div className="px-5 py-4 bg-stone-50 border-b border-stone-100 flex items-center justify-between shrink-0">
+                  <h3 className="text-xs font-bold text-stone-800">发送红包</h3>
                   <button 
                     onClick={() => setActiveAttachModal(null)}
-                    className="absolute top-4 left-4 text-white/70 hover:text-white"
+                    className="p-1 hover:bg-stone-200/50 rounded-full transition-colors text-stone-500"
                   >
-                    <X className="w-5 h-5" />
+                    <X className="w-4 h-4" />
                   </button>
-                  <h3 className="text-sm font-bold text-yellow-100">发红包</h3>
                 </div>
 
                 <div className="p-5 space-y-4 flex-1">
                   {/* Amount Field */}
-                  <div className="bg-white/10 rounded-xl p-3 border border-white/5">
-                    <label className="block text-[10px] text-yellow-100/70 font-semibold uppercase tracking-wider mb-1">红包金额 (元)</label>
+                  <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-3 focus-within:ring-1 focus-within:ring-[#e15241]/30 focus-within:border-[#e15241]/50 transition-all">
+                    <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">红包金额 (元)</label>
                     <div className="flex items-center">
-                      <span className="text-xl font-bold text-yellow-300 mr-1">¥</span>
+                      <span className="text-lg font-bold text-[#e15241] mr-1.5 font-mono">¥</span>
                       <input 
                         type="number"
                         step="0.01"
                         value={redPacketAmount}
                         onChange={(e) => setRedPacketAmount(e.target.value)}
-                        className="bg-transparent text-white font-bold text-lg focus:outline-none flex-1 w-full"
+                        className="bg-transparent text-stone-800 font-bold text-base focus:outline-none flex-1 w-full font-mono placeholder-stone-300"
                         placeholder="0.00"
                       />
                     </div>
                   </div>
 
                   {/* Greeting Field */}
-                  <div className="bg-white/10 rounded-xl p-3 border border-white/5">
-                    <label className="block text-[10px] text-yellow-100/70 font-semibold uppercase tracking-wider mb-1">留言祝福</label>
+                  <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-3 focus-within:ring-1 focus-within:ring-[#e15241]/30 focus-within:border-[#e15241]/50 transition-all">
+                    <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">留言祝福</label>
                     <input 
                       type="text"
                       value={redPacketGreeting}
                       onChange={(e) => setRedPacketGreeting(e.target.value)}
-                      className="bg-transparent text-white font-medium text-xs focus:outline-none w-full"
+                      className="bg-transparent text-stone-800 font-bold text-xs focus:outline-none w-full placeholder-stone-300"
                       placeholder="恭喜发财，万事如意"
                     />
                   </div>
@@ -1633,7 +2079,7 @@ Instructions:
                       <button 
                         key={val}
                         onClick={() => setRedPacketAmount(val)}
-                        className="px-2 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[9px] font-bold text-yellow-100 transition-colors"
+                        className="px-2.5 py-1 bg-slate-50 hover:bg-[#e15241]/10 border border-slate-200/60 hover:border-[#e15241]/20 rounded-xl text-[10px] font-bold text-stone-600 hover:text-[#e15241] transition-all active:scale-95"
                       >
                         {val}元
                       </button>
@@ -1647,7 +2093,7 @@ Instructions:
                       sendCustomMessage(`[红包]|${finalAmount}|${finalGreeting}`);
                       setActiveAttachModal(null);
                     }}
-                    className="w-full py-2.5 bg-[#fa9e3b] hover:bg-[#e48e2f] text-[#3c1e0e] font-extrabold text-xs rounded-xl shadow-md transition-all border-b-2 border-amber-700/50"
+                    className="w-full py-2.5 bg-[#e15241] hover:bg-[#c94334] text-white font-extrabold text-xs rounded-xl shadow-sm transition-all active:scale-[0.98]"
                   >
                     塞钱进红包
                   </button>
@@ -1659,32 +2105,32 @@ Instructions:
           {/* Red Envelope Opened Modal Overlay */}
           {showRedPacketOpenModal && openRedPacketDetail && (
             <div className="absolute inset-0 bg-black/75 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
-              <div className="bg-[#f35543] text-white rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-yellow-500/20 animate-scale-up text-center p-6 space-y-6">
+              <div className="bg-white text-stone-800 rounded-[32px] w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-stone-100 animate-scale-up text-center p-6 space-y-5">
                 <button 
                   onClick={() => setShowRedPacketOpenModal(false)}
-                  className="absolute top-4 left-4 text-white/70 hover:text-white"
+                  className="absolute top-4 right-4 text-stone-400 hover:text-stone-600 p-1 hover:bg-stone-100 rounded-full transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
                 <div className="flex flex-col items-center mt-2">
-                  <div className="w-14 h-14 bg-[#fa9e3b] rounded-full flex items-center justify-center text-2xl font-bold text-[#3c1e0e] shadow-md border border-yellow-300">
-                    開
+                  <div className="w-14 h-14 bg-[#e15241]/10 text-[#e15241] rounded-full flex items-center justify-center text-2xl font-bold shadow-sm border border-[#e15241]/20">
+                    🧧
                   </div>
-                  <h3 className="text-sm font-bold text-yellow-100 mt-4">已成功开启红包！</h3>
-                  <p className="text-[10px] text-yellow-100/70 mt-1">"{openRedPacketDetail.greeting}"</p>
+                  <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mt-3.5">已成功开启红包！</h3>
+                  <p className="text-sm font-bold text-stone-800 mt-1 leading-relaxed">"{openRedPacketDetail.greeting}"</p>
                 </div>
 
-                <div className="bg-white/10 rounded-2xl p-4 border border-white/5">
-                  <span className="text-[10px] text-yellow-100/80">获得金额</span>
-                  <div className="text-2xl font-black text-yellow-300 mt-1">
+                <div className="bg-[#fff8f8] rounded-2xl p-4 border border-[#fee2e0] text-center">
+                  <span className="text-[10px] text-stone-400 font-bold tracking-wide uppercase">获得金额</span>
+                  <div className="text-2xl font-black text-[#e15241] mt-1.5 font-mono">
                     ¥{openRedPacketDetail.amount}
                   </div>
-                  <span className="text-[9px] text-white/40 block mt-2">已自动存入钱包零钱</span>
+                  <span className="text-[9px] text-stone-400 block mt-1">已自动存入钱包零钱</span>
                 </div>
 
                 <button 
                   onClick={() => setShowRedPacketOpenModal(false)}
-                  className="py-2 bg-yellow-400 hover:bg-yellow-500 text-stone-900 text-[10px] font-bold rounded-xl transition-all"
+                  className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all active:scale-95"
                 >
                   好的，谢谢
                 </button>
@@ -1703,29 +2149,45 @@ Instructions:
                   </button>
                 </div>
                 <div className="p-3 overflow-y-auto space-y-2 flex-1">
-                  {[
-                    { title: "晴天", artist: "周杰伦" },
-                    { title: "一万次悲伤", artist: "逃跑计划" },
-                    { title: "温柔", artist: "五月天" },
-                    { title: "幻听", artist: "许嵩" },
-                    { title: "起风了", artist: "买辣椒也用券" },
-                    { title: "消愁", artist: "毛不易" }
-                  ].map((track, i) => (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        sendCustomMessage(`[音乐]|${track.title}|${track.artist}`);
-                        setActiveAttachModal(null);
-                      }}
-                      className="w-full text-left p-2 rounded-xl bg-stone-50 hover:bg-amber-50 hover:text-white transition-all flex items-center justify-between border border-stone-100/80 group"
-                    >
-                      <div className="min-w-0 flex-1 pr-2">
-                        <p className="text-xs font-bold truncate group-hover:text-white">{track.title}</p>
-                        <p className="text-[10px] text-stone-400 truncate mt-0.5 group-hover:text-amber-100">{track.artist}</p>
-                      </div>
-                      <Music className="w-4 h-4 shrink-0 text-amber-500 group-hover:text-white" />
-                    </button>
-                  ))}
+                  {(() => {
+                    const raw = localStorage.getItem("phone_music_tracks");
+                    let userTracks: { title: string; artist: string }[] = [];
+                    if (raw) {
+                      try {
+                        const parsed = JSON.parse(raw);
+                        userTracks = parsed.map((track: any) => ({
+                          title: track.title,
+                          artist: track.artist || "未知歌手"
+                        }));
+                      } catch (e) {
+                        userTracks = [];
+                      }
+                    }
+                    if (userTracks.length === 0) {
+                      return (
+                        <div className="text-center py-8 text-stone-400 text-xs">
+                          <Music className="w-8 h-8 mx-auto mb-1.5 opacity-30 text-stone-300" />
+                          <p>音乐馆里还没有添加任何歌曲</p>
+                        </div>
+                      );
+                    }
+                    return userTracks.map((track, i) => (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          sendCustomMessage(`[音乐]|${track.title}|${track.artist}`);
+                          setActiveAttachModal(null);
+                        }}
+                        className="w-full text-left p-2 rounded-xl bg-stone-50 hover:bg-neutral-950 hover:text-white transition-all flex items-center justify-between border border-stone-100/80 group"
+                      >
+                        <div className="min-w-0 flex-1 pr-2">
+                          <p className="text-xs font-bold truncate group-hover:text-white">{track.title}</p>
+                          <p className="text-[10px] text-stone-400 truncate mt-0.5 group-hover:text-stone-300">{track.artist}</p>
+                        </div>
+                        <Music className="w-4 h-4 shrink-0 text-neutral-800 group-hover:text-white" />
+                      </button>
+                    ));
+                  })()}
                 </div>
               </div>
             </div>
@@ -1821,27 +2283,34 @@ Instructions:
                   </button>
                 </div>
                 <div className="p-3 overflow-y-auto space-y-2 flex-1">
-                  {[
-                    { name: "人设记忆矩阵深度更新.pdf", size: "2.4 MB" },
-                    { name: "星际巡防装甲计划草案.docx", size: "4.8 MB" },
-                    { name: "瓦尔哈拉编年史.txt", size: "112 KB" },
-                    { name: "今日午餐秘密食谱.xlsx", size: "14 KB" }
-                  ].map((f, i) => (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        sendCustomMessage(`[文件]|${f.name}|${f.size}`);
-                        setActiveAttachModal(null);
-                      }}
-                      className="w-full text-left p-2.5 rounded-xl bg-stone-50 hover:bg-blue-500 hover:text-white transition-all flex items-center justify-between border border-stone-100/80 group"
-                    >
-                      <div className="min-w-0 flex-1 pr-2">
-                        <p className="text-xs font-bold truncate group-hover:text-white leading-normal">{f.name}</p>
-                        <p className="text-[9px] text-stone-400 mt-0.5 group-hover:text-blue-100">{f.size}</p>
-                      </div>
-                      <FileText className="w-4 h-4 shrink-0 text-blue-500 group-hover:text-white" />
-                    </button>
-                  ))}
+                  {memoNotes.length === 0 ? (
+                    <div className="text-center py-6 px-4 space-y-3">
+                      <FileText className="w-8 h-8 text-stone-300 mx-auto" />
+                      <p className="text-xs font-bold text-stone-500">暂无备忘录笔记</p>
+                      <p className="text-[10px] text-stone-400 leading-relaxed">
+                        您可以先前往手机主屏幕的【备忘录】应用，写下您的创意和备忘，然后就可以在这里选择并发送给对方。对方还能点击阅读笔记的全部内容哦！
+                      </p>
+                    </div>
+                  ) : (
+                    memoNotes.map((note) => (
+                      <button
+                        key={note.id}
+                        onClick={() => {
+                          sendCustomMessage(`[文件]|${note.title}|${encodeURIComponent(note.content || "")}`);
+                          setActiveAttachModal(null);
+                        }}
+                        className="w-full text-left p-2.5 rounded-xl bg-stone-50 hover:bg-blue-500 hover:text-white transition-all flex items-center justify-between border border-stone-100/80 group"
+                      >
+                        <div className="min-w-0 flex-1 pr-2 text-left">
+                          <p className="text-xs font-bold truncate group-hover:text-white leading-normal">{note.title || "无标题笔记"}</p>
+                          <p className="text-[9px] text-stone-400 mt-0.5 group-hover:text-blue-100">
+                            备忘录笔记 • {note.content ? note.content.length : 0} 字
+                          </p>
+                        </div>
+                        <FileText className="w-4 h-4 shrink-0 text-blue-500 group-hover:text-white" />
+                      </button>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -1924,6 +2393,7 @@ Instructions:
               </div>
             </div>
           )}
+          </div>
         </div>
       ) : null}
 
@@ -2249,10 +2719,13 @@ Instructions:
                                 <span>{mom.likes.length || "赞"}</span>
                               </button>
 
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
+                              <button
+                                onClick={() => setShowCommentInputMap(prev => ({ ...prev, [mom.id]: !prev[mom.id] }))}
+                                className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-600 font-semibold transition-colors"
+                              >
                                 <MessageCircle className="w-3.5 h-3.5" />
                                 <span>{mom.comments.length || "评论"}</span>
-                              </div>
+                              </button>
                             </div>
                           </div>
 
@@ -2288,28 +2761,30 @@ Instructions:
                           )}
 
                           {/* Quick inline comment input */}
-                          <div className="flex gap-2 items-center bg-[#f7f7f7] border border-slate-200/30 rounded-lg px-2.5 py-1 mt-2">
-                            <input
-                              type="text"
-                              value={inlineCommentsTexts[mom.id] || ""}
-                              onChange={(e) =>
-                                setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
-                              }
-                              placeholder="发表评论..."
-                              className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  handlePublishComment(mom.id);
+                          {showCommentInputMap[mom.id] && (
+                            <div className="flex gap-2 items-center bg-[#f7f7f7] border border-slate-200/30 rounded-lg px-2.5 py-1 mt-2">
+                              <input
+                                type="text"
+                                value={inlineCommentsTexts[mom.id] || ""}
+                                onChange={(e) =>
+                                  setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
                                 }
-                              }}
-                            />
-                            <button
-                              onClick={() => handlePublishComment(mom.id)}
-                              className="text-[10px] text-blue-500 hover:text-blue-600 font-bold px-1"
-                            >
-                              发送
-                            </button>
-                          </div>
+                                placeholder="发表评论..."
+                                className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    handlePublishComment(mom.id);
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => handlePublishComment(mom.id)}
+                                className="text-[10px] text-blue-500 hover:text-blue-600 font-bold px-1"
+                              >
+                                发送
+                              </button>
+                            </div>
+                          )}
 
                         </div>
                       </div>
@@ -2352,7 +2827,7 @@ Instructions:
                 <div className="min-w-0 flex-1">
                   <h3 className="text-base font-bold text-slate-800 truncate">{settings.name}</h3>
                   <p className="text-[11px] text-slate-400 mt-1 truncate leading-normal italic">
-                    "{settings.signature || "这家伙很懒，什么都没写~"}"
+                    {settings.signature || "暂无签名"}
                   </p>
                 </div>
               </div>
@@ -2571,10 +3046,13 @@ Instructions:
                                 <span>{mom.likes.length || "赞"}</span>
                               </button>
 
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
+                              <button
+                                onClick={() => setShowCommentInputMap(prev => ({ ...prev, [mom.id]: !prev[mom.id] }))}
+                                className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-600 font-semibold transition-colors"
+                              >
                                 <MessageCircle className="w-3.5 h-3.5" />
                                 <span>{mom.comments.length || "评论"}</span>
-                              </div>
+                              </button>
                             </div>
                           </div>
 
@@ -2608,28 +3086,30 @@ Instructions:
                           )}
 
                           {/* Inline comment form */}
-                          <div className="flex gap-2 items-center bg-[#f7f7f7] border border-slate-200/30 rounded-lg px-2.5 py-1 mt-2">
-                            <input
-                              type="text"
-                              value={inlineCommentsTexts[mom.id] || ""}
-                              onChange={(e) =>
-                                setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
-                              }
-                              placeholder="发表评论..."
-                              className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  handlePublishComment(mom.id);
+                          {showCommentInputMap[mom.id] && (
+                            <div className="flex gap-2 items-center bg-[#f7f7f7] border border-slate-200/30 rounded-lg px-2.5 py-1 mt-2">
+                              <input
+                                type="text"
+                                value={inlineCommentsTexts[mom.id] || ""}
+                                onChange={(e) =>
+                                  setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
                                 }
-                              }}
-                            />
-                            <button
-                              onClick={() => handlePublishComment(mom.id)}
-                              className="text-[10px] text-blue-500 hover:text-blue-600 font-bold px-1"
-                            >
-                              发送
-                            </button>
-                          </div>
+                                placeholder="发表评论..."
+                                className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    handlePublishComment(mom.id);
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => handlePublishComment(mom.id)}
+                                className="text-[10px] text-blue-500 hover:text-blue-600 font-bold px-1"
+                              >
+                                发送
+                              </button>
+                            </div>
+                          )}
 
                         </div>
                       </div>
@@ -2659,6 +3139,45 @@ Instructions:
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+              {/* Identity Switcher */}
+              <div className="border-b border-slate-50 pb-4">
+                <div className="grid grid-cols-3 gap-2">
+                  {(settings.identities || []).map((idty, index) => {
+                    const isSelected = idty.id === (settings.activeIdentityId || "identity-1");
+                    return (
+                      <button
+                        key={idty.id}
+                        type="button"
+                        onClick={() => {
+                          setEditMyName(idty.name);
+                          setEditMyAvatar(idty.avatar);
+                          setEditMySignature(idty.signature);
+                          setEditMyBio(idty.bio);
+                          
+                          onSaveSettings({
+                            ...settings,
+                            activeIdentityId: idty.id,
+                            name: idty.name,
+                            avatar: idty.avatar,
+                            signature: idty.signature,
+                            bio: idty.bio
+                          });
+                        }}
+                        className={`flex items-center justify-center py-2 px-3 rounded-xl border text-center transition-all ${
+                          isSelected
+                            ? "border-neutral-950 ring-1 ring-neutral-950 text-neutral-950 font-bold bg-white"
+                            : "border-slate-200 text-slate-400 bg-white hover:bg-slate-50 hover:text-slate-600"
+                        }`}
+                      >
+                        <span className="text-[10px] font-bold truncate max-w-full block w-full">
+                          {idty.name || `预设 ${index + 1}`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Avatar upload */}
               <div className="flex flex-col items-center py-2 border-b border-slate-50 pb-4">
                 <div className="relative">
@@ -2667,7 +3186,7 @@ Instructions:
                     alt="Avatar"
                     className="w-16 h-16 rounded-full object-cover border border-slate-200 shadow-sm bg-slate-100"
                   />
-                  <label className="absolute -bottom-1 -right-1 bg-blue-500 text-white rounded-full p-1 border-2 border-white cursor-pointer shadow-sm hover:bg-blue-600 transition-colors">
+                  <label className="absolute -bottom-1 -right-1 bg-neutral-950 text-white rounded-full p-1 border-2 border-white cursor-pointer shadow-sm hover:bg-neutral-900 transition-colors">
                     <Sliders className="w-3 h-3" />
                     <input
                       type="file"
@@ -2720,9 +3239,40 @@ Instructions:
                   rows={4}
                   value={editMyBio}
                   onChange={(e) => setEditMyBio(e.target.value)}
-                  placeholder="说点关于你的人设，伙伴们互动时会参考这里哦..."
+                  placeholder=""
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs resize-none leading-relaxed text-slate-800"
                 />
+              </div>
+
+              {/* Global Chat Style Preset Selector */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-2">默认聊天预设样式（全局）</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditGlobalChatStylePreset("default")}
+                    className={`py-2 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                      editGlobalChatStylePreset === "default"
+                        ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
+                        : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
+                    }`}
+                  >
+                    <span className="text-[11px]">默认经典</span>
+                    <span className="text-[8px] opacity-75">官方标准布局</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditGlobalChatStylePreset("floating-cute")}
+                    className={`py-2 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                      editGlobalChatStylePreset === "floating-cute"
+                        ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
+                        : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
+                    }`}
+                  >
+                    <span className="text-[11px]">悬浮磨砂萌风</span>
+                    <span className="text-[8px] opacity-75">圆角卡片·气泡合并</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -2736,16 +3286,31 @@ Instructions:
               </button>
               <button
                 onClick={() => {
+                  const updatedIdentities = (settings.identities || []).map(idty => {
+                    if (idty.id === (settings.activeIdentityId || "identity-1")) {
+                      return {
+                        ...idty,
+                        name: editMyName,
+                        avatar: editMyAvatar,
+                        signature: editMySignature,
+                        bio: editMyBio,
+                      };
+                    }
+                    return idty;
+                  });
+
                   onSaveSettings({
                     ...settings,
                     name: editMyName,
                     avatar: editMyAvatar,
                     signature: editMySignature,
                     bio: editMyBio,
+                    globalChatStylePreset: editGlobalChatStylePreset,
+                    identities: updatedIdentities,
                   });
                   setIsEditingProfile(false);
                 }}
-                className="flex-1 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
+                className="flex-1 py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
               >
                 保存修改
               </button>
@@ -2764,7 +3329,7 @@ Instructions:
               {/* Modal Header */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
                 <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                  <Users className="w-4 h-4 text-blue-500" />
+                  <Users className="w-4 h-4 text-neutral-800" />
                   <span>添加联系人</span>
                 </h3>
                 <button
@@ -2776,24 +3341,32 @@ Instructions:
               </div>
 
               {/* Modal Body */}
-              <div className="flex-1 overflow-y-auto py-3 space-y-3 pr-1">
+              <div className={`${unaddedCharacters.length === 0 ? "" : "flex-1 overflow-y-auto"} py-3 space-y-3 pr-1`}>
                 {unaddedCharacters.length === 0 ? (
-                  <div className="text-center py-6 px-2 space-y-2">
-                    <div className="w-10 h-10 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
-                      <Users className="w-5 h-5" />
+                  <div className="text-center py-4 px-2 space-y-3">
+                    <div className="w-12 h-12 bg-slate-50 text-neutral-800 rounded-full flex items-center justify-center mx-auto shadow-inner border border-slate-100">
+                      <Users className="w-6 h-6" />
                     </div>
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                    <p className="text-xs text-slate-500 font-semibold leading-relaxed">
                       档案馆里所有的角色都已经是您的好友啦！
                     </p>
-                    <button
-                      onClick={() => {
-                        setIsShowingAddFriendDialog(false);
-                        onNavigateToApp("archives");
-                      }}
-                      className="mt-2 w-full py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-[11px] font-bold transition-all shadow-sm"
-                    >
-                      去档案馆新建更多角色
-                    </button>
+                    <div className="flex flex-col gap-2 pt-2">
+                      <button
+                        onClick={() => {
+                          setIsShowingAddFriendDialog(false);
+                          onNavigateToApp("archives");
+                        }}
+                        className="w-full py-2 bg-neutral-950 hover:bg-neutral-900 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                      >
+                        去档案馆新建更多角色
+                      </button>
+                      <button
+                        onClick={() => setIsShowingAddFriendDialog(false)}
+                        className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all"
+                      >
+                        关闭窗口
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -2824,7 +3397,7 @@ Instructions:
                             onClick={() => {
                               setFriendIds((prev) => [...prev, char.id]);
                             }}
-                            className="px-2.5 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
+                            className="px-2.5 py-1 bg-neutral-950 hover:bg-neutral-900 text-white rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
                           >
                             添加
                           </button>
@@ -2836,19 +3409,186 @@ Instructions:
               </div>
 
               {/* Modal Footer */}
-              <div className="pt-2 border-t border-slate-100 shrink-0">
-                <button
-                  onClick={() => setIsShowingAddFriendDialog(false)}
-                  className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all"
-                >
-                  关闭窗口
-                </button>
-              </div>
+              {unaddedCharacters.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 shrink-0">
+                  <button
+                    onClick={() => setIsShowingAddFriendDialog(false)}
+                    className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all"
+                  >
+                    关闭窗口
+                  </button>
+                </div>
+              )}
 
             </div>
           </div>
         );
       })()}
+
+      {/* Long Press Bubble Context Menu */}
+      {activeMenuMsg && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/10 flex items-center justify-center backdrop-blur-[1px]"
+          onClick={() => setActiveMenuMsg(null)}
+          onContextMenu={(e) => { e.preventDefault(); setActiveMenuMsg(null); }}
+        >
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[140px] text-stone-800 space-y-1"
+            style={{
+              position: "absolute",
+              top: Math.max(10, Math.min(window.innerHeight - 220, menuPosition.y - 10)),
+              left: Math.max(10, Math.min(window.innerWidth - 160, menuPosition.x - 70)),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                onToggleBookmark(activeMenuMsg.id);
+                setActiveMenuMsg(null);
+              }}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+            >
+              <Bookmark className={`w-3.5 h-3.5 ${activeMenuMsg.isBookmarked ? "text-stone-800 fill-stone-800" : "text-stone-400"}`} />
+              <span>{activeMenuMsg.isBookmarked ? "取消收藏" : "收藏"}</span>
+            </button>
+
+            {onDeleteMessage && (
+              <button
+                onClick={() => {
+                  onDeleteMessage(activeMenuMsg.id);
+                  setActiveMenuMsg(null);
+                }}
+                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-stone-500" />
+                <span>删除</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                setQuotedMessage(activeMenuMsg);
+                setActiveMenuMsg(null);
+                const inputEl = document.querySelector('input[type="text"]') as HTMLInputElement;
+                if (inputEl) inputEl.focus();
+              }}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+            >
+              <Quote className="w-3.5 h-3.5 text-stone-500" />
+              <span>引用</span>
+            </button>
+
+            {activeMenuMsg.sender !== "user" && (
+              <button
+                onClick={() => {
+                  setOocCommentText("");
+                  setShowOocCommentModal(activeMenuMsg);
+                  setActiveMenuMsg(null);
+                }}
+                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
+              >
+                <AlertCircle className="w-3.5 h-3.5 text-stone-500" />
+                <span>OOC 注释</span>
+              </button>
+            )}
+          </motion.div>
+        </div>
+      )}
+
+      {/* OOC Comment Modal */}
+      {showOocCommentModal && (
+        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-stone-100 p-4 space-y-3 animate-scale-up text-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold text-stone-800 flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 text-neutral-800" />
+                <span>人设 OOC 修正注释</span>
+              </span>
+              <button onClick={() => setShowOocCommentModal(null)} className="p-1 hover:bg-stone-200 rounded-full transition-colors">
+                <X className="w-4 h-4 text-stone-500" />
+              </button>
+            </div>
+            
+            <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-100 text-[10px] text-stone-500 text-left max-h-[80px] overflow-y-auto">
+              <span className="font-bold text-stone-600">{activeCharacter.name}: </span>
+              “{showOocCommentModal.content}”
+            </div>
+
+            <textarea
+              value={oocCommentText}
+              onChange={(e) => setOocCommentText(e.target.value)}
+              placeholder="请输入对此回答的修正意见（例如：语气太温柔了，他现在应该是冷傲的，绝对不会用这么多感叹号，更不会说么么哒。）"
+              rows={3}
+              className="w-full text-[11px] p-2.5 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-neutral-950 bg-stone-50/50 resize-none font-medium leading-relaxed text-left"
+            />
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowOocCommentModal(null)}
+                className="flex-1 py-2 rounded-xl text-stone-500 bg-stone-100 hover:bg-stone-200 text-xs font-black transition-all"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (!oocCommentText.trim()) return;
+                  
+                  const oocMemory: MemoryItem = {
+                    id: "ooc-" + Date.now(),
+                    characterId: activeChatCharId || "",
+                    content: `[OOC 修正记录] 原回答：“${showOocCommentModal.content}” 被指出不符合人设。用户修正意见：${oocCommentText.trim()}`,
+                    timestamp: Date.now(),
+                    importance: 8,
+                  };
+                  
+                  onSaveMemories([oocMemory, ...memories]);
+                  
+                  const comment = oocCommentText.trim();
+                  setShowOocCommentModal(null);
+                  
+                  // Automatically trigger immediate regeneration/correction based on OOC comment
+                  handleRegenerateResponse(showOocCommentModal, comment);
+                }}
+                className="flex-1 py-2 rounded-xl text-white bg-neutral-950 hover:bg-neutral-900 text-xs font-black shadow-sm transition-all"
+              >
+                提交并立即纠偏
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Note Content Reader Modal */}
+      {selectedFileNote && (
+        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-stone-800">
+          <div className="bg-white rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-stone-100 max-h-[75%] animate-scale-up">
+            <div className="px-4 py-3 bg-stone-50 border-b border-stone-100 flex items-center justify-between shrink-0">
+              <span className="text-xs font-black text-stone-800 flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-neutral-800" />
+                <span className="truncate max-w-[150px]">{selectedFileNote.title}</span>
+              </span>
+              <button onClick={() => setSelectedFileNote(null)} className="p-1 hover:bg-stone-200 rounded-full transition-colors">
+                <X className="w-4 h-4 text-stone-500" />
+              </button>
+            </div>
+            
+            <div className="p-4 overflow-y-auto flex-1 text-xs text-left leading-relaxed font-medium text-stone-700 whitespace-pre-wrap select-text selection:bg-blue-100 selection:text-blue-800">
+              {selectedFileNote.content || "（该笔记为空）"}
+            </div>
+            
+            <div className="p-3 bg-stone-50 border-t border-stone-100 shrink-0 text-center">
+              <button
+                onClick={() => setSelectedFileNote(null)}
+                className="px-6 py-1.5 rounded-xl text-xs font-black bg-neutral-950 hover:bg-neutral-900 text-white shadow-sm transition-all active:scale-95"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

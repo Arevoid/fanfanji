@@ -501,6 +501,30 @@ ${historyText}
       const { apiKey, apiEndpoint } = req.body;
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
 
+      const parseModels = (data: any): string[] | null => {
+        if (!data) return null;
+        if (Array.isArray(data)) {
+          if (data.length > 0 && typeof data[0] === "string") return data;
+          if (data.length > 0 && typeof data[0] === "object") {
+            return data.map((m: any) => m.id || m.name || m.model || m.model_id).filter(Boolean);
+          }
+        }
+        if (data.data && Array.isArray(data.data)) {
+          return data.data.map((m: any) => m.id || m.name || m.model || m.model_id).filter(Boolean);
+        }
+        if (data.models && Array.isArray(data.models)) {
+          return data.models.map((m: any) => {
+            if (typeof m === "string") return m;
+            const rawName = m.name || m.id || m.model || m.model_id;
+            if (typeof rawName === "string") {
+              return rawName.startsWith("models/") ? rawName.substring(7) : rawName;
+            }
+            return null;
+          }).filter(Boolean);
+        }
+        return null;
+      };
+
       if (apiEndpoint && apiEndpoint.trim() && apiKeyValue) {
         let baseUrl = apiEndpoint.trim().replace(/\/+$/, "");
         baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
@@ -514,9 +538,20 @@ ${historyText}
         });
         if (responseFetch.ok) {
           const data = await responseFetch.json();
-          if (data && Array.isArray(data.data)) {
-            const names = data.data.map((m: any) => m.id);
-            return res.json({ success: true, models: names });
+          const parsed = parseModels(data);
+          if (parsed && parsed.length > 0) {
+            return res.json({ success: true, models: parsed });
+          }
+        }
+      } else if (apiKeyValue) {
+        // Dynamically query Gemini models list if we have a key
+        const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKeyValue}`;
+        const responseFetch = await fetch(modelsUrl);
+        if (responseFetch.ok) {
+          const data = await responseFetch.json();
+          const parsed = parseModels(data);
+          if (parsed && parsed.length > 0) {
+            return res.json({ success: true, models: parsed });
           }
         }
       }
@@ -525,24 +560,26 @@ ${historyText}
       res.json({
         success: true,
         models: [
-          "gemini-3.5-flash",
-          "gemini-3.1-pro-preview",
-          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash",
+          "gemini-2.5-pro",
+          "gemini-1.5-flash",
+          "gemini-1.5-pro",
           "deepseek-chat",
           "deepseek-reasoner",
-          "deepseek-v4-flash"
+          "deepseek-v3"
         ]
       });
     } catch (err: any) {
       res.json({
         success: true,
         models: [
-          "gemini-3.5-flash",
-          "gemini-3.1-pro-preview",
-          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash",
+          "gemini-2.5-pro",
+          "gemini-1.5-flash",
+          "gemini-1.5-pro",
           "deepseek-chat",
           "deepseek-reasoner",
-          "deepseek-v4-flash"
+          "deepseek-v3"
         ]
       });
     }

@@ -26,6 +26,7 @@ export interface Character {
   proactiveChatInterval?: number;
   lastActiveTime?: number;
   customCss?: string;
+  chatStylePreset?: "default" | "floating-cute";
   greeting?: string;
   lastImmediateSummaryMsgId?: string;
 }
@@ -96,6 +97,14 @@ export interface WorldBookEntry {
   depth?: number;
 }
 
+export interface UserIdentity {
+  id: string;
+  name: string;
+  avatar: string;
+  signature: string;
+  bio: string;
+}
+
 export interface UserSettings {
   name: string;
   avatar: string;
@@ -107,6 +116,7 @@ export interface UserSettings {
   customIcons: Record<string, string>; // appKey -> image base64/URL or empty
   bubbleCss: string; // Custom bubble CSS
   globalCss: string; // Custom global CSS
+  globalChatStylePreset?: "default" | "floating-cute";
   activePreset: string; // Preset name
   momentsCover?: string; // Moments cover image URL or base64
   apiEndpoint?: string;
@@ -121,7 +131,14 @@ export interface UserSettings {
   customFontName?: string;
   customFontData?: string;
   iconBorderRadius?: number;
+  iconBgOpacity?: number;
+  iconBorderWidth?: number;
+  iconBorderOpacity?: number;
   hideAppNames?: boolean;
+  enableTimeAwareness?: boolean;
+  homeButtonPosition?: { x: number; y: number };
+  identities?: UserIdentity[];
+  activeIdentityId?: string;
 }
 
 export interface ApiPreset {

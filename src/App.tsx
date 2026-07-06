@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { motion } from "motion/react";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask } from "./types";
 import { 
   AlbumWidget, 
@@ -288,7 +289,7 @@ const DEFAULT_CHARACTERS: Character[] = [
     id: "pre-char-lc",
     name: "陆沉砚",
     age: 28,
-    avatar: "https://images.unsplash.com/photo-1620662056044-1253857f6edd?w=150&h=150&fit=crop",
+    avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9d41a3.png",
     gender: "男",
     mbti: "INFJ",
     personality: "外温内静，成熟通透，情绪极度稳定，几乎不发脾气。待人温和有礼、分寸感极强，懂得换位思考，擅长倾听，是旁人眼中靠谱、温柔、有包容度的成年人。内里慢热内敛，不擅长主动倾诉心事，习惯性独自消化压力。看似随和好说话，实则有自己坚定的底线和原则，对待工作极致严谨、偏执细致，生活里却随性松弛。轻微慢热、被动，不擅长社交应酬，偏爱安静的独处或小众的慢节奏相处；共情力极强，细腻敏感，能精准察觉他人情绪变化，习惯性照顾别人的感受。",
@@ -297,10 +298,10 @@ const DEFAULT_CHARACTERS: Character[] = [
 ];
 
 const DEFAULT_SETTINGS: UserSettings = {
-  name: "饭饭",
-  avatar: "https://images.unsplash.com/photo-1532978379173-523e16f37248?w=150&h=150&fit=crop",
-  signature: "正在用小手机发掘星空新大陆呢~",
-  bio: "一个小手机极客玩家，喜欢探索科技、文学 and 创造有趣好玩的角色人设。",
+  name: "",
+  avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
+  signature: "",
+  bio: "",
   apiKey: "",
   selectedModel: "gemini-3.5-flash",
   wallpaper: "linear-gradient(to bottom, #fbfbfd 0%, #e5e5eb 100%)",
@@ -319,10 +320,11 @@ const DEFAULT_SETTINGS: UserSettings = {
   customFontName: "",
   customFontData: "",
   activePreset: "温和灰蓝 (Default)",
-  momentsCover: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop",
+  momentsCover: "",
   apiEndpoint: "",
   apiTemperature: 0.7,
   streamCompatible: false,
+  enableTimeAwareness: true,
   activeApiPresetId: "preset-gemini",
   apiPresets: [
     {
@@ -342,6 +344,30 @@ const DEFAULT_SETTINGS: UserSettings = {
       selectedModel: "deepseek-v4-flash",
       apiTemperature: 0.7,
       streamCompatible: false
+    }
+  ],
+  activeIdentityId: "identity-1",
+  identities: [
+    {
+      id: "identity-1",
+      name: "",
+      avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
+      signature: "",
+      bio: ""
+    },
+    {
+      id: "identity-2",
+      name: "",
+      avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
+      signature: "",
+      bio: ""
+    },
+    {
+      id: "identity-3",
+      name: "",
+      avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
+      signature: "",
+      bio: ""
     }
   ],
   dockColor: "#ffffff",
@@ -368,12 +394,20 @@ export default function App() {
         const parsed = JSON.parse(raw) as Character[];
         let updated = false;
         const mapped = parsed.map(c => {
-          if (c.id === "pre-char-lc" && c.avatar.includes("photo-1539571696357-5a69c17a67c6")) {
-            updated = true;
-            return {
-              ...c,
-              avatar: DEFAULT_CHARACTERS[0].avatar
-            };
+          if (c.id === "pre-char-lc") {
+            const oldAvatars = [
+              "photo-1539571696357-5a69c17a67c6",
+              "photo-1620662056044-1253857f6edd",
+              "6a4b62d9d41a3.png"
+            ];
+            // Always set to the latest URL
+            if (c.avatar !== "https://free.picui.cn/free/2026/07/06/6a4b62d9d41a3.png") {
+              updated = true;
+              return {
+                ...c,
+                avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9d41a3.png"
+              };
+            }
           }
           return c;
         });
@@ -397,6 +431,13 @@ export default function App() {
         const hasLu = userCreated.some(c => c.id === "pre-char-lc");
         if (!hasLu) {
           userCreated.unshift(DEFAULT_CHARACTERS[0]);
+        } else {
+          // ensure the avatar is updated
+          for (let i = 0; i < userCreated.length; i++) {
+            if (userCreated[i].id === "pre-char-lc") {
+              userCreated[i].avatar = "https://free.picui.cn/free/2026/07/06/6a4b62d9d41a3.png";
+            }
+          }
         }
         localStorage.setItem("phone_characters_v3", JSON.stringify(userCreated));
         return userCreated;
@@ -418,13 +459,35 @@ export default function App() {
         ...DEFAULT_SETTINGS,
         ...parsed,
         apiPresets: parsed.apiPresets || DEFAULT_SETTINGS.apiPresets,
-        activeApiPresetId: parsed.activeApiPresetId || DEFAULT_SETTINGS.activeApiPresetId
+        activeApiPresetId: parsed.activeApiPresetId || DEFAULT_SETTINGS.activeApiPresetId,
+        identities: parsed.identities || DEFAULT_SETTINGS.identities,
+        activeIdentityId: parsed.activeIdentityId || DEFAULT_SETTINGS.activeIdentityId
       };
-      if (migrated.name === "萌新机主") {
-        migrated.name = "饭饭";
+      if (migrated.name === "萌新机主" || migrated.name === "饭饭") {
+        migrated.name = "";
       }
-      if (migrated.avatar === "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&h=150&fit=crop") {
-        migrated.avatar = "https://images.unsplash.com/photo-1532978379173-523e16f37248?w=150&h=150&fit=crop";
+      if (migrated.avatar === "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&h=150&fit=crop" || migrated.avatar === "https://images.unsplash.com/photo-1532978379173-523e16f37248?w=150&h=150&fit=crop") {
+        migrated.avatar = "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png";
+      }
+      if (migrated.identities) {
+        migrated.identities = migrated.identities.map((idty: any, index: number) => {
+          const isOldDefaultAvatar = !idty.avatar || idty.avatar.includes("photo-1534528741775-53994a69daeb") || idty.avatar.includes("photo-1507003211169-0a1dd7228f2d") || idty.avatar.includes("photo-1517841905240-472988babdf9") || idty.avatar.includes("photo-1532978379173-523e16f37248");
+          const isOldDefaultName = idty.name === "饭饭" || idty.name === "预设身份二" || idty.name === "预设身份三" || idty.name === "萌新机主";
+          return {
+            ...idty,
+            name: isOldDefaultName ? "" : idty.name,
+            avatar: isOldDefaultAvatar ? "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png" : idty.avatar,
+          };
+        });
+      }
+      if (migrated.signature === "正在用小手机发掘星空新大陆呢~") {
+        migrated.signature = "";
+      }
+      if (migrated.bio === "一个小手机极客玩家，喜欢探索科技、文学 and 创造有趣好玩的角色人设。") {
+        migrated.bio = "";
+      }
+      if (migrated.momentsCover === "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop") {
+        migrated.momentsCover = "";
       }
       localStorage.setItem("phone_settings", JSON.stringify(migrated));
       return migrated;
@@ -562,11 +625,16 @@ export default function App() {
 
   // Navigation State
   const [activeApp, setActiveApp] = useState<string | null>(null);
+  const phoneScreenRef = useRef<HTMLDivElement>(null);
 
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
     const raw = localStorage.getItem("phone_installed_apps");
-    const parsed = raw ? JSON.parse(raw) as string[] : ["chat", "archives", "worldbook", "music", "forum"];
-    return parsed.filter(id => id !== "schedule");
+    const parsed = raw ? JSON.parse(raw) as string[] : ["chat", "archives", "worldbook", "music", "notes"];
+    const filtered = parsed.filter(id => id !== "schedule");
+    if (!filtered.includes("notes")) {
+      filtered.push("notes");
+    }
+    return filtered;
   });
 
   // Global Music Player State
@@ -576,32 +644,7 @@ export default function App() {
   const [volume, setVolume] = useState(0.8);
   const globalAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  const PRESEED_MUSIC_TRACKS: MusicTrack[] = [
-    {
-      id: "preseed-track-1",
-      title: "图书馆的午后茶会",
-      artist: "希尔薇 (Silvy)",
-      url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-      isLocal: false,
-      duration: "06:12"
-    },
-    {
-      id: "preseed-track-2",
-      title: "星际巡防机动装甲 BGM",
-      artist: "雷恩少校 (Ryan)",
-      url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-      isLocal: false,
-      duration: "07:05"
-    },
-    {
-      id: "preseed-track-3",
-      title: "暗星域能源枢纽",
-      artist: "秦彻",
-      url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-      isLocal: false,
-      duration: "05:44"
-    }
-  ];
+  const PRESEED_MUSIC_TRACKS: MusicTrack[] = [];
 
   const handleNextTrack = () => {
     const allTracks = [...PRESEED_MUSIC_TRACKS, ...tracks];
@@ -673,7 +716,7 @@ export default function App() {
         { id: "archives", type: "app", size: "1x1", page: 0 },
         { id: "worldbook", type: "app", size: "1x1", page: 0 },
         { id: "music", type: "app", size: "1x1", page: 0 },
-        { id: "forum", type: "app", size: "1x1", page: 0 },
+        { id: "notes", type: "app", size: "1x1", page: 0 },
         { id: "store", type: "app", size: "1x1", page: 0 },
         { id: "settings", type: "app", size: "1x1", page: 0 },
       ];
@@ -683,6 +726,10 @@ export default function App() {
     // Automatically add memory app on the home screen if it's missing (keeps existing state but adds new feature)
     if (!items.some(item => item.id === "memory")) {
       items.push({ id: "memory", type: "app", size: "1x1", page: 0 });
+    }
+    // Automatically add notes app on the home screen if it's missing
+    if (!items.some(item => item.id === "notes")) {
+      items.push({ id: "notes", type: "app", size: "1x1", page: 0 });
     }
     return items;
   });
@@ -860,6 +907,7 @@ export default function App() {
   };
 
   const [currentPage, setCurrentPage] = useState(0);
+  const [swipeOffset, setSwipeOffset] = useState(0);
   const [isEditingHomeScreen, setIsEditingHomeScreen] = useState(false);
   const [draggedItem, setDraggedItem] = useState<HomeScreenItem | null>(null);
   const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
@@ -1219,6 +1267,11 @@ export default function App() {
             longPressTimerRef.current = null;
           }
         }
+
+        // Update swipeOffset in real-time for physical feedback
+        if (Math.abs(dx) > 10) {
+          setSwipeOffset(dx);
+        }
       }
     };
 
@@ -1252,8 +1305,9 @@ export default function App() {
         }
       }
 
-      // Reset swipe tracking
+      // Reset swipe tracking and offset
       swipeStartRef.current = null;
+      setSwipeOffset(0);
     };
 
     window.addEventListener("pointermove", handleGlobalPointerMove);
@@ -1459,6 +1513,10 @@ export default function App() {
     );
   };
 
+  const handleDeleteMessage = (id: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+  };
+
   // Moments Handlers
   const handleAddMoment = (newMo: Moment) => {
     setMoments((prev) => [newMo, ...prev]);
@@ -1619,6 +1677,18 @@ export default function App() {
       <style>{`
         :root, .phone-screen-container {
           --app-icon-radius: ${settings.iconBorderRadius !== undefined ? settings.iconBorderRadius : 35}%;
+          --app-icon-bg-opacity: ${(settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100) / 100};
+          --app-icon-border-width: ${settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1}px;
+          --app-icon-border-opacity: ${(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100) / 100};
+        }
+        .phone-screen-container div[style*="--app-icon-radius"],
+        .phone-screen-container button[style*="--app-icon-radius"],
+        .phone-screen-container div.bg-white[style*="--app-icon-radius"],
+        .phone-screen-container button.bg-white[style*="--app-icon-radius"] {
+          background-color: rgba(255, 255, 255, var(--app-icon-bg-opacity, 1)) !important;
+          border-width: var(--app-icon-border-width, 1px) !important;
+          border-color: rgba(240, 240, 243, var(--app-icon-border-opacity, 1)) !important;
+          border-style: solid !important;
         }
         body, button, input, textarea, select, div, p, span, h1, h2, h3, h4, h5, h6 {
           font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif !important;
@@ -1975,6 +2045,7 @@ export default function App() {
       {/* Phone Glass Screen Frame (Adaptive layout) */}
       <div
         id="phone_glass_screen"
+        ref={phoneScreenRef}
         className="w-full h-screen md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl overflow-hidden relative flex flex-col bg-slate-100 transition-all duration-300 border-none phone-screen-container"
         style={{
           background: settings.wallpaper.startsWith("linear-gradient")
@@ -1999,6 +2070,12 @@ export default function App() {
               {/* Multiple Pages Grid Section */}
               {(() => {
                 const totalPages = Math.max(1, ...homeScreenItems.map(item => item.page + 1));
+                let activeOffset = swipeOffset;
+                if (currentPage === 0 && activeOffset > 0) {
+                  activeOffset = Math.pow(activeOffset, 0.82); // elastic boundary feel
+                } else if (currentPage === totalPages - 1 && activeOffset < 0) {
+                  activeOffset = -Math.pow(-activeOffset, 0.82); // elastic boundary feel
+                }
                 return (
                   <div className="flex-1 overflow-hidden flex flex-col relative py-2 select-none">
                     <div className="flex-1 overflow-hidden relative">
@@ -2006,8 +2083,8 @@ export default function App() {
                       <div 
                         className="flex h-full w-full"
                         style={{
-                          transform: `translateX(-${currentPage * 100}%)`,
-                          transition: "transform 0.45s cubic-bezier(0.16, 1, 0.3, 1)"
+                          transform: `translateX(calc(-${currentPage * 100}% + ${activeOffset}px))`,
+                          transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)" : "none"
                         }}
                       >
                         {Array.from({ length: totalPages }).map((_, pageIdx) => {
@@ -2066,7 +2143,7 @@ export default function App() {
                                       {settings.name}
                                     </h2>
                                     <p className="text-[11px] text-neutral-500 mt-1 line-clamp-1 leading-relaxed">
-                                      “{settings.signature}”
+                                      {settings.signature}
                                     </p>
                                   </div>
                                 </div>
@@ -2167,7 +2244,7 @@ export default function App() {
                                             isPlaying={isPlaying}
                                             onTogglePlay={() => setIsPlaying(!isPlaying)}
                                             onNext={handleNextTrack}
-                                            currentTrack={currentTrack || PRESEED_MUSIC_TRACKS[0]}
+                                            currentTrack={currentTrack || null}
                                             characters={characters}
                                             onOpenApp={setActiveApp}
                                             installedAppIds={installedAppIds}
@@ -2329,6 +2406,7 @@ export default function App() {
                   onAddCommentToMoment={handleAddCommentToMoment}
                   onLikeMoment={handleLikeMoment}
                   onToggleBookmark={handleToggleBookmark}
+                  onDeleteMessage={handleDeleteMessage}
                   onClose={() => setActiveApp(null)}
                   onSaveSettings={setSettings}
                   onNavigateToApp={setActiveApp}
@@ -2485,7 +2563,7 @@ export default function App() {
                 {React.createElement(getWidgetComponent(draggedItem.widgetType), {
                   id: draggedItem.id,
                   isPlaying,
-                  currentTrack: currentTrack || PRESEED_MUSIC_TRACKS[0],
+                  currentTrack: currentTrack || null,
                   characters,
                   installedAppIds,
                   widgetOpacity: settings.widgetOpacity,
@@ -2497,12 +2575,17 @@ export default function App() {
 
         {/* Floating Back to Home Button */}
         {settings.showHomeButton && activeApp !== null && (
-          <div
+          <motion.div
             id="floating_home_button"
+            drag
+            dragConstraints={phoneScreenRef}
+            dragElastic={0.05}
+            dragMomentum={false}
             onClick={() => setActiveApp(null)}
             className="absolute bottom-24 right-4 w-12 h-12 bg-white/45 hover:bg-white/70 backdrop-blur-md rounded-full border border-neutral-300/30 shadow-lg flex items-center justify-center cursor-pointer z-50 group active:scale-95 select-none transition-all duration-200"
             style={{
               boxShadow: "0 8px 32px 0 rgba(0, 0, 0, 0.15)",
+              touchAction: "none"
             }}
             title="一键返回主页"
           >
@@ -2512,7 +2595,7 @@ export default function App() {
                 <div className="w-3.5 h-3.5 border-2 border-neutral-600/70 rounded-md" />
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
       </div>
