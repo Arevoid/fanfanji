@@ -299,9 +299,9 @@ const DEFAULT_CHARACTERS: Character[] = [
 ];
 
 const DEFAULT_SETTINGS: UserSettings = {
-  name: "",
+  name: "饭饭",
   avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
-  signature: "",
+  signature: "今天你也想我了吗",
   bio: "",
   apiKey: "",
   selectedModel: "gemini-3.5-flash",
@@ -351,9 +351,9 @@ const DEFAULT_SETTINGS: UserSettings = {
   identities: [
     {
       id: "identity-1",
-      name: "",
+      name: "饭饭",
       avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
-      signature: "",
+      signature: "今天你也想我了吗",
       bio: ""
     },
     {
@@ -464,8 +464,8 @@ export default function App() {
         identities: parsed.identities || DEFAULT_SETTINGS.identities,
         activeIdentityId: parsed.activeIdentityId || DEFAULT_SETTINGS.activeIdentityId
       };
-      if (migrated.name === "萌新机主" || migrated.name === "饭饭") {
-        migrated.name = "";
+      if (!migrated.name || migrated.name === "萌新机主") {
+        migrated.name = "饭饭";
       }
       if (migrated.avatar === "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&h=150&fit=crop" || migrated.avatar === "https://images.unsplash.com/photo-1532978379173-523e16f37248?w=150&h=150&fit=crop") {
         migrated.avatar = "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png";
@@ -473,16 +473,26 @@ export default function App() {
       if (migrated.identities) {
         migrated.identities = migrated.identities.map((idty: any, index: number) => {
           const isOldDefaultAvatar = !idty.avatar || idty.avatar.includes("photo-1534528741775-53994a69daeb") || idty.avatar.includes("photo-1507003211169-0a1dd7228f2d") || idty.avatar.includes("photo-1517841905240-472988babdf9") || idty.avatar.includes("photo-1532978379173-523e16f37248");
-          const isOldDefaultName = idty.name === "饭饭" || idty.name === "预设身份二" || idty.name === "预设身份三" || idty.name === "萌新机主";
+          let name = idty.name;
+          let signature = idty.signature;
+          if (idty.id === "identity-1") {
+            if (!name || name === "萌新机主" || name === "预设身份一") {
+              name = "饭饭";
+            }
+            if (!signature) {
+              signature = "今天你也想我了吗";
+            }
+          }
           return {
             ...idty,
-            name: isOldDefaultName ? "" : idty.name,
+            name: name,
+            signature: signature,
             avatar: isOldDefaultAvatar ? "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png" : idty.avatar,
           };
         });
       }
-      if (migrated.signature === "正在用小手机发掘星空新大陆呢~") {
-        migrated.signature = "";
+      if (!migrated.signature) {
+        migrated.signature = "今天你也想我了吗";
       }
       if (migrated.bio === "一个小手机极客玩家，喜欢探索科技、文学 and 创造有趣好玩的角色人设。") {
         migrated.bio = "";

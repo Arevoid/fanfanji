@@ -231,6 +231,7 @@ export default function AppChat({
   const [chatInputText, setChatInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [manualLocationText, setManualLocationText] = useState("");
+  const [emptyGreetingCheckedCharIds, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
 
   // Moments form state
   const [momentInputText, setMomentInputText] = useState("");
@@ -314,20 +315,140 @@ export default function AppChat({
 
   // Send character's custom opening speech / greeting if there are no messages in the chat history
   useEffect(() => {
-    if (activeChatCharId && activeCharacter && activeCharacter.greeting) {
-      const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId);
-      if (currentChatMessages.length === 0) {
-        const charMsg: Message = {
-          id: `msg-greeting-${Date.now()}`,
-          characterId: activeChatCharId,
-          sender: "character",
-          content: activeCharacter.greeting,
-          timestamp: Date.now(),
-        };
-        onSendMessage(charMsg);
-      }
+    if (!activeChatCharId || !activeCharacter) return;
+    
+    const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId);
+    if (currentChatMessages.length > 0) return;
+
+    if (activeCharacter.greeting && activeCharacter.greeting.trim()) {
+      const charMsg: Message = {
+        id: `msg-greeting-${Date.now()}`,
+        characterId: activeChatCharId,
+        sender: "character",
+        content: activeCharacter.greeting,
+        timestamp: Date.now(),
+      };
+      onSendMessage(charMsg);
+    } else {
+      // No custom greeting set. Decide based on personality.
+      if (emptyGreetingCheckedCharIds.includes(activeChatCharId)) return;
+      
+      setEmptyGreetingCheckedCharIds(prev => [...prev, activeChatCharId]);
+      
+      const personalityText = activeCharacter.personality || "";
+      const mbtiText = (activeCharacter.mbti || "").toUpperCase();
+      const backstoryText = activeCharacter.backstory || "";
+      
+      // Local heuristic: extraverted or proactive keywords
+      const isExtraverted = mbtiText.startsWith("E") ||
+        (/(主动|热情|外向|开朗|活泼|话痨|自来熟|社牛|温暖|元气|积极|话多)/.test(personalityText) &&
+         !/(被动|慢热|内向|高冷|冷淡|孤僻|社恐|傲娇|淡漠)/.test(personalityText));
+
+      const decideAndSend = async () => {
+        setIsTyping(true);
+        try {
+          const prompt = `你现在要为一个AI角色判定：在没有设定开场白的情况下，根据该角色的人设，决定它是会【主动发第一条微信消息给用户】还是【等用户先发信息】。
+角色的基本信息如下：
+- 名字：${activeCharacter.name}
+- 性格描述：${personalityText}
+- MBTI：${mbtiText}
+- 背景故事：${backstoryText}
+
+判定规则：
+1. 如果角色性格属于外向、主动、热情、开朗，或MBTI为E型，或者因职业/背景习惯于主动沟通，它会决定【主动发第一条信息】。
+2. 如果角色性格属于内向、慢热、被动、高冷、孤僻、傲娇、寡言、冷漠，或MBTI为I型，或者因身份不屑于/不方便主动，它会决定【等用户先发信息】。
+
+请直接以以下JSON格式回复（不要包含 markdown 包裹，直接输出纯 JSON 字符串）：
+{
+  "shouldInitiate": true / false,
+  "firstMessage": "如果 shouldInitiate 为 true，请写一句极其符合该人设性格、口癖和说话习惯的第一条微信消息（控制在50字以内，自然、像真人，不带废话；如果 shouldInitiate 为 false，这里留空字符串即可）"
+}
+`;
+
+          let apiResponse;
+          try {
+            apiResponse = await apiChat({
+              message: prompt,
+              history: [],
+              apiKey: settings.apiKey,
+              model: settings.selectedModel || "gemini-3.5-flash",
+              apiEndpoint: settings.apiEndpoint,
+              apiTemperature: 0.7,
+              systemInstruction: "你是一个角色扮演设定判别助手。请只输出合法的 JSON 字符串。"
+            });
+          } catch (e) {
+            console.warn("AI decision failed, falling back to local heuristic rules:", e);
+          }
+
+          let shouldInitiate = isExtraverted;
+          let firstMessage = "";
+
+          if (apiResponse && apiResponse.text) {
+            try {
+              const cleanText = apiResponse.text.replace(/```json/g, "").replace(/```/g, "").trim();
+              const parsed = JSON.parse(cleanText);
+              if (typeof parsed.shouldInitiate === "boolean") {
+                shouldInitiate = parsed.shouldInitiate;
+              }
+              if (typeof parsed.firstMessage === "string") {
+                firstMessage = parsed.firstMessage;
+              }
+            } catch (jsonErr) {
+              console.warn("Failed to parse JSON response from AI:", jsonErr, apiResponse.text);
+            }
+          }
+
+          if (shouldInitiate) {
+            // Generate a first message if empty
+            if (!firstMessage || !firstMessage.trim()) {
+              const genPrompt = `请扮演角色“${activeCharacter.name}”。你刚和用户在微信上建立联系，且你们之前没有任何聊天记录。
+根据你的以下设定，主动发第一条微信消息向用户打个招呼：
+- 性格：${personalityText}
+- MBTI：${mbtiText}
+- 背景故事：${backstoryText}
+
+要求：
+1. 语言极其符合你的角色口癖、语气和性格。
+2. 极其简短，控制在 30 个字以内，像真实的微信聊天。
+3. 直接输出你发送的话，绝对不要有任何括号注释、前缀、旁白、markdown 格式或任何多余文字。`;
+
+              const genRes = await apiChat({
+                message: genPrompt,
+                history: [],
+                apiKey: settings.apiKey,
+                model: settings.selectedModel || "gemini-3.5-flash",
+                apiEndpoint: settings.apiEndpoint,
+                apiTemperature: 0.8,
+                systemInstruction: `请扮演角色 ${activeCharacter.name}，极其简短、自然地发送第一条微信消息。不要带有任何多余格式。`
+              });
+              if (genRes && genRes.text) {
+                firstMessage = genRes.text.trim().replace(/^["']|["']$/g, "");
+              }
+            }
+
+            if (firstMessage && firstMessage.trim()) {
+              // Add a slight delay to simulate realistic typing
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              const charMsg: Message = {
+                id: `msg-empty-greeting-${Date.now()}`,
+                characterId: activeChatCharId,
+                sender: "character",
+                content: firstMessage,
+                timestamp: Date.now(),
+              };
+              onSendMessage(charMsg);
+            }
+          }
+        } catch (err) {
+          console.error("Error in empty greeting decision process:", err);
+        } finally {
+          setIsTyping(false);
+        }
+      };
+
+      decideAndSend();
     }
-  }, [activeChatCharId, activeCharacter, messages, onSendMessage]);
+  }, [activeChatCharId, activeCharacter, messages, onSendMessage, emptyGreetingCheckedCharIds, settings]);
 
   // Background proactive check (every minute)
   useEffect(() => {
@@ -1439,12 +1560,7 @@ Instructions:
                 : "transparent",
             }}
           >
-            {/* Disclaimer */}
-            <div className="flex justify-center">
-              <span className="bg-slate-200/50 text-slate-500 backdrop-blur-md px-3 py-0.5 rounded-full text-[9px] font-bold tracking-wide">
-                模型大脑正在运行 &bull; 聊天支持对话收藏
-              </span>
-            </div>
+
 
             {currentChatMessages.map((msg, idx) => {
               const isSelf = msg.sender === "user";
