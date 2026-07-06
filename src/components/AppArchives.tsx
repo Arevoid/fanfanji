@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Character, WorldBookEntry } from "../types";
+import { apiSummarizePersonality } from "../utils/apiHelper";
 import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare } from "lucide-react";
 
 interface AppArchivesProps {
@@ -520,21 +521,12 @@ export default function AppArchives({
         }
       }
 
-      const res = await fetch("/api/summarize-personality", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          references: char.references,
-          apiKey,
-          model,
-          apiEndpoint
-        })
+      const data = await apiSummarizePersonality({
+        references: char.references,
+        apiKey,
+        model,
+        apiEndpoint
       });
-
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        throw new Error(data.error || "服务器响应异常");
-      }
 
       const aiResult = data.text;
       if (!aiResult || !aiResult.trim()) {

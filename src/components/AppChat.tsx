@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
+import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings } from "../types";
 import { getRelevantMemories } from "./AppMemory";
 import {
@@ -548,24 +549,18 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
         promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒）。由于微信语音默认无法直接识别文字，请假设你听到了我用温暖/俏皮的声音发给你的语音（内容可以由你自行结合之前的话题进行脑补/想象，或者是日常可爱的闲聊）。请对此做出一个非常符合你人设、温暖、极其简短像真人在微信回语音或文字一样的回复。`;
       }
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: promptMessage,
-          history,
-          systemInstruction,
-          apiKey: settings.apiKey,
-          model: settings.selectedModel || "gemini-3.5-flash",
-          apiEndpoint: settings.apiEndpoint,
-          apiTemperature: settings.apiTemperature,
-          streamCompatible: settings.streamCompatible,
-        }),
+      const data = await apiChat({
+        message: promptMessage,
+        history,
+        systemInstruction,
+        apiKey: settings.apiKey,
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+        apiTemperature: settings.apiTemperature,
+        streamCompatible: settings.streamCompatible,
       });
 
-      const data = await response.json();
-
-      if (response.ok && data.text) {
+      if (data && data.text) {
         const charMsg: Message = {
           id: (Date.now() + 1).toString(),
           characterId: activeChatCharId,
@@ -629,7 +624,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
           id: (Date.now() + 1).toString(),
           characterId: activeChatCharId,
           sender: "character",
-          content: `⚠️ [系统出错]：${data.error || "智能体未能理解该消息。"}`,
+          content: `⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`,
           timestamp: Date.now(),
         };
         onSendMessage(errMsg);
@@ -770,24 +765,18 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       const systemInstruction = [mainPromptText, charDefText, userProfileText].join("\n\n---\n\n");
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: lastUserMsg.content,
-          history,
-          systemInstruction,
-          apiKey: settings.apiKey,
-          model: settings.selectedModel || "gemini-3.5-flash",
-          apiEndpoint: settings.apiEndpoint,
-          apiTemperature: settings.apiTemperature,
-          streamCompatible: settings.streamCompatible,
-        }),
+      const data = await apiChat({
+        message: lastUserMsg.content,
+        history,
+        systemInstruction,
+        apiKey: settings.apiKey,
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+        apiTemperature: settings.apiTemperature,
+        streamCompatible: settings.streamCompatible,
       });
 
-      const data = await response.json();
-
-      if (response.ok && data.text) {
+      if (data && data.text) {
         const charMsg: Message = {
           id: (Date.now() + 1).toString(),
           characterId: activeChatCharId,
@@ -851,22 +840,17 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         text: m.content,
       }));
 
-      const response = await fetch("/api/extract-memories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          history,
-          characterName: activeCharacter.name,
-          apiKey: settings.apiKey,
-          model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model")
-            ? (settings.selectedModel || "gemini-3.5-flash")
-            : recallSettings.extractModel,
-          apiEndpoint: settings.apiEndpoint,
-        }),
+      const data = await apiExtractMemories({
+        history,
+        characterName: activeCharacter.name,
+        apiKey: settings.apiKey,
+        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model")
+          ? (settings.selectedModel || "gemini-3.5-flash")
+          : recallSettings.extractModel,
+        apiEndpoint: settings.apiEndpoint,
       });
 
-      const data = await response.json();
-      if (response.ok && data.items && Array.isArray(data.items)) {
+      if (data && data.items && Array.isArray(data.items)) {
         const newItems: MemoryItem[] = [];
         data.items.forEach((content: string) => {
           const trimmed = content.trim();
@@ -895,7 +879,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         }
         return newItems.length;
       } else {
-        console.error("Extract memory API error:", data.error);
+        console.error("Extract memory API error:", (data as any).error);
       }
     } catch (err: any) {
       console.error("Memory extraction error:", err);
@@ -935,23 +919,18 @@ Instructions:
 3. This is an initiator message, so check in on the user or share something from your day.
 4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: "(用户失联3小时，你主动给其发送了一条信息)",
-          history: [],
-          systemInstruction,
-          apiKey: settings.apiKey,
-          model: settings.selectedModel || "gemini-3.5-flash",
-          apiEndpoint: settings.apiEndpoint,
-          apiTemperature: settings.apiTemperature,
-          streamCompatible: settings.streamCompatible,
-        }),
+      const data = await apiChat({
+        message: "(用户失联3小时，你主动给其发送了一条信息)",
+        history: [],
+        systemInstruction,
+        apiKey: settings.apiKey,
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+        apiTemperature: settings.apiTemperature,
+        streamCompatible: settings.streamCompatible,
       });
 
-      const data = await response.json();
-      if (response.ok && data.text) {
+      if (data && data.text) {
         const proactiveMsg: Message = {
           id: Date.now().toString(),
           characterId: activeChatCharId,
@@ -961,7 +940,7 @@ Instructions:
         };
         onSendMessage(proactiveMsg);
       } else {
-        alert(`主动联络失败: ${data.error || "智能体无响应"}`);
+        alert(`主动联络失败: ${(data as any).error || "智能体无响应"}`);
       }
     } catch (err: any) {
       alert(`主动联络错误: ${err.message || err}`);
@@ -1000,23 +979,18 @@ Instructions:
 3. This is an initiator message, so check in on the user or share something from your day.
 4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: "(你主动给用户发送了一条信息)",
-          history: [],
-          systemInstruction,
-          apiKey: settings.apiKey,
-          model: settings.selectedModel || "gemini-3.5-flash",
-          apiEndpoint: settings.apiEndpoint,
-          apiTemperature: settings.apiTemperature,
-          streamCompatible: settings.streamCompatible,
-        }),
+      const data = await apiChat({
+        message: "(你主动给用户发送了一条信息)",
+        history: [],
+        systemInstruction,
+        apiKey: settings.apiKey,
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+        apiTemperature: settings.apiTemperature,
+        streamCompatible: settings.streamCompatible,
       });
 
-      const data = await response.json();
-      if (response.ok && data.text) {
+      if (data && data.text) {
         const proactiveMsg: Message = {
           id: Date.now().toString(),
           characterId: charId,

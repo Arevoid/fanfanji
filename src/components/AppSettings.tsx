@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { UserSettings, StylePreset, ApiPreset } from "../types";
+import { apiFetchModels, apiTestKey } from "../utils/apiHelper";
 import {
   ChevronLeft,
   ChevronRight,
@@ -170,117 +171,26 @@ export default function AppSettings({
 
   const handleFetchModels = async () => {
     setIsFetchingModels(true);
-    let fetchedList: string[] | null = null;
-
-    // Helper to parse different models response formats
-    const parseModels = (data: any): string[] | null => {
-      if (!data) return null;
-      if (Array.isArray(data)) {
-        if (data.length > 0 && typeof data[0] === "string") return data;
-        if (data.length > 0 && typeof data[0] === "object") {
-          return data.map((m: any) => m.id || m.name || m.model || m.model_id).filter(Boolean);
-        }
-      }
-      if (data.data && Array.isArray(data.data)) {
-        return data.data.map((m: any) => m.id || m.name || m.model || m.model_id).filter(Boolean);
-      }
-      if (data.models && Array.isArray(data.models)) {
-        return data.models.map((m: any) => {
-          if (typeof m === "string") return m;
-          const rawName = m.name || m.id || m.model || m.model_id;
-          if (typeof rawName === "string") {
-            return rawName.startsWith("models/") ? rawName.substring(7) : rawName;
-          }
-          return null;
-        }).filter(Boolean);
-      }
-      return null;
-    };
-
-    // Step 1: Try backend /api/models first
     try {
-      const res = await fetch("/api/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apiKey,
-          apiEndpoint
-        })
+      const apiKeyValue = apiKey.trim() || settings.apiKey;
+      const endpointValue = apiEndpoint.trim();
+
+      const models = await apiFetchModels({
+        apiKey: apiKeyValue,
+        apiEndpoint: endpointValue
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.models) && data.models.length > 0) {
-          fetchedList = data.models;
+
+      if (models && models.length > 0) {
+        setModelSuggestions(models);
+        if (!models.includes(selectedModel)) {
+          setSelectedModel(models[0]);
         }
       }
     } catch (error) {
-      console.warn("Backend model fetch failed, trying client-side direct fetch...", error);
+      console.error("Fetch models error:", error);
+    } finally {
+      setIsFetchingModels(false);
     }
-
-    // Step 2: If backend failed, try client-side direct fetch
-    if (!fetchedList) {
-      try {
-        const apiKeyValue = apiKey.trim() || settings.apiKey;
-        const endpointValue = apiEndpoint.trim();
-
-        if (endpointValue && apiKeyValue) {
-          // Custom endpoint client-side fetch
-          let baseUrl = endpointValue.replace(/\/+$/, "");
-          baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
-          const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : (baseUrl + "/models");
-
-          const responseFetch = await fetch(modelsUrl, {
-            method: "GET",
-            headers: {
-              "Authorization": `Bearer ${apiKeyValue}`
-            }
-          });
-          if (responseFetch.ok) {
-            const data = await responseFetch.json();
-            fetchedList = parseModels(data);
-          }
-        } else if (apiKeyValue) {
-          // Gemini default client-side models fetch
-          const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKeyValue}`;
-          const responseFetch = await fetch(modelsUrl);
-          if (responseFetch.ok) {
-            const data = await responseFetch.json();
-            fetchedList = parseModels(data);
-          }
-        }
-      } catch (err) {
-        console.error("Client-side direct fetch also failed:", err);
-      }
-    }
-
-    // Step 3: Fallback list if all else fails
-    if (fetchedList && fetchedList.length > 0) {
-      setModelSuggestions(fetchedList);
-      if (!fetchedList.includes(selectedModel)) {
-        setSelectedModel(fetchedList[0]);
-      }
-    } else {
-      // Elegant default fallback list so model list is never empty
-      const defaultModels = [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "deepseek-chat",
-        "deepseek-reasoner",
-        "deepseek-v3",
-        "gpt-4o",
-        "gpt-4o-mini",
-        "claude-3-5-sonnet"
-      ];
-      setModelSuggestions(defaultModels);
-      if (!defaultModels.includes(selectedModel)) {
-        setSelectedModel(defaultModels[0]);
-      }
-      alert("无法通过接口拉取模型列表（可能因部署环境或网络限制），已为您加载默认的推荐模型列表。");
-    }
-
-    setIsFetchingModels(false);
   };
 
   const handleSaveApiConfig = () => {
@@ -413,23 +323,21 @@ export default function AppSettings({
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch("/api/test-key", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apiKey,
-          model: selectedModel,
-          apiEndpoint
-        }),
+      const apiKeyValue = apiKey.trim() || settings.apiKey;
+      const endpointValue = apiEndpoint.trim();
+
+      const result = await apiTestKey({
+        apiKey: apiKeyValue,
+        model: selectedModel,
+        apiEndpoint: endpointValue
       });
-      const data = await res.json();
-      if (data.success) {
-        setTestResult({ success: true, msg: data.message });
-      } else {
-        setTestResult({ success: false, msg: data.error });
-      }
+
+      setTestResult({
+        success: result.success,
+        msg: result.message
+      });
     } catch (err: any) {
-      setTestResult({ success: false, msg: "连接失败，无法到达后端路由" });
+      setTestResult({ success: false, msg: err.message || "连接失败" });
     } finally {
       setIsTesting(false);
     }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
+import { apiExtractMemories } from "./utils/apiHelper";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask } from "./types";
 import { 
   AlbumWidget, 
@@ -819,22 +820,17 @@ export default function App() {
         text: m.content,
       }));
 
-      const response = await fetch("/api/extract-memories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          history,
-          characterName: char.name,
-          apiKey: settings.apiKey,
-          model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model")
-            ? (settings.selectedModel || "gemini-3.5-flash")
-            : recallSettings.extractModel,
-          apiEndpoint: settings.apiEndpoint,
-        }),
+      const data = await apiExtractMemories({
+        history,
+        characterName: char.name,
+        apiKey: settings.apiKey,
+        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model")
+          ? (settings.selectedModel || "gemini-3.5-flash")
+          : recallSettings.extractModel,
+        apiEndpoint: settings.apiEndpoint,
       });
 
-      const data = await response.json();
-      if (response.ok && data.items && Array.isArray(data.items)) {
+      if (data && data.items && Array.isArray(data.items)) {
         const validItems = data.items
           .map((content: string) => content.trim())
           .filter((content: string) => content.length > 0);
@@ -885,7 +881,7 @@ export default function App() {
         setImmediateSummaryTask(prev => ({
           ...prev,
           status: "error",
-          error: data.error || "提炼失败，未提取到有效记忆或API请求出错",
+          error: (data as any).error || "提炼失败，未提取到有效记忆或API请求出错",
         }));
       }
     } catch (err: any) {
