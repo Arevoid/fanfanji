@@ -11,6 +11,7 @@ import {
   Compass,
   User,
   Send,
+  ArrowUp,
   MoreHorizontal,
   Bookmark,
   Pin,
@@ -600,13 +601,20 @@ export default function AppChat({
     return () => clearInterval(timer);
   }, [activeAttachModal, callingStatus]);
 
-  const generateResponseForUserMessage = async (userMsg: Message) => {
+  const generateResponseForUserMessage = async (userMsg: Message, customHistoryOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return;
     setIsTyping(true);
 
     try {
       // Collect message history of this specific character to pass to backend
-      const history = currentChatMessages.map((m) => ({
+      const sourceMsgs = customHistoryOverride || [...currentChatMessages, userMsg];
+      const uniqueMsgsMap = new Map<string, Message>();
+      sourceMsgs.forEach(m => {
+        if (m) uniqueMsgsMap.set(m.id, m);
+      });
+      const finalMsgs = Array.from(uniqueMsgsMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+      const history = finalMsgs.map((m) => ({
         role: m.sender === "user" ? "user" : "model",
         text: m.content,
       }));
@@ -616,9 +624,8 @@ export default function AppChat({
         ? `You are playing the role of "${activeCharacter.name}" in an OFFLINE STAGE/DRAMA script mode (线下剧本模式).
 In this mode, you are co-writing an immersive story with the user.
 You must output a highly detailed, book-chapter or high-quality roleplay novel section in Chinese.
-Your reply should contain third-person narrator descriptions of actions, background details, scenery, and characters' thoughts, AS WELL AS dialogue.
-IMPORTANT: All spoken dialogues MUST be enclosed in Chinese double quotes “ ” (e.g. “你又在胡思乱想了。”) or 「 」 so they can be separated into dialog bubbles and narrations.
-Keep in character completely. Be descriptive and atmospheric. Speak in Chinese.`
+Your reply should contain third-person narrator descriptions of actions, background details, scenery, and characters' thoughts, AS WELL AS character dialogues.
+🚨🚨🚨 [CRITICAL RULE]: All spoken dialogues MUST be strictly enclosed in Chinese double quotes “ ” (e.g. “你又在胡思乱想了。”) or corner brackets 「 」. Any third-person scenery, action descriptions, or thoughts must remain OUTSIDE of the quotes. NEVER output spoken dialogue without quotes! Otherwise the system cannot parse your dialogue into separate chat bubbles.`
         : `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
 WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
 Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
@@ -960,9 +967,9 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
     }
   }, [messages, activeChatCharId, isTyping]);
 
-  // Handle Send Message and API generation trigger
-  const handleSendChatMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Handle Send Message (User sends only, no immediate reply)
+  const handleSendOnly = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
 
     let userMsgText = chatInputText.trim();
@@ -986,7 +993,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
     setChatInputText("");
 
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       characterId: activeChatCharId,
       sender: "user",
       content: userMsgText,
@@ -1008,8 +1015,62 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
         onSaveOfflineStory(updatedStory);
       }
     }
+  };
 
-    generateResponseForUserMessage(userMsg);
+  // Handle Send Message and Trigger AI reply
+  const handleSendAndReply = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
+
+    let userMsgText = chatInputText.trim();
+    if (quotedMessage) {
+      const senderName = quotedMessage.sender === "user" ? "我" : (activeCharacter.remark || activeCharacter.name);
+      let shortContent = quotedMessage.content;
+      if (shortContent.startsWith("[文件]")) {
+        const parts = shortContent.split("|");
+        shortContent = `[文件] ${parts[1] || "笔记"}`;
+      } else if (shortContent.startsWith("[红包]")) {
+        shortContent = "[红包]";
+      } else if (shortContent.startsWith("[位置]")) {
+        shortContent = "[位置]";
+      } else if (shortContent.startsWith("[音乐]")) {
+        shortContent = "[音乐]";
+      }
+      userMsgText = `「引用 ${senderName}：${shortContent}」\n${userMsgText}`;
+      setQuotedMessage(null);
+    }
+
+    setChatInputText("");
+
+    const userMsg: Message = {
+      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      characterId: activeChatCharId,
+      sender: "user",
+      content: userMsgText,
+      timestamp: Date.now(),
+      isOffline: isOfflineModeActive ? true : undefined,
+      isNarration: isOfflineModeActive ? isInputNarration : undefined
+    };
+
+    onSendMessage(userMsg);
+
+    let currentMessagesWithNewUser = currentChatMessages;
+    if (isOfflineModeActive && activeOfflineStoryId && onSaveOfflineStory) {
+      const targetStory = offlineStories.find(s => s.id === activeOfflineStoryId);
+      if (targetStory) {
+        const updatedStory = {
+          ...targetStory,
+          messages: [...targetStory.messages, userMsg],
+          updatedAt: Date.now()
+        };
+        onSaveOfflineStory(updatedStory);
+        currentMessagesWithNewUser = updatedStory.messages;
+      }
+    } else {
+      currentMessagesWithNewUser = [...currentChatMessages, userMsg];
+    }
+
+    generateResponseForUserMessage(userMsg, currentMessagesWithNewUser);
   };
 
   const handleRegenerateResponse = async (targetMsg: Message, oocComment: string) => {
@@ -1493,6 +1554,23 @@ ${instructionsPrompt}`;
               </button>
             </div>
 
+            {isOfflineModeActive && (
+              <button
+                onClick={() => {
+                  setIsOfflineModeActive(false);
+                  setActiveOfflineStoryId(null);
+                  if (activeChatCharId) {
+                    localStorage.setItem(`offline_mode_active_${activeChatCharId}`, "false");
+                    localStorage.removeItem(`offline_story_id_${activeChatCharId}`);
+                  }
+                }}
+                className="absolute top-[72px] right-4 z-40 w-10 h-10 rounded-full backdrop-blur-md bg-white/40 hover:bg-white/60 active:scale-90 flex items-center justify-center transition-all cursor-pointer border border-white/50 shadow-[0_4px_16px_rgba(0,0,0,0.1)] hover:shadow-xl text-slate-700 hover:text-slate-900 animate-fade-in"
+                title="退出线下模式"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+
           {/* Character Details / Settings Full-Screen Page */}
           {isShowingCardModal && (
             <div className="absolute inset-0 z-50 bg-slate-50 flex flex-col h-full animate-slide-up">
@@ -1789,28 +1867,6 @@ ${instructionsPrompt}`;
           )}
 
           {/* Active Chat Messages body */}
-          {isOfflineModeActive && (
-            <div className="px-4 py-2 bg-slate-100 border-b border-slate-200 text-slate-600 flex items-center justify-between text-[11px] shrink-0 font-medium select-none">
-              <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>已启用线下剧本模式</span>
-              </span>
-              <button
-                onClick={() => {
-                  setIsOfflineModeActive(false);
-                  setActiveOfflineStoryId(null);
-                  if (activeChatCharId) {
-                    localStorage.setItem(`offline_mode_active_${activeChatCharId}`, "false");
-                    localStorage.removeItem(`offline_story_id_${activeChatCharId}`);
-                  }
-                }}
-                className="w-5 h-5 rounded-full hover:bg-slate-200 flex items-center justify-center transition-colors text-slate-400 hover:text-slate-600"
-                title="退出线下模式"
-              >
-                <X className="w-3.5 h-3.5 animate-none" />
-              </button>
-            </div>
-          )}
 
           <div
             className="flex-1 overflow-y-auto p-4 space-y-4"
@@ -2151,51 +2207,41 @@ ${instructionsPrompt}`;
             )}
             
             {isOfflineModeActive && (
-              <div className="px-4 py-1.5 bg-indigo-50 border-b border-indigo-100 flex items-center gap-2 text-xs text-slate-700 shrink-0 select-none">
-                <span className="font-extrabold text-[10px] text-indigo-700 uppercase">剧本输入类型:</span>
+              <div className="px-4 py-2 bg-slate-50 border-b border-slate-150 flex items-center gap-2.5 text-xs text-slate-700 shrink-0 select-none">
+                <span className="font-bold text-[11px] text-slate-500 uppercase tracking-wide">剧本输入类型:</span>
                 <button
                   type="button"
                   onClick={() => setIsInputNarration(false)}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${
+                  className={`px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all flex items-center gap-1 shadow-sm ${
                     !isInputNarration 
-                      ? "bg-indigo-600 text-white border-indigo-500 shadow-sm" 
-                      : "bg-white text-slate-500 border-slate-200 hover:text-slate-700"
+                      ? "bg-slate-900 border-slate-900 text-white !text-white" 
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                   }`}
                 >
-                  💬 角色发言
+                  <span className={!isInputNarration ? "text-white !text-white" : "text-slate-600"}>💬 角色发言</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsInputNarration(true)}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${
+                  className={`px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all flex items-center gap-1 shadow-sm ${
                     isInputNarration 
-                      ? "bg-rose-600 text-white border-rose-500 shadow-sm" 
-                      : "bg-white text-slate-500 border-slate-200 hover:text-slate-700"
+                      ? "bg-slate-900 border-slate-900 text-white !text-white" 
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                   }`}
                 >
-                  📖 旁白客观叙事
+                  <span className={isInputNarration ? "text-white !text-white" : "text-slate-600"}>📖 旁白客观叙事</span>
                 </button>
               </div>
             )}
 
             <form
-              onSubmit={handleSendChatMessage}
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendAndReply(e);
+              }}
               className="px-3 py-2 flex items-center gap-2"
             >
-              {/* 1. Voice input button (Leftmost) */}
-              <button
-                type="button"
-                onClick={() => {
-                  setVoiceDuration("5");
-                  setActiveAttachModal("voice");
-                }}
-                className="w-9 h-9 border border-slate-300 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors shrink-0 voice-input-btn cv-func-btn chat-action-btn"
-                title="发送语音"
-              >
-                <Volume2 className="w-4 h-4 voice-icon" />
-              </button>
-
-              {/* 2. Chat Input text box */}
+              {/* Chat Input text box */}
               <input
                 type="text"
                 value={chatInputText}
@@ -2214,43 +2260,40 @@ ${instructionsPrompt}`;
                 }`}
               />
 
-              {/* 3. Emoji placeholder button */}
+              {/* Plus (+) Button */}
               <button
                 type="button"
-                onClick={() => {
-                  const emojis = ["😊", "👍", "❤️", "🌹", "🎉", "🔥", "✨", "😆", "🥰", "👀"];
-                  const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-                  setChatInputText(prev => prev + randomEmoji);
-                }}
-                className="w-9 h-9 rounded-full flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors shrink-0 emoji-btn cv-func-btn chat-action-btn"
-                title="插入表情"
+                onClick={() => setShowAttachPanel(!showAttachPanel)}
+                className={`w-8 h-8 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn text-slate-700 ${
+                  showAttachPanel
+                    ? "bg-stone-100 rotate-45"
+                    : "bg-white hover:bg-slate-100"
+                }`}
+                title="附加菜单"
               >
-                <Smile className="w-5 h-5" />
+                <Plus className="w-3.5 h-3.5" />
               </button>
-              
-              {/* 4. Plus (+) button OR Send button */}
-              {!chatInputText.trim() ? (
-                <button
-                  type="button"
-                  onClick={() => setShowAttachPanel(!showAttachPanel)}
-                  className={`w-9 h-9 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn text-slate-700 ${
-                    showAttachPanel
-                      ? "bg-stone-100 rotate-45"
-                      : "bg-white hover:bg-slate-100"
-                  }`}
-                  title="附加菜单"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={isTyping}
-                  className="h-9 px-4 bg-[#58bf6a] hover:bg-[#4cb25e] text-white font-medium text-xs rounded-xl transition-all flex items-center justify-center shrink-0 shadow-sm cv-btn-user cv-btn-ai send-button"
-                >
-                  发送
-                </button>
-              )}
+
+              {/* Send Button 1 (User send only - gray background with white upward arrow) */}
+              <button
+                type="button"
+                onClick={(e) => handleSendOnly(e)}
+                disabled={!chatInputText.trim() || isTyping}
+                className="w-8 h-8 rounded-full bg-slate-300 hover:bg-slate-400 disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm"
+                title="仅发送消息 (不立即得到回复)"
+              >
+                <ArrowUp className="w-4 h-4 stroke-[2.5]" />
+              </button>
+
+              {/* Send Button 2 (Send and AI Reply - black background with white paper plane) */}
+              <button
+                type="submit"
+                disabled={!chatInputText.trim() || isTyping}
+                className="w-8 h-8 rounded-full bg-slate-900 hover:bg-black disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm send-button"
+                title="发送消息并获取回复"
+              >
+                <Send className="w-3.5 h-3.5 fill-white text-white" />
+              </button>
             </form>
 
             {/* Attach Panel */}
@@ -2331,21 +2374,6 @@ ${instructionsPrompt}`;
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
                 </button>
 
-                {/* 6. 文件 (File) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveAttachModal("file");
-                    setShowAttachPanel(false);
-                  }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
-                >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <FileText className="w-4 h-4 text-slate-700" />
-                  </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">文件</span>
-                </button>
-
                 {/* 7. 位置 (Location) */}
                 <button
                   type="button"
@@ -2361,20 +2389,21 @@ ${instructionsPrompt}`;
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
                 </button>
 
-                {/* 8. 语音 (Voice) */}
+                {/* 8. 表情 (Emoji) */}
                 <button
                   type="button"
                   onClick={() => {
-                    setVoiceDuration("5");
-                    setActiveAttachModal("voice");
+                    const emojis = ["😊", "👍", "❤️", "🌹", "🎉", "🔥", "✨", "😆", "🥰", "👀", "😘", "😭", "🥱", "👿", "🤡", "💖", "🌟"];
+                    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+                    setChatInputText(prev => prev + randomEmoji);
                     setShowAttachPanel(false);
                   }}
                   className="flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <Mic className="w-4 h-4 text-slate-700" />
+                    <Smile className="w-4 h-4 text-slate-700" />
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
                 </button>
               </div>
             )}

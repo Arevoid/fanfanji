@@ -70,6 +70,8 @@ export default function AppOffline({
   // Handle opening a story
   const handleOpenStory = (story: OfflineStory) => {
     setActiveStory(story);
+    localStorage.setItem(`offline_mode_active_${story.characterId}`, "true");
+    localStorage.setItem(`offline_story_id_${story.characterId}`, story.id);
   };
 
   // Create new offline story
@@ -121,6 +123,8 @@ export default function AppOffline({
 
     onSaveOfflineStory(newStory);
     setActiveStory(newStory);
+    localStorage.setItem(`offline_mode_active_${selectedCharId}`, "true");
+    localStorage.setItem(`offline_story_id_${selectedCharId}`, newStory.id);
     setShowCreateModal(false);
 
     // Reset fields
@@ -225,8 +229,7 @@ export default function AppOffline({
 【线下模式核心规则】
 1. 用户可以通过文字、指令或旁白，像导播、写小说或主控一样描述故事进展。
 2. 作为一个优秀的内容创作者，你要输出一整段精美的、小说叙事般的回复，内容包括第三人称的场景描写、客观动作、旁白叙事，以及两人的对话。
-3. 对话必须使用中文引号 “ ” 或 「 」 括起来，以便我们能够高保真地拆分成气泡对话。例如：
-   秦彻走上前，轻轻拍了拍你的头，“你又在胡思乱想什么。”随后，他转过身看着窗外。
+3. 🚨🚨🚨 [绝对指令]: 所有发言对话必须使用中文引号 “ ” (例如 “你又在胡思乱想什么。”) 或 「 」 括起来。任何非发言部分（动作描述、神态、场景描写、内心想法、旁白等）必须放在引号外面，严禁放在引号内。不可漏掉引号！否则系统无法将你的发言拆分成气泡对话。
 4. 如果用户给出了导演指令（如：[控制剧情：我们遇到了敌人]），请积极顺应，发挥你强大的故事延展能力，精美自然地推进剧情。
 5. 必须保持极高的人设契合度、动作细节和情感氛围描写。不要说任何破戏（OOC）的话，不要说你是AI。
 
@@ -642,27 +645,27 @@ export default function AppOffline({
               <div className="flex items-center justify-between">
                 
                 {/* Input Mode Toggle: Spoken dialogue vs Narrative */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">输入类型:</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-[11px] text-slate-500 uppercase tracking-wide">输入类型:</span>
                   <button
                     onClick={() => setInputNarration(false)}
-                    className={`px-2.5 py-1 rounded text-[10px] font-bold border transition-all ${
+                    className={`px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all flex items-center gap-1 shadow-sm ${
                       !inputNarration 
-                        ? "bg-slate-900 text-white border-slate-900" 
-                        : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-250"
+                        ? "bg-slate-900 border-slate-900 text-white !text-white" 
+                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                     }`}
                   >
-                    💬 角色发言气泡
+                    <span className={!inputNarration ? "text-white !text-white" : "text-slate-600"}>💬 角色发言</span>
                   </button>
                   <button
                     onClick={() => setInputNarration(true)}
-                    className={`px-2.5 py-1 rounded text-[10px] font-bold border transition-all ${
+                    className={`px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all flex items-center gap-1 shadow-sm ${
                       inputNarration 
-                        ? "bg-rose-500 text-white border-rose-500" 
-                        : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-250"
+                        ? "bg-slate-900 border-slate-900 text-white !text-white" 
+                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                     }`}
                   >
-                    📖 旁白客观叙事
+                    <span className={inputNarration ? "text-white !text-white" : "text-slate-600"}>📖 旁白客观叙事</span>
                   </button>
                 </div>
 

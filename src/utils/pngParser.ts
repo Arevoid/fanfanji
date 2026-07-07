@@ -285,28 +285,35 @@ export const parseTextToWorldBookEntries = (text: string, filename: string): Wor
 export function splitTextToOfflineSegments(text: string): { content: string; isNarration: boolean }[] {
   if (!text) return [];
   const segments: { content: string; isNarration: boolean }[] = [];
-  // Matching quotes like “...” or "..." or 「...」
-  const regex = /([“\"「][^”\"」]+[”\"」])/g;
+  // Matching quotes like “...” or "..." or 「...」 or 『...』 or ‘...’ or '...'
+  const regex = /([“\"「『‘'][^”\"」』’']+[”\"」』’'])/g;
   const parts = text.split(regex);
   
   for (const part of parts) {
     if (!part) continue;
-    const trimmed = part.trim();
+    let trimmed = part.trim();
     if (!trimmed) continue;
     
     const isDialogue = (
-      (part.startsWith("“") && part.endsWith("”")) ||
-      (part.startsWith("「") && part.endsWith("」")) ||
-      (part.startsWith("\"") && part.endsWith("\""))
+      (trimmed.startsWith("“") && trimmed.endsWith("”")) ||
+      (trimmed.startsWith("「") && trimmed.endsWith("」")) ||
+      (trimmed.startsWith("『") && trimmed.endsWith("』")) ||
+      (trimmed.startsWith("‘") && trimmed.endsWith("’")) ||
+      (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))
     );
     
     if (isDialogue) {
-      const dialogueContent = part.substring(1, part.length - 1).trim();
+      const dialogueContent = trimmed.substring(1, trimmed.length - 1).trim();
       if (dialogueContent) {
         segments.push({ content: dialogueContent, isNarration: false });
       }
     } else {
-      segments.push({ content: trimmed, isNarration: true });
+      // Clean up trailing colons or dialogue indicators at the very end of narration (e.g. "说：" -> "说")
+      trimmed = trimmed.replace(/[:：]\s*$/, "").trim();
+      if (trimmed) {
+        segments.push({ content: trimmed, isNarration: true });
+      }
     }
   }
   return segments;
