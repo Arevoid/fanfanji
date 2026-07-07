@@ -637,7 +637,7 @@ export default function AppOffline({
                 
                 {/* Input Mode Toggle: Spoken dialogue vs Narrative */}
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-[11px] text-slate-500 uppercase tracking-wide">输入类型:</span>
+                  <span className="font-bold text-[11px] text-slate-500 uppercase tracking-wide">类型:</span>
                   <button
                     onClick={() => setInputNarration(false)}
                     className={`px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all flex items-center gap-1 shadow-sm ${
@@ -646,7 +646,7 @@ export default function AppOffline({
                         : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                     }`}
                   >
-                    <span className={!inputNarration ? "text-white !text-white" : "text-slate-600"}>💬 角色发言</span>
+                    <span className={!inputNarration ? "text-white !text-white" : "text-slate-600"}>💬 发言</span>
                   </button>
                   <button
                     onClick={() => setInputNarration(true)}
@@ -656,7 +656,7 @@ export default function AppOffline({
                         : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                     }`}
                   >
-                    <span className={inputNarration ? "text-white !text-white" : "text-slate-600"}>📖 旁白客观叙事</span>
+                    <span className={inputNarration ? "text-white !text-white" : "text-slate-600"}>📖 旁白</span>
                   </button>
                 </div>
 
@@ -667,7 +667,7 @@ export default function AppOffline({
                   className="px-3 py-1 rounded bg-slate-50 hover:bg-slate-100 text-indigo-600 font-bold text-[10px] border border-slate-200 transition-all flex items-center gap-1 shadow-sm"
                 >
                   <Sparkles className="w-3 h-3 text-indigo-500" />
-                  <span>AI 自动续写一幕</span>
+                  <span>✨ 续写</span>
                 </button>
               </div>
 
@@ -682,10 +682,10 @@ export default function AppOffline({
                   onChange={(e) => setInputText(e.target.value)}
                   placeholder={
                     inputNarration 
-                      ? "输入旁白、客观场景、描述，渲染故事场景环境..." 
+                      ? "输入旁白..." 
                       : activeStory.mode === "director" 
                         ? "发出简短指令控制后续走向 (例: [突降暴雨，我们躲在桥下])" 
-                        : "输入角色发言，继续对话剧情..."
+                        : "输入发言，继续对话剧情..."
                   }
                   className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />

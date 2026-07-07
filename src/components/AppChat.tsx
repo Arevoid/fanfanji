@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory } from "../types";
-import { splitTextToOfflineSegments } from "../utils/pngParser";
+import { splitTextToOfflineSegments, cleanOnlineMessage } from "../utils/pngParser";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
 import {
@@ -633,10 +633,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         : `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
 WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
 Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
-Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+Do NOT say you are an AI or Gemini, unless that is your explicit character人设.
+
+🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
+1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
+2. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
+3. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${activeCharacter.name}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`;
 
       if (!isOfflineModeActive && activeCharacter.disableBracketActions) {
-        mainPromptText += `\n[🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks. Maintain natural, realistic, text-message style dialogue.`;
+        mainPromptText += `\n4. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks. Maintain natural, realistic, text-message style dialogue.`;
       }
 
       let charDefText = `Roleplay Profile:
@@ -863,11 +868,12 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
             }
           }
         } else {
+          const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
           const charMsg: Message = {
             id: (Date.now() + 1).toString(),
             characterId: activeChatCharId,
             sender: "character",
-            content: data.text,
+            content: cleanedText || data.text,
             timestamp: Date.now(),
           };
           onSendMessage(charMsg);
@@ -1110,10 +1116,15 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       let mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
 WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
 Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
-Do NOT say you are an AI or Gemini.`;
+Do NOT say you are an AI or Gemini.
+
+🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
+1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
+2. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
+3. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${activeCharacter.name}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`;
 
       if (activeCharacter.disableBracketActions) {
-        mainPromptText += `\n[🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
+        mainPromptText += `\n4. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
       let charDefText = `Roleplay Profile:
@@ -1159,11 +1170,12 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       });
 
       if (data && data.text) {
+        const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
         const charMsg: Message = {
           id: (Date.now() + 1).toString(),
           characterId: activeChatCharId,
           sender: "character",
-          content: data.text,
+          content: cleanedText || data.text,
           timestamp: Date.now(),
         };
         onSendMessage(charMsg);
@@ -1324,11 +1336,12 @@ ${proactivePrompt}`;
       });
 
       if (data && data.text) {
+        const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
         const proactiveMsg: Message = {
           id: Date.now().toString(),
           characterId: activeChatCharId,
           sender: "character",
-          content: data.text,
+          content: cleanedText || data.text,
           timestamp: Date.now(),
         };
         onSendMessage(proactiveMsg);
@@ -1394,11 +1407,12 @@ ${instructionsPrompt}`;
       });
 
       if (data && data.text) {
+        const cleanedText = cleanOnlineMessage(data.text, friend.disableBracketActions || false);
         const proactiveMsg: Message = {
           id: Date.now().toString(),
           characterId: charId,
           sender: "character",
-          content: data.text,
+          content: cleanedText || data.text,
           timestamp: Date.now(),
         };
         onSendMessage(proactiveMsg);
@@ -2218,7 +2232,7 @@ ${instructionsPrompt}`;
             
             {isOfflineModeActive && (
               <div className="px-4 py-2 bg-slate-50 border-b border-slate-150 flex items-center gap-2.5 text-xs text-slate-700 shrink-0 select-none">
-                <span className="font-bold text-[11px] text-slate-500 uppercase tracking-wide">剧本输入类型:</span>
+                <span className="font-bold text-[11px] text-slate-500 uppercase tracking-wide">类型:</span>
                 <button
                   type="button"
                   onClick={() => setIsInputNarration(false)}
@@ -2228,7 +2242,7 @@ ${instructionsPrompt}`;
                       : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                   }`}
                 >
-                  <span className={!isInputNarration ? "text-white !text-white" : "text-slate-600"}>💬 角色发言</span>
+                  <span className={!isInputNarration ? "text-white !text-white" : "text-slate-600"}>💬 发言</span>
                 </button>
                 <button
                   type="button"
@@ -2239,7 +2253,7 @@ ${instructionsPrompt}`;
                       : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                   }`}
                 >
-                  <span className={isInputNarration ? "text-white !text-white" : "text-slate-600"}>📖 旁白客观叙事</span>
+                  <span className={isInputNarration ? "text-white !text-white" : "text-slate-600"}>📖 旁白</span>
                 </button>
               </div>
             )}
@@ -2259,8 +2273,8 @@ ${instructionsPrompt}`;
                 placeholder={
                   isOfflineModeActive 
                     ? (isInputNarration 
-                        ? "输入旁白客观场景叙事描述..." 
-                        : "继续剧本对话...")
+                        ? "输入旁白..." 
+                        : "输入发言，继续剧本对话...")
                     : `发送消息给 ${activeCharacter.name}...`
                 }
                 className={`flex-1 h-10 border focus:outline-none rounded-2xl px-4 text-xs text-slate-800 chat-input ${

@@ -293,3 +293,86 @@ export function splitTextToOfflineSegments(text: string): { content: string; isN
   
   return segments;
 }
+
+export function cleanOnlineMessage(text: string, disableBracketActions: boolean): string {
+  if (!text) return "";
+  
+  // Clean up any double empty parentheses or brackets if they happen to appear
+  let processedText = text.replace(/\(\s*\)|（\s*）/g, "").trim();
+
+  // Check if there are any quotes in the response (Chinese or standard quotes)
+  const hasQuotes = /[“「『”」』]/.test(processedText);
+  
+  if (hasQuotes) {
+    // If there are quotes, we ONLY extract the content inside quotes as the dialogue,
+    // and completely discard all narration/scenery/parentheses outside the quotes!
+    const regex = /[“「『]([^”」』]+)[”」』]/g;
+    const matches: string[] = [];
+    let match;
+    while ((match = regex.exec(processedText)) !== null) {
+      let content = match[1].trim();
+      if (content) {
+        // If disableBracketActions is enabled, let's also remove any parenthesized/bracketed action parts inside the quote
+        // E.g. “（微笑）你醒了？” -> “你醒了？”
+        content = content.replace(/\([^)]*\)/g, "");
+        content = content.replace(/（[^）]*）/g, "");
+        content = content.replace(/\*[^*]*\*/g, "");
+        content = content.trim();
+        if (content) {
+          matches.push(content);
+        }
+      }
+    }
+    if (matches.length > 0) {
+      return matches.join("\n").trim();
+    }
+  }
+  
+  // If there are no quotes, we keep the text, but filter out any lines or parts of lines that are parenthesized/bracketed actions
+  const lines = processedText.split(/\r?\n/);
+  const cleanedLines: string[] = [];
+  
+  for (const line of lines) {
+    let trimmed = line.trim();
+    if (!trimmed) continue;
+    
+    // Check if the entire line is wrapped in parentheses/brackets/asterisks (representing action/narration settings)
+    const isActionOrNarrationLine = (
+      (trimmed.startsWith("(") && trimmed.endsWith(")")) ||
+      (trimmed.startsWith("（") && trimmed.endsWith("）")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+      (trimmed.startsWith("【") && trimmed.endsWith("】")) ||
+      (trimmed.startsWith("*") && trimmed.endsWith("*"))
+    );
+    
+    if (isActionOrNarrationLine) {
+      continue; // Skip entire narration line
+    }
+    
+    // Check for common narrative cues at the start of a line
+    // E.g. "他..." or "你..." describing physical scene
+    const isNarrativeScene = trimmed.length > 15 && 
+      (trimmed.startsWith("他") || trimmed.startsWith("她") || trimmed.startsWith("你") || trimmed.startsWith("我")) &&
+      (trimmed.includes("走进来") || trimmed.includes("端着") || trimmed.includes("看着") || trimmed.includes("拿着") || trimmed.includes("坐下"));
+      
+    if (isNarrativeScene) {
+      continue; // Skip narrative scene line
+    }
+    
+    // Remove inline bracketed action descriptions
+    trimmed = trimmed.replace(/\([^)]*\)/g, "");
+    trimmed = trimmed.replace(/（[^）]*）/g, "");
+    trimmed = trimmed.replace(/\*[^*]*\*/g, "");
+    
+    // Clean up spaces and punctuation
+    trimmed = trimmed.replace(/\s+/g, " ").trim();
+    trimmed = trimmed.replace(/[,，、：:]\s*$/, "").trim();
+    
+    if (trimmed) {
+      cleanedLines.push(trimmed);
+    }
+  }
+  
+  return cleanedLines.join("\n").trim();
+}
+
