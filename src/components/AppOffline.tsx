@@ -347,7 +347,7 @@ export default function AppOffline({
                 </button>
                 <div>
                   <h1 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                    <span>🎭 线下剧本模式</span>
+                    <span>线下剧本模式</span>
                   </h1>
                   <p className="text-[10px] text-slate-500">线下独立走向，与线上大脑记忆互通</p>
                 </div>
@@ -355,10 +355,10 @@ export default function AppOffline({
 
               <button 
                 onClick={() => setShowCreateModal(true)}
-                className="px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition-colors"
+                className="w-8 h-8 rounded-full bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center shadow-sm transition-colors"
+                title="新建故事"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>新建故事</span>
+                <Plus className="w-4 h-4" />
               </button>
             </div>
 
@@ -477,15 +477,6 @@ export default function AppOffline({
                   })}
                 </div>
               )}
-            </div>
-
-            {/* Quick explanation guide footer */}
-            <div className="p-4 bg-white border-t border-slate-150 text-[11px] text-slate-500 space-y-2">
-              <p className="font-bold text-slate-700 flex items-center gap-1">
-                <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                什么是线下故事模式？
-              </p>
-              <p className="leading-relaxed">线下故事模式是模拟剧本创作，支持「导演模式」、「续写模式」与「IF平行宇宙」。双方可以通过客观旁白/动作描写进行文段叙事，极高自由度定制非线性关系，所有内容与主线独立但记忆相通。</p>
             </div>
           </motion.div>
         ) : (

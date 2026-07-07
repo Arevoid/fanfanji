@@ -601,13 +601,13 @@ export default function AppChat({
     return () => clearInterval(timer);
   }, [activeAttachModal, callingStatus]);
 
-  const generateResponseForUserMessage = async (userMsg: Message, customHistoryOverride?: Message[]) => {
+  const generateResponseForUserMessage = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return;
     setIsTyping(true);
 
     try {
       // Collect message history of this specific character to pass to backend
-      const sourceMsgs = customHistoryOverride || [...currentChatMessages, userMsg];
+      const sourceMsgs = customHistoryOverride || (userMsg ? [...currentChatMessages, userMsg] : [...currentChatMessages]);
       const uniqueMsgsMap = new Map<string, Message>();
       sourceMsgs.forEach(m => {
         if (m) uniqueMsgsMap.set(m.id, m);
@@ -623,9 +623,13 @@ export default function AppChat({
       let mainPromptText = isOfflineModeActive 
         ? `You are playing the role of "${activeCharacter.name}" in an OFFLINE STAGE/DRAMA script mode (线下剧本模式).
 In this mode, you are co-writing an immersive story with the user.
-You must output a highly detailed, book-chapter or high-quality roleplay novel section in Chinese.
-Your reply should contain third-person narrator descriptions of actions, background details, scenery, and characters' thoughts, AS WELL AS character dialogues.
-🚨🚨🚨 [CRITICAL RULE]: All spoken dialogues MUST be strictly enclosed in Chinese double quotes “ ” (e.g. “你又在胡思乱想了。”) or corner brackets 「 」. Any third-person scenery, action descriptions, or thoughts must remain OUTSIDE of the quotes. NEVER output spoken dialogue without quotes! Otherwise the system cannot parse your dialogue into separate chat bubbles.`
+Your reply must contain third-person narrator descriptions of actions, background details, scenery, and characters' thoughts, AS WELL AS character dialogues.
+
+🚨🚨🚨 [CRITICAL OFFLINE FORMAT RULES]:
+1. All spoken dialogues MUST be strictly enclosed in Chinese double quotes “ ” (e.g. “你又在胡思乱想了。”) or corner brackets 「 」. Any third-person scenery, action descriptions, or thoughts must remain OUTSIDE of the quotes. NEVER output spoken dialogue without quotes! Otherwise the system cannot parse your dialogue into separate chat bubbles.
+2. Third-person narrator descriptions, actions, and scenery should be rich, detailed, complete, and immersive, so as to create a vivid novel-like narrative. (第三人称旁白、场景及动作心理描写应当丰富、生动且完整，以塑造出极具沉浸感的小说式氛围)。
+3. Do NOT wrap descriptions or actions in parentheses like (微笑), （叹气）, (物理动作); instead, write them as normal, beautiful narrative prose sentences and separate them from spoken dialogue using standard line breaks (换行处理，不要加任何括号).
+4. You must ONLY use Chinese double quotes “ ” to enclose actual spoken dialogue (口语/说话内容) by ${activeCharacter.name}. NEVER use quotes for thoughts, descriptions, emphasis, or words within third-person narration! This is extremely important so the user's system can correctly parse dialogue bubbles.`
         : `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
 WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
 Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
@@ -649,7 +653,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", userMsg.content, topK);
+      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", userMsg ? userMsg.content : "", topK);
       if (relevantMemories.length > 0) {
         charDefText += `\n- Reclaimed Memories from previous conversations (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
       }
@@ -664,7 +668,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
         text: string;
       }[] = [];
 
-      const lowerUserMsg = userMsg.content.toLowerCase();
+      const lowerUserMsg = userMsg ? userMsg.content.toLowerCase() : "";
 
       for (const entry of worldBookEntries) {
         // Skip inactive entries
@@ -765,7 +769,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
       // Custom tool/attachment format descriptions for character context
-      let promptMessage = userMsg.content;
+      let promptMessage = userMsg ? userMsg.content : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
       if (promptMessage.startsWith("data:image/")) {
         promptMessage = `[发送图片/照片] 我给你发送了一张照片，请对此做出符合你人设、生动有趣、短小、像真正情侣或朋友一样的回复。`;
       } else if (promptMessage.startsWith("[红包]")) {
@@ -879,7 +883,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 
           if (isAutoExtractEnabled) {
             const triggerCount = extractIntervalRounds * 2;
-            const currentMsgs = [...currentChatMessages, userMsg, charMsg];
+            const currentMsgs = userMsg ? [...currentChatMessages, userMsg, charMsg] : [...currentChatMessages, charMsg];
             
             let eligibleMsgs = currentMsgs;
             if (activeCharacter.lastImmediateSummaryMsgId) {
@@ -1020,7 +1024,13 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
   // Handle Send Message and Trigger AI reply
   const handleSendAndReply = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
+    if (!activeChatCharId || !activeCharacter) return;
+
+    if (!chatInputText.trim()) {
+      // If user input is empty, trigger AI response directly (continue the story)
+      generateResponseForUserMessage(null, currentChatMessages);
+      return;
+    }
 
     let userMsgText = chatInputText.trim();
     if (quotedMessage) {
@@ -2288,7 +2298,7 @@ ${instructionsPrompt}`;
               {/* Send Button 2 (Send and AI Reply - black background with white paper plane) */}
               <button
                 type="submit"
-                disabled={!chatInputText.trim() || isTyping}
+                disabled={isTyping}
                 className="w-8 h-8 rounded-full bg-slate-900 hover:bg-black disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm send-button"
                 title="发送消息并获取回复"
               >

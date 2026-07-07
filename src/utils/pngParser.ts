@@ -201,120 +201,95 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
 };
 
 export const parseTextToWorldBookEntries = (text: string, filename: string): WorldBookEntry[] => {
-  const entries: WorldBookEntry[] = [];
   const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+  const trimmedText = text.trim();
+  if (!trimmedText) return [];
   
-  const sections: { title: string; lines: string[] }[] = [];
-  let currentSection: { title: string; lines: string[] } | null = null;
-  
-  const lines = text.split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    
-    const bracketMatch1 = trimmed.match(/^【(.*?)】$/) || trimmed.match(/^【(.*?)】(.*)$/);
-    const bracketMatch2 = trimmed.match(/^\[(.*?)\]$/) || trimmed.match(/^\[(.*?)\](.*)$/);
-    const mdMatch = trimmed.match(/^#+\s+(.*?)$/);
-    
-    let matchedTitle = "";
-    let trailingContent = "";
-    
-    if (bracketMatch1) {
-      matchedTitle = bracketMatch1[1].trim();
-      trailingContent = bracketMatch1[2] ? bracketMatch1[2].trim() : "";
-    } else if (bracketMatch2) {
-      matchedTitle = bracketMatch2[1].trim();
-      trailingContent = bracketMatch2[2] ? bracketMatch2[2].trim() : "";
-    } else if (mdMatch) {
-      matchedTitle = mdMatch[1].trim();
-    }
-    
-    if (matchedTitle) {
-      currentSection = { title: matchedTitle, lines: [] };
-      if (trailingContent) {
-        currentSection.lines.push(trailingContent);
-      }
-      sections.push(currentSection);
-    } else {
-      if (currentSection) {
-        currentSection.lines.push(line);
-      } else {
-        const sepIndex = trimmed.indexOf(":") > -1 ? trimmed.indexOf(":") : trimmed.indexOf("：");
-        if (sepIndex > 0 && sepIndex < 30) {
-          const title = trimmed.substring(0, sepIndex).trim();
-          const content = trimmed.substring(sepIndex + 1).trim();
-          if (title && content) {
-            sections.push({ title, lines: [content] });
-          }
-        } else {
-          currentSection = { title: nameWithoutExt, lines: [line] };
-          sections.push(currentSection);
-        }
-      }
-    }
-  }
-  
-  sections.forEach((sec, idx) => {
-    const content = sec.lines.join("\n").trim();
-    if (sec.title && content) {
-      entries.push({
-        id: "wb-" + Date.now() + "-" + idx + "-" + Math.floor(Math.random() * 1000),
-        title: sec.title,
-        content: content,
-        characterId: "global",
-        category: "导入词条",
-        timestamp: Date.now()
-      });
-    }
-  });
-  
-  if (entries.length === 0 && text.trim()) {
-    entries.push({
-      id: "wb-" + Date.now() + "-fallback",
-      title: nameWithoutExt,
-      content: text.trim(),
-      characterId: "global",
-      category: "导入词条",
-      timestamp: Date.now()
-    });
-  }
-  
-  return entries;
+  return [{
+    id: "wb-" + Date.now() + "-" + Math.floor(Math.random() * 1000000),
+    title: nameWithoutExt,
+    content: trimmedText,
+    characterId: "global",
+    category: "导入词条",
+    timestamp: Date.now()
+  }];
 };
 
 export function splitTextToOfflineSegments(text: string): { content: string; isNarration: boolean }[] {
   if (!text) return [];
   const segments: { content: string; isNarration: boolean }[] = [];
-  // Matching quotes like “...” or "..." or 「...」 or 『...』 or ‘...’ or '...'
-  const regex = /([“\"「『‘'][^”\"」』’']+[”\"」』’'])/g;
-  const parts = text.split(regex);
   
-  for (const part of parts) {
-    if (!part) continue;
-    let trimmed = part.trim();
-    if (!trimmed) continue;
+  // Normalize line breaks and remove duplicate spaces
+  let processedText = text.replace(/\r\n/g, "\n").trim();
+  
+  // Clean up any double empty parentheses or brackets if they happen to appear
+  processedText = processedText.replace(/\(\s*\)|（\s*）/g, "").trim();
+
+  const hasQuotes = /[“\"「『‘'”」』’']/.test(processedText);
+
+  // This regex matches:
+  // 1. Parenthesized/bracketed blocks: (...) or （...） or [...] or 【...】 or *...*
+  // 2. Quoted blocks: “...” or 「...」 or 『...』 or "..." or '...'
+  const regex = /(\([^)]+\)|（[^）]+）|\[[^\]]+\]|【[^】]+】|\*[^*]+\*|[“"「『‘'][^”"」』’']+[”"」』’'])/g;
+  
+  let match;
+  let lastIndex = 0;
+  
+  while ((match = regex.exec(processedText)) !== null) {
+    const matchText = match[0];
+    const matchIndex = match.index;
     
-    const isDialogue = (
-      (trimmed.startsWith("“") && trimmed.endsWith("”")) ||
-      (trimmed.startsWith("「") && trimmed.endsWith("」")) ||
-      (trimmed.startsWith("『") && trimmed.endsWith("』")) ||
-      (trimmed.startsWith("‘") && trimmed.endsWith("’")) ||
-      (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
-      (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    // Process any text between the last match and the current match
+    if (matchIndex > lastIndex) {
+      const betweenText = processedText.substring(lastIndex, matchIndex).trim();
+      if (betweenText) {
+        // Clean up trailing colons or dialogue indicators
+        const cleanText = betweenText.replace(/^[a-zA-Z0-9_\u4e00-\u9fa5]+\s*[:：]\s*/, "").replace(/[:：]\s*$/, "").trim();
+        if (cleanText) {
+          // If there are quotes elsewhere in the response, plain text outside quotes is narration.
+          // Otherwise, plain text defaults to dialogue in a bubble!
+          segments.push({ content: cleanText, isNarration: hasQuotes });
+        }
+      }
+    }
+    
+    // Process the match itself
+    let trimmedMatch = matchText.trim();
+    const isParenthesized = (
+      (trimmedMatch.startsWith("(") && trimmedMatch.endsWith(")")) ||
+      (trimmedMatch.startsWith("（") && trimmedMatch.endsWith("）")) ||
+      (trimmedMatch.startsWith("[") && trimmedMatch.endsWith("]")) ||
+      (trimmedMatch.startsWith("【") && trimmedMatch.endsWith("】")) ||
+      (trimmedMatch.startsWith("*") && trimmedMatch.endsWith("*"))
     );
     
-    if (isDialogue) {
-      const dialogueContent = trimmed.substring(1, trimmed.length - 1).trim();
-      if (dialogueContent) {
-        segments.push({ content: dialogueContent, isNarration: false });
+    if (isParenthesized) {
+      // Strip the parentheses
+      const cleanContent = trimmedMatch.substring(1, trimmedMatch.length - 1).trim();
+      if (cleanContent) {
+        segments.push({ content: cleanContent, isNarration: true });
       }
     } else {
-      // Clean up trailing colons or dialogue indicators at the very end of narration (e.g. "说：" -> "说")
-      trimmed = trimmed.replace(/[:：]\s*$/, "").trim();
-      if (trimmed) {
-        segments.push({ content: trimmed, isNarration: true });
+      // It's a quoted block, strip quotes
+      const cleanContent = trimmedMatch.substring(1, trimmedMatch.length - 1).trim();
+      if (cleanContent) {
+        segments.push({ content: cleanContent, isNarration: false });
+      }
+    }
+    
+    lastIndex = regex.lastIndex;
+  }
+  
+  // Process any remaining text after the last match
+  if (lastIndex < processedText.length) {
+    const remainingText = processedText.substring(lastIndex).trim();
+    if (remainingText) {
+      const cleanText = remainingText.replace(/^[a-zA-Z0-9_\u4e00-\u9fa5]+\s*[:：]\s*/, "").replace(/[:：]\s*$/, "").trim();
+      if (cleanText) {
+        segments.push({ content: cleanText, isNarration: hasQuotes });
       }
     }
   }
+  
   return segments;
 }
