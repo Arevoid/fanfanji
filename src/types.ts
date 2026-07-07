@@ -29,6 +29,7 @@ export interface Character {
   chatStylePreset?: "default" | "floating-cute";
   greeting?: string;
   lastImmediateSummaryMsgId?: string;
+  disableBracketActions?: boolean;
 }
 
 export interface Message {
@@ -38,6 +39,8 @@ export interface Message {
   content: string;
   timestamp: number;
   isBookmarked?: boolean;
+  isOffline?: boolean;
+  isNarration?: boolean;
 }
 
 export interface MomentComment {
@@ -190,6 +193,19 @@ export interface ImmediateSummaryTask {
   rounds: number;
   extractedCount: number;
   error?: string;
+}
+
+export interface OfflineStory {
+  id: string;
+  characterId: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  mode: "director" | "continue" | "if";
+  ifPrompt?: string;
+  sourceChatId?: string; // Optional reference source
+  sourceChatMsgCount?: number;
+  messages: Message[];
 }
 
 

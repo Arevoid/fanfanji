@@ -79,6 +79,17 @@ const APPS_LIST: AppItem[] = [
     reviews: "1.4万",
     size: "5.3 MB",
     description: "清爽纯净的本地记事与日程待办工具，支持多栏笔记管理及每日待办，与桌面代办小组件完全同步，助您轻松打理生活与灵感。"
+  },
+  {
+    id: "offline",
+    name: "线下模式",
+    category: "剧本创作与演练",
+    icon: "🎭",
+    iconBg: "bg-indigo-600",
+    rating: 4.9,
+    reviews: "4.8万",
+    size: "9.2 MB",
+    description: "支持新建线下剧本或根据聊天续写故事。支持「导演」指令走向、常规「续写」和「IF线」假想推演，与线上对话保持记忆互通，并提供客观旁白叙事能力。"
   }
 ];
 

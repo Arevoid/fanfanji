@@ -1,7 +1,9 @@
 import React, { useState } from "react";
+import mammoth from "mammoth";
 import { Character, WorldBookEntry } from "../types";
 import { apiSummarizePersonality } from "../utils/apiHelper";
 import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare } from "lucide-react";
+import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry } from "../utils/pngParser";
 
 interface AppArchivesProps {
   characters: Character[];
@@ -18,203 +20,6 @@ const MBTI_LIST = [
   "ISTP", "ISFP", "ESTP", "ESFP"
 ];
 
-// PNG Character Card text chunk parser
-async function parsePngChunks(file: File): Promise<string | null> {
-  const buffer = await file.arrayBuffer();
-  const view = new DataView(buffer);
-  
-  if (view.getUint32(0) !== 0x89504E47 || view.getUint32(4) !== 0x0D0A1A0A) {
-    throw new Error("不是一个有效的 PNG 图片文件！");
-  }
-  
-  let offset = 8;
-  const length = buffer.byteLength;
-  
-  while (offset < length) {
-    if (offset + 8 > length) break;
-    const chunkLength = view.getUint32(offset);
-    const chunkType = String.fromCharCode(
-      view.getUint8(offset + 4),
-      view.getUint8(offset + 5),
-      view.getUint8(offset + 6),
-      view.getUint8(offset + 7)
-    );
-    
-    if (chunkType === "tEXt" || chunkType === "iTXt") {
-      const chunkDataOffset = offset + 8;
-      const chunkData = new Uint8Array(buffer, chunkDataOffset, chunkLength);
-      const textDecoder = new TextDecoder("utf-8");
-      const decoded = textDecoder.decode(chunkData);
-      
-      if (chunkType === "tEXt") {
-        const parts = decoded.split("\0");
-        if (parts.length >= 2) {
-          const key = parts[0];
-          const val = parts.slice(1).join("\0");
-          if (key === "chara") {
-            return val;
-          }
-        }
-      } else if (chunkType === "iTXt") {
-        const parts = decoded.split("\0");
-        if (parts.length >= 2) {
-          const key = parts[0];
-          if (key === "chara") {
-            let index = key.length + 3;
-            while (index < decoded.length && decoded[index] !== "\0") {
-              index++;
-            }
-            index++;
-            while (index < decoded.length && decoded[index] !== "\0") {
-              index++;
-            }
-            index++;
-            const val = decoded.substring(index);
-            return val;
-          }
-        }
-      }
-    }
-    offset += 12 + chunkLength;
-  }
-  return null;
-}
-
-function decodeCharaData(rawData: string): any {
-  let text = rawData.trim();
-  if (!text.startsWith("{")) {
-    try {
-      text = atob(text);
-    } catch (e) {
-      // ignore
-    }
-  }
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    throw new Error("无法将解析出的数据转换为 JSON 格式: " + err);
-  }
-}
-
-const mapSillyTavernToCharacter = (json: any, defaultAvatar: string): Character => {
-  const data = json.data || json;
-  const charName = data.name || data.char_name || "未命名角色";
-  
-  let pDetails = "";
-  if (data.personality) pDetails += `【性格】\n${data.personality}\n\n`;
-  if (data.description || data.char_persona) pDetails += `【详细人设】\n${data.description || data.char_persona}\n\n`;
-  if (data.scenario || data.world_scenario) pDetails += `【背景/情境】\n${data.scenario || data.world_scenario}\n\n`;
-  if (data.mes_example) pDetails += `【对话范例】\n${data.mes_example}\n\n`;
-  
-  let bstory = data.creator_notes || data.creator || "";
-  if (!bstory.trim()) {
-    bstory = "暂无背景故事。";
-  }
-
-  let ageNum: number | "" = "";
-  if (data.age !== undefined && data.age !== null && data.age !== "") {
-    const parsedAge = parseInt(String(data.age));
-    if (!isNaN(parsedAge)) {
-      ageNum = parsedAge;
-    }
-  } else {
-    const ageMatch = pDetails.match(/(?:年龄|Age|age|岁)[:：\s]*(\d+)/);
-    if (ageMatch) {
-      ageNum = parseInt(ageMatch[1]);
-    }
-  }
-
-  let genderStr = "";
-  if (data.gender !== undefined && data.gender !== null && data.gender !== "") {
-    genderStr = String(data.gender).trim();
-  } else {
-    if (pDetails.includes("女") || pDetails.toLowerCase().includes("female") || pDetails.toLowerCase().includes("girl")) {
-      genderStr = "女";
-    } else if (pDetails.includes("男") || pDetails.toLowerCase().includes("male") || pDetails.toLowerCase().includes("boy")) {
-      genderStr = "男";
-    }
-  }
-
-  let mbtiStr = "";
-  const mbtiMatch = pDetails.match(/\b([IE][NS][TF][JP])\b/i);
-  if (mbtiMatch) {
-    mbtiStr = mbtiMatch[1].toUpperCase();
-  }
-
-  return {
-    id: "char-import-" + Date.now(),
-    name: charName,
-    avatar: defaultAvatar || "/avatars/default.png",
-    age: ageNum,
-    gender: genderStr,
-    mbti: mbtiStr,
-    personality: pDetails.trim() || "导入的性格设定。",
-    backstory: bstory.trim(),
-    greeting: (data.first_mes || "").trim(),
-    album: defaultAvatar ? [defaultAvatar] : [],
-    references: [],
-  };
-};
-
-const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBookEntry => {
-  let title = stEntry.comment || stEntry.name || stEntry.title || "";
-  if (!title && stEntry.keys && stEntry.keys.length > 0) {
-    title = Array.isArray(stEntry.keys) ? stEntry.keys[0] : String(stEntry.keys).split(",")[0];
-  }
-  if (!title) {
-    title = `未命名词条-${Math.random().toString(36).substring(2, 6)}`;
-  }
-
-  let kwString = "";
-  if (Array.isArray(stEntry.keys)) {
-    kwString = stEntry.keys.join(", ");
-  } else if (typeof stEntry.keys === "string") {
-    kwString = stEntry.keys;
-  }
-
-  let mappedPos: "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history" = "after_char_def";
-  const stPos = stEntry.position;
-  if (stPos !== undefined) {
-    const pStr = String(stPos).toLowerCase();
-    if (pStr.includes("author") || pStr === "3") {
-      mappedPos = "after_char_def"; // authors_note maps to after_char_def
-    } else if (pStr.includes("before_char") || pStr.includes("before_body") || pStr === "0") {
-      mappedPos = "before_char_def";
-    } else if (pStr.includes("after_char") || pStr.includes("after_body") || pStr === "1") {
-      mappedPos = "after_char_def";
-    } else if (pStr.includes("chat") || pStr.includes("story") || pStr === "2") {
-      mappedPos = "before_chat_history";
-    } else if (pStr.includes("main") || pStr.includes("depth") || pStr === "4") {
-      mappedPos = "after_main_prompt";
-    }
-  }
-
-  let mappedDepth = 5;
-  if (stEntry.insertion_order !== undefined) {
-    mappedDepth = Math.max(1, Math.min(15, Number(stEntry.insertion_order)));
-  } else if (stEntry.depth !== undefined) {
-    mappedDepth = Math.max(1, Math.min(15, Number(stEntry.depth)));
-  }
-
-  let trigger: "keys" | "constant" | "vector" = "keys";
-  if (stEntry.constant === true || !kwString.trim()) {
-    trigger = "constant";
-  }
-
-  return {
-    id: `wb-entry-${characterId}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    title: title,
-    category: "世界书",
-    content: stEntry.content || "",
-    timestamp: Date.now(),
-    characterId: characterId,
-    triggerType: trigger,
-    keywords: kwString || undefined,
-    isActive: stEntry.enabled !== false,
-    position: mappedPos,
-    depth: mappedDepth
-  };
-};
 
 export default function AppArchives({
   characters,
@@ -304,8 +109,14 @@ export default function AppArchives({
     setGender(char.gender);
     setMbti(char.mbti);
     setAvatar(char.avatar);
-    setPersonality(char.personality);
-    setBackstory(char.backstory);
+    
+    // Combine existing backstory if populated and valid
+    let combined = char.personality;
+    if (char.backstory && char.backstory !== "暂无背景设定。" && char.backstory !== "暂无背景故事。" && char.backstory.trim() !== "") {
+      combined += "\n\n【背景故事】\n" + char.backstory;
+    }
+    setPersonality(combined);
+    setBackstory("");
     setGreeting(char.greeting || "");
     setAlbum(char.album || []);
     setErrorMsg("");
@@ -333,23 +144,27 @@ export default function AppArchives({
     try {
       const isPng = file.name.toLowerCase().endsWith(".png");
       const isJson = file.name.toLowerCase().endsWith(".json");
+      const isTxt = file.name.toLowerCase().endsWith(".txt");
+      const isDocx = file.name.toLowerCase().endsWith(".docx");
       
-      let parsedJson: any = null;
-      let imgDataUrl = "";
+      let importedChar: Character;
+      let characterBook: any = null;
 
       if (isPng) {
         const charaStr = await parsePngChunks(file);
         if (!charaStr) {
           throw new Error("此 PNG 图片中未检测到内嵌的角色卡数据 (chara)！");
         }
-        parsedJson = decodeCharaData(charaStr);
-        
-        imgDataUrl = await new Promise<string>((resolve, reject) => {
+        const parsedJson = decodeCharaData(charaStr);
+        const imgDataUrl = await new Promise<string>((resolve, reject) => {
           const r = new FileReader();
           r.onload = () => resolve(r.result as string);
           r.onerror = () => reject(new Error("读取头像图片失败"));
           r.readAsDataURL(file);
         });
+        importedChar = mapSillyTavernToCharacter(parsedJson, imgDataUrl);
+        const innerData = parsedJson.data || parsedJson;
+        characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
       } else if (isJson) {
         const text = await new Promise<string>((resolve, reject) => {
           const r = new FileReader();
@@ -357,16 +172,52 @@ export default function AppArchives({
           r.onerror = () => reject(new Error("读取 JSON 配置文件失败"));
           r.readAsText(file);
         });
-        parsedJson = JSON.parse(text);
+        const parsedJson = JSON.parse(text);
+        importedChar = mapSillyTavernToCharacter(parsedJson, "");
+        const innerData = parsedJson.data || parsedJson;
+        characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
+      } else if (isTxt) {
+        const text = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => reject(new Error("读取 TXT 配置文件失败"));
+          r.readAsText(file);
+        });
+        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+        importedChar = {
+          id: "char-import-" + Date.now(),
+          name: nameWithoutExt,
+          avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop",
+          personality: text.trim() || "导入的性格设定。",
+          backstory: "通过文本文件导入。",
+          greeting: `你好，我是 ${nameWithoutExt}。`,
+          album: [],
+          references: [],
+        };
+      } else if (isDocx) {
+        const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as ArrayBuffer);
+          r.onerror = () => reject(new Error("读取 DOCX 配置文件失败"));
+          r.readAsArrayBuffer(file);
+        });
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        const text = result.value;
+        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+        importedChar = {
+          id: "char-import-" + Date.now(),
+          name: nameWithoutExt,
+          avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop",
+          personality: text.trim() || "导入的性格设定。",
+          backstory: "通过 DOCX 文件导入。",
+          greeting: `你好，我是 ${nameWithoutExt}。`,
+          album: [],
+          references: [],
+        };
       } else {
-        throw new Error("请上传 .png 角色卡图片或 .json 人设配置文件！");
+        throw new Error("请上传 .png 角色卡、.json 配置文件、.txt 或 .docx 文档文件！");
       }
 
-      const importedChar = mapSillyTavernToCharacter(parsedJson, imgDataUrl);
-      
-      const innerData = parsedJson.data || parsedJson;
-      const characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
-      
       const finishImport = (importEntries: boolean) => {
         let importedEntriesCount = 0;
         if (importEntries && characterBook && Array.isArray(characterBook.entries) && characterBook.entries.length > 0) {
@@ -410,10 +261,6 @@ export default function AppArchives({
     e.preventDefault();
     setErrorMsg("");
 
-    if (!avatar) {
-      setErrorMsg("请先上传角色头像！");
-      return;
-    }
     if (!name.trim()) {
       setErrorMsg("请输入姓名！");
       return;
@@ -422,21 +269,20 @@ export default function AppArchives({
       setErrorMsg("请输入正确的年龄！");
       return;
     }
-    if (!personality.trim()) {
-      setErrorMsg("请输入详细人设！");
-      return;
-    }
 
     const originalChar = editingId ? characters.find(c => c.id === editingId) : null;
+    const finalAvatar = avatar || "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png";
+    const finalPersonality = personality.trim() || "这个角色尚未填写详细人设和背景。";
+
     const savedChar: Character = {
       id: editingId || Date.now().toString(),
       name: name.trim(),
       age: age === "" ? "" : Number(age),
       gender,
       mbti,
-      avatar,
-      personality: personality.trim(),
-      backstory: backstory.trim() || "暂无背景设定。",
+      avatar: finalAvatar,
+      personality: finalPersonality,
+      backstory: "",
       greeting: greeting.trim(),
       album: album,
       momentsCover: originalChar ? originalChar.momentsCover : undefined,
@@ -624,7 +470,7 @@ export default function AppArchives({
                       <span>导入设定</span>
                       <input
                         type="file"
-                        accept=".png,.json"
+                        accept=".png,.json,.txt,.docx"
                         onChange={(e) => {
                           setShowAddMenu(false);
                           handleCharacterImport(e);
@@ -656,7 +502,7 @@ export default function AppArchives({
             {/* Avatar Selection */}
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                上传角色头像 <span className="text-rose-500">*</span>
+                上传角色头像 (选填)
               </label>
               <div className="flex items-center gap-4">
                 {avatar ? (
@@ -747,31 +593,17 @@ export default function AppArchives({
               </div>
             </div>
 
-            {/* Detailed Personality */}
+            {/* Detailed Personality and Backstory */}
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1">
-                详细人设 <span className="text-rose-500">*</span>
+                详细人设与背景 (选填)
               </label>
               <textarea
-                rows={5}
+                rows={8}
                 value={personality}
                 onChange={(e) => setPersonality(e.target.value)}
-                placeholder="在此输入详细的人格性格设定、语气特征和交流行为惯例..."
+                placeholder="在此输入详细的人格性格设定、语气特征、来历背景、生活背景或各种设定细节..."
                 className="w-full px-5 py-4 rounded-[32px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed font-medium"
-              />
-            </div>
-
-            {/* Backstory */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1">
-                背景故事
-              </label>
-              <textarea
-                rows={5}
-                value={backstory}
-                onChange={(e) => setBackstory(e.target.value)}
-                placeholder="在此输入角色的来历、生活背景或各种设定细节..."
-                className="w-full px-5 py-4 rounded-[32px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed"
               />
             </div>
 
@@ -838,7 +670,7 @@ export default function AppArchives({
                 <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-2">
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Brain className="w-3.5 h-3.5 text-neutral-800" />
-                    <span>详细人设与口癖特征</span>
+                    <span>详细人设与背景设定</span>
                   </h3>
                   <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 p-4 rounded-xl border border-slate-100 font-semibold">
                     {char.personality}
@@ -846,15 +678,17 @@ export default function AppArchives({
                 </div>
 
                 {/* Backstory Card */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-2">
-                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <BookOpen className="w-3.5 h-3.5 text-neutral-800" />
-                    <span>背景故事设定</span>
-                  </h3>
-                  <div className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap bg-slate-50 p-4 rounded-xl border border-slate-100">
-                    {char.backstory}
+                {char.backstory && char.backstory !== "暂无背景设定。" && char.backstory !== "暂无背景故事。" && char.backstory.trim() !== "" && (
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-2">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <BookOpen className="w-3.5 h-3.5 text-neutral-800" />
+                      <span>独立背景故事设定</span>
+                    </h3>
+                    <div className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap bg-slate-50 p-4 rounded-xl border border-slate-100">
+                      {char.backstory}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Greeting Card */}
                 {char.greeting && (

@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import mammoth from "mammoth";
 import { WorldBookEntry, Character } from "../types";
 import { Plus, Trash2, Edit, Search, ChevronLeft, Save, BookOpen, Layers, Globe, User, X, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
+import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries } from "../utils/pngParser";
 
 export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBookEntry | null => {
   if (!e || typeof e !== "object") return null;
@@ -157,7 +159,19 @@ export default function AppWorldBook({
 }: AppWorldBookProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBinding, setSelectedBinding] = useState<string | null>(null);
-  const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
+  const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>(() => {
+    try {
+      const stored = localStorage.getItem("worldbook_collapsed_categories");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("worldbook_collapsed_categories", JSON.stringify(collapsedCategories));
+  }, [collapsedCategories]);
+
   const [showAddMenu, setShowAddMenu] = useState(false);
   
   const [isEditing, setIsEditing] = useState(false);
@@ -359,31 +373,83 @@ export default function AppWorldBook({
     resetForm();
   };
 
-  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const json = JSON.parse(reader.result as string);
-        const imported = parseWorldBookImport(json);
-        if (imported.length > 0) {
-          if (onSaveEntries) {
-            onSaveEntries(imported);
-          } else {
-            imported.forEach(entry => onSaveEntry(entry));
-          }
-          showAlert("导入成功", `成功识别并导入 ${imported.length} 条世界书词条！`);
-        } else {
-          showAlert("导入提示", "未能在此文件中识别出有效的世界书词条设定。");
+    try {
+      const isPng = file.name.toLowerCase().endsWith(".png");
+      const isJson = file.name.toLowerCase().endsWith(".json");
+      const isTxt = file.name.toLowerCase().endsWith(".txt");
+      const isDocx = file.name.toLowerCase().endsWith(".docx");
+
+      let imported: WorldBookEntry[] = [];
+
+      if (isPng) {
+        const charaStr = await parsePngChunks(file);
+        if (!charaStr) {
+          throw new Error("此 PNG 图片中未检测到内嵌的角色卡数据！");
         }
-      } catch (err: any) {
-        showAlert("解析失败", "JSON 文件解析失败，请检查文件格式。");
+        const parsedJson = decodeCharaData(charaStr);
+        const innerData = parsedJson.data || parsedJson;
+        const characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
+        if (characterBook && Array.isArray(characterBook.entries)) {
+          imported = characterBook.entries.map((entry: any) => mapSillyTavernEntry(entry, "global"));
+        } else {
+          throw new Error("该 PNG 角色卡中不包含任何世界书 (character_book) 词条设定。");
+        }
+      } else if (isJson) {
+        const text = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => reject(new Error("读取 JSON 失败"));
+          r.readAsText(file);
+        });
+        const parsedJson = JSON.parse(text);
+        const innerData = parsedJson.data || parsedJson;
+        const characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
+        if (characterBook && Array.isArray(characterBook.entries)) {
+          imported = characterBook.entries.map((entry: any) => mapSillyTavernEntry(entry, "global"));
+        } else {
+          imported = parseWorldBookImport(parsedJson);
+        }
+      } else if (isTxt) {
+        const text = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => reject(new Error("读取 TXT 失败"));
+          r.readAsText(file);
+        });
+        imported = parseTextToWorldBookEntries(text, file.name);
+      } else if (isDocx) {
+        const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as ArrayBuffer);
+          r.onerror = () => reject(new Error("读取 DOCX 失败"));
+          r.readAsArrayBuffer(file);
+        });
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        imported = parseTextToWorldBookEntries(result.value, file.name);
+      } else {
+        throw new Error("请上传 .json 配置文件、.png 角色卡、.txt 或 .docx 文档文件！");
       }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+
+      if (imported.length > 0) {
+        if (onSaveEntries) {
+          onSaveEntries(imported);
+        } else {
+          imported.forEach((entry) => onSaveEntry(entry));
+        }
+        showAlert("导入成功", `成功识别并导入 ${imported.length} 条世界书词条！`);
+      } else {
+        showAlert("导入提示", "未能在此文件中识别出任何有效的世界书设定词条。");
+      }
+    } catch (err: any) {
+      console.error(err);
+      showAlert("导入失败", err.message || "文件导入解析失败，请检查文件格式。");
+    } finally {
+      e.target.value = "";
+    }
   };
 
   const filteredEntries = entries.filter((entry) => {
@@ -449,7 +515,7 @@ export default function AppWorldBook({
                       <span>导入设定</span>
                       <input
                         type="file"
-                        accept=".json"
+                        accept=".png,.json,.txt,.docx"
                         onChange={(e) => {
                           setShowAddMenu(false);
                           handleFileImport(e);

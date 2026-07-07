@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory } from "../types";
+import { splitTextToOfflineSegments } from "../utils/pngParser";
+import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
 import {
   MessageSquare,
@@ -34,7 +36,9 @@ import {
   Quote,
   Mic,
   Volume2,
-  Smile
+  Smile,
+  Copy,
+  BookOpen
 } from "lucide-react";
 
 interface AppChatProps {
@@ -57,20 +61,13 @@ interface AppChatProps {
   memories: MemoryItem[];
   onSaveMemories: (updated: MemoryItem[]) => void;
   recallSettings: MemoryVaultSettings;
+  activeChatCharId: string | null;
+  setActiveChatCharId: (id: string | null) => void;
+  offlineStories?: OfflineStory[];
+  onSaveOfflineStory?: (story: OfflineStory) => void;
 }
 
-const PRESEED_MOMENTS: Moment[] = [
-  {
-    id: "m-init-lc",
-    characterId: "pre-char-lc",
-    authorName: "陆沉砚",
-    authorAvatar: "https://images.unsplash.com/photo-1620662056044-1253857f6edd?w=100&h=100&fit=crop",
-    content: "刚整理完新一期的人文空间设计图，给自己泡了一杯热美式。深夜的城市很安静，希望每个在梦想路上前行的人，今晚都有个温柔的梦.☕✍️",
-    timestamp: Date.now() - 3600000,
-    likes: ["饭饭"],
-    comments: []
-  }
-];
+const PRESEED_MOMENTS: Moment[] = [];
 
 export default function AppChat({
   characters,
@@ -92,11 +89,74 @@ export default function AppChat({
   memories,
   onSaveMemories,
   recallSettings,
+  activeChatCharId,
+  setActiveChatCharId,
+  offlineStories = [],
+  onSaveOfflineStory,
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
+
+  // Initiated chats state to satisfy: unless user initiates chat or proactive message received, don't show thread
+  const [initiatedChatIds, setInitiatedChatIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem("phone_initiated_chat_ids");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("phone_initiated_chat_ids", JSON.stringify(initiatedChatIds));
+  }, [initiatedChatIds]);
+
+  // Keep track of initiated chats when a chat is opened
+  useEffect(() => {
+    if (activeChatCharId && !initiatedChatIds.includes(activeChatCharId)) {
+      setInitiatedChatIds((prev) => [...prev, activeChatCharId]);
+    }
+  }, [activeChatCharId, initiatedChatIds]);
+
+  // Unread messages tracking
+  const [lastReadTimestamps, setLastReadTimestamps] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem("phone_last_read_timestamps");
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("phone_last_read_timestamps", JSON.stringify(lastReadTimestamps));
+  }, [lastReadTimestamps]);
+
+  useEffect(() => {
+    if (activeChatCharId) {
+      setLastReadTimestamps((prev) => ({
+        ...prev,
+        [activeChatCharId]: Date.now(),
+      }));
+    }
+  }, [activeChatCharId, messages.length]);
+
+  const getUnreadCount = (charId: string) => {
+    if (activeChatCharId === charId) return 0;
+    const lastRead = lastReadTimestamps[charId] || 0;
+    const charMsgs = messages.filter(
+      (m) => m.characterId === charId && m.sender === "character" && m.timestamp > lastRead
+    );
+    return charMsgs.length;
+  };
+
+  const startChatWith = (charId: string) => {
+    setActiveChatCharId(charId);
+    if (!initiatedChatIds.includes(charId)) {
+      setInitiatedChatIds((prev) => [...prev, charId]);
+    }
+  };
   
   // Navigation State
-  const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
   const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId);
   const activeStylePreset = (activeCharacter?.chatStylePreset) || (settings.globalChatStylePreset) || "default";
@@ -232,6 +292,60 @@ export default function AppChat({
   const [isTyping, setIsTyping] = useState(false);
   const [manualLocationText, setManualLocationText] = useState("");
   const [emptyGreetingCheckedCharIds, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  
+  // Offline Mode States
+  const [isOfflineModeActive, setIsOfflineModeActive] = useState(false);
+  const [isInputNarration, setIsInputNarration] = useState(false);
+  const [activeOfflineStoryId, setActiveOfflineStoryId] = useState<string | null>(null);
+
+  // Restore persistent offline mode state on character switch or mount
+  useEffect(() => {
+    if (activeChatCharId) {
+      const saved = localStorage.getItem(`offline_mode_active_${activeChatCharId}`);
+      setIsOfflineModeActive(saved === "true");
+      
+      const savedStoryId = localStorage.getItem(`offline_story_id_${activeChatCharId}`);
+      setActiveOfflineStoryId(savedStoryId || null);
+    } else {
+      setIsOfflineModeActive(false);
+      setActiveOfflineStoryId(null);
+    }
+  }, [activeChatCharId]);
+
+  const handleStartOfflineFromMsg = (msg: Message) => {
+    if (!activeChatCharId || !activeCharacter) return;
+    
+    const charName = activeCharacter.remark || activeCharacter.name;
+    const newStory: OfflineStory = {
+      id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      characterId: activeChatCharId,
+      title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      mode: "continue",
+      sourceChatId: activeChatCharId,
+      sourceChatMsgCount: 1,
+      messages: [{ ...msg, isOffline: true }]
+    };
+    
+    if (onSaveOfflineStory) {
+      onSaveOfflineStory(newStory);
+    }
+    
+    setActiveOfflineStoryId(newStory.id);
+    setIsOfflineModeActive(true);
+    
+    localStorage.setItem(`offline_mode_active_${activeChatCharId}`, "true");
+    localStorage.setItem(`offline_story_id_${activeChatCharId}`, newStory.id);
+    
+    showToast("已无痛切换到线下故事模式");
+  };
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 1500);
+  };
 
   // Moments form state
   const [momentInputText, setMomentInputText] = useState("");
@@ -248,6 +362,7 @@ export default function AppChat({
   const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
+  const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
@@ -497,10 +612,21 @@ export default function AppChat({
       }));
 
       // Construct system instructions based on multi-block SillyTavern positioning rules
-      const mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
+      let mainPromptText = isOfflineModeActive 
+        ? `You are playing the role of "${activeCharacter.name}" in an OFFLINE STAGE/DRAMA script mode (线下剧本模式).
+In this mode, you are co-writing an immersive story with the user.
+You must output a highly detailed, book-chapter or high-quality roleplay novel section in Chinese.
+Your reply should contain third-person narrator descriptions of actions, background details, scenery, and characters' thoughts, AS WELL AS dialogue.
+IMPORTANT: All spoken dialogues MUST be enclosed in Chinese double quotes “ ” (e.g. “你又在胡思乱想了。”) or 「 」 so they can be separated into dialog bubbles and narrations.
+Keep in character completely. Be descriptive and atmospheric. Speak in Chinese.`
+        : `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
 WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
 Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
 Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+
+      if (!isOfflineModeActive && activeCharacter.disableBracketActions) {
+        mainPromptText += `\n[🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks. Maintain natural, realistic, text-message style dialogue.`;
+      }
 
       let charDefText = `Roleplay Profile:
 - Name: ${activeCharacter.name}
@@ -597,6 +723,9 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       // Assemble system instruction blocks
       let assembledInstructions: string[] = [];
 
+      // 0. Base living human prompt (hidden base system instruction)
+      assembledInstructions.push(LIVING_HUMAN_PROMPT);
+
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
 
@@ -682,61 +811,103 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       });
 
       if (data && data.text) {
-        const charMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          characterId: activeChatCharId,
-          sender: "character",
-          content: data.text,
-          timestamp: Date.now(),
-        };
-        onSendMessage(charMsg);
+        if (isOfflineModeActive) {
+          const parsedSegments = splitTextToOfflineSegments(data.text);
+          let newMsgs: Message[] = [];
+          if (parsedSegments.length > 0) {
+            newMsgs = parsedSegments.map((seg, sIdx) => ({
+              id: `offline-reply-${Date.now()}-${sIdx}-${Math.random().toString(36).substr(2, 5)}`,
+              characterId: activeChatCharId,
+              sender: seg.isNarration ? "user" : "character",
+              content: seg.content,
+              timestamp: Date.now() + sIdx,
+              isOffline: true,
+              isNarration: seg.isNarration
+            }));
+          } else {
+            newMsgs = [{
+              id: (Date.now() + 1).toString(),
+              characterId: activeChatCharId,
+              sender: "character",
+              content: data.text,
+              timestamp: Date.now(),
+              isOffline: true,
+              isNarration: false
+            }];
+          }
 
-        // Check if auto extraction is enabled and we have reached the trigger round count
-        const isAutoExtractEnabled = activeCharacter.enableAutoSummary !== undefined
-          ? activeCharacter.enableAutoSummary
-          : (recallSettings?.autoExtract !== false);
+          // Send each segment to the message stream
+          newMsgs.forEach(m => onSendMessage(m));
 
-        const extractIntervalRounds = activeCharacter.summaryTriggerRound !== undefined
-          ? activeCharacter.summaryTriggerRound
-          : (recallSettings?.extractInterval || 10);
+          // Save each segment to the active offline story
+          if (activeOfflineStoryId && onSaveOfflineStory) {
+            const targetStory = offlineStories.find(s => s.id === activeOfflineStoryId);
+            if (targetStory) {
+              const updatedStory = {
+                ...targetStory,
+                messages: [...targetStory.messages, ...newMsgs],
+                updatedAt: Date.now()
+              };
+              onSaveOfflineStory(updatedStory);
+            }
+          }
+        } else {
+          const charMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            characterId: activeChatCharId,
+            sender: "character",
+            content: data.text,
+            timestamp: Date.now(),
+          };
+          onSendMessage(charMsg);
 
-        if (isAutoExtractEnabled) {
-          const triggerCount = extractIntervalRounds * 2;
-          const currentMsgs = [...currentChatMessages, userMsg, charMsg];
-          
-          let eligibleMsgs = currentMsgs;
-          if (activeCharacter.lastImmediateSummaryMsgId) {
-            const idx = currentMsgs.findIndex(m => m.id === activeCharacter.lastImmediateSummaryMsgId);
-            if (idx !== -1) {
-              eligibleMsgs = currentMsgs.slice(idx + 1);
+          // Check if auto extraction is enabled and we have reached the trigger round count
+          const isAutoExtractEnabled = activeCharacter.enableAutoSummary !== undefined
+            ? activeCharacter.enableAutoSummary
+            : (recallSettings?.autoExtract !== false);
+
+          const extractIntervalRounds = activeCharacter.summaryTriggerRound !== undefined
+            ? activeCharacter.summaryTriggerRound
+            : (recallSettings?.extractInterval || 10);
+
+          if (isAutoExtractEnabled) {
+            const triggerCount = extractIntervalRounds * 2;
+            const currentMsgs = [...currentChatMessages, userMsg, charMsg];
+            
+            let eligibleMsgs = currentMsgs;
+            if (activeCharacter.lastImmediateSummaryMsgId) {
+              const idx = currentMsgs.findIndex(m => m.id === activeCharacter.lastImmediateSummaryMsgId);
+              if (idx !== -1) {
+                eligibleMsgs = currentMsgs.slice(idx + 1);
+              }
+            }
+
+            if (eligibleMsgs.length >= triggerCount) {
+              // Trigger automatic memory extraction in background
+              setTimeout(async () => {
+                const count = await handleExtractMemories(eligibleMsgs);
+                if (count > 0 && onClearMessages) {
+                  // Keep the last 4 messages to preserve conversational thread
+                  onClearMessages(activeChatCharId, 4);
+                }
+              }, 200);
             }
           }
 
-          if (eligibleMsgs.length >= triggerCount) {
-            // Trigger automatic memory extraction in background
-            setTimeout(async () => {
-              const count = await handleExtractMemories(eligibleMsgs);
-              if (count > 0 && onClearMessages) {
-                // Keep the last 4 messages to preserve conversational thread
-                onClearMessages(activeChatCharId, 4);
+          // AI autonomously decides on Moments background cover from their own album
+          if (activeCharacter.album && activeCharacter.album.length > 0) {
+            const needsCover = !activeCharacter.momentsCover;
+            const shouldChangeCover = needsCover || Math.random() < 0.35;
+            if (shouldChangeCover) {
+              const albumList = activeCharacter.album;
+              const randomIndex = Math.floor(Math.random() * albumList.length);
+              const selectedCover = albumList[randomIndex];
+              if (selectedCover !== activeCharacter.momentsCover) {
+                onSaveCharacter({
+                  ...activeCharacter,
+                  momentsCover: selectedCover,
+                });
               }
-            }, 200);
-          }
-        }
-
-        // AI autonomously decides on Moments background cover from their own album
-        if (activeCharacter.album && activeCharacter.album.length > 0) {
-          const needsCover = !activeCharacter.momentsCover;
-          const shouldChangeCover = needsCover || Math.random() < 0.35;
-          if (shouldChangeCover) {
-            const albumList = activeCharacter.album;
-            const randomIndex = Math.floor(Math.random() * albumList.length);
-            const selectedCover = albumList[randomIndex];
-            if (selectedCover !== activeCharacter.momentsCover) {
-              onSaveCharacter({
-                ...activeCharacter,
-                momentsCover: selectedCover,
-              });
             }
           }
         }
@@ -820,9 +991,24 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       sender: "user",
       content: userMsgText,
       timestamp: Date.now(),
+      isOffline: isOfflineModeActive ? true : undefined,
+      isNarration: isOfflineModeActive ? isInputNarration : undefined
     };
 
     onSendMessage(userMsg);
+
+    if (isOfflineModeActive && activeOfflineStoryId && onSaveOfflineStory) {
+      const targetStory = offlineStories.find(s => s.id === activeOfflineStoryId);
+      if (targetStory) {
+        const updatedStory = {
+          ...targetStory,
+          messages: [...targetStory.messages, userMsg],
+          updatedAt: Date.now()
+        };
+        onSaveOfflineStory(updatedStory);
+      }
+    }
+
     generateResponseForUserMessage(userMsg);
   };
 
@@ -850,10 +1036,14 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       }));
 
       // Construct system instructions
-      const mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
+      let mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
 WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
 Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
 Do NOT say you are an AI or Gemini.`;
+
+      if (activeCharacter.disableBracketActions) {
+        mainPromptText += `\n[🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
+      }
 
       let charDefText = `Roleplay Profile:
 - Name: ${activeCharacter.name}
@@ -884,7 +1074,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
 
-      const systemInstruction = [mainPromptText, charDefText, userProfileText].join("\n\n---\n\n");
+      const systemInstruction = [LIVING_HUMAN_PROMPT, mainPromptText, charDefText, userProfileText].join("\n\n---\n\n");
 
       const data = await apiChat({
         message: lastUserMsg.content,
@@ -926,6 +1116,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         chatStylePreset: draftChatStylePreset,
         enableProactiveChat: draftEnableProactiveChat,
         proactiveChatInterval: draftProactiveChatInterval,
+        disableBracketActions: draftDisableBracketActions,
       });
       setIsShowingCardModal(false);
     }
@@ -1017,7 +1208,21 @@ Please read the feedback carefully and rewrite your response to perfectly match 
     setIsTriggeringProactive(true);
     setIsTyping(true);
     try {
-      const systemInstruction = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
+      let proactivePrompt = `Instructions:
+1. Speak in Chinese. Maintain character role-play thoroughly.
+2. WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
+3. This is an initiator message, so check in on the user or share something from your day.
+4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+
+      if (activeCharacter.disableBracketActions) {
+        proactivePrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
+      }
+
+      const systemInstruction = `${LIVING_HUMAN_PROMPT}
+
+---
+
+You are playing the role of "${activeCharacter.name}" in a WeChat chat.
 Roleplay Profile:
 - Age: ${activeCharacter.age}
 - Gender: ${activeCharacter.gender}
@@ -1034,11 +1239,7 @@ User Profile (interacting with you):
 PROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
-Instructions:
-1. Speak in Chinese. Maintain character role-play thoroughly.
-2. WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
-3. This is an initiator message, so check in on the user or share something from your day.
-4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+${proactivePrompt}`;
 
       const data = await apiChat({
         message: "(用户失联3小时，你主动给其发送了一条信息)",
@@ -1077,7 +1278,21 @@ Instructions:
     if (!friend) return;
 
     try {
-      const systemInstruction = `You are playing the role of "${friend.name}" in a WeChat chat.
+      let instructionsPrompt = `Instructions:
+1. Speak in Chinese. Maintain character role-play thoroughly.
+2. WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
+3. This is an initiator message, so check in on the user or share something from your day.
+4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+
+      if (friend.disableBracketActions) {
+        instructionsPrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
+      }
+
+      const systemInstruction = `${LIVING_HUMAN_PROMPT}
+
+---
+
+You are playing the role of "${friend.name}" in a WeChat chat.
 Roleplay Profile:
 - Age: ${friend.age}
 - Gender: ${friend.gender}
@@ -1094,11 +1309,7 @@ User Profile (interacting with you):
 PROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.
 
-Instructions:
-1. Speak in Chinese. Maintain character role-play thoroughly.
-2. WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
-3. This is an initiator message, so check in on the user or share something from your day.
-4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+${instructionsPrompt}`;
 
       const data = await apiChat({
         message: "(你主动给用户发送了一条信息)",
@@ -1192,19 +1403,28 @@ Instructions:
   };
 
   // Active chat threads list builder
-  const chatThreads = characters.map((char) => {
-    const threadMsgs = messages.filter((m) => m.characterId === char.id);
-    const lastMsg = threadMsgs.length > 0 ? threadMsgs[threadMsgs.length - 1] : null;
-    return {
-      character: char,
-      lastMessage: lastMsg,
-      isPinned: char.isPinned || false,
-    };
-  }).sort((a, b) => {
-    if (a.isPinned && !b.isPinned) return -1;
-    if (!a.isPinned && b.isPinned) return 1;
-    return (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0);
-  });
+  const chatThreads = characters
+    .filter((char) => {
+      if (!friendIds.includes(char.id)) return false;
+      const threadMsgs = messages.filter((m) => m.characterId === char.id);
+      const hasMessages = threadMsgs.length > 0;
+      const isInitiated = initiatedChatIds.includes(char.id);
+      const isActive = char.id === activeChatCharId;
+      return hasMessages || isInitiated || isActive;
+    })
+    .map((char) => {
+      const threadMsgs = messages.filter((m) => m.characterId === char.id);
+      const lastMsg = threadMsgs.length > 0 ? threadMsgs[threadMsgs.length - 1] : null;
+      return {
+        character: char,
+        lastMessage: lastMsg,
+        isPinned: char.isPinned || false,
+      };
+    }).sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      return (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0);
+    });
 
   const savedBookmarks = messages.filter((m) => m.isBookmarked);
 
@@ -1264,6 +1484,7 @@ Instructions:
                   setDraftChatStylePreset(activeCharacter.chatStylePreset || "default");
                   setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
                   setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
+                  setDraftDisableBracketActions(activeCharacter.disableBracketActions || false);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
@@ -1324,6 +1545,22 @@ Instructions:
                           type="checkbox"
                           checked={draftIsPinned}
                           onChange={(e) => setDraftIsPinned(e.target.checked)}
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Disable Bracket Actions */}
+                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                      <div className="space-y-0.5">
+                        <span className="text-[#52525b] font-bold text-xs">过滤括号动描</span>
+                        <span className="text-[10px] text-slate-400 block">开启后线上模式对话中不使用括号动作/描述，保留纯语言交流（除非人物说话特色）</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={draftDisableBracketActions}
+                          onChange={(e) => setDraftDisableBracketActions(e.target.checked)}
                           className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                         />
                       </label>
@@ -1552,6 +1789,29 @@ Instructions:
           )}
 
           {/* Active Chat Messages body */}
+          {isOfflineModeActive && (
+            <div className="px-4 py-2 bg-slate-100 border-b border-slate-200 text-slate-600 flex items-center justify-between text-[11px] shrink-0 font-medium select-none">
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>已启用线下剧本模式</span>
+              </span>
+              <button
+                onClick={() => {
+                  setIsOfflineModeActive(false);
+                  setActiveOfflineStoryId(null);
+                  if (activeChatCharId) {
+                    localStorage.setItem(`offline_mode_active_${activeChatCharId}`, "false");
+                    localStorage.removeItem(`offline_story_id_${activeChatCharId}`);
+                  }
+                }}
+                className="w-5 h-5 rounded-full hover:bg-slate-200 flex items-center justify-center transition-colors text-slate-400 hover:text-slate-600"
+                title="退出线下模式"
+              >
+                <X className="w-3.5 h-3.5 animate-none" />
+              </button>
+            </div>
+          )}
+
           <div
             className="flex-1 overflow-y-auto p-4 space-y-4"
             style={{
@@ -1563,6 +1823,24 @@ Instructions:
 
 
             {currentChatMessages.map((msg, idx) => {
+              if (msg.isNarration) {
+                return (
+                  <div 
+                    key={msg.id}
+                    className="w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed text-[#a1a3a8] border-b border-dashed border-slate-100/60 dark:border-slate-800/60 transition-all cursor-pointer"
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setActiveMenuMsg(msg);
+                      setMenuPosition({ x: e.clientX, y: e.clientY });
+                    }}
+                  >
+                    <div className="max-w-[90%] mx-auto font-normal tracking-wide select-text">
+                      {msg.content}
+                    </div>
+                  </div>
+                );
+              }
+
               const isSelf = msg.sender === "user";
               const prevMsg = idx > 0 ? currentChatMessages[idx - 1] : null;
               const isConsecutivePrev = prevMsg && prevMsg.sender === msg.sender;
@@ -1871,6 +2149,35 @@ Instructions:
                 </button>
               </div>
             )}
+            
+            {isOfflineModeActive && (
+              <div className="px-4 py-1.5 bg-indigo-50 border-b border-indigo-100 flex items-center gap-2 text-xs text-slate-700 shrink-0 select-none">
+                <span className="font-extrabold text-[10px] text-indigo-700 uppercase">剧本输入类型:</span>
+                <button
+                  type="button"
+                  onClick={() => setIsInputNarration(false)}
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${
+                    !isInputNarration 
+                      ? "bg-indigo-600 text-white border-indigo-500 shadow-sm" 
+                      : "bg-white text-slate-500 border-slate-200 hover:text-slate-700"
+                  }`}
+                >
+                  💬 角色发言
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsInputNarration(true)}
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${
+                    isInputNarration 
+                      ? "bg-rose-600 text-white border-rose-500 shadow-sm" 
+                      : "bg-white text-slate-500 border-slate-200 hover:text-slate-700"
+                  }`}
+                >
+                  📖 旁白客观叙事
+                </button>
+              </div>
+            )}
+
             <form
               onSubmit={handleSendChatMessage}
               className="px-3 py-2 flex items-center gap-2"
@@ -1893,7 +2200,13 @@ Instructions:
                 type="text"
                 value={chatInputText}
                 onChange={(e) => setChatInputText(e.target.value)}
-                placeholder={`发送消息给 ${activeCharacter.name}...`}
+                placeholder={
+                  isOfflineModeActive 
+                    ? (isInputNarration 
+                        ? "输入旁白客观场景叙事描述..." 
+                        : "继续剧本对话...")
+                    : `发送消息给 ${activeCharacter.name}...`
+                }
                 className={`flex-1 h-10 border focus:outline-none rounded-2xl px-4 text-xs text-slate-800 chat-input ${
                   isFloatingCute 
                     ? "bg-white/60 border-slate-200/40 focus:bg-white" 
@@ -2522,7 +2835,7 @@ Instructions:
                 chatThreads.map(({ character, lastMessage, isPinned }) => (
                   <div
                     key={character.id}
-                    onClick={() => setActiveChatCharId(character.id)}
+                    onClick={() => startChatWith(character.id)}
                     className={`flex items-center p-3 cursor-pointer transition-colors relative ${
                       isPinned ? "bg-blue-50/20 hover:bg-blue-50/40" : "hover:bg-slate-50"
                     }`}
@@ -2532,11 +2845,18 @@ Instructions:
                     )}
 
                     {/* Avatar */}
-                    <img
-                      src={character.avatar}
-                      alt={character.name}
-                      className="w-11 h-11 rounded-full object-cover mr-3 bg-slate-100 border border-slate-100 shrink-0 aspect-square"
-                    />
+                    <div className="relative shrink-0 mr-3">
+                      <img
+                        src={character.avatar}
+                        alt={character.name}
+                        className="w-11 h-11 rounded-full object-cover bg-slate-100 border border-slate-100 aspect-square"
+                      />
+                      {getUnreadCount(character.id) > 0 && (
+                        <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 border border-white shadow-sm">
+                          {getUnreadCount(character.id)}
+                        </span>
+                      )}
+                    </div>
 
                     {/* Last details */}
                     <div className="flex-1 min-w-0 pr-4">
@@ -2551,7 +2871,7 @@ Instructions:
                         )}
                       </div>
                       <p className="text-[11px] text-slate-500 truncate mt-0.5 leading-normal">
-                        {lastMessage ? lastMessage.content : `[点击开启与${character.name}的首次对话...]`}
+                        {lastMessage ? lastMessage.content : ""}
                       </p>
                     </div>
                   </div>
@@ -2595,7 +2915,7 @@ Instructions:
                 friends.map((char) => (
                   <div
                     key={char.id}
-                    onClick={() => setActiveChatCharId(char.id)}
+                    onClick={() => startChatWith(char.id)}
                     className="flex items-center p-3 hover:bg-slate-50 cursor-pointer transition-colors"
                   >
                     <img
@@ -2994,7 +3314,17 @@ Instructions:
               activeTab === "chats" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
             }`}
           >
-            <MessageSquare className="w-5 h-5" />
+            <div className="relative">
+              <MessageSquare className="w-5 h-5" />
+              {(() => {
+                const totalUnreadCount = friendIds.reduce((sum, id) => sum + getUnreadCount(id), 0);
+                return totalUnreadCount > 0 ? (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] bg-red-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-0.5 border border-white">
+                    {totalUnreadCount}
+                  </span>
+                ) : null;
+              })()}
+            </div>
             <span>聊天</span>
           </button>
           
@@ -3544,6 +3874,18 @@ Instructions:
               <span>{activeMenuMsg.isBookmarked ? "取消收藏" : "收藏"}</span>
             </button>
 
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(activeMenuMsg.content);
+                showToast("复制成功");
+                setActiveMenuMsg(null);
+              }}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5 text-stone-500" />
+              <span>复制</span>
+            </button>
+
             {onDeleteMessage && (
               <button
                 onClick={() => {
@@ -3568,6 +3910,17 @@ Instructions:
             >
               <Quote className="w-3.5 h-3.5 text-stone-500" />
               <span>引用</span>
+            </button>
+
+            <button
+              onClick={() => {
+                handleStartOfflineFromMsg(activeMenuMsg);
+                setActiveMenuMsg(null);
+              }}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-indigo-600 transition-colors"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
+              <span>切换到线下模式</span>
             </button>
 
             {activeMenuMsg.sender !== "user" && (
@@ -3677,6 +4030,13 @@ Instructions:
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Visual Toast Notification Overlay */}
+      {toastMessage && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9999] bg-stone-900/90 text-white px-4 py-2 rounded-full text-xs font-semibold shadow-lg backdrop-blur-sm transition-all duration-300">
+          {toastMessage}
         </div>
       )}
 
