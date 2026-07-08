@@ -1250,39 +1250,75 @@ export default function App() {
     }
   };
   useEffect(() => {
-    localStorage.setItem("phone_characters_v3", JSON.stringify(characters));
+    try {
+      localStorage.setItem("phone_characters_v3", JSON.stringify(characters));
+    } catch (e) {
+      console.error("Failed to save characters to localStorage:", e);
+    }
   }, [characters]);
 
   useEffect(() => {
-    localStorage.setItem("phone_settings", JSON.stringify(settings));
+    try {
+      localStorage.setItem("phone_settings", JSON.stringify(settings));
+    } catch (e) {
+      console.error("Failed to save settings to localStorage:", e);
+    }
   }, [settings]);
 
   useEffect(() => {
-    localStorage.setItem("phone_messages_v3", JSON.stringify(messages));
+    try {
+      localStorage.setItem("phone_messages_v3", JSON.stringify(messages));
+    } catch (e) {
+      console.error("Failed to save messages to localStorage:", e);
+    }
   }, [messages]);
 
   useEffect(() => {
-    localStorage.setItem("phone_moments_v3", JSON.stringify(moments));
+    try {
+      localStorage.setItem("phone_moments_v3", JSON.stringify(moments));
+    } catch (e) {
+      console.error("Failed to save moments to localStorage:", e);
+    }
   }, [moments]);
 
   useEffect(() => {
-    localStorage.setItem("phone_presets", JSON.stringify(presets));
+    try {
+      localStorage.setItem("phone_presets", JSON.stringify(presets));
+    } catch (e) {
+      console.error("Failed to save presets to localStorage:", e);
+    }
   }, [presets]);
 
   useEffect(() => {
-    localStorage.setItem("phone_music_tracks", JSON.stringify(tracks));
+    try {
+      localStorage.setItem("phone_music_tracks", JSON.stringify(tracks));
+    } catch (e) {
+      console.error("Failed to save tracks to localStorage:", e);
+    }
   }, [tracks]);
 
   useEffect(() => {
-    localStorage.setItem("phone_music_playlists", JSON.stringify(playlists));
+    try {
+      localStorage.setItem("phone_music_playlists", JSON.stringify(playlists));
+    } catch (e) {
+      console.error("Failed to save playlists to localStorage:", e);
+    }
   }, [playlists]);
 
   useEffect(() => {
-    localStorage.setItem("phone_calendar_events", JSON.stringify(calendarEvents));
+    try {
+      localStorage.setItem("phone_calendar_events", JSON.stringify(calendarEvents));
+    } catch (e) {
+      console.error("Failed to save calendar events to localStorage:", e);
+    }
   }, [calendarEvents]);
 
   useEffect(() => {
-    localStorage.setItem("phone_worldbook_entries", JSON.stringify(worldBookEntries));
+    try {
+      localStorage.setItem("phone_worldbook_entries", JSON.stringify(worldBookEntries));
+    } catch (e) {
+      console.error("Failed to save worldbook entries to localStorage:", e);
+    }
   }, [worldBookEntries]);
 
   // Global Scroll Event Capture to handle show-on-scroll custom thin scrollbars

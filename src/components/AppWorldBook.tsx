@@ -168,7 +168,11 @@ export default function AppWorldBook({
   });
 
   useEffect(() => {
-    localStorage.setItem("worldbook_collapsed_categories", JSON.stringify(collapsedCategories));
+    try {
+      localStorage.setItem("worldbook_collapsed_categories", JSON.stringify(collapsedCategories));
+    } catch (e) {
+      console.error(e);
+    }
   }, [collapsedCategories]);
 
   const [showAddMenu, setShowAddMenu] = useState(false);

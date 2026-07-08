@@ -109,7 +109,11 @@ export default function AppChat({
   });
 
   useEffect(() => {
-    localStorage.setItem("phone_initiated_chat_ids", JSON.stringify(initiatedChatIds));
+    try {
+      localStorage.setItem("phone_initiated_chat_ids", JSON.stringify(initiatedChatIds));
+    } catch (e) {
+      console.error(e);
+    }
   }, [initiatedChatIds]);
 
   // Keep track of initiated chats when a chat is opened
@@ -130,7 +134,11 @@ export default function AppChat({
   });
 
   useEffect(() => {
-    localStorage.setItem("phone_last_read_timestamps", JSON.stringify(lastReadTimestamps));
+    try {
+      localStorage.setItem("phone_last_read_timestamps", JSON.stringify(lastReadTimestamps));
+    } catch (e) {
+      console.error(e);
+    }
   }, [lastReadTimestamps]);
 
   useEffect(() => {
@@ -176,7 +184,11 @@ export default function AppChat({
   });
 
   useEffect(() => {
-    localStorage.setItem("phone_friend_ids", JSON.stringify(friendIds));
+    try {
+      localStorage.setItem("phone_friend_ids", JSON.stringify(friendIds));
+    } catch (e) {
+      console.error(e);
+    }
   }, [friendIds]);
 
   const friends = characters.filter((c) => friendIds.includes(c.id));
