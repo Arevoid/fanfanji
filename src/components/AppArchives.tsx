@@ -1,9 +1,8 @@
 import React, { useState } from "react";
-import mammoth from "mammoth";
 import { Character, WorldBookEntry } from "../types";
 import { apiSummarizePersonality } from "../utils/apiHelper";
 import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare } from "lucide-react";
-import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry } from "../utils/pngParser";
+import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
 
 interface AppArchivesProps {
   characters: Character[];
@@ -123,17 +122,17 @@ export default function AppArchives({
     setIsCreating(true);
   };
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          setAvatar(reader.result);
-          setErrorMsg("");
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 400, 400, 0.75);
+        setAvatar(compressed);
+        setErrorMsg("");
+      } catch (err) {
+        console.error("Avatar compression failed:", err);
+        setErrorMsg("图片压缩失败，请重试");
+      }
     }
   };
 
@@ -187,10 +186,10 @@ export default function AppArchives({
         importedChar = {
           id: "char-import-" + Date.now(),
           name: nameWithoutExt,
-          avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop",
-          personality: text.trim() || "导入的性格设定。",
-          backstory: "通过文本文件导入。",
-          greeting: `你好，我是 ${nameWithoutExt}。`,
+          avatar: "https://free.picui.cn/free/2026/07/08/6a4e1204296f8.jpg",
+          personality: text.trim(),
+          backstory: "",
+          greeting: "",
           album: [],
           references: [],
         };
@@ -201,16 +200,15 @@ export default function AppArchives({
           r.onerror = () => reject(new Error("读取 DOCX 配置文件失败"));
           r.readAsArrayBuffer(file);
         });
-        const result = await mammoth.extractRawText({ arrayBuffer });
-        const text = result.value;
+        const text = await safeParseDocx(arrayBuffer);
         const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
         importedChar = {
           id: "char-import-" + Date.now(),
           name: nameWithoutExt,
-          avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop",
-          personality: text.trim() || "导入的性格设定。",
-          backstory: "通过 DOCX 文件导入。",
-          greeting: `你好，我是 ${nameWithoutExt}。`,
+          avatar: "https://free.picui.cn/free/2026/07/08/6a4e1204296f8.jpg",
+          personality: text.trim(),
+          backstory: "",
+          greeting: "",
           album: [],
           references: [],
         };
@@ -219,24 +217,37 @@ export default function AppArchives({
       }
 
       const finishImport = (importEntries: boolean) => {
-        let importedEntriesCount = 0;
-        if (importEntries && characterBook && Array.isArray(characterBook.entries) && characterBook.entries.length > 0) {
-          const mappedEntries = characterBook.entries.map((entry: any) => 
-            mapSillyTavernEntry(entry, importedChar.id)
-          );
-          if (mappedEntries.length > 0 && onSaveWorldBookEntries) {
-            onSaveWorldBookEntries(mappedEntries);
-            importedEntriesCount = mappedEntries.length;
+        try {
+          let importedEntriesCount = 0;
+          if (importEntries && characterBook && Array.isArray(characterBook.entries) && characterBook.entries.length > 0) {
+            const mappedEntries = characterBook.entries
+              .map((entry: any) => {
+                try {
+                  return mapSillyTavernEntry(entry, importedChar.id);
+                } catch (e) {
+                  console.error("Failed to map entry:", entry, e);
+                  return null;
+                }
+              })
+              .filter(Boolean) as WorldBookEntry[];
+
+            if (mappedEntries.length > 0 && onSaveWorldBookEntries) {
+              onSaveWorldBookEntries(mappedEntries);
+              importedEntriesCount = mappedEntries.length;
+            }
           }
-        }
 
-        onSaveCharacter(importedChar);
+          onSaveCharacter(importedChar);
 
-        let successMsg = `成功导入角色「${importedChar.name}」！`;
-        if (importedEntriesCount > 0) {
-          successMsg += `\n并自动识别并绑定导入了其附带的 ${importedEntriesCount} 条世界书词条！已链接到世界书。`;
+          let successMsg = `成功导入角色「${importedChar.name}」！`;
+          if (importedEntriesCount > 0) {
+            successMsg += `\n并自动识别并绑定导入了其附带的 ${importedEntriesCount} 条世界书词条！已链接到世界书。`;
+          }
+          showAlert("导入成功", successMsg);
+        } catch (error: any) {
+          console.error("Error in finishImport:", error);
+          showAlert("导入失败", error.message || "未知错误");
         }
-        showAlert("导入成功", successMsg);
       };
 
       if (characterBook && Array.isArray(characterBook.entries) && characterBook.entries.length > 0) {
@@ -271,8 +282,8 @@ export default function AppArchives({
     }
 
     const originalChar = editingId ? characters.find(c => c.id === editingId) : null;
-    const finalAvatar = avatar || "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png";
-    const finalPersonality = personality.trim() || "这个角色尚未填写详细人设和背景。";
+    const finalAvatar = avatar || "https://free.picui.cn/free/2026/07/08/6a4e1204296f8.jpg";
+    const finalPersonality = personality.trim();
 
     const savedChar: Character = {
       id: editingId || Date.now().toString(),

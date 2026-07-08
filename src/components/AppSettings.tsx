@@ -22,6 +22,8 @@ import {
   Upload
 } from "lucide-react";
 
+import { compressImage } from "../utils/pngParser";
+
 interface AppSettingsProps {
   settings: UserSettings;
   presets: StylePreset[];
@@ -273,45 +275,42 @@ export default function AppSettings({
     setBio(settings.bio);
   }, [settings.activeIdentityId, settings.name, settings.avatar, settings.signature, settings.bio]);
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          setAvatar(reader.result);
-          handleSave({ avatar: reader.result });
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 400, 400, 0.75);
+        setAvatar(compressed);
+        handleSave({ avatar: compressed });
+      } catch (err) {
+        console.error("Avatar compression failed:", err);
+      }
     }
   };
 
-  const handleWallpaperUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleWallpaperUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          setWallpaper(reader.result);
-          handleSave({ wallpaper: reader.result });
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 1000, 1000, 0.7);
+        setWallpaper(compressed);
+        handleSave({ wallpaper: compressed });
+      } catch (err) {
+        console.error("Wallpaper compression failed:", err);
+      }
     }
   };
 
-  const handleIconUpload = (appKey: string, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleIconUpload = async (appKey: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          const updatedIcons = { ...settings.customIcons, [appKey]: reader.result };
-          handleSave({ customIcons: updatedIcons });
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 120, 120, 0.8);
+        const updatedIcons = { ...settings.customIcons, [appKey]: compressed };
+        handleSave({ customIcons: updatedIcons });
+      } catch (err) {
+        console.error("Icon compression failed:", err);
+      }
     }
   };
 

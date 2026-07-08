@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory } from "../types";
-import { splitTextToOfflineSegments, cleanOnlineMessage } from "../utils/pngParser";
+import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles, compressImage } from "../utils/pngParser";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
 import {
@@ -39,7 +39,8 @@ import {
   Volume2,
   Smile,
   Copy,
-  BookOpen
+  BookOpen,
+  RefreshCw
 } from "lucide-react";
 
 interface AppChatProps {
@@ -364,6 +365,7 @@ export default function AppChat({
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
   const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
+  const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
@@ -614,7 +616,11 @@ export default function AppChat({
       });
       const finalMsgs = Array.from(uniqueMsgsMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 
-      const history = finalMsgs.map((m) => ({
+      // Limit history to active character's historyMemoryLimit (default 150 messages / 75 turns)
+      const limit = activeCharacter.historyMemoryLimit || 150;
+      const slicedMsgs = finalMsgs.slice(-limit);
+
+      const history = slicedMsgs.map((m) => ({
         role: m.sender === "user" ? "user" : "model",
         text: m.content,
       }));
@@ -828,17 +834,17 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 
       if (data && data.text) {
         if (isOfflineModeActive) {
-          const parsedSegments = splitTextToOfflineSegments(data.text);
+          const paragraphs = data.text.split("\n").map(p => p.trim()).filter(Boolean);
           let newMsgs: Message[] = [];
-          if (parsedSegments.length > 0) {
-            newMsgs = parsedSegments.map((seg, sIdx) => ({
-              id: `offline-reply-${Date.now()}-${sIdx}-${Math.random().toString(36).substr(2, 5)}`,
+          if (paragraphs.length > 0) {
+            newMsgs = paragraphs.map((para, pIdx) => ({
+              id: `offline-reply-${Date.now()}-${pIdx}-${Math.random().toString(36).substr(2, 5)}`,
               characterId: activeChatCharId,
-              sender: seg.isNarration ? "user" : "character",
-              content: seg.content,
-              timestamp: Date.now() + sIdx,
+              sender: "character",
+              content: para,
+              timestamp: Date.now() + pIdx,
               isOffline: true,
-              isNarration: seg.isNarration
+              isNarration: false
             }));
           } else {
             newMsgs = [{
@@ -869,19 +875,23 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
           }
         } else {
           const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
-          const charMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            characterId: activeChatCharId,
-            sender: "character",
-            content: cleanedText || data.text,
-            timestamp: Date.now(),
-          };
-          onSendMessage(charMsg);
+          const textToSplit = cleanedText || data.text;
+          const bubbles = splitIntoWeChatBubbles(textToSplit);
+          const createdMessages: Message[] = [];
+          bubbles.forEach((bubbleText, idx) => {
+            const charMsg: Message = {
+              id: `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+              characterId: activeChatCharId,
+              sender: "character",
+              content: bubbleText,
+              timestamp: Date.now() + idx,
+            };
+            onSendMessage(charMsg);
+            createdMessages.push(charMsg);
+          });
 
           // Check if auto extraction is enabled and we have reached the trigger round count
-          const isAutoExtractEnabled = activeCharacter.enableAutoSummary !== undefined
-            ? activeCharacter.enableAutoSummary
-            : (recallSettings?.autoExtract !== false);
+          const isAutoExtractEnabled = activeCharacter.enableAutoSummary === true;
 
           const extractIntervalRounds = activeCharacter.summaryTriggerRound !== undefined
             ? activeCharacter.summaryTriggerRound
@@ -889,7 +899,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 
           if (isAutoExtractEnabled) {
             const triggerCount = extractIntervalRounds * 2;
-            const currentMsgs = userMsg ? [...currentChatMessages, userMsg, charMsg] : [...currentChatMessages, charMsg];
+            const currentMsgs = userMsg ? [...currentChatMessages, userMsg, ...createdMessages] : [...currentChatMessages, ...createdMessages];
             
             let eligibleMsgs = currentMsgs;
             if (activeCharacter.lastImmediateSummaryMsgId) {
@@ -966,16 +976,41 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
   };
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastActiveCharIdRef = useRef<string | null>(null);
+  const lastMsgCountRef = useRef<number>(0);
 
   // Pre-seed moments if state empty
   const allMoments = moments.length === 0 ? PRESEED_MOMENTS : moments;
 
-  // Auto scroll in chats
+  // Auto scroll in chats with smart detection
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    const container = scrollContainerRef.current;
+    if (!activeChatCharId || !container) return;
+
+    const currentChatMsgs = messages.filter(m => m.characterId === activeChatCharId);
+    const msgCount = currentChatMsgs.length;
+    
+    const isFreshOpen = lastActiveCharIdRef.current !== activeChatCharId;
+    const lastMsg = currentChatMsgs[currentChatMsgs.length - 1];
+    const isUserSent = lastMsg && lastMsg.sender === "user";
+
+    // Measure distance to bottom
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const isNearBottom = distanceToBottom < 250;
+
+    // Update refs for next run
+    lastActiveCharIdRef.current = activeChatCharId;
+    lastMsgCountRef.current = msgCount;
+
+    if (isFreshOpen || isUserSent || isNearBottom || isTyping) {
+      setTimeout(() => {
+        if (chatEndRef.current) {
+          chatEndRef.current.scrollIntoView({ behavior: isFreshOpen ? "auto" : "smooth" });
+        }
+      }, 50);
     }
-  }, [messages, activeChatCharId, isTyping]);
+  }, [messages.length, activeChatCharId, isTyping]);
 
   // Handle Send Message (User sends only, no immediate reply)
   const handleSendOnly = async (e?: React.FormEvent) => {
@@ -1106,8 +1141,12 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
     setIsTyping(true);
 
     try {
+      // Limit history to active character's historyMemoryLimit (default 150 messages / 75 turns)
+      const limit = activeCharacter.historyMemoryLimit || 150;
+      const slicedMsgs = previousMessages.slice(-limit);
+
       // Map history
-      const history = previousMessages.map((m) => ({
+      const history = slicedMsgs.map((m) => ({
         role: m.sender === "user" ? "user" : "model",
         text: m.content,
       }));
@@ -1171,14 +1210,18 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       if (data && data.text) {
         const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
-        const charMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          characterId: activeChatCharId,
-          sender: "character",
-          content: cleanedText || data.text,
-          timestamp: Date.now(),
-        };
-        onSendMessage(charMsg);
+        const textToSplit = cleanedText || data.text;
+        const bubbles = splitIntoWeChatBubbles(textToSplit);
+        bubbles.forEach((bubbleText, idx) => {
+          const charMsg: Message = {
+            id: `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+            characterId: activeChatCharId,
+            sender: "character",
+            content: bubbleText,
+            timestamp: Date.now() + idx,
+          };
+          onSendMessage(charMsg);
+        });
       }
     } catch (err: any) {
       console.error("Regeneration error:", err);
@@ -1200,22 +1243,22 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         enableProactiveChat: draftEnableProactiveChat,
         proactiveChatInterval: draftProactiveChatInterval,
         disableBracketActions: draftDisableBracketActions,
+        historyMemoryLimit: draftHistoryMemoryLimit,
       });
       setIsShowingCardModal(false);
     }
   };
 
   // Set chat specific background wallpaper (draft)
-  const handleDraftChatBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDraftChatBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          setDraftChatBg(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 1000, 1000, 0.7);
+        setDraftChatBg(compressed);
+      } catch (err) {
+        console.error("Chat background compression failed:", err);
+      }
     }
   };
 
@@ -1246,33 +1289,35 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       });
 
       if (data && data.items && Array.isArray(data.items)) {
-        const newItems: MemoryItem[] = [];
-        data.items.forEach((content: string) => {
-          const trimmed = content.trim();
-          if (!trimmed) return;
-          // De-duplicate against existing memories for this character
+        const validItems = data.items
+          .map((content: string) => content.trim())
+          .filter((content: string) => content.length > 0);
+
+        if (validItems.length > 0) {
+          const bulletPoints = validItems.map((item: string) => `- ${item}`).join("\n");
+          const singleSummaryContent = `【自动对话记忆总结】\n${bulletPoints}`;
+
           const isDup = (memories || []).some(
             (m) =>
               m.characterId === activeChatCharId &&
               m.content.toLowerCase().replace(/[\s,.:;!?"']/g, "") ===
-                trimmed.toLowerCase().replace(/[\s,.:;!?"']/g, "")
+                singleSummaryContent.toLowerCase().replace(/[\s,.:;!?"']/g, "")
           );
+
           if (!isDup) {
-            newItems.push({
+            const newSingleItem: MemoryItem = {
               id: (Date.now() + Math.random()).toString(),
               characterId: activeChatCharId,
-              content: trimmed,
+              content: singleSummaryContent,
               timestamp: Date.now(),
               importance: 5,
               isManual: false,
-            });
+            };
+            onSaveMemories([newSingleItem, ...(memories || [])]);
+            return 1;
           }
-        });
-
-        if (newItems.length > 0) {
-          onSaveMemories([...newItems, ...(memories || [])]);
         }
-        return newItems.length;
+        return 0;
       } else {
         console.error("Extract memory API error:", (data as any).error);
       }
@@ -1337,14 +1382,18 @@ ${proactivePrompt}`;
 
       if (data && data.text) {
         const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
-        const proactiveMsg: Message = {
-          id: Date.now().toString(),
-          characterId: activeChatCharId,
-          sender: "character",
-          content: cleanedText || data.text,
-          timestamp: Date.now(),
-        };
-        onSendMessage(proactiveMsg);
+        const textToSplit = cleanedText || data.text;
+        const bubbles = splitIntoWeChatBubbles(textToSplit);
+        bubbles.forEach((bubbleText, idx) => {
+          const proactiveMsg: Message = {
+            id: `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+            characterId: activeChatCharId,
+            sender: "character",
+            content: bubbleText,
+            timestamp: Date.now() + idx,
+          };
+          onSendMessage(proactiveMsg);
+        });
       } else {
         alert(`主动联络失败: ${(data as any).error || "智能体无响应"}`);
       }
@@ -1408,14 +1457,18 @@ ${instructionsPrompt}`;
 
       if (data && data.text) {
         const cleanedText = cleanOnlineMessage(data.text, friend.disableBracketActions || false);
-        const proactiveMsg: Message = {
-          id: Date.now().toString(),
-          characterId: charId,
-          sender: "character",
-          content: cleanedText || data.text,
-          timestamp: Date.now(),
-        };
-        onSendMessage(proactiveMsg);
+        const textToSplit = cleanedText || data.text;
+        const bubbles = splitIntoWeChatBubbles(textToSplit);
+        bubbles.forEach((bubbleText, idx) => {
+          const proactiveMsg: Message = {
+            id: `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+            characterId: charId,
+            sender: "character",
+            content: bubbleText,
+            timestamp: Date.now() + idx,
+          };
+          onSendMessage(proactiveMsg);
+        });
       }
     } catch (err) {
       console.error("Proactive message auto-trigger error:", err);
@@ -1423,16 +1476,15 @@ ${instructionsPrompt}`;
   };
 
   // Moments publication
-  const handleMomentImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMomentImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          setMomentAttachedImage(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 800, 800, 0.7);
+        setMomentAttachedImage(compressed);
+      } catch (err) {
+        console.error("Moment image compression failed:", err);
+      }
     }
   };
 
@@ -1457,16 +1509,15 @@ ${instructionsPrompt}`;
     setShowMomentPublisher(false);
   };
 
-  const handleMomentsCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMomentsCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          onSaveSettings({ ...settings, momentsCover: reader.result });
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 1000, 1000, 0.7);
+        onSaveSettings({ ...settings, momentsCover: compressed });
+      } catch (err) {
+        console.error("Moments cover compression failed:", err);
+      }
     }
   };
 
@@ -1570,6 +1621,7 @@ ${instructionsPrompt}`;
                   setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
                   setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
                   setDraftDisableBracketActions(activeCharacter.disableBracketActions || false);
+                  setDraftHistoryMemoryLimit(activeCharacter.historyMemoryLimit || 150);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
@@ -1738,6 +1790,35 @@ ${instructionsPrompt}`;
                       </div>
                     </div>
 
+                    {/* History Memory Limit Customizer */}
+                    <div className="py-3.5 space-y-2.5 border-t border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <span className="text-[#52525b] font-bold text-xs block">历史记忆（携带对话轮数）</span>
+                          <span className="text-[10px] text-slate-400 block">设置发送至 AI 的最近消息条数限制</span>
+                        </div>
+                        <span className="text-xs font-bold text-slate-700 font-mono">
+                          {draftHistoryMemoryLimit} 条 / {Math.round(draftHistoryMemoryLimit / 2)} 轮
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={50}
+                        max={1000}
+                        step={50}
+                        value={draftHistoryMemoryLimit}
+                        onChange={(e) => setDraftHistoryMemoryLimit(parseInt(e.target.value))}
+                        className="w-full accent-neutral-950 h-1 bg-slate-100 rounded-lg appearance-none cursor-pointer"
+                      />
+                      <div className="flex justify-between text-[9px] text-slate-400 font-mono">
+                        <span>50条</span>
+                        <span>250条</span>
+                        <span>500条</span>
+                        <span>750条</span>
+                        <span>1000条</span>
+                      </div>
+                    </div>
+
                     {/* Character Specific CSS Customizer */}
                     <div className="py-3 space-y-1.5 border-t border-slate-100">
                       <div className="flex items-center justify-between">
@@ -1893,16 +1974,77 @@ ${instructionsPrompt}`;
           {/* Active Chat Messages body */}
 
           <div
+            ref={scrollContainerRef}
             className="flex-1 overflow-y-auto p-4 space-y-4"
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
                 : "transparent",
+              WebkitOverflowScrolling: "touch",
             }}
           >
 
 
             {currentChatMessages.map((msg, idx) => {
+              if (isOfflineModeActive) {
+                // 1. Narration (centered divider with grey text and dashed line)
+                if (msg.isNarration) {
+                  return (
+                    <div 
+                      key={msg.id}
+                      className="w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed text-[#a1a3a8] border-b border-dashed border-slate-100/60 dark:border-slate-800/60 transition-all cursor-pointer"
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setActiveMenuMsg(msg);
+                        setMenuPosition({ x: e.clientX, y: e.clientY });
+                      }}
+                    >
+                      <div className="max-w-[90%] mx-auto font-normal tracking-wide select-text">
+                        {msg.content}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // 2. Character lines & descriptions (beautiful book paragraph layout, NO bubble, NO avatar)
+                if (msg.sender === "character") {
+                  return (
+                    <div 
+                      key={msg.id}
+                      className="w-full text-left my-4 px-1 py-1 group relative select-text transition-all duration-200 hover:bg-slate-50/10 dark:hover:bg-stone-800/20 rounded-lg cursor-pointer"
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setActiveMenuMsg(msg);
+                        setMenuPosition({ x: e.clientX, y: e.clientY });
+                      }}
+                    >
+                      <p className="text-[14px] leading-loose text-stone-800 dark:text-stone-200 font-sans tracking-wide text-justify whitespace-pre-wrap">
+                        {msg.content}
+                      </p>
+                    </div>
+                  );
+                }
+
+                // 3. User spoken dialogue ("我的发言", beautiful center-right soft grey bubble)
+                return (
+                  <div 
+                    key={msg.id}
+                    className="w-full flex justify-end my-4 group relative select-text cursor-pointer"
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setActiveMenuMsg(msg);
+                      setMenuPosition({ x: e.clientX, y: e.clientY });
+                    }}
+                  >
+                    <div className="relative max-w-[85%] bg-slate-100 dark:bg-stone-800/80 rounded-2xl px-4 py-2.5 shadow-sm hover:shadow-md transition-all border border-slate-200/40 dark:border-stone-700/40">
+                      <p className="text-[13.5px] leading-relaxed text-[#5e6672] dark:text-stone-300 font-medium font-sans italic whitespace-pre-wrap">
+                        {msg.content}
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+
               if (msg.isNarration) {
                 return (
                   <div 
@@ -2184,23 +2326,30 @@ ${instructionsPrompt}`;
 
             {/* AI is writing/typing indicator */}
             {isTyping && (
-              <div className="flex items-start gap-2.5 max-w-[80%] mr-auto">
-                <img 
-                  src={activeCharacter.avatar} 
-                  alt="" 
-                  className={`w-9 h-9 border object-cover shrink-0 aspect-square ${
-                    isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"
-                  }`} 
-                />
-                <div className="space-y-1">
-                  <span className="text-[9px] text-slate-400 font-bold">对方正在输入...</span>
-                  <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 rounded-2xl shadow-sm text-xs flex items-center space-x-1">
-                    <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+              isOfflineModeActive ? (
+                <div className="flex items-center gap-2 text-xs text-indigo-600 font-bold italic px-1 py-2 my-2 animate-pulse">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>{activeCharacter.remark || activeCharacter.name} 正在编织剧情走向...</span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2.5 max-w-[80%] mr-auto">
+                  <img 
+                    src={activeCharacter.avatar} 
+                    alt="" 
+                    className={`w-9 h-9 border object-cover shrink-0 aspect-square ${
+                      isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"
+                    }`} 
+                  />
+                  <div className="space-y-1">
+                    <span className="text-[9px] text-slate-400 font-bold">对方正在输入...</span>
+                    <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 rounded-2xl shadow-sm text-xs flex items-center space-x-1">
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                    </div>
                   </div>
                 </div>
-              </div>
+              )
             )}
 
             <div ref={chatEndRef} />
@@ -2332,17 +2481,16 @@ ${instructionsPrompt}`;
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (file) {
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          if (typeof reader.result === "string") {
-                            sendCustomMessage(reader.result);
-                            setShowAttachPanel(false);
-                          }
-                        };
-                        reader.readAsDataURL(file);
+                        try {
+                          const compressed = await compressImage(file, 800, 800, 0.75);
+                          sendCustomMessage(compressed);
+                          setShowAttachPanel(false);
+                        } catch (err) {
+                          console.error("Custom chat image compression failed:", err);
+                        }
                       }
                     }}
                     className="hidden"
@@ -3664,16 +3812,15 @@ ${instructionsPrompt}`;
                     <input
                       type="file"
                       accept="image/*"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            if (typeof reader.result === "string") {
-                              setEditMyAvatar(reader.result);
-                            }
-                          };
-                          reader.readAsDataURL(file);
+                          try {
+                            const compressed = await compressImage(file, 400, 400, 0.75);
+                            setEditMyAvatar(compressed);
+                          } catch (err) {
+                            console.error("My avatar compression failed:", err);
+                          }
                         }
                       }}
                       className="hidden"

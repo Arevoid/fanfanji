@@ -180,6 +180,22 @@ export default function AppOffline({
     showToast("剧情记忆已成功同步至人物主大脑！");
   };
 
+  // Delete individual plot record
+  const handleDeleteMessage = (msgId: string) => {
+    if (!activeStory) return;
+    if (confirm("确定要删除这段剧情记录吗？")) {
+      const updatedMsgs = activeStory.messages.filter(m => m.id !== msgId);
+      const updatedStory = {
+        ...activeStory,
+        messages: updatedMsgs,
+        updatedAt: Date.now()
+      };
+      onSaveOfflineStory(updatedStory);
+      setActiveStory(updatedStory);
+      showToast("剧情记录已删除");
+    }
+  };
+
   // Send message inside workspace
   const handleSendMessage = async (textToSend?: string, forceAIOnly = false) => {
     if (!activeStory) return;
@@ -226,10 +242,15 @@ export default function AppOffline({
 - 语气/性格特点：${selectedChar.personality}
 - 背景设定：${selectedChar.backstory}
 
+【人设遵循最高优先规则】
+1. 🚨 你必须严密、100%地遵循「${selectedChar.name}」的性格特征、说话语气、背景设定、思维逻辑、人际关系等所有人物卡属性。
+2. 在你生成的剧本小说叙述中，所有属于该角色的对话发言、神态动作、心理描写都必须与其性格高度吻合，严禁出现任何脱离人设、机械迎合或现代AI味的套话。
+3. ⚠️ 除非在下方【当前创作模式】的【IF平行假想线】设定中，明确标明了该角色需要调整、颠覆或改变其性格/人设，否则在任何情况下都绝对不许擅自改变或淡化其原原有性格！
+
 【线下模式核心规则】
 1. 用户可以通过文字、指令或旁白，像导播、写小说或主控一样描述故事进展。
 2. 作为一个优秀的内容创作者，你要输出一整段精美的、小说叙事般的回复，内容包括第三人称的场景描写、客观动作、旁白叙事，以及两人的对话。
-3. 🚨🚨🚨 [绝对指令]: 所有发言对话必须使用中文引号 “ ” (例如 “你又在胡思乱想什么。”) 或 「 」 括起来。任何非发言部分（动作描述、神态、场景描写、内心想法、旁白等）必须放在引号外面，严禁放在引号内。不可漏掉引号！否则系统无法将你的发言拆分成气泡对话。
+3. 任何发言对话请使用中文引号 “ ” (例如 “你醒了？”) 或 「 」 括起来，以便阅读。任何非发言部分（动作描述、神态、场景描写、内心想法、旁白等）放在引号外面。
 4. 如果用户给出了导演指令（如：[控制剧情：我们遇到了敌人]），请积极顺应，发挥你强大的故事延展能力，精美自然地推进剧情。
 5. 必须保持极高的人设契合度、动作细节和情感氛围描写。不要说任何破戏（OOC）的话，不要说你是AI。
 
@@ -265,22 +286,22 @@ export default function AppOffline({
       });
 
       if (response && response.text) {
-        // Parse the generated text block into sequence of speech bubbles & narration lines!
-        const parsedSegments = splitTextToOfflineSegments(response.text);
+        // Split AI response into individual paragraphs to maintain nice formatting and allow easy deletion of single paragraphs
+        const paragraphs = response.text.split("\n").map(p => p.trim()).filter(Boolean);
         
         let newMsgs: Message[] = [];
-        if (parsedSegments.length > 0) {
-          newMsgs = parsedSegments.map((seg, sIdx) => ({
-            id: `offline-reply-${Date.now()}-${sIdx}-${Math.random().toString(36).substr(2, 5)}`,
+        if (paragraphs.length > 0) {
+          newMsgs = paragraphs.map((para, pIdx) => ({
+            id: `offline-reply-${Date.now()}-${pIdx}-${Math.random().toString(36).substr(2, 5)}`,
             characterId: activeStory.characterId,
-            sender: seg.isNarration ? "user" : "character", // narration maps beautifully to neutral or user view, but visually has no avatar. We set sender user/char but flag isNarration
-            content: seg.content,
-            timestamp: Date.now() + sIdx,
+            sender: "character",
+            content: para,
+            timestamp: Date.now() + pIdx,
             isOffline: true,
-            isNarration: seg.isNarration
+            isNarration: false
           }));
         } else {
-          // Fallback if parsing fails
+          // Fallback if empty
           newMsgs = [{
             id: `offline-reply-fallback-${Date.now()}`,
             characterId: activeStory.characterId,
@@ -548,8 +569,20 @@ export default function AppOffline({
             )}
 
             {/* Messaging Workspace Body */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-100/40">
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white">
               
+              {activeStory.messages.length > 0 && (
+                /* Elegant session metadata header */
+                <div className="flex items-center justify-between border-b border-slate-150/40 pb-3 mb-6 select-none">
+                  <span className="text-[11px] font-medium tracking-wide text-slate-400 font-mono">
+                    {new Date(activeStory.createdAt).toLocaleDateString()} {new Date(activeStory.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 border border-slate-200/40">
+                    {activeStory.messages.length} 句
+                  </span>
+                </div>
+              )}
+
               {activeStory.messages.length === 0 && (
                 <div className="py-12 text-center text-slate-500 space-y-3 px-6">
                   <p className="text-xs leading-relaxed">🎬 剧本空间已就绪！可以先在输入框选择“旁白/描述”或“发言”来开个头，也可以直接点击下方的 “AI 续写” 让 {selectedChar.remark || selectedChar.name} 主动打破僵局并书写一段精美的小说开场白。</p>
@@ -562,52 +595,52 @@ export default function AppOffline({
                 </div>
               )}
 
-              {activeStory.messages.map((msg, index) => {
+              {activeStory.messages.map((msg) => {
                 const isSelf = msg.sender === "user";
-                
-                if (msg.isNarration) {
-                  // Objective Narration / Action layout
+                const isUserSpoken = isSelf && !msg.isNarration;
+
+                if (isUserSpoken) {
+                  // User Spoken Dialogue - beautiful center-right soft grey bubble
                   return (
                     <div 
                       key={msg.id}
-                      className="w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed text-[#a1a3a8] border-b border-dashed border-slate-150 transition-all"
+                      className="w-full flex justify-end my-5 group relative pr-7 select-text"
                     >
-                      <div className="max-w-[90%] mx-auto font-normal tracking-wide">
-                        {msg.content}
+                      <div className="relative max-w-[85%] bg-slate-100 rounded-2xl px-4 py-2.5 shadow-sm hover:shadow-md transition-all border border-slate-200/40">
+                        <p className="text-[13.5px] leading-relaxed text-[#5e6672] font-medium font-sans italic whitespace-pre-wrap">
+                          {msg.content}
+                        </p>
                       </div>
+                      
+                      {/* Subtle Hover Deletion Button */}
+                      <button
+                        onClick={() => handleDeleteMessage(msg.id)}
+                        className="absolute right-0 top-1/2 -translate-y-1/2 p-1 rounded bg-red-50 hover:bg-red-100 text-red-500 opacity-0 group-hover:opacity-100 transition-all shadow-sm"
+                        title="删除这段发言"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </div>
                   );
                 } else {
-                  // Spoken Dialogue Bubble layout
+                  // AI Narrative/Dialogue or User Narrative - beautiful flat left-aligned book-style paragraphs
                   return (
-                    <div
+                    <div 
                       key={msg.id}
-                      className={`flex items-start gap-2.5 max-w-[85%] message message-container ${
-                        isSelf ? "ml-auto flex-row-reverse" : "mr-auto"
-                      }`}
+                      className="w-full text-left my-4 group relative pr-7 select-text transition-all duration-200 hover:bg-slate-50/50 rounded-lg py-1 px-1"
                     >
-                      {/* Avatar */}
-                      <img
-                        src={isSelf ? settings.avatar : selectedChar.avatar}
-                        alt=""
-                        className="w-9 h-9 bg-slate-100 rounded-full object-cover border border-slate-200 shrink-0 aspect-square"
-                      />
+                      <p className="text-[14px] leading-loose text-slate-700 font-sans tracking-wide text-justify whitespace-pre-wrap">
+                        {msg.content}
+                      </p>
                       
-                      <div className="space-y-0.5 max-w-full">
-                        <span className="text-[10px] text-slate-400 block px-1">
-                          {isSelf ? "我" : (selectedChar.remark || selectedChar.name)}
-                        </span>
-                        
-                        <div 
-                          className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
-                            isSelf 
-                              ? "bg-indigo-600 text-white rounded-tr-none shadow-sm" 
-                              : "bg-white text-slate-800 border border-slate-150 rounded-tl-none shadow-sm"
-                          }`}
-                        >
-                          {msg.content}
-                        </div>
-                      </div>
+                      {/* Subtle Hover Deletion Button */}
+                      <button
+                        onClick={() => handleDeleteMessage(msg.id)}
+                        className="absolute right-0 top-1/2 -translate-y-1/2 p-1 rounded bg-red-50 hover:bg-red-100 text-red-500 opacity-0 group-hover:opacity-100 transition-all shadow-sm"
+                        title="删除这段剧情"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </div>
                   );
                 }
@@ -615,7 +648,7 @@ export default function AppOffline({
 
               {/* Typing Indicator */}
               {isGenerating && (
-                <div className="flex items-center gap-2 text-xs text-indigo-600 font-bold italic px-2">
+                <div className="flex items-center gap-2 text-xs text-indigo-600 font-bold italic px-1 py-2">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   <span>{selectedChar.remark || selectedChar.name} 正在编织剧情走向...</span>
                 </div>

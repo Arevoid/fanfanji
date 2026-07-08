@@ -30,6 +30,7 @@ export interface Character {
   greeting?: string;
   lastImmediateSummaryMsgId?: string;
   disableBracketActions?: boolean;
+  historyMemoryLimit?: number;
 }
 
 export interface Message {

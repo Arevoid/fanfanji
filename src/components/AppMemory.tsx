@@ -61,14 +61,14 @@ export default function AppMemory({
 
   // States for automatic summary settings
   const [selectedCharForAutoSummary, setSelectedCharForAutoSummary] = useState<string>("");
-  const [modalEnableAutoSummary, setModalEnableAutoSummary] = useState<boolean>(true);
+  const [modalEnableAutoSummary, setModalEnableAutoSummary] = useState<boolean>(false);
   const [modalSummaryTriggerRound, setModalSummaryTriggerRound] = useState<number>(15);
 
   const handleSelectCharForAutoSummary = (charId: string) => {
     setSelectedCharForAutoSummary(charId);
     const char = characters.find(c => c.id === charId);
     if (char) {
-      setModalEnableAutoSummary(char.enableAutoSummary !== false); // Default to true
+      setModalEnableAutoSummary(char.enableAutoSummary === true); // Default to false
       setModalSummaryTriggerRound(char.summaryTriggerRound || 15); // Default to 15
     }
   };
@@ -77,11 +77,11 @@ export default function AppMemory({
     const firstChar = characters[0];
     if (firstChar) {
       setSelectedCharForAutoSummary(firstChar.id);
-      setModalEnableAutoSummary(firstChar.enableAutoSummary !== false);
+      setModalEnableAutoSummary(firstChar.enableAutoSummary === true);
       setModalSummaryTriggerRound(firstChar.summaryTriggerRound || 15);
     } else {
       setSelectedCharForAutoSummary("");
-      setModalEnableAutoSummary(true);
+      setModalEnableAutoSummary(false);
       setModalSummaryTriggerRound(15);
     }
     setShowRecallModal(true);

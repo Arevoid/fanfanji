@@ -130,7 +130,7 @@ const DEFAULT_CHARACTERS: Character[] = [];
 
 const DEFAULT_SETTINGS: UserSettings = {
   name: "饭饭",
-  avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
+  avatar: "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png",
   signature: "今天你也想我了吗",
   bio: "",
   apiKey: "",
@@ -182,21 +182,21 @@ const DEFAULT_SETTINGS: UserSettings = {
     {
       id: "identity-1",
       name: "饭饭",
-      avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
+      avatar: "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png",
       signature: "今天你也想我了吗",
       bio: ""
     },
     {
       id: "identity-2",
       name: "",
-      avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
+      avatar: "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png",
       signature: "",
       bio: ""
     },
     {
       id: "identity-3",
       name: "",
-      avatar: "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png",
+      avatar: "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png",
       signature: "",
       bio: ""
     }
@@ -259,12 +259,12 @@ export default function App() {
       if (!migrated.name || migrated.name === "萌新机主") {
         migrated.name = "饭饭";
       }
-      if (migrated.avatar === "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&h=150&fit=crop" || migrated.avatar === "https://images.unsplash.com/photo-1532978379173-523e16f37248?w=150&h=150&fit=crop") {
-        migrated.avatar = "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png";
+      if (migrated.avatar === "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&h=150&fit=crop" || migrated.avatar === "https://images.unsplash.com/photo-1532978379173-523e16f37248?w=150&h=150&fit=crop" || migrated.avatar === "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png" || migrated.avatar === "https://picui.ogmua.cn/s1/2026/07/08/6a4dda2cbb97b.webp") {
+        migrated.avatar = "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png";
       }
       if (migrated.identities) {
         migrated.identities = migrated.identities.map((idty: any, index: number) => {
-          const isOldDefaultAvatar = !idty.avatar || idty.avatar.includes("photo-1534528741775-53994a69daeb") || idty.avatar.includes("photo-1507003211169-0a1dd7228f2d") || idty.avatar.includes("photo-1517841905240-472988babdf9") || idty.avatar.includes("photo-1532978379173-523e16f37248");
+          const isOldDefaultAvatar = !idty.avatar || idty.avatar.includes("photo-1534528741775-53994a69daeb") || idty.avatar.includes("photo-1507003211169-0a1dd7228f2d") || idty.avatar.includes("photo-1517841905240-472988babdf9") || idty.avatar.includes("photo-1532978379173-523e16f37248") || idty.avatar.includes("6a4b62d9eaa31") || idty.avatar.includes("6a4dda2cbb97b");
           let name = idty.name;
           let signature = idty.signature;
           if (idty.id === "identity-1") {
@@ -279,7 +279,7 @@ export default function App() {
             ...idty,
             name: name,
             signature: signature,
-            avatar: isOldDefaultAvatar ? "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png" : idty.avatar,
+            avatar: isOldDefaultAvatar ? "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png" : idty.avatar,
           };
         });
       }
@@ -1525,7 +1525,7 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen w-full bg-[#f3f4f6] flex items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb]">
+    <div className="min-h-[100dvh] h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb]">
       
       {/* Live Custom CSS Styling injection */}
       <style>{`
@@ -1900,7 +1900,7 @@ export default function App() {
       <div
         id="phone_glass_screen"
         ref={phoneScreenRef}
-        className="w-full h-screen md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl overflow-hidden relative flex flex-col bg-slate-100 transition-all duration-300 border-none phone-screen-container"
+        className="w-full h-[100dvh] md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl overflow-hidden relative flex flex-col bg-slate-100 transition-all duration-300 border-none phone-screen-container"
         style={{
           background: settings.wallpaper.startsWith("linear-gradient")
             ? settings.wallpaper

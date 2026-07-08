@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
-import mammoth from "mammoth";
 import { WorldBookEntry, Character } from "../types";
 import { Plus, Trash2, Edit, Search, ChevronLeft, Save, BookOpen, Layers, Globe, User, X, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
-import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries } from "../utils/pngParser";
+import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries, safeParseDocx } from "../utils/pngParser";
 
 export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBookEntry | null => {
   if (!e || typeof e !== "object") return null;
@@ -428,8 +427,8 @@ export default function AppWorldBook({
           r.onerror = () => reject(new Error("读取 DOCX 失败"));
           r.readAsArrayBuffer(file);
         });
-        const result = await mammoth.extractRawText({ arrayBuffer });
-        imported = parseTextToWorldBookEntries(result.value, file.name);
+        const text = await safeParseDocx(arrayBuffer);
+        imported = parseTextToWorldBookEntries(text, file.name);
       } else {
         throw new Error("请上传 .json 配置文件、.png 角色卡、.txt 或 .docx 文档文件！");
       }

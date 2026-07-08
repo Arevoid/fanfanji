@@ -89,9 +89,6 @@ export const mapSillyTavernToCharacter = (json: any, defaultAvatar: string): Cha
   if (data.mes_example) pDetails += `【对话范例】\n${data.mes_example}\n\n`;
   
   let bstory = data.creator_notes || data.creator || "";
-  if (!bstory.trim()) {
-    bstory = "来自导入文件。";
-  }
   
   // Try mapping common fields
   let ageNum: number | "" = "";
@@ -110,7 +107,7 @@ export const mapSillyTavernToCharacter = (json: any, defaultAvatar: string): Cha
   const genderStr = data.gender || "";
   
   // Heuristic for MBTI
-  let mbtiStr = "INFP";
+  let mbtiStr = "";
   const mbtiCandidates = [
     "INTJ", "INTP", "ENTJ", "ENTP",
     "INFJ", "INFP", "ENFJ", "ENFP",
@@ -124,26 +121,53 @@ export const mapSillyTavernToCharacter = (json: any, defaultAvatar: string): Cha
     }
   }
 
+  // Detect embedded avatar/image from JSON
+  let detectedAvatar = "";
+  const avatarFields = [
+    "avatar", "image", "custom_avatar", "img_url", "img", "profile_image", "character_avatar", "logo", "picture", "portrait"
+  ];
+  for (const field of avatarFields) {
+    const val = data[field] || json[field];
+    if (val && typeof val === "string") {
+      const trimmedVal = val.trim();
+      if (trimmedVal.startsWith("data:image/") || trimmedVal.startsWith("http://") || trimmedVal.startsWith("https://")) {
+        detectedAvatar = trimmedVal;
+        break;
+      } else if (/^[A-Za-z0-9+/=]{100,}$/.test(trimmedVal)) {
+        detectedAvatar = `data:image/png;base64,${trimmedVal}`;
+        break;
+      }
+    }
+  }
+
+  const finalAvatar = detectedAvatar || defaultAvatar || "https://picui.ogmua.cn/s1/2026/07/08/6a4dda2cbb97b.webp";
+
   return {
     id: "char-" + Date.now(),
     name: charName,
     remark: "",
-    avatar: defaultAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop",
+    avatar: finalAvatar,
     age: ageNum,
     gender: genderStr,
     mbti: mbtiStr,
-    personality: pDetails.trim() || "导入的性格设定。",
+    personality: pDetails.trim(),
     backstory: bstory.trim(),
     greeting: (data.first_mes || "").trim(),
-    album: defaultAvatar ? [defaultAvatar] : [],
+    album: finalAvatar ? [finalAvatar] : [],
     references: [],
   };
 };
 
 export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBookEntry => {
+  if (!stEntry || typeof stEntry !== "object") {
+    stEntry = { content: String(stEntry || "") };
+  }
+
   let title = stEntry.comment || stEntry.name || stEntry.title || "";
-  if (!title && stEntry.keys && stEntry.keys.length > 0) {
-    title = Array.isArray(stEntry.keys) ? stEntry.keys[0] : String(stEntry.keys).split(",")[0];
+  if (!title && stEntry.keys && Array.isArray(stEntry.keys) && stEntry.keys.length > 0) {
+    title = stEntry.keys[0];
+  } else if (!title && stEntry.keys) {
+    title = String(stEntry.keys).split(",")[0];
   }
   if (!title) {
     title = `未命名词条-${Math.random().toString(36).substring(2, 6)}`;
@@ -158,7 +182,7 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
 
   let mappedPos: "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history" = "after_char_def";
   const stPos = stEntry.position;
-  if (stPos !== undefined) {
+  if (stPos !== undefined && stPos !== null) {
     const pStr = String(stPos).toLowerCase();
     if (pStr.includes("author") || pStr === "3") {
       mappedPos = "after_char_def";
@@ -174,10 +198,16 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
   }
 
   let mappedDepth = 5;
-  if (stEntry.insertion_order !== undefined) {
-    mappedDepth = Math.max(1, Math.min(15, Number(stEntry.insertion_order)));
-  } else if (stEntry.depth !== undefined) {
-    mappedDepth = Math.max(1, Math.min(15, Number(stEntry.depth)));
+  if (stEntry.insertion_order !== undefined && stEntry.insertion_order !== null) {
+    const parsed = Number(stEntry.insertion_order);
+    if (!isNaN(parsed)) {
+      mappedDepth = Math.max(1, Math.min(15, parsed));
+    }
+  } else if (stEntry.depth !== undefined && stEntry.depth !== null) {
+    const parsed = Number(stEntry.depth);
+    if (!isNaN(parsed)) {
+      mappedDepth = Math.max(1, Math.min(15, parsed));
+    }
   }
 
   let trigger: "keys" | "constant" | "vector" = "keys";
@@ -187,9 +217,9 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
 
   return {
     id: `wb-entry-${characterId}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    title: title,
+    title: String(title),
     category: "世界书",
-    content: stEntry.content || "",
+    content: String(stEntry.content || ""),
     timestamp: Date.now(),
     characterId: characterId || "global",
     triggerType: trigger,
@@ -375,4 +405,96 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
   
   return cleanedLines.join("\n").trim();
 }
+
+export function splitIntoWeChatBubbles(text: string): string[] {
+  if (!text) return [];
+  
+  // Split by sentence terminators: 。 ！ ？ ! ? \n
+  // Keep the terminators attached to the preceding text
+  const regex = /[^。！？!?\n]+[。！？!?\n]*/g;
+  const matches = text.match(regex);
+  if (!matches) {
+    return [text];
+  }
+  
+  const results: string[] = [];
+  for (const match of matches) {
+    const trimmed = match.trim();
+    if (trimmed) {
+      results.push(trimmed);
+    }
+  }
+  
+  return results.length > 0 ? results : [text];
+}
+
+export function compressImage(file: File, maxWidth: number, maxHeight: number, quality: number = 0.7): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(event.target?.result as string);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        // Compress as jpeg to save massive space
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl);
+      };
+      img.onerror = (err) => reject(err);
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
+// @ts-ignore
+import mammothCode from "mammoth/mammoth.browser.min.js?raw";
+
+export async function safeParseDocx(arrayBuffer: ArrayBuffer): Promise<string> {
+  const g = typeof window !== "undefined" ? window : globalThis;
+  // @ts-ignore
+  if (!g.mammoth) {
+    try {
+      const fn = new Function("exports", "module", "define", mammothCode);
+      fn(undefined, undefined, undefined);
+    } catch (e) {
+      console.error("Failed to load mammoth browser bundle", e);
+      throw new Error("初始化 DOCX 解析器失败");
+    }
+  }
+  // @ts-ignore
+  const mammothInstance = g.mammoth;
+  if (!mammothInstance) {
+    throw new Error("DOCX 解析器未加载成功");
+  }
+  const result = await mammothInstance.extractRawText({ arrayBuffer });
+  return result.value;
+}
+
+
 
