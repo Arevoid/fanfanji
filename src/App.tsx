@@ -445,6 +445,66 @@ export default function App() {
     timestamp: number;
   } | null>(null);
 
+  const [isMobileKeyboardActive, setIsMobileKeyboardActive] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Synchronize mobile keyboard visual state to prevent bounce and shift view cleanly
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    const handleViewportChange = () => {
+      const vv = window.visualViewport;
+      if (!vv) return;
+      
+      const isMobile = window.innerWidth < 768;
+      if (!isMobile) {
+        setIsMobileKeyboardActive(false);
+        setKeyboardHeight(0);
+        return;
+      }
+
+      // Check if keyboard is likely open by measuring viewport height reduction
+      const offset = window.innerHeight - vv.height;
+      if (offset > 120) { // typical keyboard height threshold (e.g. 120px+)
+        setIsMobileKeyboardActive(true);
+        setKeyboardHeight(offset);
+      } else {
+        setIsMobileKeyboardActive(false);
+        setKeyboardHeight(0);
+      }
+    };
+
+    const preventScrollBounce = () => {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        window.scrollTo(0, 0);
+        document.body.scrollTop = 0;
+      }
+    };
+
+    window.visualViewport.addEventListener("resize", handleViewportChange);
+    window.visualViewport.addEventListener("scroll", handleViewportChange);
+    window.addEventListener("scroll", preventScrollBounce, { passive: true });
+
+    // Force periodic reset of body scroll when input is focused to combat iOS Safari behavior
+    const interval = setInterval(() => {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        window.scrollTo(0, 0);
+        document.body.scrollTop = 0;
+      }
+    }, 200);
+
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", handleViewportChange);
+        window.visualViewport.removeEventListener("scroll", handleViewportChange);
+      }
+      window.removeEventListener("scroll", preventScrollBounce);
+      clearInterval(interval);
+    };
+  }, []);
+
   // Auto-close global notification after 3 seconds
   useEffect(() => {
     if (globalNotification) {
@@ -1946,15 +2006,11 @@ export default function App() {
           background: settings.wallpaper.startsWith("linear-gradient")
             ? settings.wallpaper
             : `url(${settings.wallpaper}) center/cover no-repeat`,
+          transform: isMobileKeyboardActive ? `translateY(-${keyboardHeight}px)` : "none",
+          transition: "transform 0.28s cubic-bezier(0.1, 0.76, 0.55, 0.94), background 0.3s ease, width 0.3s ease, height 0.3s ease",
         }}
       >
-        {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) */}
-        {(() => {
-          const activeChar = characters.find(c => c.id === activeChatCharId);
-          const currentPreset = activeChar?.chatStylePreset || settings.globalChatStylePreset || "default";
-          const isStatusBarTransparent = activeApp === "chat" && activeChatCharId !== null && currentPreset === "liquid-glass";
-          return <StatusBar isTransparent={isStatusBarTransparent} />;
-        })()}
+        {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) is now overlaid absolutely at the bottom of the container to stay on top of everything */}
 
         {/* Global New Message Notification Banner */}
         {globalNotification && (
@@ -2000,7 +2056,7 @@ export default function App() {
         <div className="flex-1 relative overflow-hidden flex flex-col">
           {activeApp === null ? (
             <div 
-              className="flex-1 flex flex-col justify-between p-4 pb-6 select-none touch-none"
+              className="flex-1 flex flex-col justify-between p-4 pt-[40px] pb-6 select-none touch-none"
               onPointerDown={handleDesktopPointerDown}
               onPointerUp={handleDesktopPointerUp}
               onPointerLeave={handleDesktopPointerUp}
@@ -2333,7 +2389,7 @@ export default function App() {
             </div>
           ) : (
             // Full screen app view ports with transitions
-            <div className="absolute inset-0 z-30 bg-slate-50 flex flex-col h-full">
+            <div className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full pt-[36px]">
               <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
                 <AppChat
                   characters={characters}
@@ -2479,6 +2535,15 @@ export default function App() {
               )}
             </div>
           )}
+
+          {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) - Overlaid absolutely on top of everything */}
+          {(() => {
+            const activeChar = characters.find(c => c.id === activeChatCharId);
+            const activeWallpaper = (activeApp === "chat" && activeChar && activeChar.chatBg) 
+              ? activeChar.chatBg 
+              : settings.wallpaper;
+            return <StatusBar wallpaper={activeWallpaper} />;
+          })()}
         </div>
 
         {/* Tactile absolute clone of the dragged item following cursor */}

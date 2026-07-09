@@ -764,8 +764,8 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
 
-      // 1.5 Time awareness prompt if enabled
-      if (activeCharacter.enableTimeAwareness) {
+      // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
+      if (activeCharacter.enableTimeAwareness !== false) {
         const now = new Date();
         const timeStr = now.toLocaleString("zh-CN", { 
           year: "numeric", 
@@ -900,8 +900,22 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
             }];
           }
 
-          // Send each segment to the message stream
-          newMsgs.forEach(m => onSendMessage(m));
+          // Send each segment with realistic typing delays and real-time timestamps
+          for (let idx = 0; idx < newMsgs.length; idx++) {
+            const m = newMsgs[idx];
+            setIsTyping(true);
+            const chars = m.content.length;
+            const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
+            await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
+            
+            m.timestamp = Date.now();
+            onSendMessage(m);
+            setIsTyping(false);
+            
+            if (idx < newMsgs.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
+            }
+          }
 
           // Save each segment to the active offline story
           if (activeOfflineStoryId && onSaveOfflineStory) {
@@ -921,17 +935,31 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
           const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
           const createdMessages: Message[] = [];
-          bubbles.forEach((bubbleText, idx) => {
+          
+          for (let idx = 0; idx < bubbles.length; idx++) {
+            const bubbleText = bubbles[idx];
             const charMsg: Message = {
               id: `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
               characterId: activeChatCharId,
               sender: "character",
               content: bubbleText,
-              timestamp: Date.now() + idx,
+              timestamp: Date.now(),
             };
+            
+            setIsTyping(true);
+            const chars = bubbleText.length;
+            const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
+            await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
+            
+            charMsg.timestamp = Date.now();
             onSendMessage(charMsg);
             createdMessages.push(charMsg);
-          });
+            setIsTyping(false);
+            
+            if (idx < bubbles.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
+            }
+          }
 
           // Check if auto extraction is enabled and we have reached the trigger round count
           const isAutoExtractEnabled = activeCharacter.enableAutoSummary === true;
@@ -1627,7 +1655,7 @@ ${instructionsPrompt}`;
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
-        <div className={`absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen">
+        <div className={`absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up pt-[36px] ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen">
           <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content">
             {activeCharacter.customCss && (
               <style>{activeCharacter.customCss}</style>
@@ -2698,29 +2726,35 @@ ${instructionsPrompt}`;
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   <span>{activeCharacter.remark || activeCharacter.name} 正在编织剧情走向...</span>
                 </div>
-              ) : (
-                <div className="w-full flex flex-col items-start mt-4.5 cv-msg-row message message-container">
-                  <div className="flex items-center gap-2.5 mb-1.5 select-none">
-                    <img 
-                      src={activeCharacter.avatar} 
-                      alt="" 
-                      className={`w-9 h-9 border object-cover shrink-0 aspect-square avatar ai-avatar ${
-                        isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"
-                      }`} 
-                    />
-                    <div className="flex flex-col items-start text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header">
-                      <span className="text-[9px] text-slate-400 font-bold">对方正在输入...</span>
+              ) : (() => {
+                const lastMsg = currentChatMessages.length > 0 ? currentChatMessages[currentChatMessages.length - 1] : null;
+                const isTypingConsecutive = lastMsg && lastMsg.sender !== "user";
+                return (
+                  <div className={`w-full flex flex-col items-start ${isTypingConsecutive ? "mt-1.5" : "mt-4.5"} cv-msg-row message message-container`}>
+                    {!isTypingConsecutive && (
+                      <div className="flex items-center gap-2.5 mb-1.5 select-none">
+                        <img 
+                          src={activeCharacter.avatar} 
+                          alt="" 
+                          className={`w-9 h-9 border object-cover shrink-0 aspect-square avatar ai-avatar ${
+                            isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"
+                          }`} 
+                        />
+                        <div className="flex flex-col items-start text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header">
+                          <span className="text-[9px] text-slate-400 font-bold">对方正在输入...</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="max-w-[85%]">
+                      <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 rounded-2xl shadow-sm text-xs flex items-center space-x-1 chat-bubble-other message-bubble">
+                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
                     </div>
                   </div>
-                  <div className="max-w-[85%]">
-                    <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 rounded-2xl shadow-sm text-xs flex items-center space-x-1 chat-bubble-other message-bubble">
-                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                    </div>
-                  </div>
-                </div>
-              )
+                );
+              })()
             )}
 
             <div ref={chatEndRef} />

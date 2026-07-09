@@ -395,9 +395,16 @@ export default function AppWorldBook({
         }
         const parsedJson = decodeCharaData(charaStr);
         const innerData = parsedJson.data || parsedJson;
+        const charName = innerData.name || "";
         const characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
         if (characterBook && Array.isArray(characterBook.entries)) {
-          imported = characterBook.entries.map((entry: any) => mapSillyTavernEntry(entry, "global"));
+          imported = characterBook.entries.map((entry: any) => {
+            const mapped = mapSillyTavernEntry(entry, "global");
+            if (mapped && charName) {
+              mapped.category = `${charName}世界书`;
+            }
+            return mapped;
+          }).filter(Boolean);
         } else {
           throw new Error("该 PNG 角色卡中不包含任何世界书 (character_book) 词条设定。");
         }
@@ -410,9 +417,16 @@ export default function AppWorldBook({
         });
         const parsedJson = JSON.parse(text);
         const innerData = parsedJson.data || parsedJson;
+        const charName = innerData.name || "";
         const characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
         if (characterBook && Array.isArray(characterBook.entries)) {
-          imported = characterBook.entries.map((entry: any) => mapSillyTavernEntry(entry, "global"));
+          imported = characterBook.entries.map((entry: any) => {
+            const mapped = mapSillyTavernEntry(entry, "global");
+            if (mapped && charName) {
+              mapped.category = `${charName}世界书`;
+            }
+            return mapped;
+          }).filter(Boolean);
         } else {
           imported = parseWorldBookImport(parsedJson);
         }

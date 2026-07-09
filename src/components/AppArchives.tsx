@@ -229,7 +229,11 @@ export default function AppArchives({
             const mappedEntries = characterBook.entries
               .map((entry: any) => {
                 try {
-                  return mapSillyTavernEntry(entry, importedChar.id);
+                  const mapped = mapSillyTavernEntry(entry, importedChar.id);
+                  if (mapped) {
+                    mapped.category = `${importedChar.name || "未命名"}世界书`;
+                  }
+                  return mapped;
                 } catch (e) {
                   console.error("Failed to map entry:", entry, e);
                   return null;
