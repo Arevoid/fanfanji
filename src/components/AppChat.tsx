@@ -1083,6 +1083,27 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
     }
   }, [messages.length, activeChatCharId, isTyping]);
 
+  // Scroll to bottom when visual viewport height changes (mobile keyboard pops up/down)
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    const handleViewportResize = () => {
+      if (!activeChatCharId) return;
+      // Scroll to bottom when height changes (e.g., keyboard pops up or dismisses)
+      setTimeout(() => {
+        if (chatEndRef.current) {
+          chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+        }
+      }, 100);
+    };
+
+    const vv = window.visualViewport;
+    vv.addEventListener("resize", handleViewportResize);
+    return () => {
+      vv.removeEventListener("resize", handleViewportResize);
+    };
+  }, [activeChatCharId]);
+
   // Handle Send Message (User sends only, no immediate reply)
   const handleSendOnly = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -1655,7 +1676,7 @@ ${instructionsPrompt}`;
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
-        <div className={`absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up pt-[36px] ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen">
+        <div className={`absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen">
           <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content">
             {activeCharacter.customCss && (
               <style>{activeCharacter.customCss}</style>
@@ -2842,6 +2863,13 @@ ${instructionsPrompt}`;
                 type="text"
                 value={chatInputText}
                 onChange={(e) => setChatInputText(e.target.value)}
+                onFocus={() => {
+                  setTimeout(() => {
+                    if (chatEndRef.current) {
+                      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+                    }
+                  }, 120);
+                }}
                 placeholder={
                   isOfflineModeActive 
                     ? (isInputNarration 

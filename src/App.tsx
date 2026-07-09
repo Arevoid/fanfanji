@@ -2400,7 +2400,7 @@ export default function App() {
           ) : (
             // Full screen app view ports with transitions
             <div className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full pt-[36px]">
-              <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
+              <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-x-0 bottom-0 top-[36px]">
                 <AppChat
                   characters={characters}
                   settings={settings}
