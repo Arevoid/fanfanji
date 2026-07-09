@@ -881,27 +881,66 @@ export default function AppSettings({
                 </h3>
                 
                 {/* 手机壁纸上传区 */}
-                <div className="flex flex-row items-center justify-center gap-4 py-2.5 border border-dashed border-slate-200 bg-slate-50/50 rounded-[32px] w-full">
-                  <label className="cursor-pointer bg-white hover:bg-slate-50 px-5 py-1.5 rounded-[32px] border border-slate-200 text-[11px] text-[#52525b] font-bold shadow-sm transition-colors flex items-center gap-1.5">
-                    <span>点击上传壁纸</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleWallpaperUpload}
-                      className="hidden"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const fallback = "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)";
-                      setWallpaper(fallback);
-                      handleSave({ wallpaper: fallback });
-                    }}
-                    className="text-[11px] text-[#52525b] hover:text-neutral-950 hover:underline font-bold"
-                  >
-                    恢复默认
-                  </button>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[11px] font-bold text-[#52525b]">手机壁纸预览与设置</span>
+                    {wallpaper && !wallpaper.startsWith("linear-gradient") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const fallback = "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)";
+                          setWallpaper(fallback);
+                          handleSave({ wallpaper: fallback });
+                        }}
+                        className="text-[10px] text-red-500 hover:text-red-600 font-semibold"
+                      >
+                        恢复默认
+                      </button>
+                    )}
+                  </div>
+                  
+                  {wallpaper && !wallpaper.startsWith("linear-gradient") ? (
+                    <div className="relative w-full h-32 rounded-[20px] overflow-hidden border border-slate-200 group">
+                      <img
+                        src={wallpaper}
+                        alt="Wallpaper Preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <label className="cursor-pointer bg-white/90 hover:bg-white text-slate-800 text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors">
+                          更换图片
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleWallpaperUpload}
+                            className="hidden"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const fallback = "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)";
+                            setWallpaper(fallback);
+                            handleSave({ wallpaper: fallback });
+                          }}
+                          className="bg-red-500/90 hover:bg-red-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-4 rounded-[20px] text-xs transition-colors group w-full">
+                      <span className="text-slate-500 font-medium group-hover:text-slate-700">点击上传手机壁纸图片</span>
+                      <span className="text-[10px] text-slate-400 mt-0.5">支持 PNG, JPG 等格式</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleWallpaperUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
                 </div>
 
                 {/* Dock 栏透明度设置 */}
@@ -960,15 +999,15 @@ export default function AppSettings({
                   <span>2. 图标全局美化模块</span>
                 </h3>
 
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {/* 圆角 */}
-                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                    <div className="w-[72px] shrink-0 flex flex-col pl-2">
-                      <span className="text-[11px] font-bold text-[#52525b]">圆角</span>
-                      <span className="text-[9px] text-slate-400 font-mono font-medium">{iconBorderRadius}%</span>
-                    </div>
-                    <div className="flex-1 flex items-center gap-2">
-                      <span className="text-[9px] text-slate-400 shrink-0">直角</span>
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
+                      <span>圆角</span>
+                      <span className="text-[10px] text-slate-400 font-mono font-medium">{iconBorderRadius}%</span>
+                    </label>
+                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">直角</span>
                       <input
                         type="range"
                         min="0"
@@ -981,18 +1020,18 @@ export default function AppSettings({
                         }}
                         className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                       />
-                      <span className="text-[9px] text-slate-400 shrink-0">圆形</span>
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">圆形</span>
                     </div>
                   </div>
 
                   {/* 背景 */}
-                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                    <div className="w-[72px] shrink-0 flex flex-col pl-2">
-                      <span className="text-[11px] font-bold text-[#52525b]">背景</span>
-                      <span className="text-[9px] text-slate-400 font-mono font-medium">{iconBgOpacity}%</span>
-                    </div>
-                    <div className="flex-1 flex items-center gap-2">
-                      <span className="text-[9px] text-slate-400 shrink-0">透明</span>
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
+                      <span>背景</span>
+                      <span className="text-[10px] text-slate-400 font-mono font-medium">{iconBgOpacity}%</span>
+                    </label>
+                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">全透明</span>
                       <input
                         type="range"
                         min="0"
@@ -1005,18 +1044,18 @@ export default function AppSettings({
                         }}
                         className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                       />
-                      <span className="text-[9px] text-slate-400 shrink-0">不透</span>
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">不透明</span>
                     </div>
                   </div>
 
                   {/* 描边粗细 */}
-                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                    <div className="w-[72px] shrink-0 flex flex-col pl-2">
-                      <span className="text-[11px] font-bold text-[#52525b]">描边粗细</span>
-                      <span className="text-[9px] text-slate-400 font-mono font-medium">{iconBorderWidth}px</span>
-                    </div>
-                    <div className="flex-1 flex items-center gap-2">
-                      <span className="text-[9px] text-slate-400 shrink-0">无</span>
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
+                      <span>描边粗细</span>
+                      <span className="text-[10px] text-slate-400 font-mono font-medium">{iconBorderWidth}px</span>
+                    </label>
+                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">无描边</span>
                       <input
                         type="range"
                         min="0"
@@ -1029,18 +1068,18 @@ export default function AppSettings({
                         }}
                         className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                       />
-                      <span className="text-[9px] text-slate-400 shrink-0">10px</span>
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">10px</span>
                     </div>
                   </div>
 
                   {/* 描边显示 */}
-                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                    <div className="w-[72px] shrink-0 flex flex-col pl-2">
-                      <span className="text-[11px] font-bold text-[#52525b]">描边显示</span>
-                      <span className="text-[9px] text-slate-400 font-mono font-medium">{iconBorderOpacity}%</span>
-                    </div>
-                    <div className="flex-1 flex items-center gap-2">
-                      <span className="text-[9px] text-slate-400 shrink-0">全透</span>
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
+                      <span>描边显示</span>
+                      <span className="text-[10px] text-slate-400 font-mono font-medium">{iconBorderOpacity}%</span>
+                    </label>
+                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">全透</span>
                       <input
                         type="range"
                         min="0"
@@ -1053,7 +1092,7 @@ export default function AppSettings({
                         }}
                         className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                       />
-                      <span className="text-[9px] text-slate-400 shrink-0">不透</span>
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">不透</span>
                     </div>
                   </div>
                 </div>

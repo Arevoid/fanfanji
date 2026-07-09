@@ -140,7 +140,7 @@ export const mapSillyTavernToCharacter = (json: any, defaultAvatar: string): Cha
     }
   }
 
-  const finalAvatar = detectedAvatar || defaultAvatar || "https://picui.ogmua.cn/s1/2026/07/08/6a4dda2cbb97b.webp";
+  const finalAvatar = detectedAvatar || defaultAvatar || "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg";
 
   return {
     id: "char-" + Date.now(),
@@ -406,22 +406,42 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
   return cleanedLines.join("\n").trim();
 }
 
-export function splitIntoWeChatBubbles(text: string): string[] {
+export function splitIntoWeChatBubbles(text: string, keepPeriods: boolean = false): string[] {
   if (!text) return [];
   
-  // Split by sentence terminators: 。 ！ ？ ! ? \n
-  // Keep the terminators attached to the preceding text
-  const regex = /[^。！？!?\n]+[。！？!?\n]*/g;
-  const matches = text.match(regex);
-  if (!matches) {
-    return [text];
-  }
-  
+  // Split by newlines first to ensure each paragraph/line break gets its own bubble
+  const lines = text.split(/\r?\n/);
   const results: string[] = [];
-  for (const match of matches) {
-    const trimmed = match.trim();
-    if (trimmed) {
-      results.push(trimmed);
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+    
+    // Split the line by major sentence endings: 。！？!?
+    const regex = /[^。！？!?]+[。！？!?]*/g;
+    const matches = trimmedLine.match(regex);
+    if (!matches) {
+      let finalBubble = trimmedLine;
+      if (!keepPeriods && finalBubble.endsWith("。")) {
+        finalBubble = finalBubble.replace(/。+$/, "");
+      }
+      if (finalBubble.trim()) {
+        results.push(finalBubble.trim());
+      }
+      continue;
+    }
+    
+    for (const match of matches) {
+      let bubbleText = match.trim();
+      if (!bubbleText) continue;
+      
+      if (!keepPeriods && bubbleText.endsWith("。")) {
+        bubbleText = bubbleText.replace(/。+$/, "");
+      }
+      
+      if (bubbleText.trim()) {
+        results.push(bubbleText.trim());
+      }
     }
   }
   

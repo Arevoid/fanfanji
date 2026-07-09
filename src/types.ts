@@ -26,7 +26,7 @@ export interface Character {
   proactiveChatInterval?: number;
   lastActiveTime?: number;
   customCss?: string;
-  chatStylePreset?: "default" | "floating-cute";
+  chatStylePreset?: "default" | "floating-cute" | "liquid-glass";
   greeting?: string;
   lastImmediateSummaryMsgId?: string;
   disableBracketActions?: boolean;
@@ -120,7 +120,7 @@ export interface UserSettings {
   customIcons: Record<string, string>; // appKey -> image base64/URL or empty
   bubbleCss: string; // Custom bubble CSS
   globalCss: string; // Custom global CSS
-  globalChatStylePreset?: "default" | "floating-cute";
+  globalChatStylePreset?: "default" | "floating-cute" | "liquid-glass";
   activePreset: string; // Preset name
   momentsCover?: string; // Moments cover image URL or base64
   apiEndpoint?: string;

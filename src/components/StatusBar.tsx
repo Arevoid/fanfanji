@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { Wifi, Battery, Signal } from "lucide-react";
 
-export default function StatusBar() {
+interface StatusBarProps {
+  isTransparent?: boolean;
+}
+
+export default function StatusBar({ isTransparent }: StatusBarProps) {
   const [time, setTime] = useState("");
 
   useEffect(() => {
@@ -17,7 +21,11 @@ export default function StatusBar() {
   }, []);
 
   return (
-    <div className="flex justify-between items-center px-6 py-2.5 text-xs font-semibold text-gray-800 select-none z-50 bg-white/40 backdrop-blur-md border-b border-gray-100/30">
+    <div className={`flex justify-between items-center px-6 py-2.5 text-xs font-semibold text-gray-800 select-none z-50 transition-all ${
+      isTransparent 
+        ? "bg-transparent border-none backdrop-blur-none shadow-none" 
+        : "bg-white/40 backdrop-blur-md border-b border-gray-100/30"
+    }`}>
       <div className="flex items-center space-x-1.5">
         <span className="font-sans text-sm tracking-tight">{time}</span>
       </div>

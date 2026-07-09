@@ -135,8 +135,9 @@ const DEFAULT_SETTINGS: UserSettings = {
   bio: "",
   apiKey: "",
   selectedModel: "gemini-3.5-flash",
-  wallpaper: "linear-gradient(to bottom, #fbfbfd 0%, #e5e5eb 100%)",
+  wallpaper: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4qlqT1pFp4Gj5EqG1Gmkjd5vpi7lCgACjCQAAuHegVYQ0GSE8vFwEjwE.jpg",
   customIcons: {},
+  globalChatStylePreset: "liquid-glass",
   bubbleCss: `.chat-bubble-self {
   background: #18181b !important;
   color: #ffffff !important;
@@ -256,6 +257,10 @@ export default function App() {
         identities: parsed.identities || DEFAULT_SETTINGS.identities,
         activeIdentityId: parsed.activeIdentityId || DEFAULT_SETTINGS.activeIdentityId
       };
+      if (!migrated.wallpaper || migrated.wallpaper.startsWith("linear-gradient")) {
+        migrated.wallpaper = "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4qlqT1pFp4Gj5EqG1Gmkjd5vpi7lCgACjCQAAuHegVYQ0GSE8vFwEjwE.jpg";
+      }
+      migrated.globalChatStylePreset = "liquid-glass";
       if (!migrated.name || migrated.name === "萌新机主") {
         migrated.name = "饭饭";
       }
@@ -1944,7 +1949,12 @@ export default function App() {
         }}
       >
         {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) */}
-        <StatusBar />
+        {(() => {
+          const activeChar = characters.find(c => c.id === activeChatCharId);
+          const currentPreset = activeChar?.chatStylePreset || settings.globalChatStylePreset || "default";
+          const isStatusBarTransparent = activeApp === "chat" && activeChatCharId !== null && currentPreset === "liquid-glass";
+          return <StatusBar isTransparent={isStatusBarTransparent} />;
+        })()}
 
         {/* Global New Message Notification Banner */}
         {globalNotification && (

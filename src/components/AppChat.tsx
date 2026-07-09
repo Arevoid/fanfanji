@@ -288,7 +288,7 @@ export default function AppChat({
   const [editMySignature, setEditMySignature] = useState(settings.signature);
   const [editMyBio, setEditMyBio] = useState(settings.bio);
   const [editMyAvatar, setEditMyAvatar] = useState(settings.avatar);
-  const [editGlobalChatStylePreset, setEditGlobalChatStylePreset] = useState<"default" | "floating-cute">("default");
+  const [editGlobalChatStylePreset, setEditGlobalChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
 
   // Sync edits when isEditingProfile toggled
   useEffect(() => {
@@ -373,7 +373,7 @@ export default function AppChat({
   const [draftIsPinned, setDraftIsPinned] = useState(false);
   const [draftChatBg, setDraftChatBg] = useState<string | undefined>(undefined);
   const [draftCustomCss, setDraftCustomCss] = useState("");
-  const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute">("default");
+  const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
   const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
@@ -846,7 +846,14 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 
       if (data && data.text) {
         if (isOfflineModeActive) {
-          const paragraphs = data.text.split("\n").map(p => p.trim()).filter(Boolean);
+          const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+          const paragraphs = data.text.split("\n").map(p => {
+            let trimmed = p.trim();
+            if (!keepPeriods && trimmed.endsWith("。")) {
+              trimmed = trimmed.replace(/。+$/, "");
+            }
+            return trimmed;
+          }).filter(Boolean);
           let newMsgs: Message[] = [];
           if (paragraphs.length > 0) {
             newMsgs = paragraphs.map((para, pIdx) => ({
@@ -859,11 +866,15 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
               isNarration: false
             }));
           } else {
+            let finalContent = data.text;
+            if (!keepPeriods && finalContent.endsWith("。")) {
+              finalContent = finalContent.replace(/。+$/, "");
+            }
             newMsgs = [{
               id: (Date.now() + 1).toString(),
               characterId: activeChatCharId,
               sender: "character",
-              content: data.text,
+              content: finalContent,
               timestamp: Date.now(),
               isOffline: true,
               isNarration: false
@@ -888,7 +899,8 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
         } else {
           const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
           const textToSplit = cleanedText || data.text;
-          const bubbles = splitIntoWeChatBubbles(textToSplit);
+          const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+          const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
           const createdMessages: Message[] = [];
           bubbles.forEach((bubbleText, idx) => {
             const charMsg: Message = {
@@ -1223,7 +1235,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       if (data && data.text) {
         const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
         const textToSplit = cleanedText || data.text;
-        const bubbles = splitIntoWeChatBubbles(textToSplit);
+        const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+        const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
         bubbles.forEach((bubbleText, idx) => {
           const charMsg: Message = {
             id: `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
@@ -1395,7 +1408,8 @@ ${proactivePrompt}`;
       if (data && data.text) {
         const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
         const textToSplit = cleanedText || data.text;
-        const bubbles = splitIntoWeChatBubbles(textToSplit);
+        const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+        const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
         bubbles.forEach((bubbleText, idx) => {
           const proactiveMsg: Message = {
             id: `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
@@ -1470,7 +1484,8 @@ ${instructionsPrompt}`;
       if (data && data.text) {
         const cleanedText = cleanOnlineMessage(data.text, friend.disableBracketActions || false);
         const textToSplit = cleanedText || data.text;
-        const bubbles = splitIntoWeChatBubbles(textToSplit);
+        const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
+        const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
         bubbles.forEach((bubbleText, idx) => {
           const proactiveMsg: Message = {
             id: `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
@@ -1592,10 +1607,249 @@ ${instructionsPrompt}`;
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
-        <div className="absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up" id="conv-screen">
+        <div className={`absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen">
           <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content">
             {activeCharacter.customCss && (
               <style>{activeCharacter.customCss}</style>
+            )}
+            {activeStylePreset === "liquid-glass" && (
+              <style>{`
+                #conv-screen {
+                  background: url("${activeCharacter.chatBg || 'https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4qlqT1pFp4Gj5EqG1Gmkjd5vpi7lCgACjCQAAuHegVYQ0GSE8vFwEjwE.jpg'}") center/cover no-repeat !important;
+                }
+                .cv-messages-list {
+                  background: transparent !important;
+                }
+
+                /* 1. 导航栏 (Navigation Bar) */
+                .cv-header {
+                  background: transparent !important;
+                  border: none !important;
+                  box-shadow: none !important;
+                  padding-top: 16px !important;
+                  padding-bottom: 8px !important;
+                  position: relative !important;
+                }
+                /* 返回按钮 */
+                .cv-header .back-btn {
+                  position: relative !important;
+                  width: 42px !important;
+                  height: 42px !important;
+                  border-radius: 50% !important;
+                  background: rgba(255, 255, 255, 0.72) !important;
+                  backdrop-filter: blur(20px) saturate(190%) !important;
+                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
+                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05) !important;
+                  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+                  display: flex !important;
+                  align-items: center !important;
+                  justify-content: center !important;
+                }
+                .cv-header .back-btn:hover {
+                  background: rgba(255, 255, 255, 0.85) !important;
+                  transform: scale(1.05) !important;
+                }
+                /* 菜单按钮 */
+                .cv-header .menu-btn {
+                  position: relative !important;
+                  width: 42px !important;
+                  height: 42px !important;
+                  border-radius: 50% !important;
+                  background: rgba(255, 255, 255, 0.72) !important;
+                  backdrop-filter: blur(20px) saturate(190%) !important;
+                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
+                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05) !important;
+                  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+                  display: flex !important;
+                  align-items: center !important;
+                  justify-content: center !important;
+                }
+                .cv-header .menu-btn:hover {
+                  background: rgba(255, 255, 255, 0.85) !important;
+                  transform: scale(1.05) !important;
+                }
+                /* 中间标题胶囊 - 绝对完美水平及垂直居中 */
+                .cv-header .header-title {
+                  position: absolute !important;
+                  left: 50% !important;
+                  top: 50% !important;
+                  transform: translate(-50%, -50%) !important;
+                  width: max-content !important;
+                  max-width: 50% !important;
+                  margin: 0 !important;
+                  height: 42px !important;
+                  padding: 0 16px !important;
+                  background: rgba(255, 255, 255, 0.72) !important;
+                  backdrop-filter: blur(20px) saturate(190%) !important;
+                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
+                  border-radius: 9999px !important;
+                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05) !important;
+                  display: flex !important;
+                  align-items: center !important;
+                  justify-content: center !important;
+                  gap: 8px !important;
+                }
+                .cv-header .header-title-avatar {
+                  width: 24px !important;
+                  height: 24px !important;
+                  border-radius: 50% !important;
+                  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+                }
+                .cv-header .header-title-name {
+                  font-size: 11px !important;
+                  font-weight: 800 !important;
+                  letter-spacing: 0.08em !important;
+                  text-transform: uppercase !important;
+                  color: #1c1917 !important;
+                }
+                .cv-header .character-status {
+                  display: none !important;
+                }
+ 
+                /* 2. 头像 (Avatars) */
+                .avatar, .user-avatar, .ai-avatar {
+                  border-radius: 12px !important;
+                  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05) !important;
+                  width: 36px !important;
+                  height: 36px !important;
+                }
+ 
+                /* 3. 聊天气泡 (Chat Bubbles) - 强效覆盖，解决圆角/背景色被 Tailwind 覆盖的问题 */
+                .style-liquid-glass .chat-bubble-self {
+                  background: rgba(24, 24, 27, 0.75) !important;
+                  backdrop-filter: blur(20px) saturate(190%) !important;
+                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
+                  border: 1.2px solid rgba(255, 255, 255, 0.15) !important;
+                  color: #ffffff !important;
+                  border-radius: 20px !important;
+                  border-top-right-radius: 20px !important;
+                  border-top-left-radius: 20px !important;
+                  border-bottom-right-radius: 20px !important;
+                  border-bottom-left-radius: 20px !important;
+                  padding: 11px 16px !important;
+                  font-size: 12px !important;
+                  font-weight: 600 !important;
+                  line-height: 1.4 !important;
+                  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1) !important;
+                }
+                .style-liquid-glass .chat-bubble-other {
+                  background: rgba(255, 255, 255, 0.75) !important;
+                  backdrop-filter: blur(20px) saturate(190%) !important;
+                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
+                  border: 1.2px solid rgba(255, 255, 255, 0.55) !important;
+                  color: #1c1917 !important;
+                  border-radius: 20px !important;
+                  border-top-right-radius: 20px !important;
+                  border-top-left-radius: 20px !important;
+                  border-bottom-right-radius: 20px !important;
+                  border-bottom-left-radius: 20px !important;
+                  padding: 11px 16px !important;
+                  font-size: 12px !important;
+                  font-weight: 600 !important;
+                  line-height: 1.4 !important;
+                  box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.05) !important;
+                }
+ 
+                /* 气泡元数据 */
+                .msg-meta-header {
+                  margin-bottom: 6px !important;
+                }
+                .msg-meta-name {
+                  color: #3f3f46 !important;
+                  font-size: 9px !important;
+                  font-weight: 800 !important;
+                  letter-spacing: 0.08em !important;
+                  margin-bottom: 2px !important;
+                }
+                .msg-meta-date, .msg-meta-time {
+                  color: #71717a !important;
+                  font-size: 9px !important;
+                  font-weight: 500 !important;
+                  letter-spacing: 0.02em !important;
+                  display: inline-block !important;
+                  margin-right: 8px !important;
+                }
+                .msg-meta-divider {
+                  border-color: rgba(0, 0, 0, 0.08) !important;
+                  width: 48px !important;
+                  margin-top: 6px !important;
+                  margin-bottom: 8px !important;
+                }
+ 
+                /* 4. 底部输入栏 (Bottom Input Bar) 悬浮 */
+                .cv-footer {
+                  background: transparent !important;
+                  border: none !important;
+                  box-shadow: none !important;
+                  padding: 12px 14px 24px 14px !important;
+                  margin-top: auto !important;
+                }
+                .cv-footer form {
+                  background: transparent !important;
+                  padding: 0 !important;
+                  display: flex !important;
+                  align-items: center !important;
+                  gap: 8px !important;
+                }
+                .cv-footer .toggle-tools-btn,
+                .cv-footer .cv-send-only-btn,
+                .cv-footer .send-button {
+                  width: 42px !important;
+                  height: 42px !important;
+                  border-radius: 50% !important;
+                  background: rgba(255, 255, 255, 0.72) !important;
+                  backdrop-filter: blur(20px) saturate(190%) !important;
+                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
+                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05) !important;
+                  display: flex !important;
+                  align-items: center !important;
+                  justify-content: center !important;
+                  color: #1c1917 !important;
+                  transition: all 0.2s ease !important;
+                  flex-shrink: 0 !important;
+                }
+                .cv-footer .chat-input {
+                  height: 42px !important;
+                  border-radius: 9999px !important;
+                  background: rgba(255, 255, 255, 0.45) !important;
+                  backdrop-filter: blur(20px) saturate(190%) !important;
+                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
+                  border: 1.5px solid rgba(255, 255, 255, 0.45) !important;
+                  color: #1c1917 !important;
+                  font-size: 11px !important;
+                  font-weight: 700 !important;
+                  letter-spacing: 0.04em !important;
+                  padding-left: 16px !important;
+                  padding-right: 16px !important;
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03) !important;
+                  flex-grow: 1 !important;
+                  flex-shrink: 1 !important;
+                  min-width: 0 !important;
+                }
+                .cv-footer .chat-input::placeholder {
+                  color: rgba(28, 25, 23, 0.5) !important;
+                  font-weight: 600 !important;
+                  letter-spacing: 0.05em !important;
+                }
+                .cv-footer .cv-send-only-btn:disabled {
+                  opacity: 0.5 !important;
+                  background: rgba(255, 255, 255, 0.4) !important;
+                }
+                .cv-footer .cv-send-reply-icon svg {
+                  fill: #1c1917 !important;
+                  color: #1c1917 !important;
+                  stroke: #1c1917 !important;
+                }
+                .cv-footer .cv-send-only-icon svg {
+                  color: #1c1917 !important;
+                  stroke: #1c1917 !important;
+                }
+              `}</style>
             )}
             {/* Chat Window Header with standard classes and compact size */}
             <div className={`flex items-center justify-between z-10 shrink-0 relative cv-header header app-top-container default-controls selection-controls ${
@@ -1610,16 +1864,22 @@ ${instructionsPrompt}`;
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn back-btn"
               >
-                <ChevronLeft className="w-4 h-4 text-slate-700" />
+                <span className="cv-back-icon flex items-center justify-center w-full h-full">
+                  <ChevronLeft className="w-4 h-4 text-slate-700" />
+                </span>
               </button>
               
-              <div className="flex items-center gap-1.5 absolute left-1/2 -translate-x-1/2 w-max max-w-[160px] header-title">
-                <h2 className="text-base font-bold text-slate-800 tracking-tight truncate">
+              <div className="flex items-center gap-1.5 absolute left-1/2 -translate-x-1/2 w-max max-w-[200px] header-title">
+                <img 
+                  src={activeCharacter.avatar} 
+                  alt="" 
+                  className="w-5 h-5 rounded-full object-cover shrink-0 border border-white/50 header-title-avatar"
+                />
+                <h2 className="text-[13px] font-bold text-slate-800 tracking-tight truncate header-title-name">
                   {activeCharacter.remark || activeCharacter.name}
                 </h2>
                 <div className="flex items-center gap-0.5 character-status">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 status-indicator online" />
-                  <span className="text-[9px] text-slate-400 font-medium tracking-wide">在线</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 status-indicator online animate-pulse" />
                 </div>
               </div>
 
@@ -1638,7 +1898,9 @@ ${instructionsPrompt}`;
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
               >
-                <MoreHorizontal className="w-4 h-4 text-slate-700" />
+                <span className="cv-menu-icon flex items-center justify-center w-full h-full">
+                  <MoreHorizontal className="w-4 h-4 text-slate-700" />
+                </span>
               </button>
             </div>
 
@@ -1716,6 +1978,35 @@ ${instructionsPrompt}`;
                       </label>
                     </div>
 
+                     {/* Character Specific Chat Style Preset Selector */}
+                    <div className="py-3 border-t border-slate-100 space-y-2">
+                      <span className="text-[#52525b] font-bold block text-xs">聊天页面预设样式</span>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setDraftChatStylePreset("default")}
+                          className={`py-1.5 px-2 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            draftChatStylePreset === "default"
+                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
+                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
+                          }`}
+                        >
+                          <span className="text-[11px]">默认经典</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDraftChatStylePreset("liquid-glass")}
+                          className={`py-1.5 px-2 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            draftChatStylePreset === "liquid-glass"
+                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
+                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
+                          }`}
+                        >
+                          <span className="text-[11px]">液态玻璃</span>
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Disable Bracket Actions */}
                     <div className="flex items-center justify-between py-3 border-t border-slate-100">
                       <div className="space-y-0.5">
@@ -1771,37 +2062,6 @@ ${instructionsPrompt}`;
                       )}
                     </div>
 
-                    {/* Chat Style Preset Customizer */}
-                    <div className="py-3.5 space-y-2 border-t border-slate-100">
-                      <span className="text-[#52525b] font-bold block text-xs">聊天页预设样式风格</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setDraftChatStylePreset("default")}
-                          className={`py-2.5 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
-                            draftChatStylePreset === "default"
-                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
-                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
-                          }`}
-                        >
-                          <span className="text-[11px]">默认经典</span>
-                          <span className="text-[9px] opacity-75">官方标准布局</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDraftChatStylePreset("floating-cute")}
-                          className={`py-2.5 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
-                            draftChatStylePreset === "floating-cute"
-                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
-                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
-                          }`}
-                        >
-                          <span className="text-[11px]">悬浮磨砂萌风</span>
-                          <span className="text-[9px] opacity-75">圆角卡片·气泡合并</span>
-                        </button>
-                      </div>
-                    </div>
-
                     {/* History Memory Limit Customizer */}
                     <div className="py-3.5 space-y-2.5 border-t border-slate-100">
                       <div className="flex items-center justify-between">
@@ -1838,11 +2098,46 @@ ${instructionsPrompt}`;
                         <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">优先于全局气泡</span>
                       </div>
                       <textarea
-                        rows={3}
+                        rows={12}
                         value={draftCustomCss}
                         onChange={(e) => setDraftCustomCss(e.target.value)}
-                        placeholder={`例如：\n.chat-bubble-self {\n  background: #f43f5e !important;\n  color: #fff !important;\n}`}
-                        className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[32px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none font-mono leading-relaxed"
+                        placeholder={`/* 支持全面美化自定义。以下是常用选择器说明： */
+.cv-header { /* 导航栏/顶栏 */ }
+.cv-messages-list { /* 聊天背景/消息列表 */ }
+.user-avatar { /* 个人头像 */ }
+.ai-avatar { /* 对方头像 */ }
+.chat-bubble-self { /* 个人气泡 */ }
+.chat-bubble-other { /* 对方气泡 */ }
+.cv-footer { /* 底部输入栏 */ }
+.chat-input { /* 输入框样式 */ }
+
+/* 自定义图标样式(隐藏默认SVG并设置图片链接)： */
+.cv-back-icon svg { display: none !important; }
+.cv-back-icon {
+  background: url('返回按钮图片URL') center/contain no-repeat !important;
+}
+
+.cv-menu-icon svg { display: none !important; }
+.cv-menu-icon {
+  background: url('菜单按钮图片URL') center/contain no-repeat !important;
+}
+
+.cv-plus-icon svg { display: none !important; }
+.cv-plus-icon {
+  background: url('加号按钮图片URL') center/contain no-repeat !important;
+}
+
+.cv-send-only-icon svg { display: none !important; }
+.cv-send-only-icon {
+  background: url('仅发送按钮图片URL') center/contain no-repeat !important;
+}
+
+.cv-send-reply-icon svg { display: none !important; }
+.cv-send-reply-icon {
+  background: url('发送回复按钮图片URL') center/contain no-repeat !important;
+}
+`}
+                        className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[20px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono leading-relaxed h-48"
                       />
                     </div>
 
@@ -1987,7 +2282,7 @@ ${instructionsPrompt}`;
 
           <div
             ref={scrollContainerRef}
-            className="flex-1 overflow-y-auto p-4 space-y-4"
+            className="flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list"
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
@@ -2110,7 +2405,26 @@ ${instructionsPrompt}`;
                   )}
 
                   {/* Message Bubble Block */}
-                  <div className="space-y-0.5 max-w-full">
+                  <div className="space-y-1 max-w-full">
+                    {!isConsecutivePrev && (
+                      <div className={`text-[10px] text-slate-500/80 mb-1 space-y-0.5 select-none msg-meta-header ${
+                        isSelf ? "text-right" : "text-left"
+                      }`}>
+                        {!isSelf && (
+                          <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
+                            <span>🖤</span>
+                            <span>{activeCharacter.remark || activeCharacter.name}</span>
+                          </div>
+                        )}
+                        <div className="text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-date">
+                          {new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                        </div>
+                        <div className="text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time">
+                          {new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        </div>
+                        <div className="border-b border-dashed border-slate-300/40 w-16 my-1.5 msg-meta-divider" style={{ marginLeft: isSelf ? 'auto' : '0' }}></div>
+                      </div>
+                    )}
                     <div 
                       onContextMenu={(e) => {
                         e.preventDefault();
@@ -2371,7 +2685,9 @@ ${instructionsPrompt}`;
           <div className={`${
             isFloatingCute 
               ? "mx-3.5 mb-3.5 mt-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area" 
-              : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
+              : activeStylePreset === "liquid-glass"
+                ? "mx-3.5 mb-3.5 mt-1 bg-transparent border-0 shadow-none overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area"
+                : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
           }`}>
             {quotedMessage && (
               <div className="px-3 py-1.5 bg-stone-50 border-b border-stone-100 flex items-center justify-between text-[11px] text-stone-600 shrink-0 animate-fade-in">
@@ -2426,6 +2742,22 @@ ${instructionsPrompt}`;
               }}
               className="px-3 py-2 flex items-center gap-2"
             >
+              {/* Plus (+) Button */}
+              <button
+                type="button"
+                onClick={() => setShowAttachPanel(!showAttachPanel)}
+                className={`w-8 h-8 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn text-slate-700 ${
+                  showAttachPanel
+                    ? "bg-stone-100 rotate-45"
+                    : "bg-white hover:bg-slate-100"
+                }`}
+                title="附加菜单"
+              >
+                <span className="cv-plus-icon flex items-center justify-center w-full h-full">
+                  <Plus className="w-3.5 h-3.5" />
+                </span>
+              </button>
+
               {/* Chat Input text box */}
               <input
                 type="text"
@@ -2445,20 +2777,6 @@ ${instructionsPrompt}`;
                 }`}
               />
 
-              {/* Plus (+) Button */}
-              <button
-                type="button"
-                onClick={() => setShowAttachPanel(!showAttachPanel)}
-                className={`w-8 h-8 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn text-slate-700 ${
-                  showAttachPanel
-                    ? "bg-stone-100 rotate-45"
-                    : "bg-white hover:bg-slate-100"
-                }`}
-                title="附加菜单"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-
               {/* Send Button 1 (User send only - gray background with white upward arrow) */}
               <button
                 type="button"
@@ -2467,7 +2785,9 @@ ${instructionsPrompt}`;
                 className="w-8 h-8 rounded-full bg-slate-300 hover:bg-slate-400 disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm"
                 title="仅发送消息 (不立即得到回复)"
               >
-                <ArrowUp className="w-4 h-4 stroke-[2.5]" />
+                <span className="cv-send-only-icon flex items-center justify-center w-full h-full">
+                  <ArrowUp className="w-4 h-4 stroke-[2.5]" />
+                </span>
               </button>
 
               {/* Send Button 2 (Send and AI Reply - black background with white paper plane) */}
@@ -2477,13 +2797,19 @@ ${instructionsPrompt}`;
                 className="w-8 h-8 rounded-full bg-slate-900 hover:bg-black disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm send-button"
                 title="发送消息并获取回复"
               >
-                <Send className="w-3.5 h-3.5 fill-white text-white" />
+                <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
+                  <Send className="w-3.5 h-3.5 fill-white text-white" />
+                </span>
               </button>
             </form>
 
             {/* Attach Panel */}
             {showAttachPanel && (
-              <div className="bg-slate-50 border-t border-slate-100 py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto">
+              <div className={`py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto ${
+                activeStylePreset === "liquid-glass"
+                  ? "bg-white/60 backdrop-blur-md border-t border-white/40"
+                  : "bg-slate-50 border-t border-slate-100"
+              }`}>
                 {/* 1. 相册 (Album) */}
                 <label className="flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
@@ -3879,30 +4205,30 @@ ${instructionsPrompt}`;
               {/* Global Chat Style Preset Selector */}
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 mb-2">默认聊天预设样式（全局）</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-1.5">
                   <button
                     type="button"
                     onClick={() => setEditGlobalChatStylePreset("default")}
-                    className={`py-2 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                    className={`py-2 px-2 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
                       editGlobalChatStylePreset === "default"
                         ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
                         : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
                     }`}
                   >
                     <span className="text-[11px]">默认经典</span>
-                    <span className="text-[8px] opacity-75">官方标准布局</span>
+                    <span className="text-[7.5px] opacity-75">官方标准</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setEditGlobalChatStylePreset("floating-cute")}
-                    className={`py-2 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
-                      editGlobalChatStylePreset === "floating-cute"
+                    onClick={() => setEditGlobalChatStylePreset("liquid-glass")}
+                    className={`py-2 px-2 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                      editGlobalChatStylePreset === "liquid-glass"
                         ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
                         : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
                     }`}
                   >
-                    <span className="text-[11px]">悬浮磨砂萌风</span>
-                    <span className="text-[8px] opacity-75">圆角卡片·气泡合并</span>
+                    <span className="text-[11px]">液态玻璃</span>
+                    <span className="text-[7.5px] opacity-75">高感毛玻璃</span>
                   </button>
                 </div>
               </div>

@@ -698,7 +698,7 @@ export default function AppWorldBook({
                         >
                           {characters.map((char) => (
                             <option key={char.id} value={char.id}>
-                              {char.remark || char.name}
+                              {char.name}
                             </option>
                           ))}
                         </select>
@@ -902,7 +902,7 @@ export default function AppWorldBook({
                      }`}
                   >
                     <img src={char.avatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover shrink-0" />
-                    <span>{char.remark || char.name}</span>
+                    <span>{char.name}</span>
                   </button>
                 ))}
               </div>
@@ -1054,7 +1054,7 @@ export default function AppWorldBook({
                                     {!isGlobal && boundChar && (
                                       <div
                                         className="w-8 h-8 flex items-center justify-center text-stone-400 shrink-0"
-                                        title={`绑定专属角色: ${boundChar.remark || boundChar.name}`}
+                                        title={`绑定专属角色: ${boundChar.name}`}
                                       >
                                         <Link2 className="w-3.5 h-3.5 shrink-0" />
                                       </div>

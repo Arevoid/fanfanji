@@ -155,12 +155,18 @@ export default function AppArchives({
           throw new Error("此 PNG 图片中未检测到内嵌的角色卡数据 (chara)！");
         }
         const parsedJson = decodeCharaData(charaStr);
-        const imgDataUrl = await new Promise<string>((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result as string);
-          r.onerror = () => reject(new Error("读取头像图片失败"));
-          r.readAsDataURL(file);
-        });
+        let imgDataUrl = "";
+        try {
+          imgDataUrl = await compressImage(file, 400, 400, 0.75);
+        } catch (compErr) {
+          console.error("Failed to compress PNG avatar, using fallback raw load:", compErr);
+          imgDataUrl = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result as string);
+            r.onerror = () => reject(new Error("读取头像图片失败"));
+            r.readAsDataURL(file);
+          });
+        }
         importedChar = mapSillyTavernToCharacter(parsedJson, imgDataUrl);
         const innerData = parsedJson.data || parsedJson;
         characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
@@ -186,7 +192,7 @@ export default function AppArchives({
         importedChar = {
           id: "char-import-" + Date.now(),
           name: nameWithoutExt,
-          avatar: "https://free.picui.cn/free/2026/07/08/6a4e1204296f8.jpg",
+          avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
           personality: text.trim(),
           backstory: "",
           greeting: "",
@@ -205,7 +211,7 @@ export default function AppArchives({
         importedChar = {
           id: "char-import-" + Date.now(),
           name: nameWithoutExt,
-          avatar: "https://free.picui.cn/free/2026/07/08/6a4e1204296f8.jpg",
+          avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
           personality: text.trim(),
           backstory: "",
           greeting: "",
@@ -282,7 +288,7 @@ export default function AppArchives({
     }
 
     const originalChar = editingId ? characters.find(c => c.id === editingId) : null;
-    const finalAvatar = avatar || "https://free.picui.cn/free/2026/07/08/6a4e1204296f8.jpg";
+    const finalAvatar = avatar || "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg";
     const finalPersonality = personality.trim();
 
     const savedChar: Character = {
