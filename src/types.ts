@@ -31,6 +31,7 @@ export interface Character {
   lastImmediateSummaryMsgId?: string;
   disableBracketActions?: boolean;
   historyMemoryLimit?: number;
+  enableTimeAwareness?: boolean;
 }
 
 export interface Message {

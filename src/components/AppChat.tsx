@@ -378,6 +378,7 @@ export default function AppChat({
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
   const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
   const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
+  const [draftEnableTimeAwareness, setDraftEnableTimeAwareness] = useState(false);
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
@@ -762,6 +763,24 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
+
+      // 1.5 Time awareness prompt if enabled
+      if (activeCharacter.enableTimeAwareness) {
+        const now = new Date();
+        const timeStr = now.toLocaleString("zh-CN", { 
+          year: "numeric", 
+          month: "long", 
+          day: "numeric", 
+          hour: "2-digit", 
+          minute: "2-digit", 
+          second: "2-digit",
+          weekday: "long" 
+        });
+        assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
+当前现实物理世界的时间是：${timeStr}。
+你对时间有精准的实时感知。请在你的回复中，极度自然地融合这一时间感（例如：如果在深夜，你可以表现出困倦或关心地催促对方去睡觉；如果在清晨，可以道早安；如果到饭点，可以提一句吃饭）。
+请确保不要刻板、生硬地报时，而是像一个真实生活在该时区、该时刻的真人一样表现和说话。`);
+      }
 
       // 2. After Main Prompt entries
       if (entriesByPos.after_main_prompt.length > 0) {
@@ -1269,6 +1288,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         proactiveChatInterval: draftProactiveChatInterval,
         disableBracketActions: draftDisableBracketActions,
         historyMemoryLimit: draftHistoryMemoryLimit,
+        enableTimeAwareness: draftEnableTimeAwareness,
       });
       setIsShowingCardModal(false);
     }
@@ -1672,10 +1692,10 @@ ${instructionsPrompt}`;
                 }
                 /* 中间标题胶囊 - 绝对完美水平及垂直居中 */
                 .cv-header .header-title {
-                  position: absolute !important;
-                  left: 50% !important;
-                  top: 50% !important;
-                  transform: translate(-50%, -50%) !important;
+                  position: relative !important;
+                  left: auto !important;
+                  top: auto !important;
+                  transform: none !important;
                   width: max-content !important;
                   max-width: 50% !important;
                   margin: 0 !important;
@@ -1718,29 +1738,13 @@ ${instructionsPrompt}`;
                   height: 36px !important;
                 }
  
-                /* 3. 聊天气泡 (Chat Bubbles) - 强效覆盖，解决圆角/背景色被 Tailwind 覆盖的问题 */
+                /* 3. 聊天气泡 (Chat Bubbles) - 强效覆盖，解决圆角/背景色被 Tailwind 和 App.tsx 覆盖的问题 */
+                .phone-screen-container .style-liquid-glass .chat-bubble-self,
                 .style-liquid-glass .chat-bubble-self {
-                  background: rgba(24, 24, 27, 0.75) !important;
+                  background: rgba(255, 255, 255, 0.68) !important;
                   backdrop-filter: blur(20px) saturate(190%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: 1.2px solid rgba(255, 255, 255, 0.15) !important;
-                  color: #ffffff !important;
-                  border-radius: 20px !important;
-                  border-top-right-radius: 20px !important;
-                  border-top-left-radius: 20px !important;
-                  border-bottom-right-radius: 20px !important;
-                  border-bottom-left-radius: 20px !important;
-                  padding: 11px 16px !important;
-                  font-size: 12px !important;
-                  font-weight: 600 !important;
-                  line-height: 1.4 !important;
-                  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1) !important;
-                }
-                .style-liquid-glass .chat-bubble-other {
-                  background: rgba(255, 255, 255, 0.75) !important;
-                  backdrop-filter: blur(20px) saturate(190%) !important;
-                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: 1.2px solid rgba(255, 255, 255, 0.55) !important;
+                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
                   color: #1c1917 !important;
                   border-radius: 20px !important;
                   border-top-right-radius: 20px !important;
@@ -1751,7 +1755,34 @@ ${instructionsPrompt}`;
                   font-size: 12px !important;
                   font-weight: 600 !important;
                   line-height: 1.4 !important;
-                  box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.05) !important;
+                  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
+                }
+                .phone-screen-container .style-liquid-glass .chat-bubble-self *,
+                .style-liquid-glass .chat-bubble-self * {
+                  color: #1c1917 !important;
+                }
+
+                .phone-screen-container .style-liquid-glass .chat-bubble-other,
+                .style-liquid-glass .chat-bubble-other {
+                  background: rgba(255, 255, 255, 0.68) !important;
+                  backdrop-filter: blur(20px) saturate(190%) !important;
+                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
+                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
+                  color: #1c1917 !important;
+                  border-radius: 20px !important;
+                  border-top-right-radius: 20px !important;
+                  border-top-left-radius: 20px !important;
+                  border-bottom-right-radius: 20px !important;
+                  border-bottom-left-radius: 20px !important;
+                  padding: 11px 16px !important;
+                  font-size: 12px !important;
+                  font-weight: 600 !important;
+                  line-height: 1.4 !important;
+                  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
+                }
+                .phone-screen-container .style-liquid-glass .chat-bubble-other *,
+                .style-liquid-glass .chat-bubble-other * {
+                  color: #1c1917 !important;
                 }
  
                 /* 气泡元数据 */
@@ -1869,7 +1900,7 @@ ${instructionsPrompt}`;
                 </span>
               </button>
               
-              <div className="flex items-center gap-1.5 absolute left-1/2 -translate-x-1/2 w-max max-w-[200px] header-title">
+              <div className="flex items-center gap-1.5 w-max max-w-[200px] header-title">
                 <img 
                   src={activeCharacter.avatar} 
                   alt="" 
@@ -1894,6 +1925,7 @@ ${instructionsPrompt}`;
                   setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
                   setDraftDisableBracketActions(activeCharacter.disableBracketActions || false);
                   setDraftHistoryMemoryLimit(activeCharacter.historyMemoryLimit || 150);
+                  setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness || false);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
@@ -2018,6 +2050,22 @@ ${instructionsPrompt}`;
                           type="checkbox"
                           checked={draftDisableBracketActions}
                           onChange={(e) => setDraftDisableBracketActions(e.target.checked)}
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Time Awareness */}
+                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                      <div className="space-y-0.5">
+                        <span className="text-[#52525b] font-bold text-xs">时间感知功能</span>
+                        <span className="text-[10px] text-slate-400 block">开启后角色在对话时能实时感知物理时间（如清晨、深夜、饭点），并动态生成贴合语境的时间对话</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={draftEnableTimeAwareness}
+                          onChange={(e) => setDraftEnableTimeAwareness(e.target.checked)}
                           className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                         />
                       </label>
@@ -2373,58 +2421,51 @@ ${instructionsPrompt}`;
               const isSelf = msg.sender === "user";
               const prevMsg = idx > 0 ? currentChatMessages[idx - 1] : null;
               const isConsecutivePrev = prevMsg && prevMsg.sender === msg.sender;
-              const showAvatar = !isFloatingCute || !isConsecutivePrev;
               
               return (
                 <div
                   key={msg.id}
-                  className={`flex items-start gap-2.5 max-w-[85%] cv-msg-row message message-container ${
-                    isSelf ? "ml-auto flex-row-reverse user sent" : "mr-auto ai received"
+                  className={`w-full flex flex-col ${
+                    isSelf ? "items-end" : "items-start"
                   } ${
-                    isFloatingCute 
-                      ? (isConsecutivePrev ? "!mt-1" : "!mt-4") 
-                      : ""
-                  }`}
+                    isConsecutivePrev ? "mt-1.5" : "mt-4.5"
+                  } cv-msg-row message message-container`}
                 >
-                  {/* Avatar */}
-                  {showAvatar ? (
-                    <img
-                      src={isSelf ? settings.avatar : activeCharacter.avatar}
-                      alt=""
-                      onClick={() => {
-                        if (!isSelf) {
-                          setSingleCharacterMomentsId(activeCharacter.id);
-                        }
-                      }}
-                      className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
-                        isSelf ? "user-avatar" : "ai-avatar"
-                      } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
-                    />
-                  ) : (
-                    <div className="w-9 h-9 shrink-0" />
-                  )}
-
-                  {/* Message Bubble Block */}
-                  <div className="space-y-1 max-w-full">
-                    {!isConsecutivePrev && (
-                      <div className={`text-[10px] text-slate-500/80 mb-1 space-y-0.5 select-none msg-meta-header ${
-                        isSelf ? "text-right" : "text-left"
-                      }`}>
+                  {/* Avatar + Meta Header */}
+                  {!isConsecutivePrev && (
+                    <div className={`flex items-center gap-2.5 mb-1.5 select-none ${
+                      isSelf ? "flex-row-reverse" : "flex-row"
+                    }`}>
+                      <img
+                        src={isSelf ? settings.avatar : activeCharacter.avatar}
+                        alt=""
+                        onClick={() => {
+                          if (!isSelf) {
+                            setSingleCharacterMomentsId(activeCharacter.id);
+                          }
+                        }}
+                        className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
+                          isSelf ? "user-avatar" : "ai-avatar"
+                        } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
+                      />
+                      <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header`}>
                         {!isSelf && (
                           <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
                             <span>🖤</span>
                             <span>{activeCharacter.remark || activeCharacter.name}</span>
                           </div>
                         )}
-                        <div className="text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-date">
-                          {new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                        <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
+                          <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                          <span>•</span>
+                          <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
                         </div>
-                        <div className="text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time">
-                          {new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
-                        </div>
-                        <div className="border-b border-dashed border-slate-300/40 w-16 my-1.5 msg-meta-divider" style={{ marginLeft: isSelf ? 'auto' : '0' }}></div>
                       </div>
-                    )}
+                    </div>
+                  )}
+
+                  {/* Message Bubble Block */}
+                  <div className="max-w-[85%]">
                     <div 
                       onContextMenu={(e) => {
                         e.preventDefault();
@@ -2658,17 +2699,21 @@ ${instructionsPrompt}`;
                   <span>{activeCharacter.remark || activeCharacter.name} 正在编织剧情走向...</span>
                 </div>
               ) : (
-                <div className="flex items-start gap-2.5 max-w-[80%] mr-auto">
-                  <img 
-                    src={activeCharacter.avatar} 
-                    alt="" 
-                    className={`w-9 h-9 border object-cover shrink-0 aspect-square ${
-                      isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"
-                    }`} 
-                  />
-                  <div className="space-y-1">
-                    <span className="text-[9px] text-slate-400 font-bold">对方正在输入...</span>
-                    <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 rounded-2xl shadow-sm text-xs flex items-center space-x-1">
+                <div className="w-full flex flex-col items-start mt-4.5 cv-msg-row message message-container">
+                  <div className="flex items-center gap-2.5 mb-1.5 select-none">
+                    <img 
+                      src={activeCharacter.avatar} 
+                      alt="" 
+                      className={`w-9 h-9 border object-cover shrink-0 aspect-square avatar ai-avatar ${
+                        isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"
+                      }`} 
+                    />
+                    <div className="flex flex-col items-start text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header">
+                      <span className="text-[9px] text-slate-400 font-bold">对方正在输入...</span>
+                    </div>
+                  </div>
+                  <div className="max-w-[85%]">
+                    <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 rounded-2xl shadow-sm text-xs flex items-center space-x-1 chat-bubble-other message-bubble">
                       <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                       <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                       <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
@@ -2746,7 +2791,7 @@ ${instructionsPrompt}`;
               <button
                 type="button"
                 onClick={() => setShowAttachPanel(!showAttachPanel)}
-                className={`w-8 h-8 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn text-slate-700 ${
+                className={`w-10 h-10 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn text-slate-700 ${
                   showAttachPanel
                     ? "bg-stone-100 rotate-45"
                     : "bg-white hover:bg-slate-100"
@@ -2770,7 +2815,7 @@ ${instructionsPrompt}`;
                         : "输入发言，继续剧本对话...")
                     : `发送消息给 ${activeCharacter.name}...`
                 }
-                className={`flex-1 h-10 border focus:outline-none rounded-2xl px-4 text-xs text-slate-800 chat-input ${
+                className={`flex-1 h-10 border focus:outline-none rounded-[20px] px-4 text-xs text-slate-800 chat-input ${
                   isFloatingCute 
                     ? "bg-white/60 border-slate-200/40 focus:bg-white" 
                     : "bg-slate-50 border-slate-200/80"
@@ -2782,7 +2827,7 @@ ${instructionsPrompt}`;
                 type="button"
                 onClick={(e) => handleSendOnly(e)}
                 disabled={!chatInputText.trim() || isTyping}
-                className="w-8 h-8 rounded-full bg-slate-300 hover:bg-slate-400 disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm"
+                className="w-10 h-10 rounded-full bg-slate-300 hover:bg-slate-400 disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm cv-send-only-btn"
                 title="仅发送消息 (不立即得到回复)"
               >
                 <span className="cv-send-only-icon flex items-center justify-center w-full h-full">
@@ -2794,7 +2839,7 @@ ${instructionsPrompt}`;
               <button
                 type="submit"
                 disabled={isTyping}
-                className="w-8 h-8 rounded-full bg-slate-900 hover:bg-black disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm send-button"
+                className="w-10 h-10 rounded-full bg-slate-900 hover:bg-black disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm send-button"
                 title="发送消息并获取回复"
               >
                 <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">

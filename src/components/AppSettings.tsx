@@ -66,7 +66,6 @@ export default function AppSettings({
   onClose,
 }: AppSettingsProps) {
   const [activeTab, setActiveTab] = useState<"profile" | "api" | "beauty" | "system_config" | "system" | null>(null);
-  const [enableTimeAwareness, setEnableTimeAwareness] = useState(settings.enableTimeAwareness !== false);
 
   // Local Form state
   const [name, setName] = useState(settings.name);
@@ -532,7 +531,7 @@ export default function AppSettings({
                   </div>
                   <div>
                     <span className="text-sm font-bold text-slate-800">系统设置</span>
-                    <p className="text-[10px] text-slate-400 mt-0.5">控制一键回到桌面悬浮按钮与时间感知开启状态</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">控制一键回到桌面悬浮按钮的开启状态</p>
                   </div>
                 </div>
                 <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
@@ -1282,35 +1281,6 @@ export default function AppSettings({
                     <div
                       className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
                         showHomeButton ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Time Awareness Settings */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800 tracking-wide">时间感知功能</h4>
-                    <p className="text-[10px] text-slate-400 mt-1 leading-normal">
-                      开启后，AI 角色在对话时能够感知到当前的真实物理时间（如深夜、清晨、午后），并基于此动态生成贴合语境的时间段对话。
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextVal = !enableTimeAwareness;
-                      setEnableTimeAwareness(nextVal);
-                      handleSave({ enableTimeAwareness: nextVal });
-                    }}
-                    className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-1 shrink-0 ${
-                      enableTimeAwareness ? "bg-neutral-950" : "bg-slate-200"
-                    }`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
-                        enableTimeAwareness ? "translate-x-5" : "translate-x-0"
                       }`}
                     />
                   </button>
