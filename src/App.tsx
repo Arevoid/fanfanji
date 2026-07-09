@@ -447,6 +447,7 @@ export default function App() {
 
   const [isMobileKeyboardActive, setIsMobileKeyboardActive] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [visualViewportHeight, setVisualViewportHeight] = useState<number>(() => typeof window !== "undefined" ? window.innerHeight : 812);
 
   // Synchronize mobile keyboard visual state to prevent bounce and shift view cleanly
   useEffect(() => {
@@ -460,10 +461,11 @@ export default function App() {
       if (!isMobile) {
         setIsMobileKeyboardActive(false);
         setKeyboardHeight(0);
+        setVisualViewportHeight(window.innerHeight);
         return;
       }
 
-      // Check if keyboard is likely open by measuring viewport height reduction
+      setVisualViewportHeight(vv.height);
       const offset = window.innerHeight - vv.height;
       if (offset > 120) { // typical keyboard height threshold (e.g. 120px+)
         setIsMobileKeyboardActive(true);
@@ -471,6 +473,11 @@ export default function App() {
       } else {
         setIsMobileKeyboardActive(false);
         setKeyboardHeight(0);
+      }
+
+      // Lock visual viewport scroll offsets to 0,0 to prevent standard viewport bouncing or panning
+      if (vv.offsetTop !== 0 || vv.offsetLeft !== 0) {
+        window.scrollTo(0, 0);
       }
     };
 
@@ -485,6 +492,9 @@ export default function App() {
     window.visualViewport.addEventListener("resize", handleViewportChange);
     window.visualViewport.addEventListener("scroll", handleViewportChange);
     window.addEventListener("scroll", preventScrollBounce, { passive: true });
+
+    // Run once to initialize
+    handleViewportChange();
 
     // Force periodic reset of body scroll when input is focused to combat iOS Safari behavior
     const interval = setInterval(() => {
@@ -2006,8 +2016,8 @@ export default function App() {
           background: settings.wallpaper.startsWith("linear-gradient")
             ? settings.wallpaper
             : `url(${settings.wallpaper}) center/cover no-repeat`,
-          transform: isMobileKeyboardActive ? `translateY(-${keyboardHeight}px)` : "none",
-          transition: "transform 0.28s cubic-bezier(0.1, 0.76, 0.55, 0.94), background 0.3s ease, width 0.3s ease, height 0.3s ease",
+          height: (typeof window !== "undefined" && window.innerWidth < 768 && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
+          transition: "background 0.3s ease, width 0.3s ease",
         }}
       >
         {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) is now overlaid absolutely at the bottom of the container to stay on top of everything */}
