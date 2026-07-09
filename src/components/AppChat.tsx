@@ -71,6 +71,44 @@ interface AppChatProps {
 
 const PRESEED_MOMENTS: Moment[] = [];
 
+const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ownerName: string) => {
+  if (!allMoments || allMoments.length === 0) return "";
+  
+  // Take last 8 moments
+  const sortedMoments = [...allMoments].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
+  
+  const momentLines = sortedMoments.map((m) => {
+    const author = m.characterId === activeChar.id ? "你(发布人)" : (m.characterId ? m.authorName : `${ownerName}(机主)`);
+    const dateStr = new Date(m.timestamp).toLocaleDateString("zh-CN");
+    const likesStr = m.likes.length > 0 ? ` [点赞人: ${m.likes.join(", ")}]` : "";
+    const commentsStr = m.comments.length > 0 ? ` [评论: ${m.comments.map(c => `${c.authorName}: ${c.content}`).join("; ")}]` : "";
+    return `- ${dateStr} | ${author} 发表朋友圈: "${m.content}"${likesStr}${commentsStr}`;
+  });
+
+  return `[🚨 微信朋友圈记忆 (Moments Memory)]
+以下是最近微信朋友圈里的动态，你对这些内容拥有清晰的记忆。你不一定要主动提起它们，但它们是你们共享的日常生活背景。在交流中，你可以根据你们的亲疏关系极度自然地参考这些生活点滴，例如偶尔作为话题，或对对方最近的状态有所了解。
+${momentLines.join("\n")}`;
+};
+
+const getPostIntervalMs = (character: Character) => {
+  const bioAndPersonality = ((character.personality || "") + " " + (character.backstory || "")).toLowerCase();
+  const lovesSharing = /(热爱分享|喜欢分享|热爱生活|发朋友圈|爱分享|活跃|话唠|分享欲)/i.test(bioAndPersonality);
+  
+  if (lovesSharing) {
+    // 1-2 days
+    return (24 + Math.random() * 24) * 60 * 60 * 1000; 
+  } else {
+    // 1-5 days
+    return (24 + Math.random() * 96) * 60 * 60 * 1000;
+  }
+};
+
+const getCharacterLastMomentTimestamp = (moments: Moment[], charId: string) => {
+  const charMoments = moments.filter(m => m.characterId === charId);
+  if (charMoments.length === 0) return 0;
+  return Math.max(...charMoments.map(m => m.timestamp));
+};
+
 export default function AppChat({
   characters,
   settings,
@@ -599,9 +637,20 @@ export default function AppChat({
           triggerProactiveFor(friend.id);
         }
       });
+
+      // Run character moments check
+      checkAndTriggerCharacterMoments();
     }, 60000);
     return () => clearInterval(checkProactive);
-  }, [friends]);
+  }, [friends, moments]);
+
+  // Run character moments check on mount / tab change
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      checkAndTriggerCharacterMoments();
+    }, 3000);
+    return () => clearTimeout(timeout);
+  }, [friends, moments]);
 
   // Calling timer
   useEffect(() => {
@@ -806,6 +855,12 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       // 7. Before Chat History entries
       if (entriesByPos.before_chat_history.length > 0) {
         assembledInstructions.push(`[World Book Background: Story Anchor]\n` + entriesByPos.before_chat_history.join("\n\n"));
+      }
+
+      // 8. WeChat Moments Context memory
+      const momentsContext = getMomentsContextString(moments, activeCharacter, settings.name);
+      if (momentsContext) {
+        assembledInstructions.push(momentsContext);
       }
 
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
@@ -1287,7 +1342,13 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
 
-      const systemInstruction = [LIVING_HUMAN_PROMPT, mainPromptText, charDefText, userProfileText].join("\n\n---\n\n");
+      const momentsContextRegen = getMomentsContextString(moments, activeCharacter, settings.name);
+      const instructionBlocks = [LIVING_HUMAN_PROMPT, mainPromptText, charDefText, userProfileText];
+      if (momentsContextRegen) {
+        instructionBlocks.push(momentsContextRegen);
+      }
+
+      const systemInstruction = instructionBlocks.join("\n\n---\n\n");
 
       const data = await apiChat({
         message: lastUserMsg.content,
@@ -1571,6 +1632,176 @@ ${instructionsPrompt}`;
     }
   };
 
+  const handleAutoCommentOnUserMoment = async (newMo: Moment) => {
+    if (friends.length === 0) return;
+
+    let commentingFriends = friends.filter(() => Math.random() < 0.6);
+    if (commentingFriends.length === 0 && friends.length > 0) {
+      const randomFriend = friends[Math.floor(Math.random() * friends.length)];
+      commentingFriends = [randomFriend];
+    }
+
+    // Limit to max 3 friends
+    commentingFriends = commentingFriends.slice(0, 3);
+
+    for (const friend of commentingFriends) {
+      const delay = Math.random() * 8000 + 4000; // 4 to 12 seconds delay
+      setTimeout(async () => {
+        try {
+          const friendMsgs = messages
+            .filter((m) => m.characterId === friend.id)
+            .sort((a, b) => a.timestamp - b.timestamp);
+          const slicedMsgs = friendMsgs.slice(-60); // 30 rounds of dialogue
+
+          const history = slicedMsgs.map((m) => ({
+            role: m.sender === "user" ? "user" : "model",
+            text: m.content,
+          }));
+
+          const systemInstruction = `You are roleplaying as "${friend.name}".
+Character Profile:
+- Personality: ${friend.personality}
+- Background: ${friend.backstory}
+
+User Profile (Machine Owner / 机主):
+- Nickname: ${settings.name}
+- Personality/Bio: ${settings.bio}
+
+The user just posted a new WeChat Moment (朋友圈).
+Moment Content: "${newMo.content}"
+${newMo.image ? "[User attached an image to this Moment]" : ""}
+
+Below is your recent direct chat history with the user (up to 30 rounds). It represents your current relationship context and shared history:
+${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n") : "(No prior chat history)"}
+
+Your task: Write a short, natural comment on this Moment.
+🚨 [CRITICAL WECHAT COMMENT RULES]:
+1. The comment must be brief, extremely natural (like a real person typing on WeChat), and perfectly fit your personality, relationship, and recent chat memories with the user.
+2. Keep it under 35 characters. Speak in Chinese.
+3. No OOC, no narrative brackets like (微笑), just the direct comment text.
+4. Try to make it feel deeply personal or reference recent chats subtly if applicable.
+`;
+
+          const response = await apiChat({
+            message: "请根据以上内容，为机主的新朋友圈写一条符合你人设和记忆的简短微信评论：",
+            history,
+            systemInstruction,
+            apiKey: settings.apiKey,
+            model: settings.selectedModel || "gemini-3.5-flash",
+            apiEndpoint: settings.apiEndpoint,
+            apiTemperature: settings.apiTemperature,
+          });
+
+          if (response && response.text) {
+            let cleanedComment = response.text.trim();
+            cleanedComment = cleanedComment.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+
+            const newComment: MomentComment = {
+              id: `${Date.now()}-comment-${Math.random().toString(36).substr(2, 5)}`,
+              authorName: friend.remark || friend.name,
+              authorAvatar: friend.avatar,
+              content: cleanedComment,
+              timestamp: Date.now(),
+            };
+            onAddCommentToMoment(newMo.id, newComment);
+          }
+        } catch (err) {
+          console.error(`Failed to generate automatic comment for ${friend.name}:`, err);
+        }
+      }, delay);
+    }
+  };
+
+  const generateCharacterMoment = async (friend: Character) => {
+    try {
+      const friendMsgs = messages
+        .filter((m) => m.characterId === friend.id)
+        .sort((a, b) => a.timestamp - b.timestamp);
+      const slicedMsgs = friendMsgs.slice(-60); // 30 rounds of dialogue memory
+
+      const history = slicedMsgs.map((m) => ({
+        role: m.sender === "user" ? "user" : "model",
+        text: m.content,
+      }));
+
+      const systemInstruction = `You are roleplaying as "${friend.name}".
+Character Profile:
+- Personality: ${friend.personality}
+- Background: ${friend.backstory}
+
+User Profile (Machine Owner / 机主):
+- Nickname: ${settings.name}
+- Personality/Bio: ${settings.bio}
+
+Below is your recent direct chat history with the user (up to 30 rounds). It represents your current relationship context and shared history/topics:
+${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n") : "(No prior chat history)"}
+
+Your task: Write a WeChat Moment post (朋友圈) from your perspective.
+🚨 [CRITICAL WECHAT MOMENT RULES]:
+1. The post must fit your personality. It can be about your own personal life (feelings, work, hobbies) OR about your relationship/recent chats/interactions with the user.
+2. The post content must be natural, engaging, and in Chinese.
+3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
+4. Do NOT use OOC tags, narration brackets, or talk like an AI. Just output the text of the Moment post.
+`;
+
+      const response = await apiChat({
+        message: "请根据你的设定以及与机主的历史记忆，写一条朋友圈内容（内容可以与你自己有关，也可以与机主有关）：",
+        history,
+        systemInstruction,
+        apiKey: settings.apiKey,
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+        apiTemperature: settings.apiTemperature,
+      });
+
+      if (response && response.text) {
+        let cleanedContent = response.text.trim();
+        cleanedContent = cleanedContent.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+
+        let momentImage: string | undefined = undefined;
+        if (friend.album && friend.album.length > 0) {
+          // 40% chance of attaching a photo from their album
+          if (Math.random() < 0.4) {
+            const randomIndex = Math.floor(Math.random() * friend.album.length);
+            momentImage = friend.album[randomIndex];
+          }
+        }
+
+        const newMo: Moment = {
+          id: `${Date.now()}-char-moment-${Math.random().toString(36).substr(2, 5)}`,
+          characterId: friend.id,
+          authorName: friend.remark || friend.name,
+          authorAvatar: friend.avatar,
+          content: cleanedContent,
+          timestamp: Date.now(),
+          likes: [],
+          comments: [],
+          image: momentImage,
+        };
+
+        onAddMoment(newMo);
+      }
+    } catch (err) {
+      console.error(`Failed to generate Moment for character ${friend.name}:`, err);
+    }
+  };
+
+  const checkAndTriggerCharacterMoments = async () => {
+    if (friends.length === 0) return;
+
+    for (const friend of friends) {
+      const lastPostTime = getCharacterLastMomentTimestamp(moments, friend.id);
+      const interval = getPostIntervalMs(friend);
+      const timeElapsed = Date.now() - lastPostTime;
+
+      if (timeElapsed >= interval) {
+        await generateCharacterMoment(friend);
+        // Break to avoid generating multiple moments simultaneously
+        break;
+      }
+    }
+  };
+
   // Moments publication
   const handleMomentImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1603,6 +1834,9 @@ ${instructionsPrompt}`;
     setMomentInputText("");
     setMomentAttachedImage(null);
     setShowMomentPublisher(false);
+
+    // Auto-comment trigger
+    handleAutoCommentOnUserMoment(newMo);
   };
 
   const handleMomentsCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
