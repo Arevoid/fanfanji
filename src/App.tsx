@@ -135,7 +135,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   bio: "",
   apiKey: "",
   selectedModel: "gemini-3.5-flash",
-  wallpaper: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4qlqT1pFp4Gj5EqG1Gmkjd5vpi7lCgACjCQAAuHegVYQ0GSE8vFwEjwE.jpg",
+  wallpaper: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
   customIcons: {},
   globalChatStylePreset: "liquid-glass",
   bubbleCss: `.chat-bubble-self {
@@ -257,8 +257,8 @@ export default function App() {
         identities: parsed.identities || DEFAULT_SETTINGS.identities,
         activeIdentityId: parsed.activeIdentityId || DEFAULT_SETTINGS.activeIdentityId
       };
-      if (!migrated.wallpaper || migrated.wallpaper.startsWith("linear-gradient")) {
-        migrated.wallpaper = "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4qlqT1pFp4Gj5EqG1Gmkjd5vpi7lCgACjCQAAuHegVYQ0GSE8vFwEjwE.jpg";
+      if (!migrated.wallpaper || migrated.wallpaper.includes("BQACAgUAAyEGAASHRsPbAAEW4qlqT1pFp4Gj5EqG1Gmkjd5vpi7lCgACjCQAAuHegVYQ0GSE8vFwEjwE")) {
+        migrated.wallpaper = "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)";
       }
       migrated.globalChatStylePreset = "liquid-glass";
       if (!migrated.name || migrated.name === "萌新机主") {
@@ -2016,7 +2016,7 @@ export default function App() {
           background: settings.wallpaper.startsWith("linear-gradient")
             ? settings.wallpaper
             : `url(${settings.wallpaper}) center/cover no-repeat`,
-          height: (typeof window !== "undefined" && window.innerWidth < 768 && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
+          height: (typeof window !== "undefined" && window.innerWidth < 768 && isMobileKeyboardActive && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
         }}
       >
@@ -2400,149 +2400,151 @@ export default function App() {
           ) : (
             // Full screen app view ports with transitions
             <div className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full pt-[36px]">
-              <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-x-0 bottom-0 top-[36px]">
-                <AppChat
-                  characters={characters}
-                  settings={settings}
-                  messages={messages}
-                  moments={moments}
-                  onSendMessage={handleSendMessage}
-                  onSaveCharacter={handleSaveCharacter}
-                  onAddMoment={handleAddMoment}
-                  onAddCommentToMoment={handleAddCommentToMoment}
-                  onLikeMoment={handleLikeMoment}
-                  onToggleBookmark={handleToggleBookmark}
-                  onDeleteMessage={handleDeleteMessage}
-                  onClose={() => setActiveApp(null)}
-                  onSaveSettings={setSettings}
-                  onNavigateToApp={setActiveApp}
-                  worldBookEntries={worldBookEntries}
-                  onClearMessages={handleClearMessages}
-                  memories={memories}
-                  onSaveMemories={setMemories}
-                  recallSettings={recallSettings}
-                  activeChatCharId={activeChatCharId}
-                  setActiveChatCharId={setActiveChatCharId}
-                  offlineStories={offlineStories}
-                  onSaveOfflineStory={handleSaveOfflineStory}
-                />
+              <div className="w-full flex-1 min-h-0 relative">
+                <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
+                  <AppChat
+                    characters={characters}
+                    settings={settings}
+                    messages={messages}
+                    moments={moments}
+                    onSendMessage={handleSendMessage}
+                    onSaveCharacter={handleSaveCharacter}
+                    onAddMoment={handleAddMoment}
+                    onAddCommentToMoment={handleAddCommentToMoment}
+                    onLikeMoment={handleLikeMoment}
+                    onToggleBookmark={handleToggleBookmark}
+                    onDeleteMessage={handleDeleteMessage}
+                    onClose={() => setActiveApp(null)}
+                    onSaveSettings={setSettings}
+                    onNavigateToApp={setActiveApp}
+                    worldBookEntries={worldBookEntries}
+                    onClearMessages={handleClearMessages}
+                    memories={memories}
+                    onSaveMemories={setMemories}
+                    recallSettings={recallSettings}
+                    activeChatCharId={activeChatCharId}
+                    setActiveChatCharId={setActiveChatCharId}
+                    offlineStories={offlineStories}
+                    onSaveOfflineStory={handleSaveOfflineStory}
+                  />
+                </div>
+
+                {activeApp === "archives" && (
+                  <AppArchives
+                    characters={characters}
+                    onSaveCharacter={handleSaveCharacter}
+                    onDeleteCharacter={handleDeleteCharacter}
+                    onClose={() => setActiveApp(null)}
+                    onSaveWorldBookEntries={handleSaveWorldBookEntries}
+                  />
+                )}
+
+                {activeApp === "worldbook" && (
+                  <AppWorldBook
+                    entries={worldBookEntries}
+                    characters={characters}
+                    onSaveEntry={handleSaveWorldBookEntry}
+                    onSaveEntries={handleSaveWorldBookEntries}
+                    onDeleteEntry={handleDeleteWorldBookEntry}
+                    onClose={() => setActiveApp(null)}
+                  />
+                )}
+
+                {activeApp === "music" && (
+                  <AppMusic
+                    tracks={tracks}
+                    playlists={playlists}
+                    onAddTrack={handleAddMusicTrack}
+                    onDeleteTrack={handleDeleteMusicTrack}
+                    onAddPlaylist={handleAddMusicPlaylist}
+                    onDeletePlaylist={handleDeleteMusicPlaylist}
+                    onClose={() => setActiveApp(null)}
+                    currentTrack={currentTrack}
+                    setCurrentTrack={setCurrentTrack}
+                    isPlaying={isPlaying}
+                    setIsPlaying={setIsPlaying}
+                    audioRef={globalAudioRef}
+                    playMode={playMode}
+                    setPlayMode={setPlayMode}
+                    volume={volume}
+                    setVolume={setVolume}
+                  />
+                )}
+
+                {activeApp === "forum" && (
+                  <AppForum
+                    onClose={() => setActiveApp(null)}
+                  />
+                )}
+
+                {activeApp === "notes" && (
+                  <AppNotes
+                    onClose={() => setActiveApp(null)}
+                  />
+                )}
+
+                {activeApp === "store" && (
+                  <AppStore
+                    installedAppIds={installedAppIds}
+                    onInstallApp={handleInstallApp}
+                    onUninstallApp={handleUninstallApp}
+                    onClose={() => setActiveApp(null)}
+                    renderAppIcon={(id, className) => {
+                      const customIconUrl = settings.customIcons[id];
+                      if (customIconUrl) {
+                        return <img src={customIconUrl} alt={id} className="w-full h-full object-cover" />;
+                      }
+                      const iconFn = AppIcons[id as keyof typeof AppIcons];
+                      return iconFn ? iconFn(className) : null;
+                    }}
+                  />
+                )}
+
+                {activeApp === "settings" && (
+                  <AppSettings
+                    settings={settings}
+                    presets={presets}
+                    onSaveSettings={setSettings}
+                    onSavePreset={handleSavePreset}
+                    onDeletePreset={handleDeletePreset}
+                    onClose={() => setActiveApp(null)}
+                  />
+                )}
+
+                {activeApp === "memory" && (
+                  <AppMemory
+                    characters={characters}
+                    memories={memories}
+                    onSaveMemories={setMemories}
+                    recallSettings={recallSettings}
+                    onSaveRecallSettings={setRecallSettings}
+                    onUpdateCharacter={handleSaveCharacter}
+                    immediateSummaryTask={immediateSummaryTask}
+                    onStartImmediateSummary={handleStartImmediateSummary}
+                    onResetImmediateSummary={handleResetImmediateSummary}
+                    onClose={() => setActiveApp(null)}
+                    selectedModel={settings.selectedModel}
+                    apiEndpoint={settings.apiEndpoint}
+                  />
+                )}
+
+                {activeApp === "offline" && (
+                  <AppOffline
+                    characters={characters}
+                    settings={settings}
+                    offlineStories={offlineStories}
+                    onSaveOfflineStory={handleSaveOfflineStory}
+                    onDeleteOfflineStory={handleDeleteOfflineStory}
+                    onClose={() => setActiveApp(null)}
+                    onNavigateToChat={(charId) => {
+                      setActiveChatCharId(charId);
+                      setActiveApp("chat");
+                    }}
+                    memories={memories}
+                    onSaveMemories={setMemories}
+                  />
+                )}
               </div>
-
-              {activeApp === "archives" && (
-                <AppArchives
-                  characters={characters}
-                  onSaveCharacter={handleSaveCharacter}
-                  onDeleteCharacter={handleDeleteCharacter}
-                  onClose={() => setActiveApp(null)}
-                  onSaveWorldBookEntries={handleSaveWorldBookEntries}
-                />
-              )}
-
-              {activeApp === "worldbook" && (
-                <AppWorldBook
-                  entries={worldBookEntries}
-                  characters={characters}
-                  onSaveEntry={handleSaveWorldBookEntry}
-                  onSaveEntries={handleSaveWorldBookEntries}
-                  onDeleteEntry={handleDeleteWorldBookEntry}
-                  onClose={() => setActiveApp(null)}
-                />
-              )}
-
-              {activeApp === "music" && (
-                <AppMusic
-                  tracks={tracks}
-                  playlists={playlists}
-                  onAddTrack={handleAddMusicTrack}
-                  onDeleteTrack={handleDeleteMusicTrack}
-                  onAddPlaylist={handleAddMusicPlaylist}
-                  onDeletePlaylist={handleDeleteMusicPlaylist}
-                  onClose={() => setActiveApp(null)}
-                  currentTrack={currentTrack}
-                  setCurrentTrack={setCurrentTrack}
-                  isPlaying={isPlaying}
-                  setIsPlaying={setIsPlaying}
-                  audioRef={globalAudioRef}
-                  playMode={playMode}
-                  setPlayMode={setPlayMode}
-                  volume={volume}
-                  setVolume={setVolume}
-                />
-              )}
-
-              {activeApp === "forum" && (
-                <AppForum
-                  onClose={() => setActiveApp(null)}
-                />
-              )}
-
-              {activeApp === "notes" && (
-                <AppNotes
-                  onClose={() => setActiveApp(null)}
-                />
-              )}
-
-              {activeApp === "store" && (
-                <AppStore
-                  installedAppIds={installedAppIds}
-                  onInstallApp={handleInstallApp}
-                  onUninstallApp={handleUninstallApp}
-                  onClose={() => setActiveApp(null)}
-                  renderAppIcon={(id, className) => {
-                    const customIconUrl = settings.customIcons[id];
-                    if (customIconUrl) {
-                      return <img src={customIconUrl} alt={id} className="w-full h-full object-cover" />;
-                    }
-                    const iconFn = AppIcons[id as keyof typeof AppIcons];
-                    return iconFn ? iconFn(className) : null;
-                  }}
-                />
-              )}
-
-              {activeApp === "settings" && (
-                <AppSettings
-                  settings={settings}
-                  presets={presets}
-                  onSaveSettings={setSettings}
-                  onSavePreset={handleSavePreset}
-                  onDeletePreset={handleDeletePreset}
-                  onClose={() => setActiveApp(null)}
-                />
-              )}
-
-              {activeApp === "memory" && (
-                <AppMemory
-                  characters={characters}
-                  memories={memories}
-                  onSaveMemories={setMemories}
-                  recallSettings={recallSettings}
-                  onSaveRecallSettings={setRecallSettings}
-                  onUpdateCharacter={handleSaveCharacter}
-                  immediateSummaryTask={immediateSummaryTask}
-                  onStartImmediateSummary={handleStartImmediateSummary}
-                  onResetImmediateSummary={handleResetImmediateSummary}
-                  onClose={() => setActiveApp(null)}
-                  selectedModel={settings.selectedModel}
-                  apiEndpoint={settings.apiEndpoint}
-                />
-              )}
-
-              {activeApp === "offline" && (
-                <AppOffline
-                  characters={characters}
-                  settings={settings}
-                  offlineStories={offlineStories}
-                  onSaveOfflineStory={handleSaveOfflineStory}
-                  onDeleteOfflineStory={handleDeleteOfflineStory}
-                  onClose={() => setActiveApp(null)}
-                  onNavigateToChat={(charId) => {
-                    setActiveChatCharId(charId);
-                    setActiveApp("chat");
-                  }}
-                  memories={memories}
-                  onSaveMemories={setMemories}
-                />
-              )}
             </div>
           )}
 
