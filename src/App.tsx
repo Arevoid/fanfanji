@@ -457,6 +457,9 @@ export default function App() {
   const [isMobileKeyboardActive, setIsMobileKeyboardActive] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [visualViewportHeight, setVisualViewportHeight] = useState<number>(() => typeof window !== "undefined" ? window.innerHeight : 812);
+  const [vvTop, setVvTop] = useState<number>(0);
+  const [vvLeft, setVvLeft] = useState<number>(0);
+  const [vvWidth, setVvWidth] = useState<number>(() => typeof window !== "undefined" ? window.innerWidth : 375);
 
   // Synchronize mobile keyboard visual state to prevent bounce and shift view cleanly
   useEffect(() => {
@@ -471,10 +474,17 @@ export default function App() {
         setIsMobileKeyboardActive(false);
         setKeyboardHeight(0);
         setVisualViewportHeight(window.innerHeight);
+        setVvWidth(window.innerWidth);
+        setVvTop(0);
+        setVvLeft(0);
         return;
       }
 
       setVisualViewportHeight(vv.height);
+      setVvWidth(vv.width);
+      setVvTop(vv.offsetTop);
+      setVvLeft(vv.offsetLeft);
+
       const offset = window.innerHeight - vv.height;
       if (offset > 120) { // typical keyboard height threshold (e.g. 120px+)
         setIsMobileKeyboardActive(true);
@@ -482,11 +492,6 @@ export default function App() {
       } else {
         setIsMobileKeyboardActive(false);
         setKeyboardHeight(0);
-      }
-
-      // Lock visual viewport scroll offsets to 0,0 to prevent standard viewport bouncing or panning
-      if (vv.offsetTop !== 0 || vv.offsetLeft !== 0) {
-        window.scrollTo(0, 0);
       }
     };
 
@@ -2066,12 +2071,16 @@ export default function App() {
       <div
         id="phone_glass_screen"
         ref={phoneScreenRef}
-        className="w-full h-[100dvh] md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl overflow-hidden relative flex flex-col bg-slate-100 transition-all duration-300 border-none phone-screen-container"
+        className="w-full md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl overflow-hidden relative flex flex-col bg-slate-100 border-none phone-screen-container"
         style={{
           background: settings.wallpaper.startsWith("linear-gradient")
             ? settings.wallpaper
             : `url(${settings.wallpaper}) center/cover no-repeat`,
-          height: (typeof window !== "undefined" && window.innerWidth < 768 && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
+          position: (typeof window !== "undefined" && window.innerWidth < 768) ? "fixed" : "relative",
+          top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvTop}px` : undefined,
+          left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvLeft}px` : undefined,
+          height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : undefined,
+          width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvWidth}px` : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
         }}
       >
