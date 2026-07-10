@@ -1697,6 +1697,10 @@ export default function App() {
     <div
       className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
       style={{
+        position: (typeof window !== "undefined" && window.innerWidth < 768) ? "fixed" : "relative",
+        top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvTop}px` : undefined,
+        left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvLeft}px` : undefined,
+        width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvWidth}px` : "100%",
         height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : "100vh",
       }}
     >
@@ -2089,7 +2093,7 @@ export default function App() {
             ? settings.wallpaper
             : `url(${settings.wallpaper}) center/cover no-repeat`,
           position: "relative",
-          height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : undefined,
+          height: (typeof window !== "undefined" && window.innerWidth < 768) ? "100%" : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
         }}
       >
