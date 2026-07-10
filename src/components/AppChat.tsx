@@ -539,6 +539,18 @@ export default function AppChat({
       const mbtiText = (activeCharacter.mbti || "").toUpperCase();
       const backstoryText = activeCharacter.backstory || "";
       
+      // Get triggered constant world book entries for the active character
+      const greetingTriggeredEntries = (worldBookEntries || []).filter((entry) => {
+        if (entry.isActive === false) return false;
+        const isGlobal = !entry.characterId || entry.characterId === "global";
+        if (!isGlobal && entry.characterId !== activeChatCharId) return false;
+        return entry.triggerType === "constant";
+      });
+
+      const worldBookPromptAdditions = greetingTriggeredEntries
+        .map(e => `【设定 - ${e.title}】\n${e.content}`)
+        .join("\n\n");
+      
       // Local heuristic: extraverted or proactive keywords
       const isExtraverted = mbtiText.startsWith("E") ||
         (/(主动|热情|外向|开朗|活泼|话痨|自来熟|社牛|温暖|元气|积极|话多)/.test(personalityText) &&
@@ -553,6 +565,7 @@ export default function AppChat({
 - 性格描述：${personalityText}
 - MBTI：${mbtiText}
 - 背景故事：${backstoryText}
+${worldBookPromptAdditions ? `\n角色的相关世界书背景设定：\n${worldBookPromptAdditions}` : ""}
 
 判定规则：
 1. 如果角色性格属于外向、主动、热情、开朗，或MBTI为E型，或者因职业/背景习惯于主动沟通，它会决定【主动发第一条信息】。
@@ -606,6 +619,7 @@ export default function AppChat({
 - 性格：${personalityText}
 - MBTI：${mbtiText}
 - 背景故事：${backstoryText}
+${worldBookPromptAdditions ? `\n相关世界书设定：\n${worldBookPromptAdditions}` : ""}
 
 要求：
 1. 语言极其符合你的角色口癖、语气和性格。
@@ -619,7 +633,9 @@ export default function AppChat({
                 model: settings.selectedModel || "gemini-3.5-flash",
                 apiEndpoint: settings.apiEndpoint,
                 apiTemperature: 0.8,
-                systemInstruction: `请扮演角色 ${activeCharacter.name}，极其简短、自然地发送第一条微信消息。不要带有任何多余格式。`
+                systemInstruction: `请扮演角色 ${activeCharacter.name}，极其简短、自然地发送第一条微信消息。不要带有任何多余格式。${
+                  worldBookPromptAdditions ? `\n请遵循以下相关背景和世界书设定进行扮演：\n${worldBookPromptAdditions}` : ""
+                }`
               });
               if (genRes && genRes.text) {
                 firstMessage = genRes.text.trim().replace(/^["']|["']$/g, "");
@@ -648,7 +664,7 @@ export default function AppChat({
 
       decideAndSend();
     }
-  }, [activeChatCharId, activeCharacter, messages, onSendMessage, emptyGreetingCheckedCharIds, settings]);
+  }, [activeChatCharId, activeCharacter, messages, onSendMessage, emptyGreetingCheckedCharIds, settings, worldBookEntries]);
 
   // Background proactive check (every minute)
   useEffect(() => {
@@ -1381,15 +1397,139 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       const momentsContextRegen = getMomentsContextString(moments, activeCharacter, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
-      const instructionBlocks = [LIVING_HUMAN_PROMPT, mainPromptText, charDefText, userProfileText];
-      if (momentsContextRegen) {
-        instructionBlocks.push(momentsContextRegen);
-      }
-      if (offlineStoriesContextRegen) {
-        instructionBlocks.push(offlineStoriesContextRegen);
+
+      // World Book triggering logic for regenerate response
+      const triggeredEntries: {
+        entry: WorldBookEntry;
+        text: string;
+      }[] = [];
+
+      const lowerUserMsg = lastUserMsg.content.toLowerCase();
+
+      for (const entry of worldBookEntries) {
+        // Skip inactive entries
+        if (entry.isActive === false) continue;
+
+        // Check if bound to global or active character
+        const isGlobal = !entry.characterId || entry.characterId === "global";
+        if (!isGlobal && entry.characterId !== activeChatCharId) {
+          continue;
+        }
+
+        let isTriggered = false;
+        if (entry.triggerType === "constant") {
+          isTriggered = true;
+        } else if (entry.triggerType === "vector") {
+          // Smart simulated vector term-overlap matching
+          const textToMatch = (entry.title + " " + (entry.keywords || "") + " " + entry.content).toLowerCase();
+          const userWords = lowerUserMsg.split(/[\s,.:;!?，。！？、]/).filter(w => w.length >= 2);
+          if (userWords.some(word => textToMatch.includes(word)) || lowerUserMsg.includes(entry.title.toLowerCase())) {
+            isTriggered = true;
+          }
+        } else {
+          // "keys" trigger
+          const kwStr = entry.keywords || entry.title || "";
+          const kws = kwStr
+            .split(/[,，]/)
+            .map((k) => k.trim().toLowerCase())
+            .filter(Boolean);
+
+          if (kws.some((kw) => lowerUserMsg.includes(kw))) {
+            isTriggered = true;
+          }
+        }
+
+        if (isTriggered) {
+          triggeredEntries.push({
+            entry,
+            text: `【设定 - ${entry.title}】\n${entry.content}`
+          });
+        }
       }
 
-      const systemInstruction = instructionBlocks.join("\n\n---\n\n");
+      // Group triggered entries by SillyTavern insertion position
+      const entriesByPos = {
+        after_main_prompt: [] as string[],
+        before_char_def: [] as string[],
+        after_char_def: [] as string[],
+        before_chat_history: [] as string[]
+      };
+
+      const sortedTriggered = [...triggeredEntries].sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5));
+
+      sortedTriggered.forEach(({ entry, text }) => {
+        const pos = entry.position || "after_char_def";
+        if (pos in entriesByPos) {
+          entriesByPos[pos as keyof typeof entriesByPos].push(text);
+        } else {
+          entriesByPos.after_char_def.push(text);
+        }
+      });
+
+      // Assemble system instruction blocks
+      let assembledInstructions: string[] = [];
+
+      // 0. Base living human prompt
+      assembledInstructions.push(LIVING_HUMAN_PROMPT);
+
+      // 1. Main Prompt
+      assembledInstructions.push(mainPromptText);
+
+      // 1.5 Time awareness prompt if enabled
+      if (activeCharacter.enableTimeAwareness !== false) {
+        const now = new Date();
+        const timeStr = now.toLocaleString("zh-CN", { 
+          year: "numeric", 
+          month: "long", 
+          day: "numeric", 
+          hour: "2-digit", 
+          minute: "2-digit", 
+          second: "2-digit",
+          weekday: "long" 
+        });
+        assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
+当前现实物理世界的时间是：${timeStr}。
+你对时间有精准的实时感知。请在你的回复中，极度自然地融合这一时间感（例如：如果在深夜，你可以表现出困倦或关心地催促对方去睡觉；如果在清晨，可以道早安；如果到饭点，可以提一句吃饭）。
+请确保不要刻板、生硬地报时，而是像一个真实生活在该时区、该时刻的真人一样表现和说话。`);
+      }
+
+      // 2. After Main Prompt entries
+      if (entriesByPos.after_main_prompt.length > 0) {
+        assembledInstructions.push(`[World Book Background: Main Prompt Extensions]\n` + entriesByPos.after_main_prompt.join("\n\n"));
+      }
+
+      // 3. Before Character Definition entries
+      if (entriesByPos.before_char_def.length > 0) {
+        assembledInstructions.push(`[World Book Background: Context Primers]\n` + entriesByPos.before_char_def.join("\n\n"));
+      }
+
+      // 4. Character Definition
+      assembledInstructions.push(charDefText);
+
+      // 5. After Character Definition entries
+      if (entriesByPos.after_char_def.length > 0) {
+        assembledInstructions.push(`[World Book Background: Profile Extensions]\n` + entriesByPos.after_char_def.join("\n\n"));
+      }
+
+      // 6. User Profile
+      assembledInstructions.push(userProfileText);
+
+      // 7. Before Chat History entries
+      if (entriesByPos.before_chat_history.length > 0) {
+        assembledInstructions.push(`[World Book Background: Story Anchor]\n` + entriesByPos.before_chat_history.join("\n\n"));
+      }
+
+      // 8. WeChat Moments Context memory
+      if (momentsContextRegen) {
+        assembledInstructions.push(momentsContextRegen);
+      }
+
+      // 8.5 Offline stories context memory
+      if (offlineStoriesContextRegen) {
+        assembledInstructions.push(offlineStoriesContextRegen);
+      }
+
+      const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
       const data = await apiChat({
         message: lastUserMsg.content,
@@ -2760,6 +2900,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           if (onClearMessages) {
                             onClearMessages(activeChatCharId);
                           }
+                          // Reset greeting checked state so a new proactive greeting can be generated immediately
+                          setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
                           alert(`成功提取并整理了 ${count} 条核心记忆存入“记忆书”，当前对话已安全清除！`);
                         }}
                         disabled={isCompressingMemory}
@@ -2774,6 +2916,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             if (onClearMessages) {
                               onClearMessages(activeChatCharId);
                             }
+                            // Reset greeting checked state so a new proactive greeting can be generated immediately
+                            setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
                           }
                         }}
                         className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-xs transition-colors border border-red-200"
