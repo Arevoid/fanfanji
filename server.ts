@@ -80,8 +80,39 @@ async function startServer() {
           });
         }
 
-        const dataFetch = await responseFetch.json();
-        const aiText = dataFetch.choices?.[0]?.message?.content || "";
+        const responseText = await responseFetch.text();
+        let aiText = "";
+        const trimmedText = responseText.trim();
+        if (trimmedText.startsWith("data:") || trimmedText.includes("\ndata:")) {
+          // It is a Server-Sent Events (SSE) stream
+          const lines = trimmedText.split("\n");
+          for (let line of lines) {
+            line = line.trim();
+            if (line.startsWith("data:")) {
+              const dataStr = line.substring(5).trim();
+              if (dataStr === "[DONE]") {
+                continue;
+              }
+              try {
+                const parsedChunk = JSON.parse(dataStr);
+                const content = parsedChunk.choices?.[0]?.delta?.content || 
+                                parsedChunk.choices?.[0]?.message?.content || 
+                                parsedChunk.choices?.[0]?.text || "";
+                aiText += content;
+              } catch (e) {
+                // Ignore individual chunk parsing failures
+              }
+            }
+          }
+        } else {
+          try {
+            const dataFetch = JSON.parse(trimmedText);
+            aiText = dataFetch.choices?.[0]?.message?.content || 
+                     dataFetch.choices?.[0]?.text || "";
+          } catch (jsonErr) {
+            aiText = trimmedText;
+          }
+        }
         return res.json({ text: aiText });
       }
 
