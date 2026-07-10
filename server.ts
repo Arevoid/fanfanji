@@ -99,18 +99,41 @@ async function startServer() {
       const contents = [];
       if (history && Array.isArray(history)) {
         for (const h of history) {
-          contents.push({
-            role: h.role === "user" ? "user" : "model",
-            parts: [{ text: h.text }],
-          });
+          const role = h.role === "user" ? "user" : "model";
+          const text = (h.text || h.content || "").trim();
+          if (!text) continue; // Skip empty content to prevent API validation errors
+          
+          if (contents.length > 0 && contents[contents.length - 1].role === role) {
+            // Merge consecutive messages with the same role
+            contents[contents.length - 1].parts[0].text += "\n" + text;
+          } else {
+            contents.push({
+              role,
+              parts: [{ text }],
+            });
+          }
         }
       }
 
       // Add current message
-      contents.push({
-        role: "user",
-        parts: [{ text: message }],
-      });
+      const cleanMsg = (message || "").trim();
+      if (cleanMsg) {
+        if (contents.length > 0 && contents[contents.length - 1].role === "user") {
+          contents[contents.length - 1].parts[0].text += "\n" + cleanMsg;
+        } else {
+          contents.push({
+            role: "user",
+            parts: [{ text: cleanMsg }],
+          });
+        }
+      }
+
+      if (contents.length === 0) {
+        contents.push({
+          role: "user",
+          parts: [{ text: " " }],
+        });
+      }
 
       const response = await ai.models.generateContent({
         model: model || "gemini-3.5-flash",

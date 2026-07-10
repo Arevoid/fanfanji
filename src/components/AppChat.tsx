@@ -1092,11 +1092,22 @@ ${activeCharacter.disableBracketActions
         onSendMessage(errMsg);
       }
     } catch (err: any) {
+      const errMsgStr = err?.message || "";
+      const isQuotaOrKeyError = errMsgStr.toLowerCase().includes("api_key") || 
+                                errMsgStr.toLowerCase().includes("key") || 
+                                errMsgStr.toLowerCase().includes("quota") || 
+                                errMsgStr.toLowerCase().includes("limit") || 
+                                errMsgStr.toLowerCase().includes("403") || 
+                                errMsgStr.toLowerCase().includes("400") ||
+                                errMsgStr.toLowerCase().includes("invalid");
+
       const errMsg: Message = {
         id: (Date.now() + 1).toString(),
         characterId: activeChatCharId,
         sender: "character",
-        content: "⚠️ [离线错误]：无法建立与智能体服务器的连接，请确认网络并重试。",
+        content: isQuotaOrKeyError 
+          ? `⚠️ [连接错误]：智能体响应失败 (${errMsgStr})。请检查 API Key 是否正确、是否过期或余额不足。`
+          : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`,
         timestamp: Date.now(),
       };
       onSendMessage(errMsg);

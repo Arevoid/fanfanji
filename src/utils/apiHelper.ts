@@ -96,16 +96,41 @@ async function directClientChat(params: {
     const contents: any[] = [];
     if (history && Array.isArray(history)) {
       for (const h of history) {
+        const role = h.role === "user" ? "user" : "model";
+        const text = (h.text || h.content || "").trim();
+        if (!text) continue; // Skip empty content to avoid API validation errors
+        
+        if (contents.length > 0 && contents[contents.length - 1].role === role) {
+          // Merge consecutive messages with the same role
+          contents[contents.length - 1].parts[0].text += "\n" + text;
+        } else {
+          contents.push({
+            role,
+            parts: [{ text }]
+          });
+        }
+      }
+    }
+
+    // Add current user message
+    const cleanMsg = (message || "").trim();
+    if (cleanMsg) {
+      if (contents.length > 0 && contents[contents.length - 1].role === "user") {
+        contents[contents.length - 1].parts[0].text += "\n" + cleanMsg;
+      } else {
         contents.push({
-          role: h.role === "user" ? "user" : "model",
-          parts: [{ text: h.text || h.content || "" }]
+          role: "user",
+          parts: [{ text: cleanMsg }]
         });
       }
     }
-    contents.push({
-      role: "user",
-      parts: [{ text: message }]
-    });
+
+    if (contents.length === 0) {
+      contents.push({
+        role: "user",
+        parts: [{ text: " " }]
+      });
+    }
 
     const responseFetch = await fetch(modelsUrl, {
       method: "POST",
