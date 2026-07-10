@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e0f2fe" />
+      <stop offset="100%" stop-color="#bae6fd" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0284c7" flood-opacity="0.15" />
+    </filter>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="128" fill="url(#bg)" />
+  
+  <!-- Outer Glow Ring -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#ffffff" stroke-width="6" opacity="0.6" />
+
+  <!-- Cute Phone Shape / Content -->
+  <g filter="url(#shadow)">
+    <!-- Device Body -->
+    <rect x="136" y="80" width="240" height="352" rx="40" fill="#ffffff" />
+    <rect x="144" y="88" width="224" height="336" rx="32" fill="#f0f9ff" />
+    
+    <!-- Screen Notch/Top bar -->
+    <rect x="216" y="98" width="80" height="16" rx="8" fill="#e0f2fe" />
+    <circle cx="284" cy="106" r="4" fill="#bae6fd" />
+    
+    <!-- Cute Mascot Face inside Screen -->
+    <!-- Eyes -->
+    <circle cx="216" cy="240" r="10" fill="#0369a1" />
+    <circle cx="296" cy="240" r="10" fill="#0369a1" />
+    <!-- Blushing cheeks -->
+    <ellipse cx="196" cy="256" rx="14" ry="8" fill="#fecdd3" opacity="0.8" />
+    <ellipse cx="316" cy="256" rx="14" ry="8" fill="#fecdd3" opacity="0.8" />
+    <!-- Cute Mouth -->
+    <path d="M 248,252 Q 256,258 256,252 Q 256,258 264,252" fill="none" stroke="#0369a1" stroke-width="4" stroke-linecap="round" />
+    
+    <!-- Fluffy Ears extending from phone -->
+    <path d="M 120,180 C 80,180 60,220 80,260 C 100,300 130,300 144,250" fill="#ffffff" stroke="#e0f2fe" stroke-width="4" stroke-linecap="round" />
+    <path d="M 392,180 C 432,180 452,220 432,260 C 412,300 382,300 368,250" fill="#ffffff" stroke="#e0f2fe" stroke-width="4" stroke-linecap="round" />
+    
+    <!-- Decorative Heart -->
+    <path d="M 256,310 C 256,310 244,296 234,302 C 224,308 232,324 256,338 C 280,324 288,308 278,302 C 268,296 256,310 256,310 Z" fill="#fda4af" />
+  </g>
+  
+  <!-- Sparkles/Stars in background -->
+  <g fill="#ffffff" opacity="0.9">
+    <!-- Star 1 -->
+    <path d="M 90,100 L 93,108 L 101,111 L 93,114 L 90,122 L 87,114 L 79,111 L 87,108 Z" />
+    <!-- Star 2 -->
+    <path d="M 420,110 L 422,116 L 428,118 L 422,120 L 420,126 L 418,120 L 412,118 L 418,116 Z" />
+    <!-- Star 3 -->
+    <path d="M 410,400 L 413,408 L 421,411 L 413,414 L 410,422 L 407,414 L 399,411 L 407,408 Z" />
+  </g>
+</svg>
