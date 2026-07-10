@@ -445,6 +445,15 @@ export default function App() {
     timestamp: number;
   } | null>(null);
 
+  // Global Toast warning/success state (P2: alert on save failures)
+  const [globalToast, setGlobalToast] = useState<{ message: string; isError?: boolean } | null>(null);
+  const showGlobalToast = (message: string, isError?: boolean) => {
+    setGlobalToast({ message, isError });
+    setTimeout(() => {
+      setGlobalToast(null);
+    }, 3000);
+  };
+
   const [isMobileKeyboardActive, setIsMobileKeyboardActive] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [visualViewportHeight, setVisualViewportHeight] = useState<number>(() => typeof window !== "undefined" ? window.innerHeight : 812);
@@ -1530,6 +1539,7 @@ export default function App() {
         localStorage.setItem("phone_worldbook_entries", JSON.stringify(next));
       } catch (e) {
         console.error("Failed to save worldbook entries synchronously to localStorage:", e);
+        showGlobalToast("⚠️ 浏览器存储空间不足，世界书更改保存失败！刷新后可能会丢失！", true);
       }
       return next;
     });
@@ -1544,6 +1554,7 @@ export default function App() {
         localStorage.setItem("phone_worldbook_entries", JSON.stringify(next));
       } catch (e) {
         console.error("Failed to save worldbook entries synchronously to localStorage:", e);
+        showGlobalToast("⚠️ 浏览器存储空间不足，批量保存世界书失败！", true);
       }
       return next;
     });
@@ -1556,6 +1567,7 @@ export default function App() {
         localStorage.setItem("phone_worldbook_entries", JSON.stringify(next));
       } catch (e) {
         console.error("Failed to delete worldbook entry synchronously from localStorage:", e);
+        showGlobalToast("⚠️ 浏览器存储空间不足，删除词条未能同步！", true);
       }
       return next;
     });
@@ -2562,6 +2574,7 @@ export default function App() {
                     offlineStories={offlineStories}
                     messages={messages}
                     activeChatCharId={activeChatCharId}
+                    worldBookEntries={worldBookEntries}
                     onSaveOfflineStory={handleSaveOfflineStory}
                     onDeleteOfflineStory={handleDeleteOfflineStory}
                     onClose={() => setActiveApp(null)}
@@ -2663,6 +2676,17 @@ export default function App() {
               </div>
             </div>
           </motion.div>
+        )}
+
+        {/* Global Toast Warning Overlay */}
+        {globalToast && (
+          <div className={`absolute top-24 left-1/2 -translate-x-1/2 z-[9999] px-4 py-3 rounded-2xl shadow-xl border text-xs font-medium max-w-[90%] text-center flex items-center gap-2 backdrop-blur-md transition-all duration-300 ${
+            globalToast.isError 
+              ? "border-rose-200 bg-rose-50 text-rose-800" 
+              : "border-emerald-200 bg-emerald-50 text-emerald-800"
+          }`}>
+            <span>{globalToast.message}</span>
+          </div>
         )}
 
       </div>

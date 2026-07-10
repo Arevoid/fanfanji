@@ -763,6 +763,47 @@ export default function AppWorldBook({
                     向量化
                   </button>
                 </div>
+
+                {/* UX Guidance on Constant vs Triggered entries and Habitual Speech (口癖) Setup */}
+                <div className="mt-2.5 p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200/50 space-y-2 text-[11px] text-stone-500 leading-relaxed font-semibold">
+                  {triggerType === "keys" && (
+                    <p>
+                      <span className="text-neutral-900 font-bold">✨ 关键词触发：</span>
+                      仅当上下文聊天（最新2-3轮对话）中包含触发词时临时装载词条。适合绑定特定的背景秘密、特殊事件、特定道具、地理名词解释，保持 AI 上下文记忆的极度精简与高效。
+                    </p>
+                  )}
+                  {triggerType === "constant" && (
+                    <div className="space-y-2">
+                      <p>
+                        <span className="text-neutral-900 font-bold">✨ 常驻设定（口癖推荐）：</span>
+                        只要角色配对正确，此设定都会100%强制在每次对话时装载，不受聊天内容影响。具有绝对、最高优先级别的逻辑引导。
+                      </p>
+                      <div className="p-2.5 bg-white rounded-xl border border-neutral-200 text-[10px] text-neutral-600 space-y-1.5 shadow-2xs">
+                        <div className="font-extrabold text-neutral-900 flex items-center gap-1.5">
+                          <span className="text-rose-500 text-xs">💬</span>
+                          <span>口癖与特殊言语特征设置指南：</span>
+                        </div>
+                        <ul className="list-disc pl-3.5 space-y-1 font-medium text-stone-500">
+                          <li>
+                            <strong className="text-stone-700">插入位置：</strong> 推荐选择 <span className="underline font-bold text-neutral-800">角色定义后 (after_char_def)</span>，拼接深度推荐设为 <span className="underline font-bold text-neutral-800">1 - 3 (越低越优先优先装载)</span>。
+                          </li>
+                          <li>
+                            <strong className="text-stone-700">设定示范：</strong> 
+                            <span className="block mt-1 p-1.5 bg-stone-50 rounded-md font-mono text-[9px] text-stone-600 border border-stone-200/60 leading-normal select-text">
+                              【核心说话特征/口癖】：你对用户有着极强的独占欲。你说话时，必须绝对、无条件在每句话句尾带上 “喵呜~”，并且对用户的称呼必须强制固定为 “大笨蛋”！
+                            </span>
+                          </li>
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                  {triggerType === "vector" && (
+                    <p>
+                      <span className="text-neutral-900 font-bold">✨ 向量化关联：</span>
+                      基于词条标题与聊天上下文的模糊语义相关度进行相似匹配。适合大规模小说、修真或庞大世界观，避免无关信息撑爆 AI 上下文。
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Keywords Input (conditional row) */}

@@ -5,10 +5,11 @@ import {
   Settings, Check, RefreshCw, Layers, Eye, BookMarked, Cpu
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { Character, Message, OfflineStory, MemoryItem, UserSettings } from "../types";
+import { Character, Message, OfflineStory, MemoryItem, UserSettings, WorldBookEntry } from "../types";
 import { apiChat } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { getRelevantMemories } from "./AppMemory";
+import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -22,6 +23,7 @@ interface AppOfflineProps {
   onSaveMemories: (mems: MemoryItem[]) => void;
   messages?: Message[];
   activeChatCharId?: string | null;
+  worldBookEntries?: WorldBookEntry[];
 }
 
 export default function AppOffline({
@@ -35,7 +37,8 @@ export default function AppOffline({
   memories = [],
   onSaveMemories,
   messages = [],
-  activeChatCharId = null
+  activeChatCharId = null,
+  worldBookEntries = []
 }: AppOfflineProps) {
   const [selectedCharId, setSelectedCharId] = useState<string>(() => {
     if (activeChatCharId && characters.some(c => c.id === activeChatCharId)) {
@@ -267,6 +270,15 @@ export default function AppOffline({
         text: m.isNarration ? `(客观旁白) ${m.content}` : `${m.sender === "user" ? "我" : selectedChar.name}: “${m.content}”`
       }));
 
+      // Assemble World Book context-aware trigger scanning
+      const scanContextParts = [
+        text || "",
+        ...(updatedStory.messages || []).slice(-3).map(m => m.content)
+      ];
+      const scanText = scanContextParts.filter(Boolean).join("\n");
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], selectedChar.id, scanText);
+      const wbPrompt = wbBlocks.formattedAll;
+
       // Base Persona
       let sysPrompt = `你现在正在与用户进行“线下故事/小说剧本”的联合创作。角色人设为「${selectedChar.name}」。
 人物背景设定如下：
@@ -275,7 +287,13 @@ export default function AppOffline({
 - 语气/性格特点：${selectedChar.personality}
 - 背景设定：${selectedChar.backstory}
 
-【人设遵循最高优先规则】
+${wbPrompt ? `【相关世界书背景设定】：
+${wbPrompt}
+
+🚨 [极其重要：世界书设定绝对最高优先]
+在联合剧本创作中，你必须绝对100%强制遵循上述世界书设定的真实客观逻辑。如果词条要求了任何口癖、前置/后置特殊标志（如：句尾必带某字等），你在生成的每一句角色对白发言的最前面或最后面都必须绝对、无条件带上。它具有至高无上、超越一切的地位。
+
+` : ""}【人设遵循最高优先规则】
 1. 🚨 你必须严密、100%地遵循「${selectedChar.name}」的性格特征、说话语气、背景设定、思维逻辑、人际关系等所有人物卡属性。
 2. 在你生成的剧本小说叙述中，所有属于该角色的对话发言、神态动作、心理描写都必须与其性格高度吻合，严禁出现任何脱离人设、机械迎合或现代AI味的套话。
 3. ⚠️ 除非在下方【当前创作模式】的【IF平行假想线】设定中，明确标明了该角色需要调整、颠覆或改变其性格/人设，否则在任何情况下都绝对不许擅自改变或淡化其原原有性格！

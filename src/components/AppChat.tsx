@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
+import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory } from "../types";
 import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles, compressImage } from "../utils/pngParser";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
@@ -279,15 +280,7 @@ export default function AppChat({
   const getDynamicLocations = () => {
     if (!activeCharacter) return [];
     
-    let latestWorldBookEntries = worldBookEntries;
-    try {
-      const raw = localStorage.getItem("phone_worldbook_entries");
-      if (raw) {
-        latestWorldBookEntries = JSON.parse(raw);
-      }
-    } catch (e) {
-      console.error("Failed to read freshest world book entries from localStorage in getDynamicLocations:", e);
-    }
+    const latestWorldBookEntries = getLatestWorldBookEntries(worldBookEntries);
 
     const locations: string[] = [];
     
@@ -550,13 +543,7 @@ export default function AppChat({
       const backstoryText = activeCharacter.backstory || "";
       
       // Get triggered constant world book entries for the active character from freshest local storage
-      let latestWorldBookEntries = worldBookEntries || [];
-      try {
-        const raw = localStorage.getItem("phone_worldbook_entries");
-        if (raw) {
-          latestWorldBookEntries = JSON.parse(raw);
-        }
-      } catch (e) {}
+      const latestWorldBookEntries = getLatestWorldBookEntries(worldBookEntries);
 
       const greetingTriggeredEntries = latestWorldBookEntries.filter((entry) => {
         if (entry.isActive === false) return false;
@@ -800,89 +787,15 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
 
-      // World Book triggering logic (loaded from freshest localStorage to support live edits without refresh)
-      let latestWorldBookEntries = worldBookEntries;
-      try {
-        const raw = localStorage.getItem("phone_worldbook_entries");
-        if (raw) {
-          latestWorldBookEntries = JSON.parse(raw);
-        }
-      } catch (e) {
-        console.error("Failed to load freshest World Book entries inside generateResponseForUserMessage:", e);
-      }
-
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
       const scanContextParts = [
         userMsg ? userMsg.content : "",
         ...currentChatMessages.slice(-3).map(m => m.content)
       ];
-      const scanText = scanContextParts.filter(Boolean).join("\n").toLowerCase();
+      const scanText = scanContextParts.filter(Boolean).join("\n");
 
-      const triggeredEntries: {
-        entry: WorldBookEntry;
-        text: string;
-      }[] = [];
-
-      for (const entry of latestWorldBookEntries) {
-        // Skip inactive entries
-        if (entry.isActive === false) continue;
-
-        // Check if bound to global or active character
-        const isGlobal = !entry.characterId || entry.characterId === "global";
-        if (!isGlobal && entry.characterId !== activeChatCharId) {
-          continue;
-        }
-
-        let isTriggered = false;
-        if (entry.triggerType === "constant") {
-          isTriggered = true;
-        } else if (entry.triggerType === "vector") {
-          // Smart simulated vector term-overlap matching
-          const textToMatch = (entry.title + " " + (entry.keywords || "") + " " + entry.content).toLowerCase();
-          const userWords = scanText.split(/[\s,.:;!?，。！？、；：]/).filter(w => w.length >= 2);
-          if (userWords.some(word => textToMatch.includes(word)) || scanText.includes(entry.title.toLowerCase())) {
-            isTriggered = true;
-          }
-        } else {
-          // "keys" trigger
-          const kwStr = entry.keywords || entry.title || "";
-          const kws = kwStr
-            .split(/[,，;；\s\t]+/)
-            .map((k) => k.trim().toLowerCase())
-            .filter(Boolean);
-
-          if (kws.some((kw) => scanText.includes(kw))) {
-            isTriggered = true;
-          }
-        }
-
-        if (isTriggered) {
-          triggeredEntries.push({
-            entry,
-            text: `【设定 - ${entry.title}】\n${entry.content}`
-          });
-        }
-      }
-
-      // Group triggered entries by SillyTavern insertion position
-      const entriesByPos = {
-        after_main_prompt: [] as string[],
-        before_char_def: [] as string[],
-        after_char_def: [] as string[],
-        before_chat_history: [] as string[]
-      };
-
-      // Sort entries by depth ascending (smaller depth is closer / higher priority)
-      const sortedTriggered = [...triggeredEntries].sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5));
-
-      sortedTriggered.forEach(({ entry, text }) => {
-        const pos = entry.position || "after_char_def";
-        if (pos in entriesByPos) {
-          entriesByPos[pos as keyof typeof entriesByPos].push(text);
-        } else {
-          entriesByPos.after_char_def.push(text);
-        }
-      });
+      // Use the unified World Book system blocks builder
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText);
 
       // Assemble system instruction blocks
       let assembledInstructions: string[] = [];
@@ -912,29 +825,29 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       }
 
       // 2. After Main Prompt entries
-      if (entriesByPos.after_main_prompt.length > 0) {
-        assembledInstructions.push(`[World Book Background: Main Prompt Extensions]\n` + entriesByPos.after_main_prompt.join("\n\n"));
+      if (wbBlocks.after_main_prompt.length > 0) {
+        assembledInstructions.push(`[World Book Background: Main Prompt Extensions]\n` + wbBlocks.after_main_prompt.join("\n\n"));
       }
 
       // 3. Before Character Definition entries
-      if (entriesByPos.before_char_def.length > 0) {
-        assembledInstructions.push(`[World Book Background: Context Primers]\n` + entriesByPos.before_char_def.join("\n\n"));
+      if (wbBlocks.before_char_def.length > 0) {
+        assembledInstructions.push(`[World Book Background: Context Primers]\n` + wbBlocks.before_char_def.join("\n\n"));
       }
 
       // 4. Character Definition
       assembledInstructions.push(charDefText);
 
       // 5. After Character Definition entries
-      if (entriesByPos.after_char_def.length > 0) {
-        assembledInstructions.push(`[World Book Background: Profile Extensions]\n` + entriesByPos.after_char_def.join("\n\n"));
+      if (wbBlocks.after_char_def.length > 0) {
+        assembledInstructions.push(`[World Book Background: Profile Extensions]\n` + wbBlocks.after_char_def.join("\n\n"));
       }
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
 
       // 7. Before Chat History entries
-      if (entriesByPos.before_chat_history.length > 0) {
-        assembledInstructions.push(`[World Book Background: Story Anchor]\n` + entriesByPos.before_chat_history.join("\n\n"));
+      if (wbBlocks.before_chat_history.length > 0) {
+        assembledInstructions.push(`[World Book Background: Story Anchor]\n` + wbBlocks.before_chat_history.join("\n\n"));
       }
 
       // 8. WeChat Moments Context memory
@@ -1446,88 +1359,15 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const momentsContextRegen = getMomentsContextString(moments, activeCharacter, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
 
-      // World Book triggering logic for regenerate response (loaded from freshest localStorage for real-time edits)
-      let latestWorldBookEntries = worldBookEntries;
-      try {
-        const raw = localStorage.getItem("phone_worldbook_entries");
-        if (raw) {
-          latestWorldBookEntries = JSON.parse(raw);
-        }
-      } catch (e) {
-        console.error("Failed to load freshest World Book entries inside handleRegenerateResponse:", e);
-      }
-
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
       const scanContextParts = [
         lastUserMsg ? lastUserMsg.content : "",
         ...previousMessages.slice(-3).map(m => m.content)
       ];
-      const scanText = scanContextParts.filter(Boolean).join("\n").toLowerCase();
+      const scanText = scanContextParts.filter(Boolean).join("\n");
 
-      const triggeredEntries: {
-        entry: WorldBookEntry;
-        text: string;
-      }[] = [];
-
-      for (const entry of latestWorldBookEntries) {
-        // Skip inactive entries
-        if (entry.isActive === false) continue;
-
-        // Check if bound to global or active character
-        const isGlobal = !entry.characterId || entry.characterId === "global";
-        if (!isGlobal && entry.characterId !== activeChatCharId) {
-          continue;
-        }
-
-        let isTriggered = false;
-        if (entry.triggerType === "constant") {
-          isTriggered = true;
-        } else if (entry.triggerType === "vector") {
-          // Smart simulated vector term-overlap matching
-          const textToMatch = (entry.title + " " + (entry.keywords || "") + " " + entry.content).toLowerCase();
-          const userWords = scanText.split(/[\s,.:;!?，。！？、；：]/).filter(w => w.length >= 2);
-          if (userWords.some(word => textToMatch.includes(word)) || scanText.includes(entry.title.toLowerCase())) {
-            isTriggered = true;
-          }
-        } else {
-          // "keys" trigger
-          const kwStr = entry.keywords || entry.title || "";
-          const kws = kwStr
-            .split(/[,，;；\s\t]+/)
-            .map((k) => k.trim().toLowerCase())
-            .filter(Boolean);
-
-          if (kws.some((kw) => scanText.includes(kw))) {
-            isTriggered = true;
-          }
-        }
-
-        if (isTriggered) {
-          triggeredEntries.push({
-            entry,
-            text: `【设定 - ${entry.title}】\n${entry.content}`
-          });
-        }
-      }
-
-      // Group triggered entries by SillyTavern insertion position
-      const entriesByPos = {
-        after_main_prompt: [] as string[],
-        before_char_def: [] as string[],
-        after_char_def: [] as string[],
-        before_chat_history: [] as string[]
-      };
-
-      const sortedTriggered = [...triggeredEntries].sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5));
-
-      sortedTriggered.forEach(({ entry, text }) => {
-        const pos = entry.position || "after_char_def";
-        if (pos in entriesByPos) {
-          entriesByPos[pos as keyof typeof entriesByPos].push(text);
-        } else {
-          entriesByPos.after_char_def.push(text);
-        }
-      });
+      // Use the unified World Book system blocks builder
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText);
 
       // Assemble system instruction blocks
       let assembledInstructions: string[] = [];
@@ -1557,29 +1397,29 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       }
 
       // 2. After Main Prompt entries
-      if (entriesByPos.after_main_prompt.length > 0) {
-        assembledInstructions.push(`[World Book Background: Main Prompt Extensions]\n` + entriesByPos.after_main_prompt.join("\n\n"));
+      if (wbBlocks.after_main_prompt.length > 0) {
+        assembledInstructions.push(`[World Book Background: Main Prompt Extensions]\n` + wbBlocks.after_main_prompt.join("\n\n"));
       }
 
       // 3. Before Character Definition entries
-      if (entriesByPos.before_char_def.length > 0) {
-        assembledInstructions.push(`[World Book Background: Context Primers]\n` + entriesByPos.before_char_def.join("\n\n"));
+      if (wbBlocks.before_char_def.length > 0) {
+        assembledInstructions.push(`[World Book Background: Context Primers]\n` + wbBlocks.before_char_def.join("\n\n"));
       }
 
       // 4. Character Definition
       assembledInstructions.push(charDefText);
 
       // 5. After Character Definition entries
-      if (entriesByPos.after_char_def.length > 0) {
-        assembledInstructions.push(`[World Book Background: Profile Extensions]\n` + entriesByPos.after_char_def.join("\n\n"));
+      if (wbBlocks.after_char_def.length > 0) {
+        assembledInstructions.push(`[World Book Background: Profile Extensions]\n` + wbBlocks.after_char_def.join("\n\n"));
       }
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
 
       // 7. Before Chat History entries
-      if (entriesByPos.before_chat_history.length > 0) {
-        assembledInstructions.push(`[World Book Background: Story Anchor]\n` + entriesByPos.before_chat_history.join("\n\n"));
+      if (wbBlocks.before_chat_history.length > 0) {
+        assembledInstructions.push(`[World Book Background: Story Anchor]\n` + wbBlocks.before_chat_history.join("\n\n"));
       }
 
       // 8. WeChat Moments Context memory
@@ -1760,6 +1600,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         proactivePrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
+      const charMsgs = messages.filter(m => m.characterId === activeChatCharId);
+      const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText);
+      const wbPrompt = wbBlocks.formattedAll;
+
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
 ---
@@ -1778,7 +1623,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-PROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}PROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
 ${proactivePrompt}`;
@@ -1836,6 +1681,11 @@ ${proactivePrompt}`;
         instructionsPrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
+      const charMsgs = messages.filter(m => m.characterId === charId);
+      const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], charId, scanText);
+      const wbPrompt = wbBlocks.formattedAll;
+
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
 ---
@@ -1854,7 +1704,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-PROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}PROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.
 
 ${instructionsPrompt}`;
@@ -1917,6 +1767,9 @@ ${instructionsPrompt}`;
             text: m.content,
           }));
 
+          const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, newMo.content || "");
+          const wbPrompt = wbBlocks.formattedAll;
+
           const systemInstruction = `You are roleplaying as "${friend.name}".
 Character Profile:
 - Personality: ${friend.personality}
@@ -1930,7 +1783,7 @@ The user just posted a new WeChat Moment (朋友圈).
 Moment Content: "${newMo.content}"
 ${newMo.image ? "[User attached an image to this Moment]" : ""}
 
-Below is your recent direct chat history with the user (up to 30 rounds). It represents your current relationship context and shared history:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或口癖，必须在评论中体现。\n\n` : ""}Below is your recent direct chat history with the user (up to 30 rounds). It represents your current relationship context and shared history:
 ${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n") : "(No prior chat history)"}
 
 Your task: Write a short, natural comment on this Moment.
@@ -2014,6 +1867,9 @@ Your task: Write a short, natural comment on this Moment.
           .map(c => `* ${c.authorName}: ${c.content}`)
           .join("\n");
 
+        const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, userCommentText || "");
+        const wbPrompt = wbBlocks.formattedAll;
+
         const systemInstruction = `You are roleplaying as "${friend.name}".
 Character Profile:
 - Personality: ${friend.personality}
@@ -2029,7 +1885,7 @@ Moment Author: ${targetMoment.authorName}
 Moment Content: "${targetMoment.content}"
 ${targetMoment.image ? "[Attached an image]" : ""}
 
-Existing Comments on this Moment:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或口癖，必须在评论回复中体现。\n\n` : ""}Existing Comments on this Moment:
 ${existingCommentsContext || "(No other comments)"}
 
 The User's latest comment/reply:
