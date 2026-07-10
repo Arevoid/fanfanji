@@ -1676,11 +1676,7 @@ export default function App() {
 
   return (
     <div
-      className="min-h-[100dvh] h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb]"
-      style={{
-        height: (typeof window !== "undefined" && window.innerWidth < 768 && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
-        minHeight: (typeof window !== "undefined" && window.innerWidth < 768 && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
-      }}
+      className="min-h-[100dvh] h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
     >
       
       {/* Live Custom CSS Styling injection */}
