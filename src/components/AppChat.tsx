@@ -279,10 +279,20 @@ export default function AppChat({
   const getDynamicLocations = () => {
     if (!activeCharacter) return [];
     
+    let latestWorldBookEntries = worldBookEntries;
+    try {
+      const raw = localStorage.getItem("phone_worldbook_entries");
+      if (raw) {
+        latestWorldBookEntries = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error("Failed to read freshest world book entries from localStorage in getDynamicLocations:", e);
+    }
+
     const locations: string[] = [];
     
     // 1. Filter entries related to the current character
-    const charEntries = worldBookEntries.filter(
+    const charEntries = latestWorldBookEntries.filter(
       (entry) => entry.characterId === activeCharacter.id
     );
     
@@ -314,7 +324,7 @@ export default function AppChat({
     });
     
     // 2. Also check global entries if specific character entries are empty or to enrich the list
-    const globalEntries = worldBookEntries.filter(
+    const globalEntries = latestWorldBookEntries.filter(
       (entry) => entry.characterId === "global"
     );
     globalEntries.forEach((entry) => {
@@ -539,8 +549,16 @@ export default function AppChat({
       const mbtiText = (activeCharacter.mbti || "").toUpperCase();
       const backstoryText = activeCharacter.backstory || "";
       
-      // Get triggered constant world book entries for the active character
-      const greetingTriggeredEntries = (worldBookEntries || []).filter((entry) => {
+      // Get triggered constant world book entries for the active character from freshest local storage
+      let latestWorldBookEntries = worldBookEntries || [];
+      try {
+        const raw = localStorage.getItem("phone_worldbook_entries");
+        if (raw) {
+          latestWorldBookEntries = JSON.parse(raw);
+        }
+      } catch (e) {}
+
+      const greetingTriggeredEntries = latestWorldBookEntries.filter((entry) => {
         if (entry.isActive === false) return false;
         const isGlobal = !entry.characterId || entry.characterId === "global";
         if (!isGlobal && entry.characterId !== activeChatCharId) return false;
@@ -782,15 +800,30 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
 
-      // World Book triggering logic
+      // World Book triggering logic (loaded from freshest localStorage to support live edits without refresh)
+      let latestWorldBookEntries = worldBookEntries;
+      try {
+        const raw = localStorage.getItem("phone_worldbook_entries");
+        if (raw) {
+          latestWorldBookEntries = JSON.parse(raw);
+        }
+      } catch (e) {
+        console.error("Failed to load freshest World Book entries inside generateResponseForUserMessage:", e);
+      }
+
+      // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
+      const scanContextParts = [
+        userMsg ? userMsg.content : "",
+        ...currentChatMessages.slice(-3).map(m => m.content)
+      ];
+      const scanText = scanContextParts.filter(Boolean).join("\n").toLowerCase();
+
       const triggeredEntries: {
         entry: WorldBookEntry;
         text: string;
       }[] = [];
 
-      const lowerUserMsg = userMsg ? userMsg.content.toLowerCase() : "";
-
-      for (const entry of worldBookEntries) {
+      for (const entry of latestWorldBookEntries) {
         // Skip inactive entries
         if (entry.isActive === false) continue;
 
@@ -806,19 +839,19 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
         } else if (entry.triggerType === "vector") {
           // Smart simulated vector term-overlap matching
           const textToMatch = (entry.title + " " + (entry.keywords || "") + " " + entry.content).toLowerCase();
-          const userWords = lowerUserMsg.split(/[\s,.:;!?，。！？、]/).filter(w => w.length >= 2);
-          if (userWords.some(word => textToMatch.includes(word)) || lowerUserMsg.includes(entry.title.toLowerCase())) {
+          const userWords = scanText.split(/[\s,.:;!?，。！？、；：]/).filter(w => w.length >= 2);
+          if (userWords.some(word => textToMatch.includes(word)) || scanText.includes(entry.title.toLowerCase())) {
             isTriggered = true;
           }
         } else {
           // "keys" trigger
           const kwStr = entry.keywords || entry.title || "";
           const kws = kwStr
-            .split(/[,，]/)
+            .split(/[,，;；\s\t]+/)
             .map((k) => k.trim().toLowerCase())
             .filter(Boolean);
 
-          if (kws.some((kw) => lowerUserMsg.includes(kw))) {
+          if (kws.some((kw) => scanText.includes(kw))) {
             isTriggered = true;
           }
         }
@@ -915,6 +948,20 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
       if (offlineStoriesContext) {
         assembledInstructions.push(offlineStoriesContext);
       }
+
+      // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
+      assembledInstructions.push(`[🚨🚨🚨 极其重要：世界书设定绝对最高优先 🚨🚨🚨]
+1. 【最高绝对优先权（Absolute Supreme Priority）】：
+   以上提供的“世界书背景设定（World Book Background）”（即形如“【设定 - xxx】”的词条内容）拥有最高优先级。它在所有扮演、叙事和风格规则中具有【至高无上、超越一切】的地位。
+   世界书词条中的设定必须被100%毫无遗漏、绝对忠实地遵循。
+2. 【冲突解决准则（Conflict Resolution）】：
+   如果“活人感提示词（LIVING_HUMAN_PROMPT）”（如身份锚定、表达从简、微信消息连续发送/断句、情绪化、跳脱思维等）的风格要求与“世界书背景设定”中的设定、世界观、历史事实、事件逻辑或角色特定语言习惯产生任何冲突或不一致，你必须**立即无条件完全无视/抛弃活人感提示词中的相应格式或语气限制**，并无条件以世界书设定的真实客观逻辑为唯一的最高扮演和叙事准则。
+3. 【设定遵循深度（Strict Conformity）】：
+   绝对不容许为了迎合“微信简短聊天”或“不拘小节”等风格，而对世界书背景词条中提及的任何专业知识、身份禁忌、专属回忆、世界设定或情感偏好进行淡化、遗漏、敷衍或歪曲解释。世界书的内容坚不可摧，请将其深度、丰满地融入你的发言。
+4. 【句尾后缀、口癖与特殊言行绝对强制】：
+   如果世界书设定了任何句尾后缀字、标点或特征（例如：“每句话结束最后都必须带一个“喵”字”），你必须在【每一句回复、每一个被拆分的气泡消息、甚至是单字/语气助词的最后】都绝对强制、无一例外地附加该后缀！内置活人感提示词中的任何“句式复用规避（句型模板限制）”或“消息拆分规则”在此设定面前均自动且彻底失效。
+5. 【引号内包裹法则（Inside Quotes Rule）】：
+   如果你的回复包含引号（如 “xxx” ），你必须将世界书要求的所有口癖、句尾后缀词（如“喵”）放入引号【内部】（即写成 “xxx喵” 而绝不能是 “xxx”喵 ），确保后缀作为台词整体输出，绝对不可被丢弃。`);
 
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
@@ -1398,15 +1445,30 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const momentsContextRegen = getMomentsContextString(moments, activeCharacter, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
 
-      // World Book triggering logic for regenerate response
+      // World Book triggering logic for regenerate response (loaded from freshest localStorage for real-time edits)
+      let latestWorldBookEntries = worldBookEntries;
+      try {
+        const raw = localStorage.getItem("phone_worldbook_entries");
+        if (raw) {
+          latestWorldBookEntries = JSON.parse(raw);
+        }
+      } catch (e) {
+        console.error("Failed to load freshest World Book entries inside handleRegenerateResponse:", e);
+      }
+
+      // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
+      const scanContextParts = [
+        lastUserMsg ? lastUserMsg.content : "",
+        ...previousMessages.slice(-3).map(m => m.content)
+      ];
+      const scanText = scanContextParts.filter(Boolean).join("\n").toLowerCase();
+
       const triggeredEntries: {
         entry: WorldBookEntry;
         text: string;
       }[] = [];
 
-      const lowerUserMsg = lastUserMsg.content.toLowerCase();
-
-      for (const entry of worldBookEntries) {
+      for (const entry of latestWorldBookEntries) {
         // Skip inactive entries
         if (entry.isActive === false) continue;
 
@@ -1422,19 +1484,19 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         } else if (entry.triggerType === "vector") {
           // Smart simulated vector term-overlap matching
           const textToMatch = (entry.title + " " + (entry.keywords || "") + " " + entry.content).toLowerCase();
-          const userWords = lowerUserMsg.split(/[\s,.:;!?，。！？、]/).filter(w => w.length >= 2);
-          if (userWords.some(word => textToMatch.includes(word)) || lowerUserMsg.includes(entry.title.toLowerCase())) {
+          const userWords = scanText.split(/[\s,.:;!?，。！？、；：]/).filter(w => w.length >= 2);
+          if (userWords.some(word => textToMatch.includes(word)) || scanText.includes(entry.title.toLowerCase())) {
             isTriggered = true;
           }
         } else {
           // "keys" trigger
           const kwStr = entry.keywords || entry.title || "";
           const kws = kwStr
-            .split(/[,，]/)
+            .split(/[,，;；\s\t]+/)
             .map((k) => k.trim().toLowerCase())
             .filter(Boolean);
 
-          if (kws.some((kw) => lowerUserMsg.includes(kw))) {
+          if (kws.some((kw) => scanText.includes(kw))) {
             isTriggered = true;
           }
         }
@@ -1528,6 +1590,20 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       if (offlineStoriesContextRegen) {
         assembledInstructions.push(offlineStoriesContextRegen);
       }
+
+      // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
+      assembledInstructions.push(`[🚨🚨🚨 极其重要：世界书设定绝对最高优先 🚨🚨🚨]
+1. 【最高绝对优先权（Absolute Supreme Priority）】：
+   以上提供的“世界书背景设定（World Book Background）”（即形如“【设定 - xxx】”的词条内容）拥有最高优先级。它在所有扮演、叙事和风格规则中具有【至高无上、超越一切】的地位。
+   世界书词条中的设定必须被100%毫无遗漏、绝对忠实地遵循。
+2. 【冲突解决准则（Conflict Resolution）】：
+   如果“活人感提示词（LIVING_HUMAN_PROMPT）”（如身份锚定、表达从简、微信消息连续发送/断句、情绪化、跳脱思维等）的风格要求与“世界书背景设定”中的设定、世界观、历史事件、事件逻辑或角色特定语言习惯产生任何冲突或不一致，你必须**立即无条件完全无视/抛弃活人感提示词中的相应格式或语气限制**，并无条件以世界书设定的真实客观逻辑为唯一的最高扮演和叙事准则。
+3. 【设定遵循深度（Strict Conformity）】：
+   绝对不容许为了迎合“微信简短聊天”或“不拘小节”等风格，而对世界书背景词条中提及的任何专业知识、身份禁忌、专属回忆、世界设定 or 情感偏好进行淡化、遗漏、敷衍或歪曲解释。世界书的内容坚不可摧，请将其深度、丰满地融入你的发言。
+4. 【句尾后缀、口癖与特殊言行绝对强制】：
+   如果世界书设定了任何句尾后缀字、标点或特征（例如：“每句话结束最后都必须带一个“喵”字”），你必须在【每一句回复、每一个被拆分的气泡消息、甚至是单字/语气助词的最后】都绝对强制、无一例外地附加该后缀！内置活人感提示词中的任何“句式复用规避（句型模板限制）”或“消息拆分规则”在此设定面前均自动且彻底失效。
+5. 【引号内包裹法则（Inside Quotes Rule）】：
+   如果你的回复包含引号（如 “xxx” ），你必须将世界书要求的所有口癖、句尾后缀词（如“喵”）放入引号【内部】（即写成 “xxx喵” 而绝不能是 “xxx”喵 ），确保后缀作为台词整体输出，绝对不可被丢弃。`);
 
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
