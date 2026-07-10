@@ -648,6 +648,7 @@ export default function App() {
         { id: "notes", type: "app", size: "1x1", page: 0 },
         { id: "store", type: "app", size: "1x1", page: 0 },
         { id: "settings", type: "app", size: "1x1", page: 0 },
+        { id: "offline", type: "app", size: "1x1", page: 0 },
       ];
     }
     // Filter out schedule app
@@ -659,6 +660,10 @@ export default function App() {
     // Automatically add notes app on the home screen if it's missing
     if (!items.some(item => item.id === "notes")) {
       items.push({ id: "notes", type: "app", size: "1x1", page: 0 });
+    }
+    // Automatically add offline app on the home screen if it's missing
+    if (!items.some(item => item.id === "offline")) {
+      items.push({ id: "offline", type: "app", size: "1x1", page: 0 });
     }
     return items;
   });
@@ -2533,6 +2538,8 @@ export default function App() {
                     characters={characters}
                     settings={settings}
                     offlineStories={offlineStories}
+                    messages={messages}
+                    activeChatCharId={activeChatCharId}
                     onSaveOfflineStory={handleSaveOfflineStory}
                     onDeleteOfflineStory={handleDeleteOfflineStory}
                     onClose={() => setActiveApp(null)}

@@ -20,6 +20,8 @@ interface AppOfflineProps {
   onNavigateToChat?: (charId: string) => void;
   memories: MemoryItem[];
   onSaveMemories: (mems: MemoryItem[]) => void;
+  messages?: Message[];
+  activeChatCharId?: string | null;
 }
 
 export default function AppOffline({
@@ -31,10 +33,18 @@ export default function AppOffline({
   onClose,
   onNavigateToChat,
   memories = [],
-  onSaveMemories
+  onSaveMemories,
+  messages = [],
+  activeChatCharId = null
 }: AppOfflineProps) {
-  const [selectedCharId, setSelectedCharId] = useState<string>(characters[0]?.id || "");
+  const [selectedCharId, setSelectedCharId] = useState<string>(() => {
+    if (activeChatCharId && characters.some(c => c.id === activeChatCharId)) {
+      return activeChatCharId;
+    }
+    return characters[0]?.id || "";
+  });
   const [activeStory, setActiveStory] = useState<OfflineStory | null>(null);
+  const [lastLoadedCharId, setLastLoadedCharId] = useState<string | null>(null);
   
   // Creation modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -67,11 +77,34 @@ export default function AppOffline({
     }
   }, [activeStory?.messages, isGenerating]);
 
+  // Load selected character's saved story on select or mount
+  useEffect(() => {
+    if (selectedCharId && selectedCharId !== lastLoadedCharId) {
+      setLastLoadedCharId(selectedCharId);
+      const savedStoryId = localStorage.getItem(`offline_story_id_${selectedCharId}`);
+      if (savedStoryId) {
+        const story = offlineStories.find(s => s.id === savedStoryId);
+        if (story) {
+          setActiveStory(story);
+          return;
+        }
+      }
+      setActiveStory(null);
+    }
+  }, [selectedCharId, offlineStories, lastLoadedCharId]);
+
   // Handle opening a story
   const handleOpenStory = (story: OfflineStory) => {
     setActiveStory(story);
     localStorage.setItem(`offline_mode_active_${story.characterId}`, "true");
     localStorage.setItem(`offline_story_id_${story.characterId}`, story.id);
+  };
+
+  // Exit story workspace back to list
+  const handleExitStoryWorkspace = () => {
+    setActiveStory(null);
+    localStorage.removeItem(`offline_story_id_${selectedCharId}`);
+    localStorage.setItem(`offline_mode_active_${selectedCharId}`, "false");
   };
 
   // Create new offline story
@@ -270,6 +303,17 @@ export default function AppOffline({
       const relevantMems = getRelevantMemories(memories, selectedChar.id, text || "续写故事", 5);
       if (relevantMems.length > 0) {
         sysPrompt += `\n\n【互通的线上记忆库】：以下是你们曾在线上聊天中发生并提取的核心事实，请将其有机融入作为故事的背景事实支撑：\n${relevantMems.map(m => `* ${m.content}`).join("\n")}`;
+      }
+
+      // Recall online chat history
+      const onlineMsgs = (messages || [])
+        .filter(m => m.characterId === selectedChar.id && !m.isOffline)
+        .slice(-20);
+      if (onlineMsgs.length > 0) {
+        const onlineHistoryLines = onlineMsgs.map(m => `* ${m.sender === "user" ? "我" : selectedChar.name}: ${m.content}`).join("\n");
+        sysPrompt += `\n\n【互通的线上最新对话记忆（Online Chat Context）】：
+以下是你们最近在微信（线上聊天）中的最新真实对话。这些是你们当下关系的最新现状与真实记忆。请确保线下小说剧本的走向与其认知保持连贯和融合，避免发生剧情上的冲突：
+${onlineHistoryLines}`;
       }
 
       const lastUserMsgText = text || "请继续编织并续写这幕场景。";
@@ -513,7 +557,7 @@ export default function AppOffline({
             <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm z-10">
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <button 
-                  onClick={() => setActiveStory(null)}
+                  onClick={handleExitStoryWorkspace}
                   className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors shrink-0"
                 >
                   <ArrowLeft className="w-4 h-4" />

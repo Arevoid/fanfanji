@@ -90,6 +90,31 @@ const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ow
 ${momentLines.join("\n")}`;
 };
 
+const getOfflineStoriesContextString = (offlineStories: OfflineStory[] | undefined, activeCharId: string, charName: string) => {
+  if (!offlineStories || offlineStories.length === 0) return "";
+  const charStories = offlineStories.filter(s => s.characterId === activeCharId);
+  if (charStories.length === 0) return "";
+
+  // Take the last 3 offline stories to avoid token overflow
+  const recentStories = [...charStories].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3);
+  
+  const storyLines = recentStories.map((story) => {
+    // Get last 6 messages to keep context concise but rich
+    const lastMsgs = story.messages.slice(-6);
+    const msgContent = lastMsgs.map(m => {
+      const senderName = m.isNarration ? "[旁白描述]" : (m.sender === "user" ? "我" : charName);
+      return `  - ${senderName}: ${m.content}`;
+    }).join("\n");
+    return `- 线下小说剧本《${story.title}》 (创建于: ${new Date(story.createdAt).toLocaleDateString()}):
+${msgContent || "  (暂无剧情)"}`;
+  });
+
+  return `[🚨 线下剧本走向与平行宇宙记忆 (Offline Stories Memory)]
+以下是你们在线下剧本/平行时空剧情模式（Offline Mode）中共同创造的小说故事线与经历，你对这些线下剧情细节拥有清晰的记忆。
+当线上聊天涉及相关话题时，你可以在不破坏线上微信身份的前提下，极为自然地将这些经历作为你们两人“发生过的默契、回忆、平行宇宙经历”来进行互动：
+${storyLines.join("\n\n")}`;
+};
+
 const getPostIntervalMs = (character: Character) => {
   const bioAndPersonality = ((character.personality || "") + " " + (character.backstory || "")).toLowerCase();
   const lovesSharing = /(热爱分享|喜欢分享|热爱生活|发朋友圈|爱分享|活跃|话唠|分享欲)/i.test(bioAndPersonality);
@@ -192,7 +217,7 @@ export default function AppChat({
     if (activeChatCharId === charId) return 0;
     const lastRead = lastReadTimestamps[charId] || 0;
     const charMsgs = messages.filter(
-      (m) => m.characterId === charId && m.sender === "character" && m.timestamp > lastRead
+      (m) => m.characterId === charId && m.sender === "character" && !m.isOffline && m.timestamp > lastRead
     );
     return charMsgs.length;
   };
@@ -206,7 +231,7 @@ export default function AppChat({
   
   // Navigation State
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
-  const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId);
+  const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
   const activeStylePreset = (activeCharacter?.chatStylePreset) || (settings.globalChatStylePreset) || "default";
   const isFloatingCute = activeStylePreset === "floating-cute";
 
@@ -346,24 +371,10 @@ export default function AppChat({
   const [emptyGreetingCheckedCharIds, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
-  // Offline Mode States
-  const [isOfflineModeActive, setIsOfflineModeActive] = useState(false);
-  const [isInputNarration, setIsInputNarration] = useState(false);
-  const [activeOfflineStoryId, setActiveOfflineStoryId] = useState<string | null>(null);
-
-  // Restore persistent offline mode state on character switch or mount
-  useEffect(() => {
-    if (activeChatCharId) {
-      const saved = localStorage.getItem(`offline_mode_active_${activeChatCharId}`);
-      setIsOfflineModeActive(saved === "true");
-      
-      const savedStoryId = localStorage.getItem(`offline_story_id_${activeChatCharId}`);
-      setActiveOfflineStoryId(savedStoryId || null);
-    } else {
-      setIsOfflineModeActive(false);
-      setActiveOfflineStoryId(null);
-    }
-  }, [activeChatCharId]);
+  // Offline Mode States (Inline Offline mode inside chat is disabled, transitioned to AppOffline)
+  const isOfflineModeActive = false;
+  const isInputNarration = false;
+  const activeOfflineStoryId = null;
 
   const handleStartOfflineFromMsg = (msg: Message) => {
     if (!activeChatCharId || !activeCharacter) return;
@@ -385,13 +396,14 @@ export default function AppChat({
       onSaveOfflineStory(newStory);
     }
     
-    setActiveOfflineStoryId(newStory.id);
-    setIsOfflineModeActive(true);
-    
     localStorage.setItem(`offline_mode_active_${activeChatCharId}`, "true");
     localStorage.setItem(`offline_story_id_${activeChatCharId}`, newStory.id);
     
     showToast("已无痛切换到线下故事模式");
+
+    if (onNavigateToApp) {
+      onNavigateToApp("offline");
+    }
   };
 
   const showToast = (msg: string) => {
@@ -486,7 +498,7 @@ export default function AppChat({
   useEffect(() => {
     if (!activeChatCharId || !activeCharacter) return;
     
-    const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId);
+    const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
     if (currentChatMessages.length > 0) return;
 
     if (activeCharacter.greeting && activeCharacter.greeting.trim()) {
@@ -863,6 +875,12 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
         assembledInstructions.push(momentsContext);
       }
 
+      // 8.5 Offline stories context memory
+      const offlineStoriesContext = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
+      if (offlineStoriesContext) {
+        assembledInstructions.push(offlineStoriesContext);
+      }
+
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
       // Custom tool/attachment format descriptions for character context
@@ -1114,7 +1132,7 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
     const container = scrollContainerRef.current;
     if (!activeChatCharId || !container) return;
 
-    const currentChatMsgs = messages.filter(m => m.characterId === activeChatCharId);
+    const currentChatMsgs = messages.filter(m => m.characterId === activeChatCharId && !m.isOffline);
     const msgCount = currentChatMsgs.length;
     
     const isFreshOpen = lastActiveCharIdRef.current !== activeChatCharId;
@@ -1343,9 +1361,13 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 - Personality/Bio: ${settings.bio}`;
 
       const momentsContextRegen = getMomentsContextString(moments, activeCharacter, settings.name);
+      const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
       const instructionBlocks = [LIVING_HUMAN_PROMPT, mainPromptText, charDefText, userProfileText];
       if (momentsContextRegen) {
         instructionBlocks.push(momentsContextRegen);
+      }
+      if (offlineStoriesContextRegen) {
+        instructionBlocks.push(offlineStoriesContextRegen);
       }
 
       const systemInstruction = instructionBlocks.join("\n\n---\n\n");
@@ -1712,6 +1734,110 @@ Your task: Write a short, natural comment on this Moment.
     }
   };
 
+  const handleAutoReplyToUserComment = async (momentId: string, userCommentText: string) => {
+    // Find the moment
+    const targetMoment = moments.find(m => m.id === momentId);
+    if (!targetMoment) return;
+
+    // Identify which character should reply
+    // It should be the author of the moment (if it's a character), or if it's the user's moment,
+    // we can make the character who the user is replying to (or the active character) reply.
+    let targetChar: Character | undefined;
+    if (targetMoment.characterId) {
+      targetChar = characters.find(c => c.id === targetMoment.characterId);
+    } else {
+      // Fallback to match authorName
+      targetChar = characters.find(c => c.name === targetMoment.authorName || c.remark === targetMoment.authorName);
+    }
+
+    // If the moment is posted by the user, and they are replying to a character's comment, or if we want a friend to reply
+    if (!targetChar) {
+      // If it's user's own moment, let the active character reply, or any friend
+      targetChar = characters.find(c => c.id === activeChatCharId) || friends[0];
+    }
+
+    if (!targetChar) return;
+
+    const friend = targetChar;
+    const delay = Math.random() * 5000 + 3000; // 3 to 8 seconds delay
+    
+    setTimeout(async () => {
+      try {
+        const friendMsgs = messages
+          .filter((m) => m.characterId === friend.id)
+          .sort((a, b) => a.timestamp - b.timestamp);
+        const slicedMsgs = friendMsgs.slice(-40);
+
+        const history = slicedMsgs.map((m) => ({
+          role: m.sender === "user" ? "user" : "model",
+          text: m.content,
+        }));
+
+        const existingCommentsContext = targetMoment.comments
+          .map(c => `* ${c.authorName}: ${c.content}`)
+          .join("\n");
+
+        const systemInstruction = `You are roleplaying as "${friend.name}".
+Character Profile:
+- Personality: ${friend.personality}
+- Background: ${friend.backstory}
+
+User Profile (Machine Owner / 机主):
+- Nickname: ${settings.name}
+- Personality/Bio: ${settings.bio}
+
+Context:
+The user has just commented/replied on a WeChat Moment.
+Moment Author: ${targetMoment.authorName}
+Moment Content: "${targetMoment.content}"
+${targetMoment.image ? "[Attached an image]" : ""}
+
+Existing Comments on this Moment:
+${existingCommentsContext || "(No other comments)"}
+
+The User's latest comment/reply:
+* ${settings.name}: "${userCommentText}"
+
+Below is your recent direct chat history with the user (up to 20 rounds). It represents your current relationship context and shared history:
+${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n") : "(No prior chat history)"}
+
+Your task: Write a short, extremely natural WeChat reply/comment to the user's latest comment "${userCommentText}".
+🚨 [CRITICAL WECHAT COMMENT RULES]:
+1. The reply must be brief, lively, extremely natural (like a real person replying on WeChat), and perfectly match your character's personality, tone of voice, relationship depth, and memories with the user.
+2. Keep it under 35 characters. Speak in Chinese.
+3. Speak directly to the user (e.g. use "你怎么...", "哈哈就是说啊", etc. without any formal prefixes). Do not write narrative actions or brackets like "(害羞)", just output the comment text.
+4. Try to make it feel responsive to their comment.
+`;
+
+        const response = await apiChat({
+          message: `请针对用户在朋友圈下对你（或他人）发表的最新评论 "${userCommentText}"，写一条符合你人设和记忆的简短微信回复：`,
+          history,
+          systemInstruction,
+          apiKey: settings.apiKey,
+          model: settings.selectedModel || "gemini-3.5-flash",
+          apiEndpoint: settings.apiEndpoint,
+          apiTemperature: settings.apiTemperature,
+        });
+
+        if (response && response.text) {
+          let cleanedReply = response.text.trim();
+          cleanedReply = cleanedReply.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+
+          const newComment: MomentComment = {
+            id: `${Date.now()}-reply-${Math.random().toString(36).substr(2, 5)}`,
+            authorName: friend.remark || friend.name,
+            authorAvatar: friend.avatar,
+            content: cleanedReply,
+            timestamp: Date.now(),
+          };
+          onAddCommentToMoment(momentId, newComment);
+        }
+      } catch (err) {
+        console.error(`Failed to generate reply to user comment for ${friend.name}:`, err);
+      }
+    }, delay);
+  };
+
   const generateCharacterMoment = async (friend: Character) => {
     try {
       const friendMsgs = messages
@@ -1866,20 +1992,23 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
     onAddCommentToMoment(momentId, newComment);
     setInlineCommentsTexts({ ...inlineCommentsTexts, [momentId]: "" });
     setShowCommentInputMap(prev => ({ ...prev, [momentId]: false }));
+
+    // Trigger character auto-reply to the user's new comment
+    handleAutoReplyToUserComment(momentId, text.trim());
   };
 
   // Active chat threads list builder
   const chatThreads = characters
     .filter((char) => {
       if (!friendIds.includes(char.id)) return false;
-      const threadMsgs = messages.filter((m) => m.characterId === char.id);
+      const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
       const hasMessages = threadMsgs.length > 0;
       const isInitiated = initiatedChatIds.includes(char.id);
       const isActive = char.id === activeChatCharId;
       return hasMessages || isInitiated || isActive;
     })
     .map((char) => {
-      const threadMsgs = messages.filter((m) => m.characterId === char.id);
+      const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
       const lastMsg = threadMsgs.length > 0 ? threadMsgs[threadMsgs.length - 1] : null;
       return {
         character: char,
@@ -2219,22 +2348,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               </button>
             </div>
 
-            {isOfflineModeActive && (
-              <button
-                onClick={() => {
-                  setIsOfflineModeActive(false);
-                  setActiveOfflineStoryId(null);
-                  if (activeChatCharId) {
-                    localStorage.setItem(`offline_mode_active_${activeChatCharId}`, "false");
-                    localStorage.removeItem(`offline_story_id_${activeChatCharId}`);
-                  }
-                }}
-                className="absolute top-[72px] right-4 z-40 w-10 h-10 rounded-full backdrop-blur-md bg-white/40 hover:bg-white/60 active:scale-90 flex items-center justify-center transition-all cursor-pointer border border-white/50 shadow-[0_4px_16px_rgba(0,0,0,0.1)] hover:shadow-xl text-slate-700 hover:text-slate-900 animate-fade-in"
-                title="退出线下模式"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
+
 
           {/* Character Details / Settings Full-Screen Page */}
           {isShowingCardModal && (
@@ -3041,33 +3155,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               </div>
             )}
             
-            {isOfflineModeActive && (
-              <div className="px-4 py-2 bg-slate-50 border-b border-slate-150 flex items-center gap-2.5 text-xs text-slate-700 shrink-0 select-none">
-                <span className="font-bold text-[11px] text-slate-500 uppercase tracking-wide">类型:</span>
-                <button
-                  type="button"
-                  onClick={() => setIsInputNarration(false)}
-                  className={`px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all flex items-center gap-1 shadow-sm ${
-                    !isInputNarration 
-                      ? "bg-slate-900 border-slate-900 text-white !text-white" 
-                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                  }`}
-                >
-                  <span className={!isInputNarration ? "text-white !text-white" : "text-slate-600"}>💬 发言</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsInputNarration(true)}
-                  className={`px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all flex items-center gap-1 shadow-sm ${
-                    isInputNarration 
-                      ? "bg-slate-900 border-slate-900 text-white !text-white" 
-                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                  }`}
-                >
-                  <span className={isInputNarration ? "text-white !text-white" : "text-slate-600"}>📖 旁白</span>
-                </button>
-              </div>
-            )}
+
 
             <form
               onSubmit={(e) => {
