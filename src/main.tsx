@@ -35,7 +35,7 @@ if (typeof window !== "undefined") {
   });
 
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
+    const registerSW = () => {
       navigator.serviceWorker.register("/sw.js")
         .then((registration) => {
           console.log("[PWA] Service Worker registered successfully with scope:", registration.scope);
@@ -43,6 +43,12 @@ if (typeof window !== "undefined") {
         .catch((error) => {
           console.error("[PWA] Service Worker registration failed:", error);
         });
-    });
+    };
+
+    if (document.readyState === "complete" || document.readyState === "interactive") {
+      registerSW();
+    } else {
+      window.addEventListener("load", registerSW);
+    }
   }
 }
