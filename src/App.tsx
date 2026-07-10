@@ -1675,10 +1675,30 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-[100dvh] h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb]">
+    <div
+      className="min-h-[100dvh] h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb]"
+      style={{
+        height: (typeof window !== "undefined" && window.innerWidth < 768 && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
+        minHeight: (typeof window !== "undefined" && window.innerWidth < 768 && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
+      }}
+    >
       
       {/* Live Custom CSS Styling injection */}
       <style>{`
+        @media (max-width: 767px) {
+          html, body {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+        }
         :root, .phone-screen-container {
           --app-icon-radius: ${settings.iconBorderRadius !== undefined ? settings.iconBorderRadius : 35}%;
           --app-icon-bg-opacity: ${(settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100) / 100};
@@ -2055,7 +2075,7 @@ export default function App() {
           background: settings.wallpaper.startsWith("linear-gradient")
             ? settings.wallpaper
             : `url(${settings.wallpaper}) center/cover no-repeat`,
-          height: (typeof window !== "undefined" && window.innerWidth < 768 && isMobileKeyboardActive && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
+          height: (typeof window !== "undefined" && window.innerWidth < 768 && visualViewportHeight > 0) ? `${visualViewportHeight}px` : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
         }}
       >
