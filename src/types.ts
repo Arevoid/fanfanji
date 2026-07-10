@@ -144,6 +144,16 @@ export interface UserSettings {
   homeButtonPosition?: { x: number; y: number };
   identities?: UserIdentity[];
   activeIdentityId?: string;
+  avatarBorderRadius?: number;
+  otherBubbleBg?: string;
+  otherBubbleColor?: string;
+  otherBubbleRadius?: number;
+  otherBubbleOpacity?: number;
+  selfBubbleBg?: string;
+  selfBubbleColor?: string;
+  selfBubbleRadius?: number;
+  selfBubbleOpacity?: number;
+  collapseConsecutiveAvatars?: boolean;
 }
 
 export interface ApiPreset {

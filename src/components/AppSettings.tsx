@@ -24,6 +24,25 @@ import {
 
 import { compressImage } from "../utils/pngParser";
 
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+  const fullHex = hex.replace(shorthandRegex, (_, r, g, b) => r + r + g + g + b + b);
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(fullHex);
+  return result
+    ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
+      }
+    : null;
+}
+
+function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): string {
+  const rgb = hexToRgb(hexColor);
+  if (!rgb) return hexColor;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
+}
+
 interface AppSettingsProps {
   settings: UserSettings;
   presets: StylePreset[];
@@ -84,6 +103,18 @@ export default function AppSettings({
   const [iconBorderWidth, setIconBorderWidth] = useState(settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1);
   const [iconBorderOpacity, setIconBorderOpacity] = useState(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100);
   const [hideAppNames, setHideAppNames] = useState(!!settings.hideAppNames);
+
+  // Beginner-friendly manual styling states
+  const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
+  const [otherBubbleBg, setOtherBubbleBg] = useState(settings.otherBubbleBg || "#f4f4f5");
+  const [otherBubbleColor, setOtherBubbleColor] = useState(settings.otherBubbleColor || "#18181b");
+  const [otherBubbleRadius, setOtherBubbleRadius] = useState(settings.otherBubbleRadius !== undefined ? settings.otherBubbleRadius : 18);
+  const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100);
+  const [selfBubbleBg, setSelfBubbleBg] = useState(settings.selfBubbleBg || "#18181b");
+  const [selfBubbleColor, setSelfBubbleColor] = useState(settings.selfBubbleColor || "#ffffff");
+  const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.selfBubbleRadius !== undefined ? settings.selfBubbleRadius : 18);
+  const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100);
+  const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
 
   // Connection testing state
   const [isTesting, setIsTesting] = useState(false);
@@ -1167,25 +1198,252 @@ export default function AppSettings({
               </div>
 
               {/* 3. 聊天界面样式模块 */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Sliders className="w-3.5 h-3.5 text-slate-400" />
                   <span>3. 聊天界面样式模块</span>
                 </h3>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-[#52525b]">
-                    聊天气泡 CSS样式 (.chat-bubble-self, .chat-bubble-other)
+                {/* 适合新手手动调节的模块 (新手调色盘) */}
+                <div className="space-y-4 pt-1">
+                  <div className="flex items-center gap-1.5 pb-1 border-b border-slate-100">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />
+                    <span className="text-[11px] font-bold text-[#52525b]">新手极简视觉调色盘 (实时预览)</span>
+                  </div>
+
+                  {/* 实时预览效果框 */}
+                  <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 space-y-3 relative overflow-hidden">
+                    <div className="absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-500 font-sans tracking-wide">
+                      实时预览画面
+                    </div>
+
+                    {/* 对方发言消息 */}
+                    <div className="flex items-start gap-2.5">
+                      <img
+                        src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
+                        alt=""
+                        className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0 animate-fade-in"
+                        style={{ borderRadius: `${avatarBorderRadius}px` }}
+                      />
+                      <div className="flex flex-col items-start gap-1 max-w-[75%]">
+                        <span className="text-[9px] font-bold text-slate-400">
+                          聊天对象 (AI)
+                        </span>
+                        <div
+                          className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 whitespace-pre-wrap leading-relaxed break-all"
+                          style={{
+                            backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                            color: otherBubbleColor,
+                            borderRadius: "18px",
+                          }}
+                        >
+                          这里是对方（角色）的气泡，颜色和透明度可以在下方直接滑块调节哦～
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 我方发言消息 */}
+                    <div className="flex items-start gap-2.5 justify-end">
+                      <div className="flex flex-col items-end gap-1 max-w-[75%]">
+                        <span className="text-[9px] font-bold text-slate-400">
+                          {settings.name || "我 (机主)"}
+                        </span>
+                        <div
+                          className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 whitespace-pre-wrap leading-relaxed break-all"
+                          style={{
+                            backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                            color: selfBubbleColor,
+                            borderRadius: "18px",
+                          }}
+                        >
+                          哇，这太好玩了！我的头像圆角和气泡也是同步改变的 ✨
+                        </div>
+                      </div>
+                      <img
+                        src={settings.avatar || "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png"}
+                        alt=""
+                        className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
+                        style={{ borderRadius: `${avatarBorderRadius}px` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 具体的参数滑块和颜色选择器 */}
+                  <div className="space-y-3 bg-slate-50/30 p-3 rounded-2xl border border-slate-100">
+                    {/* 双方头像圆角角度 */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[11px] font-bold text-[#52525b]">双方头像圆角</span>
+                        <span className="text-[10px] text-indigo-600 font-mono font-bold">{avatarBorderRadius}px</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] text-slate-400 font-medium">直角</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="24"
+                          value={avatarBorderRadius}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setAvatarBorderRadius(val);
+                            handleSave({ avatarBorderRadius: val });
+                          }}
+                          className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                        />
+                        <span className="text-[9px] text-slate-400 font-medium">全圆</span>
+                      </div>
+                    </div>
+
+                    {/* 是否连续显示头像 / 连续发言仅显示一次头像 */}
+                    <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
+                      <div className="flex flex-col text-left">
+                        <span className="text-[11px] font-bold text-[#52525b]">连续发言仅显示一次头像</span>
+                        <span className="text-[9px] text-slate-400 mt-0.5">开启后连续的多条发言自动合并，只在首条显示头像</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVal = !collapseConsecutiveAvatars;
+                          setCollapseConsecutiveAvatars(nextVal);
+                          handleSave({ collapseConsecutiveAvatars: nextVal });
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          collapseConsecutiveAvatars ? "bg-indigo-500" : "bg-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            collapseConsecutiveAvatars ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 对方与我方气泡微调区 */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {/* 对方气泡设置 */}
+                    <div className="bg-slate-50/30 p-3 rounded-2xl border border-slate-100 space-y-2.5">
+                      <div className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider flex items-center gap-1">
+                        <span>●</span> 对方（角色）气泡
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold text-slate-500">底色:</span>
+                          <input
+                            type="color"
+                            value={otherBubbleBg}
+                            onChange={(e) => {
+                              setOtherBubbleBg(e.target.value);
+                              handleSave({ otherBubbleBg: e.target.value });
+                            }}
+                            className="w-5.5 h-5.5 rounded cursor-pointer border border-slate-200 p-0"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold text-slate-500">文字:</span>
+                          <input
+                            type="color"
+                            value={otherBubbleColor}
+                            onChange={(e) => {
+                              setOtherBubbleColor(e.target.value);
+                              handleSave({ otherBubbleColor: e.target.value });
+                            }}
+                            className="w-5.5 h-5.5 rounded cursor-pointer border border-slate-200 p-0"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-500 font-bold">气泡透明度</span>
+                          <span className="font-mono text-slate-400 font-bold">{otherBubbleOpacity}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="10"
+                          max="100"
+                          value={otherBubbleOpacity}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setOtherBubbleOpacity(val);
+                            handleSave({ otherBubbleOpacity: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* 我方气泡设置 */}
+                    <div className="bg-slate-50/30 p-3 rounded-2xl border border-slate-100 space-y-2.5">
+                      <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1">
+                        <span>●</span> 我方（用户）气泡
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold text-slate-500">底色:</span>
+                          <input
+                            type="color"
+                            value={selfBubbleBg}
+                            onChange={(e) => {
+                              setSelfBubbleBg(e.target.value);
+                              handleSave({ selfBubbleBg: e.target.value });
+                            }}
+                            className="w-5.5 h-5.5 rounded cursor-pointer border border-slate-200 p-0"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold text-slate-500">文字:</span>
+                          <input
+                            type="color"
+                            value={selfBubbleColor}
+                            onChange={(e) => {
+                              setSelfBubbleColor(e.target.value);
+                              handleSave({ selfBubbleColor: e.target.value });
+                            }}
+                            className="w-5.5 h-5.5 rounded cursor-pointer border border-slate-200 p-0"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-500 font-bold">气泡透明度</span>
+                          <span className="font-mono text-slate-400 font-bold">{selfBubbleOpacity}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="10"
+                          max="100"
+                          value={selfBubbleOpacity}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setSelfBubbleOpacity(val);
+                            handleSave({ selfBubbleOpacity: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-100 pt-3.5 space-y-1.5 text-left">
+                  <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
+                    <span>高阶高级自定义 CSS 样式 (选填)</span>
+                    <span className="text-[9px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full font-semibold">优先于滑块设置</span>
                   </label>
                   <textarea
-                    rows={3}
+                    rows={2}
                     value={bubbleCss}
                     onChange={(e) => {
                       setBubbleCss(e.target.value);
                       handleSave({ bubbleCss: e.target.value });
                     }}
                     placeholder={`.chat-bubble-self { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%) !important; }`}
-                    className="w-full px-4 py-3 rounded-[32px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
+                    className="w-full px-4 py-3 rounded-[24px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
                   />
                 </div>
               </div>

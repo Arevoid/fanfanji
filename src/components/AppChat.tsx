@@ -43,6 +43,25 @@ import {
   RefreshCw
 } from "lucide-react";
 
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+  const fullHex = hex.replace(shorthandRegex, (_, r, g, b) => r + r + g + g + b + b);
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(fullHex);
+  return result
+    ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
+      }
+    : null;
+}
+
+function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): string {
+  const rgb = hexToRgb(hexColor);
+  if (!rgb) return hexColor;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
+}
+
 interface AppChatProps {
   characters: Character[];
   settings: UserSettings;
@@ -2044,10 +2063,61 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             {activeCharacter.customCss && (
               <style>{activeCharacter.customCss}</style>
             )}
+
+            {/* Beginner manual style adjustments */}
+            <style>{`
+              ${settings.avatarBorderRadius !== undefined ? `
+                #conv-screen .avatar, 
+                #conv-screen .user-avatar, 
+                #conv-screen .ai-avatar {
+                  border-radius: ${settings.avatarBorderRadius}px !important;
+                }
+              ` : ''}
+
+              ${settings.otherBubbleBg ? `
+                #conv-screen .chat-bubble-other,
+                #conv-screen .received-transfer-card,
+                #conv-screen .voice-message-bar.chat-bubble-other {
+                  background-color: ${getBubbleBackgroundStyle(settings.otherBubbleBg, settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100)} !important;
+                  background-image: none !important;
+                }
+              ` : ''}
+
+              ${settings.otherBubbleColor ? `
+                #conv-screen .chat-bubble-other,
+                #conv-screen .chat-bubble-other *,
+                #conv-screen .received-transfer-card,
+                #conv-screen .received-transfer-card *,
+                #conv-screen .voice-message-bar.chat-bubble-other,
+                #conv-screen .voice-message-bar.chat-bubble-other * {
+                  color: ${settings.otherBubbleColor} !important;
+                }
+              ` : ''}
+
+              ${settings.selfBubbleBg ? `
+                #conv-screen .chat-bubble-self,
+                #conv-screen .transfer-card,
+                #conv-screen .voice-message-bar.chat-bubble-self {
+                  background-color: ${getBubbleBackgroundStyle(settings.selfBubbleBg, settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100)} !important;
+                  background-image: none !important;
+                }
+              ` : ''}
+
+              ${settings.selfBubbleColor ? `
+                #conv-screen .chat-bubble-self,
+                #conv-screen .chat-bubble-self *,
+                #conv-screen .transfer-card,
+                #conv-screen .transfer-card *,
+                #conv-screen .voice-message-bar.chat-bubble-self,
+                #conv-screen .voice-message-bar.chat-bubble-self * {
+                  color: ${settings.selfBubbleColor} !important;
+                }
+              ` : ''}
+            `}</style>
             {activeStylePreset === "liquid-glass" && (
               <style>{`
                 #conv-screen {
-                  background: url("${activeCharacter.chatBg || 'https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4qlqT1pFp4Gj5EqG1Gmkjd5vpi7lCgACjCQAAuHegVYQ0GSE8vFwEjwE.jpg'}") center/cover no-repeat !important;
+                  background: url("${activeCharacter.chatBg || 'https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW88JqUKBwtMIU2FxO5zQh4CKBC_pHUAACASQAAgvDiFZ7fSrFa6akITwE.png'}") center/cover no-repeat !important;
                 }
                 .cv-messages-list {
                   background: transparent !important;
@@ -2731,7 +2801,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
-                : "transparent",
+                : `url("https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW88JqUKBwtMIU2FxO5zQh4CKBC_pHUAACASQAAgvDiFZ7fSrFa6akITwE.png") center/cover no-repeat`,
               WebkitOverflowScrolling: "touch",
             }}
           >
@@ -2817,7 +2887,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               const isSelf = msg.sender === "user";
               const prevMsg = idx > 0 ? currentChatMessages[idx - 1] : null;
+              const shouldCollapse = settings.collapseConsecutiveAvatars !== false;
               const isConsecutivePrev = prevMsg && prevMsg.sender === msg.sender;
+              const showAvatar = !isConsecutivePrev || !shouldCollapse;
               
               return (
                 <div
@@ -2825,11 +2897,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   className={`w-full flex flex-col ${
                     isSelf ? "items-end" : "items-start"
                   } ${
-                    isConsecutivePrev ? "mt-1.5" : "mt-4.5"
+                    (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
                   } cv-msg-row message message-container`}
                 >
                   {/* Avatar + Meta Header */}
-                  {!isConsecutivePrev && (
+                  {showAvatar && (
                     <div className={`flex items-center gap-2.5 mb-1.5 select-none ${
                       isSelf ? "flex-row-reverse" : "flex-row"
                     }`}>
