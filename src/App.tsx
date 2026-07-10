@@ -137,7 +137,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   selectedModel: "gemini-3.5-flash",
   wallpaper: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
   customIcons: {},
-  globalChatStylePreset: "liquid-glass",
+  globalChatStylePreset: "default",
   bubbleCss: `.chat-bubble-self {
   background: #18181b !important;
   color: #ffffff !important;
@@ -260,7 +260,7 @@ export default function App() {
       if (!migrated.wallpaper || migrated.wallpaper.includes("BQACAgUAAyEGAASHRsPbAAEW4qlqT1pFp4Gj5EqG1Gmkjd5vpi7lCgACjCQAAuHegVYQ0GSE8vFwEjwE")) {
         migrated.wallpaper = "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)";
       }
-      migrated.globalChatStylePreset = "liquid-glass";
+      migrated.globalChatStylePreset = parsed.globalChatStylePreset || "default";
       if (!migrated.name || migrated.name === "萌新机主") {
         migrated.name = "饭饭";
       }

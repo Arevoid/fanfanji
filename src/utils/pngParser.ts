@@ -344,9 +344,11 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
       if (content) {
         // If disableBracketActions is enabled, let's also remove any parenthesized/bracketed action parts inside the quote
         // E.g. “（微笑）你醒了？” -> “你醒了？”
-        content = content.replace(/\([^)]*\)/g, "");
-        content = content.replace(/（[^）]*）/g, "");
-        content = content.replace(/\*[^*]*\*/g, "");
+        if (disableBracketActions) {
+          content = content.replace(/\([^)]*\)/g, "");
+          content = content.replace(/（[^）]*）/g, "");
+          content = content.replace(/\*[^*]*\*/g, "");
+        }
         content = content.trim();
         if (content) {
           matches.push(content);
@@ -375,7 +377,7 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
       (trimmed.startsWith("*") && trimmed.endsWith("*"))
     );
     
-    if (isActionOrNarrationLine) {
+    if (disableBracketActions && isActionOrNarrationLine) {
       continue; // Skip entire narration line
     }
     
@@ -385,18 +387,22 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
       (trimmed.startsWith("他") || trimmed.startsWith("她") || trimmed.startsWith("你") || trimmed.startsWith("我")) &&
       (trimmed.includes("走进来") || trimmed.includes("端着") || trimmed.includes("看着") || trimmed.includes("拿着") || trimmed.includes("坐下"));
       
-    if (isNarrativeScene) {
+    if (disableBracketActions && isNarrativeScene) {
       continue; // Skip narrative scene line
     }
     
     // Remove inline bracketed action descriptions
-    trimmed = trimmed.replace(/\([^)]*\)/g, "");
-    trimmed = trimmed.replace(/（[^）]*）/g, "");
-    trimmed = trimmed.replace(/\*[^*]*\*/g, "");
+    if (disableBracketActions) {
+      trimmed = trimmed.replace(/\([^)]*\)/g, "");
+      trimmed = trimmed.replace(/（[^）]*）/g, "");
+      trimmed = trimmed.replace(/\*[^*]*\*/g, "");
+    }
     
     // Clean up spaces and punctuation
     trimmed = trimmed.replace(/\s+/g, " ").trim();
-    trimmed = trimmed.replace(/[,，、：:]\s*$/, "").trim();
+    if (disableBracketActions) {
+      trimmed = trimmed.replace(/[,，、：:]\s*$/, "").trim();
+    }
     
     if (trimmed) {
       cleanedLines.push(trimmed);
