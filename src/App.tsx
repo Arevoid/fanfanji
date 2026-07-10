@@ -1519,11 +1519,19 @@ export default function App() {
   // Worldbook handlers
   const handleSaveWorldBookEntry = (entry: WorldBookEntry) => {
     setWorldBookEntries((prev) => {
+      let next;
       const exists = prev.some((e) => e.id === entry.id);
       if (exists) {
-        return prev.map((e) => (e.id === entry.id ? entry : e));
+        next = prev.map((e) => (e.id === entry.id ? entry : e));
+      } else {
+        next = [entry, ...prev];
       }
-      return [entry, ...prev];
+      try {
+        localStorage.setItem("phone_worldbook_entries", JSON.stringify(next));
+      } catch (e) {
+        console.error("Failed to save worldbook entries synchronously to localStorage:", e);
+      }
+      return next;
     });
   };
 
@@ -1531,12 +1539,26 @@ export default function App() {
     setWorldBookEntries((prev) => {
       const incomingIds = new Set(entries.map(e => e.id));
       const filtered = prev.filter(e => !incomingIds.has(e.id));
-      return [...entries, ...filtered];
+      const next = [...entries, ...filtered];
+      try {
+        localStorage.setItem("phone_worldbook_entries", JSON.stringify(next));
+      } catch (e) {
+        console.error("Failed to save worldbook entries synchronously to localStorage:", e);
+      }
+      return next;
     });
   };
 
   const handleDeleteWorldBookEntry = (id: string) => {
-    setWorldBookEntries((prev) => prev.filter((e) => e.id !== id));
+    setWorldBookEntries((prev) => {
+      const next = prev.filter((e) => e.id !== id);
+      try {
+        localStorage.setItem("phone_worldbook_entries", JSON.stringify(next));
+      } catch (e) {
+        console.error("Failed to delete worldbook entry synchronously from localStorage:", e);
+      }
+      return next;
+    });
   };
 
   // Calendar Schedule handlers
