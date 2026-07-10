@@ -485,6 +485,13 @@ export default function App() {
       setVvTop(vv.offsetTop);
       setVvLeft(vv.offsetLeft);
 
+      // Aggressively clamp window scroll back to 0,0 to counteract Edge and iOS virtual viewport top shift
+      if (window.scrollY !== 0 || document.body.scrollTop !== 0 || document.documentElement.scrollTop !== 0) {
+        window.scrollTo(0, 0);
+        document.body.scrollTop = 0;
+        document.documentElement.scrollTop = 0;
+      }
+
       const offset = window.innerHeight - vv.height;
       if (offset > 120) { // typical keyboard height threshold (e.g. 120px+)
         setIsMobileKeyboardActive(true);
@@ -496,10 +503,12 @@ export default function App() {
     };
 
     const preventScrollBounce = () => {
-      const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-        window.scrollTo(0, 0);
-        document.body.scrollTop = 0;
+      if (window.innerWidth < 768) {
+        if (window.scrollY !== 0 || document.body.scrollTop !== 0 || document.documentElement.scrollTop !== 0) {
+          window.scrollTo(0, 0);
+          document.body.scrollTop = 0;
+          document.documentElement.scrollTop = 0;
+        }
       }
     };
 
@@ -512,12 +521,17 @@ export default function App() {
 
     // Force periodic reset of body scroll when input is focused to combat iOS Safari behavior
     const interval = setInterval(() => {
-      const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-        window.scrollTo(0, 0);
-        document.body.scrollTop = 0;
+      if (window.innerWidth < 768) {
+        const activeEl = document.activeElement;
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.getAttribute('contenteditable') === 'true')) {
+          if (window.scrollY !== 0 || document.body.scrollTop !== 0 || document.documentElement.scrollTop !== 0) {
+            window.scrollTo(0, 0);
+            document.body.scrollTop = 0;
+            document.documentElement.scrollTop = 0;
+          }
+        }
       }
-    }, 200);
+    }, 100);
 
     return () => {
       if (window.visualViewport) {
@@ -1681,18 +1695,16 @@ export default function App() {
 
   return (
     <div
-      className="min-h-[100dvh] h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
+      className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
+      style={{
+        height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : "100vh",
+      }}
     >
       
       {/* Live Custom CSS Styling injection */}
       <style>{`
         @media (max-width: 767px) {
           html, body {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            bottom: 0 !important;
             width: 100% !important;
             height: 100% !important;
             overflow: hidden !important;
@@ -2076,11 +2088,8 @@ export default function App() {
           background: settings.wallpaper.startsWith("linear-gradient")
             ? settings.wallpaper
             : `url(${settings.wallpaper}) center/cover no-repeat`,
-          position: (typeof window !== "undefined" && window.innerWidth < 768) ? "fixed" : "relative",
-          top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvTop}px` : undefined,
-          left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvLeft}px` : undefined,
+          position: "relative",
           height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : undefined,
-          width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvWidth}px` : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
         }}
       >
