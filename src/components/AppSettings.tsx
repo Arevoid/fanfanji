@@ -86,6 +86,54 @@ export default function AppSettings({
 }: AppSettingsProps) {
   const [activeTab, setActiveTab] = useState<"profile" | "api" | "beauty" | "system_config" | "system" | null>(null);
 
+  // PWA states
+  const [isPwaInstallable, setIsPwaInstallable] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+
+  useEffect(() => {
+    const checkStandalone = () => {
+      const isStandaloneMode = 
+        window.matchMedia('(display-mode: standalone)').matches || 
+        (window.navigator as any).standalone === true ||
+        document.referrer.includes('android-app://');
+      setIsStandalone(isStandaloneMode);
+    };
+
+    checkStandalone();
+
+    if ((window as any).deferredPrompt) {
+      setIsPwaInstallable(true);
+    }
+
+    const handlePromptAvailable = () => {
+      setIsPwaInstallable(true);
+    };
+
+    window.addEventListener("pwa-install-prompt-available", handlePromptAvailable);
+    return () => {
+      window.removeEventListener("pwa-install-prompt-available", handlePromptAvailable);
+    };
+  }, []);
+
+  const handlePwaInstall = async () => {
+    const promptEvent = (window as any).deferredPrompt;
+    if (!promptEvent) {
+      alert("抱歉，您的浏览器目前尚未触发 PWA 安装。通常这发生在您通过非安全连接访问、使用受限制的浏览器套壳，或者您的设备已经安装了该应用的情况下。\n\n请尝试在 Safari / Chrome / Edge 浏览器中直接打开本页面，或通过浏览器内置的“安装应用”/“添加到主屏幕”菜单选项进行手动安装！");
+      return;
+    }
+    try {
+      await promptEvent.prompt();
+      const { outcome } = await promptEvent.userChoice;
+      console.log(`[PWA] Install prompt outcome: ${outcome}`);
+      if (outcome === 'accepted') {
+        (window as any).deferredPrompt = null;
+        setIsPwaInstallable(false);
+      }
+    } catch (err: any) {
+      console.error("[PWA] Install prompt failed:", err);
+    }
+  };
+
   // Local Form state
   const [name, setName] = useState(settings.name);
   const [avatar, setAvatar] = useState(settings.avatar);
@@ -1543,6 +1591,67 @@ export default function AppSettings({
                     />
                   </button>
                 </div>
+              </div>
+
+              {/* PWA 渐进式独立应用管理器 */}
+              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h4 className="text-xs font-bold text-slate-800 tracking-wide">PWA 独立全屏应用模式</h4>
+                  <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold ${
+                    isStandalone 
+                      ? "bg-emerald-50 text-emerald-600 border border-emerald-100" 
+                      : "bg-amber-50 text-amber-600 border border-amber-100"
+                  }`}>
+                    {isStandalone ? "已全屏独立运行" : "普通网页浏览器模式"}
+                  </span>
+                </div>
+
+                <p className="text-[10px] text-slate-500 leading-relaxed">
+                  通过 PWA (Progressive Web App) 技术，您可以将<strong>饭饭机</strong>作为原生 App 安装到您的手机桌面。安装后点开可<strong>隐藏浏览器地址栏、实现沉浸式壁纸穿透状态栏、以及极其流畅的离线启动体验</strong>。
+                </p>
+
+                {isStandalone ? (
+                  <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100/60 text-[10px] text-emerald-700 space-y-1">
+                    <p className="font-bold flex items-center gap-1.5">
+                      <span>🎉</span> 恭喜！您已成功运行在 PWA 独立全屏环境下。
+                    </p>
+                    <p className="opacity-90">当前应用已完全隐藏浏览器顶底栏，享受 100% 沉浸式虚拟手机交互体验。</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 pt-1">
+                    {/* Native Install Button Trigger */}
+                    {isPwaInstallable ? (
+                      <button
+                        type="button"
+                        onClick={handlePwaInstall}
+                        className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-extrabold rounded-2xl text-xs transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>立即安装「饭饭机」到主屏幕</span>
+                      </button>
+                    ) : (
+                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100/80 text-[10px] text-slate-600 space-y-1.5">
+                        <p className="font-bold text-slate-700 flex items-center gap-1.5">
+                          <span>💡</span> 温馨提示：如果上述按钮未出现，您可以手动安装：
+                        </p>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-500 font-medium">
+                          <li><strong>iOS 浏览器 (Safari/Edge/Chrome):</strong> 点击底部或顶部的「分享」按钮，向下滚动并选择<strong>「添加到主屏幕」</strong>。</li>
+                          <li><strong>Android 浏览器 (Edge/Chrome/Samsung):</strong> 点击右上角「三点」菜单，选择<strong>「安装应用」</strong>或<strong>「添加到主屏幕」</strong>。</li>
+                          <li><strong>电脑浏览器:</strong> 点击地址栏右侧的「安装应用」小图标 🖥️。</li>
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="bg-amber-50/40 p-3 rounded-2xl border border-amber-100/50 text-[10px] text-amber-700 space-y-1">
+                      <p className="font-bold flex items-center gap-1">
+                        <span>⚠️</span> 极重要注意事项:
+                      </p>
+                      <p className="leading-relaxed opacity-95">
+                        由于浏览器安全策略限制，<strong>必须点击右上角新窗口/新标签页打开本网站</strong>（不可在开发平台的内嵌 iframe 预览框中），方可触发 PWA 安装和 Service Worker 注册！
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -23,15 +23,26 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-// Register service worker for PWA capability
-if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js")
-      .then((registration) => {
-        console.log("[PWA] Service Worker registered successfully with scope:", registration.scope);
-      })
-      .catch((error) => {
-        console.error("[PWA] Service Worker registration failed:", error);
-      });
+// Register service worker for PWA capability and listen to beforeinstallprompt
+if (typeof window !== "undefined") {
+  // Stash beforeinstallprompt event
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    (window as any).deferredPrompt = e;
+    console.log("[PWA] beforeinstallprompt event fired and deferred.");
+    // Dispatch custom event so React can update its state
+    window.dispatchEvent(new CustomEvent("pwa-install-prompt-available"));
   });
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js")
+        .then((registration) => {
+          console.log("[PWA] Service Worker registered successfully with scope:", registration.scope);
+        })
+        .catch((error) => {
+          console.error("[PWA] Service Worker registration failed:", error);
+        });
+    });
+  }
 }

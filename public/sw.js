@@ -79,8 +79,8 @@ self.addEventListener("fetch", (event) => {
           return networkResponse;
         })
         .catch(() => {
-          // If offline and request is for HTML, return app shell index.html
-          if (event.request.headers.get("accept")?.includes("text/html")) {
+          // If offline and request is for HTML or navigation, return app shell index.html
+          if (event.request.mode === "navigate" || event.request.headers.get("accept")?.includes("text/html")) {
             return caches.match("/");
           }
         });
