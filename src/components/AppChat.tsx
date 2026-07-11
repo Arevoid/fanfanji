@@ -455,6 +455,7 @@ export default function AppChat({
   // Inputs
   const [chatInputText, setChatInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [typingCharacterOverride, setTypingCharacterOverride] = useState<Character | null>(null);
   const [manualLocationText, setManualLocationText] = useState("");
   const [emptyGreetingCheckedCharIds, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
   const [sentGreetings, setSentGreetings] = useState<string[]>([]);
@@ -692,6 +693,7 @@ export default function AppChat({
   const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return;
     setIsTyping(true);
+    let repliesScheduled = false;
 
     try {
       // Find all characters in this group chat
@@ -700,6 +702,9 @@ export default function AppChat({
         setIsTyping(false);
         return;
       }
+
+      // Initialize the typing avatar override with the first group member to avoid displaying the group's own avatar
+      setTypingCharacterOverride(groupMembers[0]);
 
       // Collect chat messages in this group
       const sourceMsgs = customHistoryOverride || (userMsg ? [...currentChatMessages, userMsg] : [...currentChatMessages]);
@@ -810,34 +815,81 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
           parsedReplies.push(currentReply);
         }
 
-        // Filter and construct messages
-        let delayOffset = 1000;
-        parsedReplies.forEach((reply, idx) => {
-          // Find member by name
+        // Filter and construct messages with sequential typing simulation and bracket action cleaning
+        repliesScheduled = false;
+        const validReplies = parsedReplies.map((reply, idx) => {
           const member = groupMembers.find(
             m => m.name.toLowerCase() === reply.charName.toLowerCase() || 
                  (m.remark && m.remark.toLowerCase() === reply.charName.toLowerCase())
           );
-          if (member) {
+          return { reply, member, idx };
+        }).filter(item => !!item.member) as { reply: { charName: string; content: string }; member: Character; idx: number }[];
+
+        if (validReplies.length > 0) {
+          repliesScheduled = true;
+          // Immediately set typing indicator override to the first actual speaker
+          setTypingCharacterOverride(validReplies[0].member);
+          setIsTyping(true);
+
+          let currentIdx = 0;
+          
+          const sendNext = () => {
+            if (currentIdx >= validReplies.length) {
+              setIsTyping(false);
+              setTypingCharacterOverride(null);
+              return;
+            }
+
+            const currentItem = validReplies[currentIdx];
+            
+            // Set active typing character
+            setTypingCharacterOverride(currentItem.member);
+            setIsTyping(true);
+
+            // Simulate typing for 1500ms
             setTimeout(() => {
-              const charMsg: Message = {
-                id: `group-reply-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-                characterId: activeChatCharId, // Save under the Group's ID
-                sender: "character",
-                senderId: member.id, // Keep track of the specific sender!
-                content: reply.content.trim(),
-                timestamp: Date.now(),
-              };
-              onSendMessage(charMsg);
-            }, delayOffset);
-            delayOffset += 1500; // Staggered simulation of typing delays!
-          }
-        });
+              const cleanedContent = cleanOnlineMessage(currentItem.reply.content.trim(), activeCharacter.disableBracketActions || false);
+              
+              if (cleanedContent) {
+                const charMsg: Message = {
+                  id: `group-reply-${Date.now()}-${currentItem.idx}-${Math.random().toString(36).substr(2, 5)}`,
+                  characterId: activeChatCharId, // Save under the Group's ID
+                  sender: "character",
+                  senderId: currentItem.member.id, // Keep track of the specific sender
+                  content: cleanedContent,
+                  timestamp: Date.now(),
+                };
+                onSendMessage(charMsg);
+              }
+
+              currentIdx++;
+              if (currentIdx < validReplies.length) {
+                // Pre-set typing avatar for the next speaker, and take a 400ms pause
+                setTypingCharacterOverride(validReplies[currentIdx].member);
+                setIsTyping(false); 
+                setTimeout(() => {
+                  sendNext();
+                }, 400);
+              } else {
+                setIsTyping(false);
+                setTypingCharacterOverride(null);
+              }
+            }, 1500);
+          };
+
+          // Start sequence after brief buffer
+          setTimeout(() => {
+            sendNext();
+          }, 500);
+        }
       }
     } catch (err) {
       console.error("Group chat response generation failed:", err);
     } finally {
-      setIsTyping(false);
+      if (!repliesScheduled) {
+        setIsTyping(false);
+        setTypingCharacterOverride(null);
+      }
     }
   };
 
@@ -2014,7 +2066,7 @@ Your task: Write a short, natural comment on this Moment.
           });
 
           if (response && response.text) {
-            let cleanedComment = response.text.trim();
+            let cleanedComment = cleanOnlineMessage(response.text.trim(), true);
             cleanedComment = cleanedComment.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
 
             const newComment: MomentComment = {
@@ -2127,15 +2179,15 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
         });
 
         if (response && response.text) {
-          let cleanedReply = response.text.trim();
+          let cleanedReply = cleanOnlineMessage(response.text.trim(), true);
           cleanedReply = cleanedReply.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
 
           // Clean up any existing AI-generated reply prefix to prevent duplication
           cleanedReply = cleanedReply.replace(/^回复\s*[\(（].*?[\)）]\s*[:：]\s*/, "");
           cleanedReply = cleanedReply.replace(/^回复\s*.*?\s*[:：]\s*/, "");
 
-          // Since the friend is replying to the user, the prefix must be 回复（${settings.name}）：
-          const finalReply = `回复（${settings.name}）：${cleanedReply}`;
+          // Since the friend is replying to the user, the prefix must be 回复${settings.name}：
+          const finalReply = `回复${settings.name}：${cleanedReply}`;
 
           const newComment: MomentComment = {
             id: `${Date.now()}-reply-${Math.random().toString(36).substr(2, 5)}`,
@@ -2296,7 +2348,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
     if (!text || !text.trim()) return;
 
     const replyingTo = replyingToCommentMap[momentId];
-    const prefix = replyingTo ? `回复（${replyingTo.authorName}）：` : "";
+    const prefix = replyingTo ? `回复${replyingTo.authorName}：` : "";
     const finalContent = `${prefix}${text.trim()}`;
 
     const newComment: MomentComment = {
@@ -2365,7 +2417,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         if (comm.authorName !== settings.name && comm.timestamp > lastViewedMomentsTime) {
           // Check if it's user's moment, or a reply targeting the user
           const isUserMoment = mom.authorName === settings.name;
-          const isReplyToUser = comm.content.startsWith(`回复（${settings.name}）：`) || comm.content.startsWith(`回复 ${settings.name}：`);
+          const isReplyToUser = comm.content.startsWith(`回复（${settings.name}）：`) || 
+                                comm.content.startsWith(`回复 ${settings.name}：`) ||
+                                comm.content.startsWith(`回复${settings.name}：`);
           if (isUserMoment || isReplyToUser) {
             count++;
           }
@@ -3835,20 +3889,22 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               ) : (() => {
                 const lastMsg = currentChatMessages.length > 0 ? currentChatMessages[currentChatMessages.length - 1] : null;
                 const isTypingConsecutive = lastMsg && lastMsg.sender !== "user";
+                const typingChar = typingCharacterOverride || activeCharacter;
+                const typingName = typingChar.remark || typingChar.name;
                 return (
                   <div className={`w-full flex flex-col items-start ${isTypingConsecutive ? "mt-1.5" : "mt-4.5"} cv-msg-row message message-container`}>
                     {!isTypingConsecutive && (
                       <div className="flex items-center gap-2.5 mb-1.5 select-none">
                         <RenderAvatar 
-                          src={activeCharacter.avatar} 
+                          src={typingChar.avatar} 
                           alt="" 
-                          name={activeCharacter.remark || activeCharacter.name}
+                          name={typingName}
                           className={`w-9 h-9 border object-cover shrink-0 aspect-square avatar ai-avatar ${
                             isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"
                           }`} 
                         />
                         <div className="flex flex-col items-start text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header">
-                          <span className="text-[9px] text-slate-400 font-bold">对方正在输入...</span>
+                          <span className="text-[9px] text-slate-400 font-bold">{typingName} 正在输入...</span>
                         </div>
                       </div>
                     )}
@@ -4934,7 +4990,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                 onChange={(e) =>
                                   setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
                                 }
-                                placeholder={replyingToCommentMap[mom.id] ? `回复（${replyingToCommentMap[mom.id].authorName}）：` : "发表评论..."}
+                                placeholder={replyingToCommentMap[mom.id] ? `回复${replyingToCommentMap[mom.id].authorName}：` : "发表评论..."}
                                 className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") {
@@ -5294,7 +5350,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                 onChange={(e) =>
                                   setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
                                 }
-                                placeholder={replyingToCommentMap[mom.id] ? `回复（${replyingToCommentMap[mom.id].authorName}）：` : "发表评论..."}
+                                placeholder={replyingToCommentMap[mom.id] ? `回复${replyingToCommentMap[mom.id].authorName}：` : "发表评论..."}
                                 className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") {
