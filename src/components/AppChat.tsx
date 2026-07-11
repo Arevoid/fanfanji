@@ -2522,11 +2522,76 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
             {/* Beginner manual style adjustments */}
             <style>{`
+              #conv-screen .chat-bubble-self,
+              #conv-screen .chat-bubble-other {
+                position: relative !important;
+              }
+
               ${settings.avatarBorderRadius !== undefined ? `
                 #conv-screen .avatar, 
                 #conv-screen .user-avatar, 
                 #conv-screen .ai-avatar {
                   border-radius: ${settings.avatarBorderRadius}px !important;
+                }
+              ` : ''}
+
+              ${settings.otherBubbleRadius !== undefined ? `
+                #conv-screen .chat-bubble-other,
+                #conv-screen .voice-message-bar.chat-bubble-other {
+                  border-radius: ${settings.otherBubbleRadius}px !important;
+                }
+              ` : ''}
+
+              ${settings.selfBubbleRadius !== undefined ? `
+                #conv-screen .chat-bubble-self,
+                #conv-screen .voice-message-bar.chat-bubble-self {
+                  border-radius: ${settings.selfBubbleRadius}px !important;
+                }
+              ` : ''}
+
+              ${settings.bubbleTailEnabled ? `
+                #conv-screen .chat-bubble-self::after {
+                  content: '';
+                  position: absolute;
+                  width: 0;
+                  height: 0;
+                  border-style: solid;
+                  border-width: 6px;
+                  border-color: transparent transparent transparent ${settings.selfBubbleBg || '#18181b'};
+                  ${settings.bubblePosition === 'above' ? `
+                    top: -12px;
+                    right: 12px;
+                    border-color: transparent transparent ${settings.selfBubbleBg || '#18181b'} transparent;
+                  ` : settings.bubblePosition === 'below' ? `
+                    bottom: -12px;
+                    right: 12px;
+                    border-color: ${settings.selfBubbleBg || '#18181b'} transparent transparent transparent;
+                  ` : `
+                    right: -11px;
+                    ${settings.bubbleTailVertical === 'top' ? 'top: 8px;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px;' : 'top: calc(50% - 6px);'}
+                  `}
+                }
+
+                #conv-screen .chat-bubble-other::after {
+                  content: '';
+                  position: absolute;
+                  width: 0;
+                  height: 0;
+                  border-style: solid;
+                  border-width: 6px;
+                  border-color: transparent ${settings.otherBubbleBg || '#f4f4f5'} transparent transparent;
+                  ${settings.bubblePosition === 'above' ? `
+                    top: -12px;
+                    left: 12px;
+                    border-color: transparent transparent ${settings.otherBubbleBg || '#f4f4f5'} transparent;
+                  ` : settings.bubblePosition === 'below' ? `
+                    bottom: -12px;
+                    left: 12px;
+                    border-color: ${settings.otherBubbleBg || '#f4f4f5'} transparent transparent transparent;
+                  ` : `
+                    left: -11px;
+                    ${settings.bubbleTailVertical === 'top' ? 'top: 8px;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px;' : 'top: calc(50% - 6px);'}
+                  `}
                 }
               ` : ''}
 

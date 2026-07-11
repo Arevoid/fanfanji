@@ -44,10 +44,11 @@ interface WidgetProps {
   onOpenApp?: (appId: string) => void;
   installedAppIds?: string[];
   widgetOpacity?: number;
+  widgetBorderRadius?: number;
   size?: "1x1" | "2x2" | "1x4" | "2x4";
 }
 
-export function AlbumWidget({ id, isEditing, onRemove, characters = [] }: WidgetProps) {
+export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBorderRadius }: WidgetProps) {
   const [customPhotos, setCustomPhotos] = useState<string[]>(() => {
     const raw = localStorage.getItem(`album_widget_photos_${id}`);
     return raw ? JSON.parse(raw) : [];
@@ -100,6 +101,9 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [] }: Widget
     <div className="relative w-full h-full group">
       <div 
         className="w-full h-full rounded-2xl overflow-hidden shadow-md border border-white/20 bg-stone-900/10 cursor-pointer select-none"
+        style={{
+          borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined
+        }}
         onClick={(e) => {
           e.stopPropagation();
           if (!isEditing) {
@@ -138,7 +142,7 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [] }: Widget
   );
 }
 
-export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, onNext, currentTrack, onOpenApp, widgetOpacity }: WidgetProps) {
+export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, onNext, currentTrack, onOpenApp, widgetOpacity, widgetBorderRadius }: WidgetProps) {
   return (
     <div className="relative w-full h-full group">
       <div 
@@ -151,7 +155,8 @@ export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, 
           !isEditing ? "cursor-pointer hover:bg-white/50 active:scale-[0.98] transition-all duration-200" : ""
         }`}
         style={{
-          backgroundColor: widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)"
+          backgroundColor: widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)",
+          borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined
         }}
       >
         <div className="flex items-start justify-between">
@@ -228,7 +233,7 @@ export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, 
   );
 }
 
-export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity }: WidgetProps) {
+export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widgetBorderRadius }: WidgetProps) {
   const [targetDate, setTargetDate] = useState(() => {
     const raw = localStorage.getItem(`anniversary_date_${id}`);
     return raw || "2026-03-02"; // Reference date
@@ -364,7 +369,8 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity }: Wi
           backgroundColor: bgImage ? undefined : (widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)"),
           backgroundImage: bgImage ? `url(${bgImage})` : undefined,
           backgroundSize: "cover",
-          backgroundPosition: "center"
+          backgroundPosition: "center",
+          borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined
         }}
       >
         {/* Dark overlay for readability on user background images */}
@@ -704,7 +710,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity }: Wi
   );
 }
 
-export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds, widgetOpacity }: WidgetProps) {
+export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds, widgetOpacity, widgetBorderRadius }: WidgetProps) {
   const [todos, setTodos] = useState<{ id: string; text: string; checked: boolean }[]>([]);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
 
@@ -774,7 +780,8 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
           }
         }}
         style={{
-          backgroundColor: widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)"
+          backgroundColor: widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)",
+          borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined
         }}
       >
         {showInstallPrompt && (

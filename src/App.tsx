@@ -204,7 +204,13 @@ const DEFAULT_SETTINGS: UserSettings = {
   ],
   dockColor: "#ffffff",
   dockOpacity: 70,
-  widgetOpacity: 70
+  widgetOpacity: 70,
+  dockBorderRadius: 26,
+  widgetBorderRadius: 22,
+  iconBorderEnabled: true,
+  bubbleTailEnabled: true,
+  bubbleTailVertical: "top",
+  bubblePosition: "side"
 };
 
 const DEFAULT_MESSAGES: Message[] = [];
@@ -2283,6 +2289,7 @@ export default function App() {
                                     }`}
                                     style={{
                                       backgroundColor: `rgba(255, 255, 255, ${(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70) / 100})`,
+                                      borderRadius: settings.widgetBorderRadius !== undefined ? `${settings.widgetBorderRadius}px` : "22px"
                                     }}
                                   >
                                     <img
@@ -2434,6 +2441,7 @@ export default function App() {
                                             onOpenApp={setActiveApp}
                                             installedAppIds={installedAppIds}
                                             widgetOpacity={settings.widgetOpacity}
+                                            widgetBorderRadius={settings.widgetBorderRadius}
                                             size={item.size}
                                           />
                                         </div>
@@ -2478,13 +2486,14 @@ export default function App() {
 
                 return (
                   <div 
-                    className="dock-container backdrop-blur-xl border border-neutral-200/20 py-2.5 rounded-[26px] shadow-lg shrink-0 mx-0 px-3"
+                    className="dock-container backdrop-blur-xl border border-neutral-200/20 py-2.5 shadow-lg shrink-0 mx-0 px-3"
                     style={{
                       display: "grid",
                       gridTemplateColumns: `repeat(4, ${iconWidth}px)`,
                       justifyContent: "space-between",
                       alignItems: "center",
-                      backgroundColor: hexToRgba(settings.dockColor || "#ffffff", settings.dockOpacity !== undefined ? settings.dockOpacity : 70)
+                      backgroundColor: hexToRgba(settings.dockColor || "#ffffff", settings.dockOpacity !== undefined ? settings.dockOpacity : 70),
+                      borderRadius: settings.dockBorderRadius !== undefined ? `${settings.dockBorderRadius}px` : "26px"
                     }}
                   >
                     <div className="flex items-center justify-center w-full h-full">
@@ -2790,6 +2799,7 @@ export default function App() {
                   characters,
                   installedAppIds,
                   widgetOpacity: settings.widgetOpacity,
+                  widgetBorderRadius: settings.widgetBorderRadius,
                   size: draggedItem.size,
                 })}
               </div>

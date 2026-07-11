@@ -158,6 +158,12 @@ export interface UserSettings {
   selfBubbleOpacity?: number;
   collapseConsecutiveAvatars?: boolean;
   hideHomeWelcomeWidget?: boolean;
+  dockBorderRadius?: number;
+  widgetBorderRadius?: number;
+  iconBorderEnabled?: boolean;
+  bubbleTailEnabled?: boolean;
+  bubbleTailVertical?: "top" | "center" | "bottom";
+  bubblePosition?: "side" | "above" | "below";
 }
 
 export interface ApiPreset {

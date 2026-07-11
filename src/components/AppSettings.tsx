@@ -164,6 +164,15 @@ export default function AppSettings({
   const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100);
   const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
 
+  // New beauty settings states
+  const [dockBorderRadius, setDockBorderRadius] = useState(settings.dockBorderRadius !== undefined ? settings.dockBorderRadius : 26);
+  const [widgetBorderRadius, setWidgetBorderRadius] = useState(settings.widgetBorderRadius !== undefined ? settings.widgetBorderRadius : 22);
+  const [iconBorderEnabled, setIconBorderEnabled] = useState(settings.iconBorderEnabled !== false);
+  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(settings.bubbleTailEnabled !== false);
+  const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(settings.bubbleTailVertical || "top");
+  const [bubblePosition, setBubblePosition] = useState<"side" | "above" | "below">(settings.bubblePosition || "side");
+  const [beautySubTab, setBeautySubTab] = useState<"desktop" | "chat" | "preset">("desktop");
+
   // Connection testing state
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; msg: string } | null>(null);
@@ -951,49 +960,51 @@ export default function AppSettings({
           {/* BEAUTY SETTINGS TAB */}
           {activeTab === "beauty" && (
             <div className="space-y-4 text-left">
-              {/* 1. 桌面视觉底层模块 */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Image className="w-3.5 h-3.5 text-slate-400" />
-                  <span>1. 桌面视觉底层模块</span>
-                </h3>
-                
-                {/* 手机壁纸上传区 */}
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[11px] font-bold text-[#52525b]">手机壁纸预览与设置</span>
-                    {wallpaper && !wallpaper.startsWith("linear-gradient") && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const fallback = "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)";
-                          setWallpaper(fallback);
-                          handleSave({ wallpaper: fallback });
-                        }}
-                        className="text-[10px] text-red-500 hover:text-red-600 font-semibold"
-                      >
-                        恢复默认
-                      </button>
-                    )}
-                  </div>
-                  
-                  {wallpaper && !wallpaper.startsWith("linear-gradient") ? (
-                    <div className="relative w-full h-32 rounded-[20px] overflow-hidden border border-slate-200 group">
-                      <img
-                        src={wallpaper}
-                        alt="Wallpaper Preview"
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                        <label className="cursor-pointer bg-white/90 hover:bg-white text-slate-800 text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors">
-                          更换图片
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleWallpaperUpload}
-                            className="hidden"
-                          />
-                        </label>
+              {/* Classification Navigation Bar */}
+              <div className="flex items-center p-1 bg-slate-100 rounded-2xl gap-1.5 select-none mb-4">
+                <button
+                  type="button"
+                  onClick={() => setBeautySubTab("desktop")}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+                    beautySubTab === "desktop"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  桌面模块
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBeautySubTab("chat")}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+                    beautySubTab === "chat"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  聊天页面模块
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBeautySubTab("preset")}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+                    beautySubTab === "preset"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  主题预设模块
+                </button>
+              </div>
+
+              {/* 1. 桌面模块 */}
+              {beautySubTab === "desktop" && (
+                <div className="space-y-4 animate-fade-in">
+                  {/* 手机壁纸设置 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                    <div className="flex justify-between items-center pb-1 border-b border-slate-50">
+                      <span className="text-xs font-bold text-slate-700">手机壁纸设置</span>
+                      {wallpaper && !wallpaper.startsWith("linear-gradient") && (
                         <button
                           type="button"
                           onClick={() => {
@@ -1001,331 +1012,426 @@ export default function AppSettings({
                             setWallpaper(fallback);
                             handleSave({ wallpaper: fallback });
                           }}
-                          className="bg-red-500/90 hover:bg-red-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors"
+                          className="text-[10px] text-red-500 hover:text-red-600 font-semibold"
                         >
-                          删除
+                          恢复默认
                         </button>
-                      </div>
+                      )}
                     </div>
-                  ) : (
-                    <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-4 rounded-[20px] text-xs transition-colors group w-full">
-                      <span className="text-slate-500 font-medium group-hover:text-slate-700">点击上传手机壁纸图片</span>
-                      <span className="text-[10px] text-slate-400 mt-0.5">支持 PNG, JPG 等格式</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleWallpaperUpload}
-                        className="hidden"
-                      />
-                    </label>
-                  )}
-                </div>
-
-                {/* Dock 栏透明度设置 */}
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
-                    <span>Dock栏 颜色与透明度</span>
-                    <span className="text-[10px] text-slate-400 font-mono font-medium">{dockOpacity}%</span>
-                  </label>
-                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">全透明</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={dockOpacity}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setDockOpacity(val);
-                        handleSave({ dockOpacity: val });
-                      }}
-                      className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-850"
-                    />
-                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">不透明</span>
-                  </div>
-                </div>
-
-                {/* 小组件卡片透明度设置 */}
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
-                    <span>小组件背景卡片透明度</span>
-                    <span className="text-[10px] text-slate-400 font-mono font-medium">{widgetOpacity}%</span>
-                  </label>
-                  <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">全透明</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={widgetOpacity}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setWidgetOpacity(val);
-                        handleSave({ widgetOpacity: val });
-                      }}
-                      className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-850"
-                    />
-                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">不透明</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. 图标全局美化模块 */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Palette className="w-3.5 h-3.5 text-slate-400" />
-                  <span>2. 图标全局美化模块</span>
-                </h3>
-
-                <div className="space-y-4">
-                  {/* 圆角 */}
-                  <div className="space-y-1.5">
-                    <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
-                      <span>圆角</span>
-                      <span className="text-[10px] text-slate-400 font-mono font-medium">{iconBorderRadius}%</span>
-                    </label>
-                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">直角</span>
-                      <input
-                        type="range"
-                        min="0"
-                        max="50"
-                        value={iconBorderRadius}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          setIconBorderRadius(val);
-                          handleSave({ iconBorderRadius: val });
-                        }}
-                        className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
-                      />
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">圆形</span>
-                    </div>
-                  </div>
-
-                  {/* 背景 */}
-                  <div className="space-y-1.5">
-                    <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
-                      <span>背景</span>
-                      <span className="text-[10px] text-slate-400 font-mono font-medium">{iconBgOpacity}%</span>
-                    </label>
-                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">全透明</span>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={iconBgOpacity}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          setIconBgOpacity(val);
-                          handleSave({ iconBgOpacity: val });
-                        }}
-                        className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
-                      />
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">不透明</span>
-                    </div>
-                  </div>
-
-                  {/* 描边粗细 */}
-                  <div className="space-y-1.5">
-                    <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
-                      <span>描边粗细</span>
-                      <span className="text-[10px] text-slate-400 font-mono font-medium">{iconBorderWidth}px</span>
-                    </label>
-                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">无描边</span>
-                      <input
-                        type="range"
-                        min="0"
-                        max="10"
-                        value={iconBorderWidth}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          setIconBorderWidth(val);
-                          handleSave({ iconBorderWidth: val });
-                        }}
-                        className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
-                      />
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">10px</span>
-                    </div>
-                  </div>
-
-                  {/* 描边显示 */}
-                  <div className="space-y-1.5">
-                    <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
-                      <span>描边显示</span>
-                      <span className="text-[10px] text-slate-400 font-mono font-medium">{iconBorderOpacity}%</span>
-                    </label>
-                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-[32px] border border-slate-100">
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">全透</span>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={iconBorderOpacity}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          setIconBorderOpacity(val);
-                          handleSave({ iconBorderOpacity: val });
-                        }}
-                        className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
-                      />
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">不透</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 隐藏应用名称 */}
-                <div className="flex items-center justify-between bg-slate-50 p-3 rounded-[32px] border border-slate-100">
-                  <span className="text-[11px] font-bold text-[#52525b]">隐藏桌面应用名称</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextVal = !hideAppNames;
-                      setHideAppNames(nextVal);
-                      handleSave({ hideAppNames: nextVal });
-                    }}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      hideAppNames ? "bg-neutral-950" : "bg-slate-200"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        hideAppNames ? "translate-x-4" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {/* 自定义应用图标替换区域 */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between pb-1 border-b border-slate-50">
-                    <span className="text-[11px] font-bold text-[#52525b]">自定义应用图标</span>
-                    <button
-                      onClick={handleRestoreAllIcons}
-                      className="text-[10px] text-slate-400 hover:text-neutral-950 font-semibold"
-                    >
-                      恢复所有默认
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-2.5">
-                    {appKeys.map((item) => {
-                      const customImg = settings.customIcons[item.key];
-                      return (
-                        <div
-                          key={item.key}
-                          className="flex flex-col items-center bg-slate-50/60 p-2 rounded-[32px] border border-slate-100 hover:bg-slate-50 relative group cursor-pointer"
-                        >
-                          <label className="cursor-pointer flex flex-col items-center w-full">
-                            <div 
-                              className="w-10 h-10 bg-white border border-slate-200 flex items-center justify-center shadow-sm overflow-hidden shrink-0 group-hover:border-neutral-950 transition-colors"
-                              style={{ borderRadius: "var(--app-icon-radius, 35%)" }}
-                            >
-                              {customImg ? (
-                                <img src={customImg} alt={item.label} className="w-full h-full object-cover" />
-                              ) : (
-                                <Sliders className="w-4 h-4 text-slate-400" />
-                              )}
-                            </div>
-                            <span className="text-[9px] font-bold text-slate-600 mt-1.5 tracking-tight truncate w-full text-center">
-                              {item.label}
-                            </span>
+                    
+                    {wallpaper && !wallpaper.startsWith("linear-gradient") ? (
+                      <div className="relative w-full h-32 rounded-[20px] overflow-hidden border border-slate-200 group">
+                        <img
+                          src={wallpaper}
+                          alt="Wallpaper Preview"
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <label className="cursor-pointer bg-white/90 hover:bg-white text-slate-800 text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors">
+                            更换图片
                             <input
                               type="file"
                               accept="image/*"
-                              onChange={(e) => handleIconUpload(item.key, e)}
+                              onChange={handleWallpaperUpload}
                               className="hidden"
                             />
                           </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const fallback = "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)";
+                              setWallpaper(fallback);
+                              handleSave({ wallpaper: fallback });
+                            }}
+                            className="bg-red-500/90 hover:bg-red-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors"
+                          >
+                            删除
+                          </button>
                         </div>
-                      );
-                    })}
+                      </div>
+                    ) : (
+                      <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-6 rounded-[20px] text-xs transition-colors group w-full">
+                        <span className="text-slate-500 font-medium group-hover:text-slate-700">点击上传手机壁纸图片</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleWallpaperUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+                  </div>
+
+                  {/* Dock 栏设置 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
+                    <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">Dock 栏设置</div>
+                    
+                    <div className="flex items-center justify-between gap-4 py-2">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">Dock 栏透明度</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={dockOpacity}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setDockOpacity(val);
+                            handleSave({ dockOpacity: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{dockOpacity}%</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 py-2">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">Dock 栏圆角</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="40"
+                          value={dockBorderRadius}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setDockBorderRadius(val);
+                            handleSave({ dockBorderRadius: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{dockBorderRadius}px</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 小组件卡片设置 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
+                    <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">小组件卡片设置</div>
+
+                    <div className="flex items-center justify-between gap-4 py-2">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">小组件透明度</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={widgetOpacity}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setWidgetOpacity(val);
+                            handleSave({ widgetOpacity: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{widgetOpacity}%</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 py-2">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">小组件圆角</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="40"
+                          value={widgetBorderRadius}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setWidgetBorderRadius(val);
+                            handleSave({ widgetBorderRadius: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{widgetBorderRadius}px</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 全局应用图标参数组 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
+                    <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">全局应用图标参数组</div>
+
+                    <div className="flex items-center justify-between gap-4 py-2">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">图标圆角</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="50"
+                          value={iconBorderRadius}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setIconBorderRadius(val);
+                            handleSave({ iconBorderRadius: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{iconBorderRadius}%</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 py-2">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">图标背景透明度</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={iconBgOpacity}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setIconBgOpacity(val);
+                            handleSave({ iconBgOpacity: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{iconBgOpacity}%</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between py-2 border-t border-slate-50">
+                      <span className="text-xs font-bold text-slate-700">图标描边开关</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVal = !iconBorderEnabled;
+                          setIconBorderEnabled(nextVal);
+                          handleSave({ iconBorderEnabled: nextVal });
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          iconBorderEnabled ? "bg-neutral-950" : "bg-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            iconBorderEnabled ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {iconBorderEnabled && (
+                      <>
+                        <div className="flex items-center justify-between gap-4 py-2">
+                          <span className="text-xs font-bold text-slate-700 shrink-0">描边粗细</span>
+                          <div className="flex-1 flex items-center gap-2">
+                            <input
+                              type="range"
+                              min="0"
+                              max="10"
+                              value={iconBorderWidth}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                setIconBorderWidth(val);
+                                handleSave({ iconBorderWidth: val });
+                              }}
+                              className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                            />
+                            <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{iconBorderWidth}px</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-4 py-2">
+                          <span className="text-xs font-bold text-slate-700 shrink-0">描边透明度</span>
+                          <div className="flex-1 flex items-center gap-2">
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={iconBorderOpacity}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                setIconBorderOpacity(val);
+                                handleSave({ iconBorderOpacity: val });
+                              }}
+                              className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                            />
+                            <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{iconBorderOpacity}%</span>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* 隐藏应用名称 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700">隐藏桌面应用名称</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextVal = !hideAppNames;
+                        setHideAppNames(nextVal);
+                        handleSave({ hideAppNames: nextVal });
+                      }}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        hideAppNames ? "bg-neutral-950" : "bg-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          hideAppNames ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* 自定义图标区域 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-50">
+                      <span className="text-xs font-bold text-slate-700">自定义应用图标</span>
+                      <button
+                        onClick={handleRestoreAllIcons}
+                        className="text-[10px] text-slate-400 hover:text-neutral-950 font-semibold"
+                      >
+                        恢复所有默认图标
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2.5">
+                      {appKeys.map((item) => {
+                        const customImg = settings.customIcons[item.key];
+                        return (
+                          <div
+                            key={item.key}
+                            className="flex flex-col items-center bg-slate-50/60 p-2 rounded-[24px] border border-slate-100 hover:bg-slate-50 relative group cursor-pointer"
+                          >
+                            <label className="cursor-pointer flex flex-col items-center w-full">
+                              <div 
+                                className="w-10 h-10 bg-white border border-slate-200 flex items-center justify-center shadow-sm overflow-hidden shrink-0 group-hover:border-neutral-950 transition-colors"
+                                style={{ borderRadius: "var(--app-icon-radius, 35%)" }}
+                              >
+                                {customImg ? (
+                                  <img src={customImg} alt={item.label} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Sliders className="w-4 h-4 text-slate-400" />
+                                )}
+                              </div>
+                              <span className="text-[9px] font-bold text-slate-600 mt-1.5 tracking-tight truncate w-full text-center">
+                                {item.label}
+                              </span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => handleIconUpload(item.key, e)}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
-              {/* 3. 聊天界面样式模块 */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sliders className="w-3.5 h-3.5 text-slate-400" />
-                  <span>3. 聊天界面样式模块</span>
-                </h3>
+              {/* 2. 聊天页面模块 */}
+              {beautySubTab === "chat" && (
+                <div className="space-y-4 animate-fade-in">
+                  {/* 实时预览窗口 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                    <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">实时预览效果</div>
+                    
+                    <div className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 space-y-4 relative overflow-hidden">
+                      {/* Other Speaker */}
+                      {bubblePosition !== "below" && (
+                        <div className={`flex gap-2.5 items-start ${bubblePosition === "above" ? "flex-col-reverse items-center" : "flex-row"}`}>
+                          <img
+                            src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
+                            alt=""
+                            className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
+                            style={{ borderRadius: `${avatarBorderRadius}px` }}
+                          />
+                          <div className={`flex flex-col max-w-[75%] ${bubblePosition === "above" ? "items-center" : "items-start"}`}>
+                            <span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>
+                            <div
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
+                              style={{
+                                backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                color: otherBubbleColor,
+                                borderRadius: `${otherBubbleRadius}px`,
+                              }}
+                            >
+                              这里是对方气泡预览，颜色和圆角都是同步修改的。
+                              {bubbleTailEnabled && (
+                                <div
+                                  className="absolute w-0 h-0"
+                                  style={{
+                                    borderColor: bubblePosition === "side"
+                                      ? `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`
+                                      : bubblePosition === "above"
+                                        ? `${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent transparent`
+                                        : `transparent transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent`,
+                                    borderStyle: "solid",
+                                    borderWidth: "6px",
+                                    left: bubblePosition === "side" ? "-11px" : "calc(50% - 6px)",
+                                    top: bubblePosition === "side"
+                                      ? (bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto")
+                                      : "auto",
+                                    bottom: bubblePosition === "side"
+                                      ? (bubbleTailVertical === "bottom" ? "8px" : "auto")
+                                      : "-11px"
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
-                {/* 适合新手手动调节的模块 (新手调色盘) */}
-                <div className="space-y-4 pt-1">
-                  <div className="flex items-center gap-1.5 pb-1 border-b border-slate-100">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />
-                    <span className="text-[11px] font-bold text-[#52525b]">新手极简视觉调色盘 (实时预览)</span>
-                  </div>
-
-                  {/* 实时预览效果框 */}
-                  <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 space-y-3 relative overflow-hidden">
-                    <div className="absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-500 font-sans tracking-wide">
-                      实时预览画面
-                    </div>
-
-                    {/* 对方发言消息 */}
-                    <div className="flex items-start gap-2.5">
-                      <img
-                        src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
-                        alt=""
-                        className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0 animate-fade-in"
-                        style={{ borderRadius: `${avatarBorderRadius}px` }}
-                      />
-                      <div className="flex flex-col items-start gap-1 max-w-[75%]">
-                        <span className="text-[9px] font-bold text-slate-400">
-                          聊天对象 (AI)
-                        </span>
-                        <div
-                          className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 whitespace-pre-wrap leading-relaxed break-all"
-                          style={{
-                            backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
-                            color: otherBubbleColor,
-                            borderRadius: "18px",
-                          }}
-                        >
-                          这里是对方（角色）的气泡，颜色和透明度可以在下方直接滑块调节哦～
+                      {/* Self Speaker */}
+                      <div className={`flex gap-2.5 items-start justify-end ${bubblePosition === "above" ? "flex-col-reverse items-center" : "flex-row-reverse"}`}>
+                        <img
+                          src={settings.avatar || "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png"}
+                          alt=""
+                          className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
+                          style={{ borderRadius: `${avatarBorderRadius}px` }}
+                        />
+                        <div className={`flex flex-col max-w-[75%] ${bubblePosition === "above" ? "items-center" : "items-end"}`}>
+                          <span className="text-[9px] font-bold text-slate-400 mb-0.5">{settings.name || "我"}</span>
+                          <div
+                            className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
+                            style={{
+                              backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                              color: selfBubbleColor,
+                              borderRadius: `${selfBubbleRadius}px`,
+                            }}
+                          >
+                            我的专属气泡！效果完全同步 ✨
+                            {bubbleTailEnabled && (
+                              <div
+                                className="absolute w-0 h-0"
+                                style={{
+                                  borderColor: bubblePosition === "side"
+                                    ? `transparent transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)}`
+                                    : bubblePosition === "above"
+                                      ? `${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)} transparent transparent transparent`
+                                      : `transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)} transparent`,
+                                  borderStyle: "solid",
+                                  borderWidth: "6px",
+                                  right: bubblePosition === "side" ? "-11px" : "calc(50% - 6px)",
+                                  top: bubblePosition === "side"
+                                    ? (bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto")
+                                    : "auto",
+                                  bottom: bubblePosition === "side"
+                                    ? (bubbleTailVertical === "bottom" ? "8px" : "auto")
+                                    : "-11px"
+                                }}
+                              />
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
-
-                    {/* 我方发言消息 */}
-                    <div className="flex items-start gap-2.5 justify-end">
-                      <div className="flex flex-col items-end gap-1 max-w-[75%]">
-                        <span className="text-[9px] font-bold text-slate-400">
-                          {settings.name || "我 (机主)"}
-                        </span>
-                        <div
-                          className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 whitespace-pre-wrap leading-relaxed break-all"
-                          style={{
-                            backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
-                            color: selfBubbleColor,
-                            borderRadius: "18px",
-                          }}
-                        >
-                          哇，这太好玩了！我的头像圆角和气泡也是同步改变的 ✨
-                        </div>
-                      </div>
-                      <img
-                        src={settings.avatar || "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png"}
-                        alt=""
-                        className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
-                        style={{ borderRadius: `${avatarBorderRadius}px` }}
-                      />
-                    </div>
                   </div>
 
-                  {/* 具体的参数滑块和颜色选择器 */}
-                  <div className="space-y-3 bg-slate-50/30 p-3 rounded-2xl border border-slate-100">
-                    {/* 双方头像圆角角度 */}
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between items-center">
-                        <span className="text-[11px] font-bold text-[#52525b]">双方头像圆角</span>
-                        <span className="text-[10px] text-indigo-600 font-mono font-bold">{avatarBorderRadius}px</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[9px] text-slate-400 font-medium">直角</span>
+                  {/* 双方头像圆角 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
+                    <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">头像设置</div>
+                    
+                    <div className="flex items-center justify-between gap-4 py-2">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">头像圆角</span>
+                      <div className="flex-1 flex items-center gap-2">
                         <input
                           type="range"
                           min="0"
@@ -1336,18 +1442,14 @@ export default function AppSettings({
                             setAvatarBorderRadius(val);
                             handleSave({ avatarBorderRadius: val });
                           }}
-                          className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                         />
-                        <span className="text-[9px] text-slate-400 font-medium">全圆</span>
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{avatarBorderRadius}px</span>
                       </div>
                     </div>
 
-                    {/* 是否连续显示头像 / 连续发言仅显示一次头像 */}
-                    <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
-                      <div className="flex flex-col text-left">
-                        <span className="text-[11px] font-bold text-[#52525b]">连续发言仅显示一次头像</span>
-                        <span className="text-[9px] text-slate-400 mt-0.5">开启后连续的多条发言自动合并，只在首条显示头像</span>
-                      </div>
+                    <div className="flex items-center justify-between py-2.5 border-t border-slate-50">
+                      <span className="text-xs font-bold text-slate-700">合并连续发言头像</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -1356,7 +1458,7 @@ export default function AppSettings({
                           handleSave({ collapseConsecutiveAvatars: nextVal });
                         }}
                         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          collapseConsecutiveAvatars ? "bg-indigo-500" : "bg-slate-200"
+                          collapseConsecutiveAvatars ? "bg-neutral-950" : "bg-slate-200"
                         }`}
                       >
                         <span
@@ -1368,17 +1470,131 @@ export default function AppSettings({
                     </div>
                   </div>
 
-                  {/* 对方与我方气泡微调区 */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                    {/* 对方气泡设置 */}
-                    <div className="bg-slate-50/30 p-3 rounded-2xl border border-slate-100 space-y-2.5">
-                      <div className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider flex items-center gap-1">
-                        <span>●</span> 对方（角色）气泡
-                      </div>
+                  {/* 聊天气泡高级配置 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                    <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">聊天气泡高级配置</div>
 
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] font-bold text-slate-500">底色:</span>
+                    <div className="flex items-center justify-between gap-4 py-1">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">我方气泡圆角</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="28"
+                          value={selfBubbleRadius}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setSelfBubbleRadius(val);
+                            handleSave({ selfBubbleRadius: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{selfBubbleRadius}px</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 py-1">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">对方气泡圆角</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="28"
+                          value={otherBubbleRadius}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setOtherBubbleRadius(val);
+                            handleSave({ otherBubbleRadius: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{otherBubbleRadius}px</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between py-2.5 border-t border-slate-50">
+                      <span className="text-xs font-bold text-slate-700">启用气泡尖角</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVal = !bubbleTailEnabled;
+                          setBubbleTailEnabled(nextVal);
+                          handleSave({ bubbleTailEnabled: nextVal });
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          bubbleTailEnabled ? "bg-neutral-950" : "bg-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            bubbleTailEnabled ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {bubbleTailEnabled && (
+                      <div className="space-y-4 pt-1 border-t border-slate-50">
+                        <div className="flex flex-col gap-2">
+                          <span className="text-xs font-bold text-slate-700">尖角垂直位置</span>
+                          <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+                            {(["top", "center", "bottom"] as const).map((pos) => (
+                              <button
+                                key={pos}
+                                type="button"
+                                onClick={() => {
+                                  setBubbleTailVertical(pos);
+                                  handleSave({ bubbleTailVertical: pos });
+                                }}
+                                className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                                  bubbleTailVertical === pos
+                                    ? "bg-white text-slate-900 shadow-sm"
+                                    : "text-slate-500 hover:text-slate-700"
+                                }`}
+                              >
+                                {pos === "top" ? "顶部对齐" : pos === "center" ? "居中对齐" : "底部对齐"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-2 pt-2 border-t border-slate-50">
+                      <span className="text-xs font-bold text-slate-700">气泡相对头像位置</span>
+                      <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+                        {(["side", "above", "below"] as const).map((pos) => (
+                          <button
+                            key={pos}
+                            type="button"
+                            onClick={() => {
+                              setBubblePosition(pos);
+                              handleSave({ bubblePosition: pos });
+                            }}
+                            className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                              bubblePosition === pos
+                                ? "bg-white text-slate-900 shadow-sm"
+                                : "text-slate-500 hover:text-slate-700"
+                            }`}
+                          >
+                            {pos === "side" ? "头像两侧" : pos === "above" ? "头像上方" : "头像下方"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 极简视觉调色盘 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                    <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">极简视觉调色盘</div>
+
+                    {/* 对方气泡 */}
+                    <div className="space-y-3 p-3 bg-slate-50/50 rounded-[24px] border border-slate-100">
+                      <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">对方（角色）气泡</div>
+                      
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-700">底色:</span>
                           <input
                             type="color"
                             value={otherBubbleBg}
@@ -1386,11 +1602,11 @@ export default function AppSettings({
                               setOtherBubbleBg(e.target.value);
                               handleSave({ otherBubbleBg: e.target.value });
                             }}
-                            className="w-5.5 h-5.5 rounded cursor-pointer border border-slate-200 p-0"
+                            className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
                           />
                         </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] font-bold text-slate-500">文字:</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-700">文字:</span>
                           <input
                             type="color"
                             value={otherBubbleColor}
@@ -1398,40 +1614,38 @@ export default function AppSettings({
                               setOtherBubbleColor(e.target.value);
                               handleSave({ otherBubbleColor: e.target.value });
                             }}
-                            className="w-5.5 h-5.5 rounded cursor-pointer border border-slate-200 p-0"
+                            className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
                           />
                         </div>
                       </div>
 
-                      <div className="space-y-1">
-                        <div className="flex justify-between items-center text-[10px]">
-                          <span className="text-slate-500 font-bold">气泡透明度</span>
-                          <span className="font-mono text-slate-400 font-bold">{otherBubbleOpacity}%</span>
+                      <div className="flex items-center justify-between gap-4 py-1">
+                        <span className="text-xs font-bold text-slate-700 shrink-0">气泡透明度</span>
+                        <div className="flex-1 flex items-center gap-2">
+                          <input
+                            type="range"
+                            min="10"
+                            max="100"
+                            value={otherBubbleOpacity}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              setOtherBubbleOpacity(val);
+                              handleSave({ otherBubbleOpacity: val });
+                            }}
+                            className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                          />
+                          <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{otherBubbleOpacity}%</span>
                         </div>
-                        <input
-                          type="range"
-                          min="10"
-                          max="100"
-                          value={otherBubbleOpacity}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            setOtherBubbleOpacity(val);
-                            handleSave({ otherBubbleOpacity: val });
-                          }}
-                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                        />
                       </div>
                     </div>
 
-                    {/* 我方气泡设置 */}
-                    <div className="bg-slate-50/30 p-3 rounded-2xl border border-slate-100 space-y-2.5">
-                      <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1">
-                        <span>●</span> 我方（用户）气泡
-                      </div>
-
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] font-bold text-slate-500">底色:</span>
+                    {/* 我方气泡 */}
+                    <div className="space-y-3 p-3 bg-slate-50/50 rounded-[24px] border border-slate-100">
+                      <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">我方（用户）气泡</div>
+                      
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-700">底色:</span>
                           <input
                             type="color"
                             value={selfBubbleBg}
@@ -1439,11 +1653,11 @@ export default function AppSettings({
                               setSelfBubbleBg(e.target.value);
                               handleSave({ selfBubbleBg: e.target.value });
                             }}
-                            className="w-5.5 h-5.5 rounded cursor-pointer border border-slate-200 p-0"
+                            className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
                           />
                         </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] font-bold text-slate-500">文字:</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-700">文字:</span>
                           <input
                             type="color"
                             value={selfBubbleColor}
@@ -1451,113 +1665,129 @@ export default function AppSettings({
                               setSelfBubbleColor(e.target.value);
                               handleSave({ selfBubbleColor: e.target.value });
                             }}
-                            className="w-5.5 h-5.5 rounded cursor-pointer border border-slate-200 p-0"
+                            className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
                           />
                         </div>
                       </div>
 
-                      <div className="space-y-1">
-                        <div className="flex justify-between items-center text-[10px]">
-                          <span className="text-slate-500 font-bold">气泡透明度</span>
-                          <span className="font-mono text-slate-400 font-bold">{selfBubbleOpacity}%</span>
+                      <div className="flex items-center justify-between gap-4 py-1">
+                        <span className="text-xs font-bold text-slate-700 shrink-0">气泡透明度</span>
+                        <div className="flex-1 flex items-center gap-2">
+                          <input
+                            type="range"
+                            min="10"
+                            max="100"
+                            value={selfBubbleOpacity}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              setSelfBubbleOpacity(val);
+                              handleSave({ selfBubbleOpacity: val });
+                            }}
+                            className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                          />
+                          <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{selfBubbleOpacity}%</span>
                         </div>
-                        <input
-                          type="range"
-                          min="10"
-                          max="100"
-                          value={selfBubbleOpacity}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            setSelfBubbleOpacity(val);
-                            handleSave({ selfBubbleOpacity: val });
-                          }}
-                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                        />
                       </div>
                     </div>
                   </div>
+
+                  {/* 自定义 CSS */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+                    <span className="text-xs font-bold text-slate-700">高阶自定义气泡 CSS 样式</span>
+                    <textarea
+                      rows={3}
+                      value={bubbleCss}
+                      onChange={(e) => {
+                        setBubbleCss(e.target.value);
+                        handleSave({ bubbleCss: e.target.value });
+                      }}
+                      placeholder={`.chat-bubble-self { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%) !important; }`}
+                      className="w-full px-4 py-3 rounded-[24px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
+                    />
+                  </div>
                 </div>
+              )}
 
-                <div className="border-t border-slate-100 pt-3.5 space-y-1.5 text-left">
-                  <label className="block text-[11px] font-bold text-[#52525b] flex items-center justify-between">
-                    <span>高阶高级自定义 CSS 样式 (选填)</span>
-                    <span className="text-[9px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full font-semibold">优先于滑块设置</span>
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={bubbleCss}
-                    onChange={(e) => {
-                      setBubbleCss(e.target.value);
-                      handleSave({ bubbleCss: e.target.value });
-                    }}
-                    placeholder={`.chat-bubble-self { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%) !important; }`}
-                    className="w-full px-4 py-3 rounded-[24px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
-                  />
-                </div>
-              </div>
-
-              {/* 4. 主题预设模块 */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sliders className="w-3.5 h-3.5 text-slate-400" />
-                  <span>4. 主题预设模块</span>
-                </h3>
-
-                {/* 样式预设保存 */}
-                <form onSubmit={handleSaveCurrentAsPreset} className="flex gap-2">
-                  <input
-                    type="text"
-                    required
-                    value={newPresetName}
-                    onChange={(e) => setNewPresetName(e.target.value)}
-                    placeholder="保存当前样式为新预设..."
-                    className="flex-1 bg-slate-50 rounded-[32px] px-4 py-2 text-xs text-slate-800 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
-                  />
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[32px] text-xs transition-colors flex items-center gap-1 shrink-0 shadow-sm"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>保存</span>
-                  </button>
-                </form>
-
-                <div className="space-y-1.5 pt-1">
-                  <span className="text-[11px] font-bold text-[#52525b] block mb-1">切换视觉预设:</span>
-                  {activePresetsList.map((preset) => {
-                    const isActive = settings.activePreset === preset.name || 
-                                     (preset.id === "p-classic" && !settings.activePreset);
-                    return (
-                      <div
-                        key={preset.id}
-                        className={`flex items-center justify-between p-2.5 rounded-[32px] border transition-all ${
-                          isActive
-                            ? "bg-stone-100 border-stone-300 text-stone-905"
-                            : "bg-slate-50 border-slate-100 text-slate-700 hover:bg-slate-100"
-                        }`}
+              {/* 3. 主题预设模块 */}
+              {beautySubTab === "preset" && (
+                <div className="space-y-4 animate-fade-in">
+                  {/* 保存预设 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                    <span className="text-xs font-bold text-slate-700">保存当前样式为新预设</span>
+                    <form onSubmit={handleSaveCurrentAsPreset} className="flex gap-2">
+                      <input
+                        type="text"
+                        required
+                        value={newPresetName}
+                        onChange={(e) => setNewPresetName(e.target.value)}
+                        placeholder="请输入预设名称..."
+                        className="flex-1 bg-slate-50 rounded-[32px] px-4 py-2 text-xs text-slate-800 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                      />
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[32px] text-xs transition-colors flex items-center gap-1 shrink-0 shadow-sm"
                       >
-                        <button
-                          onClick={() => applyPreset(preset)}
-                          className="flex-1 text-left font-bold text-xs flex items-center gap-2"
-                        >
-                          <div className="w-4 h-4 rounded-full border border-slate-200" style={{ background: preset.wallpaper }} />
-                          <span className="text-[11px] text-[#52525b]">{preset.name}</span>
-                          {isActive && <Check className="w-3.5 h-3.5 text-neutral-950" />}
-                        </button>
+                        <Save className="w-3.5 h-3.5" />
+                        <span>保存</span>
+                      </button>
+                    </form>
+                  </div>
 
-                        {!preset.id.startsWith("p-") && (
-                          <button
-                            onClick={() => onDeletePreset(preset.id)}
-                            className="p-1 text-slate-400 hover:text-rose-500 rounded transition-colors"
+                  {/* 切换视觉预设 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+                    <span className="text-xs font-bold text-slate-700 block">预设模板库</span>
+                    <div className="space-y-2">
+                      {activePresetsList.map((preset) => {
+                        const isActive = settings.activePreset === preset.name || 
+                                         (preset.id === "p-classic" && !settings.activePreset);
+                        return (
+                          <div
+                            key={preset.id}
+                            className={`flex items-center justify-between p-2.5 rounded-[32px] border transition-all ${
+                              isActive
+                                ? "bg-stone-100 border-stone-300 text-stone-905"
+                                : "bg-slate-50 border-slate-100 text-slate-700 hover:bg-slate-100"
+                            }`}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
+                            <button
+                              onClick={() => applyPreset(preset)}
+                              className="flex-1 text-left font-bold text-xs flex items-center gap-2"
+                            >
+                              <div className="w-4 h-4 rounded-full border border-slate-200 shadow-sm shrink-0" style={{ background: preset.wallpaper }} />
+                              <span className="text-[11px] text-[#52525b]">{preset.name}</span>
+                              {isActive && <Check className="w-3.5 h-3.5 text-neutral-950 ml-1" />}
+                            </button>
+
+                            {!preset.id.startsWith("p-") && (
+                              <button
+                                onClick={() => onDeletePreset(preset.id)}
+                                className="p-1 text-slate-400 hover:text-rose-500 rounded transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 全局 CSS 注入 */}
+                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+                    <span className="text-xs font-bold text-slate-700">全局高阶 CSS 样式注入</span>
+                    <textarea
+                      rows={3}
+                      value={globalCss}
+                      onChange={(e) => {
+                        setGlobalCss(e.target.value);
+                        handleSave({ globalCss: e.target.value });
+                      }}
+                      placeholder={`/* 全局样式覆盖 */\n.phone-screen-container {\n  filter: contrast(1.05);\n}`}
+                      className="w-full px-4 py-3 rounded-[24px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
