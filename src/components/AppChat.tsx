@@ -200,6 +200,48 @@ ${msgContent || "  (暂无剧情)"}`;
 ${storyLines.join("\n\n")}`;
 };
 
+const getGroupChatMemories = (
+  activeCharacter: Character,
+  characters: Character[],
+  messages: Message[],
+  ownerName: string
+): string => {
+  const groupsWithChar = characters.filter(c => c.isGroupChat && c.memberIds?.includes(activeCharacter.id));
+  if (groupsWithChar.length === 0) return "";
+
+  const groupLines: string[] = [];
+  groupsWithChar.forEach(group => {
+    // Get last 15 messages of this group chat to provide real-time memory
+    const msgsInGroup = messages.filter(m => m.characterId === group.id).sort((a, b) => a.timestamp - b.timestamp).slice(-15);
+    if (msgsInGroup.length > 0) {
+      const formattedGroupMsgs = msgsInGroup.map(m => {
+        let senderLabel = "";
+        if (m.sender === "user") {
+          senderLabel = `${ownerName} (机主)`;
+        } else {
+          const charObj = characters.find(c => c.id === m.senderId);
+          senderLabel = charObj ? (charObj.remark || charObj.name) : (m.senderId || "未知成员");
+        }
+        const timeStr = new Date(m.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+        return `  [${timeStr}] ${senderLabel}: ${m.content}`;
+      }).join("\n");
+      groupLines.push(`- 在群聊【${group.name}】中的最近聊天记录：\n${formattedGroupMsgs}`);
+    }
+  });
+
+  if (groupLines.length === 0) return "";
+
+  return `[🚨 实时微信群聊共同记忆与近期话题 (Real-time Group Chat Shared Memory)]
+你和机主 ${ownerName} 共同身处以下微信群聊中。你对这些群聊里最近发生的所有对话、吐槽、爆料和八卦有着【100%实时的清晰记忆】。
+由于你和机主刚刚或最近在这些群里有过互动，现在在单聊中，你：
+1. **有几率会主动聊到刚才群聊的内容**：如果在群聊中刚刚讨论了某个有趣/尴尬/争议性的话题，你可以非常自然地在私聊中以此为话题切入点，单独向机主吐槽、发表情包、追问、或者表达你刚才在群里不方便说的真实想法。
+2. **支持话题承接**：如果机主主动在单聊里向你提起群聊的事，你必须立刻完美承接，了解前因后果，并给出符合人设的吐槽或回应。
+3. **展现真实熟人关系**：无需每次单聊都强行提起群聊，但若群聊刚活跃过或你们刚在群里聊完，有较大概率（例如 30%-50%）你可以以此开启私聊。
+
+以下是群聊的最近记录：
+${groupLines.join("\n\n")}`;
+};
+
 const getPostIntervalMs = (character: Character) => {
   const bioAndPersonality = ((character.personality || "") + " " + (character.backstory || "")).toLowerCase();
   const lovesSharing = /(热爱分享|喜欢分享|热爱生活|发朋友圈|爱分享|活跃|话唠|分享欲)/i.test(bioAndPersonality);
@@ -729,27 +771,42 @@ export default function AppChat({
         }
       }).join("\n");
 
+      // Scan context for World Book triggers in group chat
+      const scanContextParts = [
+        userMsg ? userMsg.content : "",
+        ...slicedMsgs.slice(-3).map(m => m.content)
+      ];
+      const scanText = scanContextParts.filter(Boolean).join("\n");
+
+      // Query group-level worldbook entries
+      const groupWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText);
+      const groupWbText = groupWbBlocks.formattedAll ? `\n\n【🚨 微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
+
       // Construct a system instruction that contains details about all members and how they should reply
       const membersDefText = groupMembers.map((member, idx) => {
+        const memberWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], member.id, scanText);
+        const memberWbText = memberWbBlocks.formattedAll 
+          ? `\n- 【重要】该角色专属世界书背景/日程/时间线设定:\n${memberWbBlocks.formattedAll}` 
+          : "";
         return `[群聊成员 ${idx + 1}: ${member.name}]
 - 角色人设/性格: ${member.personality}
 - 背景设定: ${member.backstory}
 - 与机主(${settings.name})的关系: 根据人设及世界观设定
-${member.compressedMemory ? `- 过去的互动记忆: ${member.compressedMemory}` : ""}`;
+${member.compressedMemory ? `- 过去的互动记忆: ${member.compressedMemory}` : ""}${memberWbText}`;
       }).join("\n\n");
 
       // Generate a comprehensive system prompt
-      const systemInstruction = `你正在扮演微信群聊中的多位群成员（AI角色），正在与机主“${settings.name}”在群名为“${activeCharacter.name}”的群组中进行互动。
+      const systemInstruction = `你正在扮演微信群聊中的多位群成员（AI角色），正在与机主“${settings.name}”在群名为“${activeCharacter.name}”的群组中进行互动。${groupWbText}
 
 以下是微信群聊成员的设定档案：
 ${membersDefText}
 
 【群聊互动核心原则】：
-1. 你的回复需要极其自然、生动。群聊人物会依据自己的人设、世界观设定、以及和机主的关系等，对最新消息进行相关的、贴合性格的回复。
-2. 🚨【回复概率与不回复机制】：并非每个成员在每次互动时都必须发言！在真实的微信群聊中，人物是否回复信息要参考对方人设、自己的世界观日程时间线、当前话题的兴趣度以及与说话人的关系等。
-   - 例如：高冷、忙碌或对该话题不感兴趣的角色应该保持沉默，或仅在极少数相关话题时插一句嘴；热情、爱凑热闹或与发言人关系亲密的角色则更可能频繁且积极地发言。
-   - 在生成的单次互动中，你应该让 1 到 3 位合适的成员进行回复（视话题和人设而定）。如果大家都觉得没有需要发言的内容，甚至可以只有 0~1 个人回复。
-3. 🚨【成员间互动】：成员之间不仅是单独回复机主，也可以互相回复、接话、吐槽或附和。
+1. 【人设绝对统一与高恢复度】：每个群成员发言必须 100% 贴合其人设、性格、背景故事以及各自的专属世界书设定/日常日程/时间线。对于那些设置了特殊语气词、口癖（如每句话都加“喵”等）的角色，他们在群里发言时也必须【绝对强制、无一例外地完全忠实执行该句式/口癖设定】。
+2. 🚨【回复概率与不回复机制】：并非每个成员在每次互动时都必须发言！在真实的微信群聊中，人物是否回复信息要参考对方人设、自己的世界书日常时间线和日程、当前话题的兴趣度以及与发言人的关系等。
+   - 例如：高冷、傲娇、忙碌、或正在执行专属世界书日程时间线上其他任务的角色（比如世界书设定某个角色此时应该在睡觉、在上班、或生病等），应该保持沉默，不返回任何回复，或者仅在极度契合的话题下简单插一句；而热情、空闲、爱凑热闹、或与发言人关系特别亲密的角色，则应该高频且积极地在群里接话。
+   - 在生成的单次互动中，你应该让 1 到 3 位在此时、该话题、该状态下最契合、最有可能说话的成员进行回复（视话题和人设状态而定）。如果大家都觉得没有需要发言的内容，甚至可以只有 0~1 个人回复。不要强求每个人都说话！
+3. 🚨【成员间互动】：成员之间不仅是单独回复机主，更重要的是他们也是群友。他们也可以互相回复、接话、吐槽、附和、拆台或私下八卦抬杠。
 4. 🚨【中国标点与格式规范】：
    - 微信聊天简短而随意，请保持口语化、极度真实的微信聊天风格。
    - 不要输出大段的长篇大论，尽量简短有力。
@@ -1044,6 +1101,12 @@ ${activeCharacter.disableBracketActions
       const offlineStoriesContext = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
       if (offlineStoriesContext) {
         assembledInstructions.push(offlineStoriesContext);
+      }
+
+      // 8.7 Real-time group chat memories
+      const groupMemoriesContext = getGroupChatMemories(activeCharacter, characters, messages, settings.name);
+      if (groupMemoriesContext) {
+        assembledInstructions.push(groupMemoriesContext);
       }
 
       // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
@@ -1628,6 +1691,12 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // 8.5 Offline stories context memory
       if (offlineStoriesContextRegen) {
         assembledInstructions.push(offlineStoriesContextRegen);
+      }
+
+      // 8.7 Real-time group chat memories
+      const groupMemoriesContextRegen = getGroupChatMemories(activeCharacter, characters, messages, settings.name);
+      if (groupMemoriesContextRegen) {
+        assembledInstructions.push(groupMemoriesContextRegen);
       }
 
       // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
