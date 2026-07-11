@@ -512,9 +512,21 @@ export default function App() {
       }
     };
 
+    // Auto-scroll input to center when focused to make sure it is fully visible above keyboard
+    const handleFocusIn = (e: FocusEvent) => {
+      if (window.innerWidth >= 768) return;
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.getAttribute("contenteditable") === "true")) {
+        setTimeout(() => {
+          target.scrollIntoView({ block: "center", behavior: "smooth" });
+        }, 150);
+      }
+    };
+
     window.visualViewport.addEventListener("resize", handleViewportChange);
     window.visualViewport.addEventListener("scroll", handleViewportChange);
     window.addEventListener("scroll", preventScrollBounce, { passive: true });
+    document.addEventListener("focusin", handleFocusIn);
 
     // Run once to initialize
     handleViewportChange();
@@ -539,6 +551,7 @@ export default function App() {
         window.visualViewport.removeEventListener("scroll", handleViewportChange);
       }
       window.removeEventListener("scroll", preventScrollBounce);
+      document.removeEventListener("focusin", handleFocusIn);
       clearInterval(interval);
     };
   }, []);
@@ -915,8 +928,18 @@ export default function App() {
     };
 
     return pageItems.map((item) => {
-      const w = item.size === "2x2" ? 2 : 1;
-      const h = item.size === "2x2" ? 2 : 1;
+      let w = 1;
+      let h = 1;
+      if (item.size === "2x2") {
+        w = 2;
+        h = 2;
+      } else if (item.size === "1x4") {
+        w = 4;
+        h = 1;
+      } else if (item.size === "2x4") {
+        w = 4;
+        h = 2;
+      }
 
       let r = 0;
       let c = 0;
@@ -941,7 +964,7 @@ export default function App() {
 
   const canFitOnPage = (
     existingItems: HomeScreenItem[],
-    newItem: { type: "app" | "widget"; size: "1x1" | "2x2" },
+    newItem: { type: "app" | "widget"; size: "1x1" | "2x2" | "1x4" | "2x4" },
     maxRows: number = 4
   ): boolean => {
     const columns = 4;
@@ -981,8 +1004,18 @@ export default function App() {
 
     // Place existing items
     for (const item of existingItems) {
-      const w = item.size === "2x2" ? 2 : 1;
-      const h = item.size === "2x2" ? 2 : 1;
+      let w = 1;
+      let h = 1;
+      if (item.size === "2x2") {
+        w = 2;
+        h = 2;
+      } else if (item.size === "1x4") {
+        w = 4;
+        h = 1;
+      } else if (item.size === "2x4") {
+        w = 4;
+        h = 2;
+      }
 
       let placed = false;
       let r = 0;
@@ -1003,8 +1036,18 @@ export default function App() {
     }
 
     // Check if the new item can fit
-    const nw = newItem.size === "2x2" ? 2 : 1;
-    const nh = newItem.size === "2x2" ? 2 : 1;
+    let nw = 1;
+    let nh = 1;
+    if (newItem.size === "2x2") {
+      nw = 2;
+      nh = 2;
+    } else if (newItem.size === "1x4") {
+      nw = 4;
+      nh = 1;
+    } else if (newItem.size === "2x4") {
+      nw = 4;
+      nh = 2;
+    }
 
     let placedNew = false;
     let r = 0;
@@ -1030,7 +1073,7 @@ export default function App() {
 
   const findPageForNewItem = (
     currentItems: HomeScreenItem[],
-    newItem: { type: "app" | "widget"; size: "1x1" | "2x2" },
+    newItem: { type: "app" | "widget"; size: "1x1" | "2x2" | "1x4" | "2x4" },
     startPage: number = 0
   ): number => {
     let page = startPage;
@@ -1318,14 +1361,37 @@ export default function App() {
     }
   };
 
-  const handleAddWidget = (widgetType: "album" | "music" | "anniversary" | "todo") => {
+  const handleAddWidget = (widgetType: "album" | "music" | "anniversary" | "todo" | "album_1x4" | "album_2x4" | "welcome") => {
+    if (widgetType === "welcome") {
+      setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: false }));
+      setIsShowingAddWidget(false);
+      return;
+    }
+
     setHomeScreenItems((current) => {
-      const targetPage = findPageForNewItem(current, { type: "widget", size: "2x2" }, currentPage);
+      let size: "1x1" | "2x2" | "1x4" | "2x4" = "2x2";
+      let actualWidgetType: "album" | "music" | "anniversary" | "todo" = "todo";
+
+      if (widgetType === "album_1x4") {
+        size = "1x4";
+        actualWidgetType = "album";
+      } else if (widgetType === "album_2x4") {
+        size = "2x4";
+        actualWidgetType = "album";
+      } else if (widgetType === "album") {
+        size = "2x2";
+        actualWidgetType = "album";
+      } else {
+        size = "2x2";
+        actualWidgetType = widgetType as any;
+      }
+
+      const targetPage = findPageForNewItem(current, { type: "widget", size }, currentPage);
       const newWidget: HomeScreenItem = {
         id: `widget-${widgetType}-${Date.now()}`,
         type: "widget",
-        widgetType,
-        size: "2x2",
+        widgetType: actualWidgetType,
+        size,
         page: targetPage,
       };
 
@@ -1698,8 +1764,8 @@ export default function App() {
       className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
       style={{
         position: (typeof window !== "undefined" && window.innerWidth < 768) ? "fixed" : "relative",
-        top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvTop}px` : undefined,
-        left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvLeft}px` : undefined,
+        top: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
+        left: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
         width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvWidth}px` : "100%",
         height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : "100vh",
       }}
@@ -1712,6 +1778,9 @@ export default function App() {
             width: 100% !important;
             height: 100% !important;
             overflow: hidden !important;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
             margin: 0 !important;
             padding: 0 !important;
           }
@@ -2206,29 +2275,43 @@ export default function App() {
                               className="w-full h-full flex-shrink-0 flex flex-col select-none px-0"
                             >
                               {/* Home Widget Card (Clock / Welcoming Card) inside Page 0 only */}
-                              {pageIdx === 0 && (
-                                <div 
-                                  className="backdrop-blur-md border border-neutral-200/20 p-3.5 rounded-[22px] text-neutral-850 shadow-sm mt-3 mb-3.5 select-none flex items-center gap-3.5 shrink-0"
-                                  style={{
-                                    backgroundColor: `rgba(255, 255, 255, ${(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70) / 100})`,
-                                    marginLeft: `${gridPadding}px`,
-                                    marginRight: `${gridPadding}px`,
-                                  }}
-                                >
-                                  <img
-                                    src={settings.avatar}
-                                    alt={settings.name}
-                                    className="w-12 h-12 rounded-full object-cover border border-slate-200/20 shadow-sm shrink-0"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                  <div className="min-w-0 flex-1">
-                                    <h2 className="text-sm font-extrabold text-neutral-900 tracking-tight leading-tight">
-                                      {settings.name}
-                                    </h2>
-                                    <p className="text-[11px] text-neutral-500 mt-1 line-clamp-1 leading-relaxed">
-                                      {settings.signature}
-                                    </p>
+                              {pageIdx === 0 && !settings.hideHomeWelcomeWidget && (
+                                <div className="relative shrink-0 mt-3 mb-3.5" style={{ marginLeft: `${gridPadding}px`, marginRight: `${gridPadding}px` }}>
+                                  <div 
+                                    className={`backdrop-blur-md border border-neutral-200/20 p-3.5 rounded-[22px] text-neutral-850 shadow-sm select-none flex items-center gap-3.5 w-full h-full ${
+                                      isEditingHomeScreen ? "animate-jiggle" : ""
+                                    }`}
+                                    style={{
+                                      backgroundColor: `rgba(255, 255, 255, ${(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70) / 100})`,
+                                    }}
+                                  >
+                                    <img
+                                      src={settings.avatar}
+                                      alt={settings.name}
+                                      className="w-12 h-12 rounded-full object-cover border border-slate-200/20 shadow-sm shrink-0"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <h2 className="text-sm font-extrabold text-neutral-900 tracking-tight leading-tight">
+                                        {settings.name}
+                                      </h2>
+                                      <p className="text-[11px] text-neutral-500 mt-1 line-clamp-1 leading-relaxed">
+                                        {settings.signature}
+                                      </p>
+                                    </div>
                                   </div>
+
+                                  {isEditingHomeScreen && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: true }));
+                                      }}
+                                      className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-stone-900/90 hover:bg-stone-950 text-white rounded-full flex items-center justify-center text-xs font-black shadow z-30 transition-transform active:scale-90"
+                                    >
+                                      -
+                                    </button>
+                                  )}
                                 </div>
                               )}
 
@@ -2301,15 +2384,34 @@ export default function App() {
                                   } else {
                                     const isDragged = draggedItem?.id === item.id;
                                     const WidgetComponent = getWidgetComponent(item.widgetType);
+                                    
+                                    let colSpanClass = "col-span-2";
+                                    let rowSpanClass = "row-span-2";
+                                    let currentWidgetHeight = widgetHeight;
+
+                                    if (item.size === "1x4") {
+                                      colSpanClass = "col-span-4";
+                                      rowSpanClass = "row-span-1";
+                                      currentWidgetHeight = `${rowHeightValue}px`;
+                                    } else if (item.size === "2x4") {
+                                      colSpanClass = "col-span-4";
+                                      rowSpanClass = "row-span-2";
+                                      currentWidgetHeight = `${2 * rowHeightValue + rowGapValue}px`;
+                                    } else if (item.size === "2x2") {
+                                      colSpanClass = "col-span-2";
+                                      rowSpanClass = "row-span-2";
+                                      currentWidgetHeight = widgetHeight;
+                                    }
+
                                     return (
                                       <div
                                         key={item.id}
                                         data-id={item.id}
                                         data-page={pageIdx}
-                                        className={`grid-item col-span-2 row-span-2 relative transition-opacity duration-200 ${
+                                        className={`grid-item ${colSpanClass} ${rowSpanClass} relative transition-opacity duration-200 ${
                                           isDragged ? "opacity-30 scale-95" : ""
                                         }`}
-                                        style={{ height: widgetHeight }}
+                                        style={{ height: currentWidgetHeight }}
                                         onPointerDown={(e) => {
                                           if (isEditingHomeScreen) e.preventDefault();
                                           handleItemPointerDown(e, item, index);
@@ -2332,6 +2434,7 @@ export default function App() {
                                             onOpenApp={setActiveApp}
                                             installedAppIds={installedAppIds}
                                             widgetOpacity={settings.widgetOpacity}
+                                            size={item.size}
                                           />
                                         </div>
                                       </div>
@@ -2469,6 +2572,7 @@ export default function App() {
                   <AddWidgetSheet 
                     onAdd={handleAddWidget} 
                     onClose={() => setIsShowingAddWidget(false)} 
+                    settings={settings}
                   />
                 </div>
               )}
@@ -2503,6 +2607,7 @@ export default function App() {
                     setActiveChatCharId={setActiveChatCharId}
                     offlineStories={offlineStories}
                     onSaveOfflineStory={handleSaveOfflineStory}
+                    onDeleteCharacter={handleDeleteCharacter}
                   />
                 </div>
 
@@ -2674,8 +2779,8 @@ export default function App() {
             ) : (
               <div 
                 style={{ 
-                  width: settings.hideAppNames ? "154px" : "150px",
-                  height: settings.hideAppNames ? "154px" : "150px"
+                  width: draggedItem.size === "1x4" ? "300px" : draggedItem.size === "2x4" ? "300px" : (settings.hideAppNames ? "154px" : "150px"),
+                  height: draggedItem.size === "1x4" ? "54px" : draggedItem.size === "2x4" ? "120px" : (settings.hideAppNames ? "154px" : "150px")
                 }}
               >
                 {React.createElement(getWidgetComponent(draggedItem.widgetType), {
@@ -2685,6 +2790,7 @@ export default function App() {
                   characters,
                   installedAppIds,
                   widgetOpacity: settings.widgetOpacity,
+                  size: draggedItem.size,
                 })}
               </div>
             )}

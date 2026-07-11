@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { MusicTrack, Character } from "../types";
+import { MusicTrack, Character, UserSettings } from "../types";
 import { 
   Play, 
   Pause, 
@@ -15,7 +15,8 @@ import {
   Check, 
   ChevronRight, 
   Volume2,
-  Settings
+  Settings,
+  User
 } from "lucide-react";
 
 // Pre-seeded high-quality images for the Album Widget to look gorgeous
@@ -43,6 +44,7 @@ interface WidgetProps {
   onOpenApp?: (appId: string) => void;
   installedAppIds?: string[];
   widgetOpacity?: number;
+  size?: "1x1" | "2x2" | "1x4" | "2x4";
 }
 
 export function AlbumWidget({ id, isEditing, onRemove, characters = [] }: WidgetProps) {
@@ -843,17 +845,18 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
 
 // Bottom sheet selector for preset widgets
 interface AddWidgetSheetProps {
-  onAdd: (widgetType: "album" | "music" | "anniversary" | "todo") => void;
+  onAdd: (widgetType: "album" | "music" | "anniversary" | "todo" | "album_1x4" | "album_2x4" | "welcome") => void;
   onClose: () => void;
+  settings?: UserSettings;
 }
 
-export function AddWidgetSheet({ onAdd, onClose }: AddWidgetSheetProps) {
+export function AddWidgetSheet({ onAdd, onClose, settings }: AddWidgetSheetProps) {
   return (
-    <div className="absolute inset-x-0 bottom-0 z-50 bg-white/95 backdrop-blur-md rounded-t-[32px] shadow-2xl border-t border-stone-200/50 p-6 text-left animate-slide-up select-none">
+    <div className="absolute inset-x-0 bottom-0 z-50 bg-white/95 backdrop-blur-md rounded-t-[32px] shadow-2xl border-t border-stone-200/50 p-6 text-left animate-slide-up select-none max-h-[85vh] overflow-y-auto">
       <div className="flex items-center justify-between mb-5">
         <div>
           <h3 className="text-base font-black text-stone-900 tracking-tight">添加桌面小组件</h3>
-          <p className="text-[11px] text-stone-400 font-medium mt-0.5">选择你喜欢的小组件，并丰富你的手机空白页面 (比例为 1:1, 占 4 个 APP 空间)</p>
+          <p className="text-[11px] text-stone-400 font-medium mt-0.5">选择你喜欢的小组件并丰富桌面排版 (支持 2×2, 1×4, 2×4 多种尺寸)</p>
         </div>
         <button 
           onClick={onClose}
@@ -864,7 +867,7 @@ export function AddWidgetSheet({ onAdd, onClose }: AddWidgetSheetProps) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        {/* Option 1: Album */}
+        {/* Option 1: Album 2x2 */}
         <button
           onClick={() => onAdd("album")}
           className="flex items-center gap-3 p-3 bg-stone-50 hover:bg-stone-100 border border-stone-200/60 rounded-2xl text-left transition-all hover:scale-[1.02] active:scale-95"
@@ -873,8 +876,36 @@ export function AddWidgetSheet({ onAdd, onClose }: AddWidgetSheetProps) {
             <ImageIcon className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="text-xs font-black text-stone-800">精美相册</h4>
-            <p className="text-[10px] text-stone-400 font-medium mt-0.5">多合一羁绊美图循环</p>
+            <h4 className="text-xs font-black text-stone-800">精美相册 (2×2)</h4>
+            <p className="text-[10px] text-stone-400 font-medium mt-0.5">经典方形氛围美图循环</p>
+          </div>
+        </button>
+
+        {/* Option 1b: Album 1x4 */}
+        <button
+          onClick={() => onAdd("album_1x4")}
+          className="flex items-center gap-3 p-3 bg-stone-50 hover:bg-stone-100 border border-stone-200/60 rounded-2xl text-left transition-all hover:scale-[1.02] active:scale-95"
+        >
+          <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
+            <ImageIcon className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-black text-stone-800">精美相册 (1×4)</h4>
+            <p className="text-[10px] text-stone-400 font-medium mt-0.5">扁平长条横幅小相册</p>
+          </div>
+        </button>
+
+        {/* Option 1c: Album 2x4 */}
+        <button
+          onClick={() => onAdd("album_2x4")}
+          className="flex items-center gap-3 p-3 bg-stone-50 hover:bg-stone-100 border border-stone-200/60 rounded-2xl text-left transition-all hover:scale-[1.02] active:scale-95"
+        >
+          <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600 shrink-0">
+            <ImageIcon className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-black text-stone-800">精美相册 (2×4)</h4>
+            <p className="text-[10px] text-stone-400 font-medium mt-0.5">大屏宽画幅焦点壁纸</p>
           </div>
         </button>
 
@@ -919,6 +950,22 @@ export function AddWidgetSheet({ onAdd, onClose }: AddWidgetSheetProps) {
             <p className="text-[10px] text-stone-400 font-medium mt-0.5">每日轻便手账清单</p>
           </div>
         </button>
+
+        {/* Option 5: Welcome Card */}
+        {settings?.hideHomeWelcomeWidget && (
+          <button
+            onClick={() => onAdd("welcome")}
+            className="flex items-center gap-3 p-3 bg-stone-50 hover:bg-stone-100 border border-stone-200/60 rounded-2xl text-left transition-all hover:scale-[1.02] active:scale-95 col-span-2"
+          >
+            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
+              <User className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-stone-800">置顶欢迎卡 (1×4)</h4>
+              <p className="text-[10px] text-stone-400 font-medium mt-0.5">恢复桌面1置顶的 1×4 机主名片</p>
+            </div>
+          </button>
+        )}
       </div>
 
       <div className="mt-5 text-center">

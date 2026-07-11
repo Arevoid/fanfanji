@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   X,
   Plus,
+  Minus,
   Sliders,
   Camera,
   Music,
@@ -63,6 +64,69 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
 
+const RenderAvatar = ({ 
+  src, 
+  alt, 
+  name, 
+  className, 
+  onClick 
+}: { 
+  src: string; 
+  alt: string; 
+  name: string; 
+  className: string; 
+  onClick?: () => void 
+}) => {
+  const [failed, setFailed] = useState(false);
+  
+  const isEmoji = !src || (!src.startsWith("http") && !src.startsWith("data:") && !src.startsWith("/") && !src.startsWith("."));
+  
+  if (failed || isEmoji) {
+    const cleanName = (name || "👤").replace(/[\s\p{Emoji}\p{Extended_Pictographic}]+/gu, "").trim();
+    const firstChar = cleanName ? cleanName.charAt(0) : (name ? name.charAt(0) : "👤");
+    
+    // Pick a deterministic background color based on name
+    const colors = [
+      "bg-rose-100 text-rose-700 border-rose-200",
+      "bg-blue-100 text-blue-700 border-blue-200",
+      "bg-amber-100 text-amber-700 border-amber-200",
+      "bg-emerald-100 text-emerald-700 border-emerald-200",
+      "bg-indigo-100 text-indigo-700 border-indigo-200",
+      "bg-violet-100 text-violet-700 border-violet-200",
+      "bg-teal-100 text-teal-700 border-teal-200",
+      "bg-slate-100 text-slate-700 border-slate-200"
+    ];
+    let hash = 0;
+    for (let i = 0; i < (name || "").length; i++) {
+      hash = (name || "").charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const colorClass = colors[Math.abs(hash) % colors.length];
+
+    return (
+      <div 
+        onClick={onClick}
+        className={`${className} flex items-center justify-center font-bold text-sm border select-none cursor-pointer overflow-hidden ${colorClass}`}
+      >
+        {isEmoji && src ? (
+          <span className="text-lg leading-none">{src}</span>
+        ) : (
+          <span className="text-[13px] tracking-tight">{firstChar}</span>
+        )}
+      </div>
+    );
+  }
+  
+  return (
+    <img 
+      src={src} 
+      alt={alt} 
+      onError={() => setFailed(true)}
+      onClick={onClick}
+      className={className}
+    />
+  );
+};
+
 interface AppChatProps {
   characters: Character[];
   settings: UserSettings;
@@ -87,6 +151,7 @@ interface AppChatProps {
   setActiveChatCharId: (id: string | null) => void;
   offlineStories?: OfflineStory[];
   onSaveOfflineStory?: (story: OfflineStory) => void;
+  onDeleteCharacter?: (id: string, skipConfirm?: boolean) => void;
 }
 
 const PRESEED_MOMENTS: Moment[] = [];
@@ -178,6 +243,7 @@ export default function AppChat({
   setActiveChatCharId,
   offlineStories = [],
   onSaveOfflineStory,
+  onDeleteCharacter,
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
 
@@ -274,7 +340,7 @@ export default function AppChat({
     }
   }, [friendIds]);
 
-  const friends = characters.filter((c) => friendIds.includes(c.id));
+  const friends = characters.filter((c) => friendIds.includes(c.id) && !c.isGroupChat);
 
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
@@ -391,6 +457,7 @@ export default function AppChat({
   const [isTyping, setIsTyping] = useState(false);
   const [manualLocationText, setManualLocationText] = useState("");
   const [emptyGreetingCheckedCharIds, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
+  const [sentGreetings, setSentGreetings] = useState<string[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
   // Offline Mode States (Inline Offline mode inside chat is disabled, transitioned to AppOffline)
@@ -439,9 +506,22 @@ export default function AppChat({
   const [showMomentPublisher, setShowMomentPublisher] = useState(false);
   const [inlineCommentsTexts, setInlineCommentsTexts] = useState<Record<string, string>>({});
   const [showCommentInputMap, setShowCommentInputMap] = useState<Record<string, boolean>>({});
+  const [replyingToCommentMap, setReplyingToCommentMap] = useState<Record<string, MomentComment>>({});
+  const [lastViewedMomentsTime, setLastViewedMomentsTime] = useState<number>(() => {
+    return Number(localStorage.getItem("phone_last_viewed_moments_time") || "0");
+  });
+
+  // Group Chat States
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [groupNameInput, setGroupNameInput] = useState("");
+  const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([]);
 
   // Settings draft states
   const [draftRemark, setDraftRemark] = useState("");
+  const [draftAvatar, setDraftAvatar] = useState<string | undefined>(undefined);
+  const [isDeleteMemberMode, setIsDeleteMemberMode] = useState(false);
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [selectedAddMemberIds, setSelectedAddMemberIds] = useState<string[]>([]);
   const [draftIsPinned, setDraftIsPinned] = useState(false);
   const [draftChatBg, setDraftChatBg] = useState<string | undefined>(undefined);
   const [draftCustomCss, setDraftCustomCss] = useState("");
@@ -468,6 +548,7 @@ export default function AppChat({
   const [isCompressingMemory, setIsCompressingMemory] = useState(false);
   const [isTriggeringProactive, setIsTriggeringProactive] = useState(false);
   const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
+  const [showDisbandGroupModal, setShowDisbandGroupModal] = useState(false);
   const [editingMemoryText, setEditingMemoryText] = useState("");
 
   // New features: Notes attachment, Quoting, Bubble Menu, Note Reader, OOC Annotation
@@ -475,6 +556,7 @@ export default function AppChat({
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
   const [activeMenuMsg, setActiveMenuMsg] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
   const [selectedFileNote, setSelectedFileNote] = useState<{ title: string; content: string } | null>(null);
   const [showOocCommentModal, setShowOocCommentModal] = useState<Message | null>(null);
   const [oocCommentText, setOocCommentText] = useState("");
@@ -498,6 +580,15 @@ export default function AppChat({
   useEffect(() => {
     setShowAttachPanel(false);
   }, [activeChatCharId]);
+
+  // Sync last viewed moments time when entering moments tab or when new comments arrive while viewing moments
+  useEffect(() => {
+    if (activeTab === "moments") {
+      const now = Date.now();
+      setLastViewedMomentsTime(now);
+      localStorage.setItem("phone_last_viewed_moments_time", now.toString());
+    }
+  }, [activeTab, moments]);
 
   // Sync editing memory text
   useEffect(() => {
@@ -524,152 +615,33 @@ export default function AppChat({
     if (currentChatMessages.length > 0) return;
 
     if (activeCharacter.greeting && activeCharacter.greeting.trim()) {
-      const charMsg: Message = {
-        id: `msg-greeting-${Date.now()}`,
-        characterId: activeChatCharId,
-        sender: "character",
-        content: activeCharacter.greeting,
-        timestamp: Date.now(),
+      if (sentGreetings.includes(activeChatCharId)) return;
+      
+      setSentGreetings(prev => [...prev, activeChatCharId]);
+      
+      // Simulate realistic typing for the greeting message
+      setIsTyping(true);
+      const timer = setTimeout(() => {
+        const charMsg: Message = {
+          id: `msg-greeting-${Date.now()}`,
+          characterId: activeChatCharId,
+          sender: "character",
+          content: activeCharacter.greeting!.trim(),
+          timestamp: Date.now(),
+        };
+        onSendMessage(charMsg);
+        setIsTyping(false);
+      }, 1500);
+
+      return () => {
+        clearTimeout(timer);
+        setIsTyping(false);
       };
-      onSendMessage(charMsg);
     } else {
-      // No custom greeting set. Decide based on personality.
-      if (emptyGreetingCheckedCharIds.includes(activeChatCharId)) return;
-      
-      setEmptyGreetingCheckedCharIds(prev => [...prev, activeChatCharId]);
-      
-      const personalityText = activeCharacter.personality || "";
-      const mbtiText = (activeCharacter.mbti || "").toUpperCase();
-      const backstoryText = activeCharacter.backstory || "";
-      
-      // Get triggered constant world book entries for the active character from freshest local storage
-      const latestWorldBookEntries = getLatestWorldBookEntries(worldBookEntries);
-
-      const greetingTriggeredEntries = latestWorldBookEntries.filter((entry) => {
-        if (entry.isActive === false) return false;
-        const isGlobal = !entry.characterId || entry.characterId === "global";
-        if (!isGlobal && entry.characterId !== activeChatCharId) return false;
-        return entry.triggerType === "constant";
-      });
-
-      const worldBookPromptAdditions = greetingTriggeredEntries
-        .map(e => `【设定 - ${e.title}】\n${e.content}`)
-        .join("\n\n");
-      
-      // Local heuristic: extraverted or proactive keywords
-      const isExtraverted = mbtiText.startsWith("E") ||
-        (/(主动|热情|外向|开朗|活泼|话痨|自来熟|社牛|温暖|元气|积极|话多)/.test(personalityText) &&
-         !/(被动|慢热|内向|高冷|冷淡|孤僻|社恐|傲娇|淡漠)/.test(personalityText));
-
-      const decideAndSend = async () => {
-        setIsTyping(true);
-        try {
-          const prompt = `你现在要为一个AI角色判定：在没有设定开场白的情况下，根据该角色的人设，决定它是会【主动发第一条微信消息给用户】还是【等用户先发信息】。
-角色的基本信息如下：
-- 名字：${activeCharacter.name}
-- 性格描述：${personalityText}
-- MBTI：${mbtiText}
-- 背景故事：${backstoryText}
-${worldBookPromptAdditions ? `\n角色的相关世界书背景设定：\n${worldBookPromptAdditions}` : ""}
-
-判定规则：
-1. 如果角色性格属于外向、主动、热情、开朗，或MBTI为E型，或者因职业/背景习惯于主动沟通，它会决定【主动发第一条信息】。
-2. 如果角色性格属于内向、慢热、被动、高冷、孤僻、傲娇、寡言、冷漠，或MBTI为I型，或者因身份不屑于/不方便主动，它会决定【等用户先发信息】。
-
-请直接以以下JSON格式回复（不要包含 markdown 包裹，直接输出纯 JSON 字符串）：
-{
-  "shouldInitiate": true / false,
-  "firstMessage": "如果 shouldInitiate 为 true，请写一句极其符合该人设性格、口癖和说话习惯的第一条微信消息（控制在50字以内，自然、像真人，不带废话；如果 shouldInitiate 为 false，这里留空字符串即可）"
-}
-`;
-
-          let apiResponse;
-          try {
-            apiResponse = await apiChat({
-              message: prompt,
-              history: [],
-              apiKey: settings.apiKey,
-              model: settings.selectedModel || "gemini-3.5-flash",
-              apiEndpoint: settings.apiEndpoint,
-              apiTemperature: 0.7,
-              systemInstruction: "你是一个角色扮演设定判别助手。请只输出合法的 JSON 字符串。"
-            });
-          } catch (e) {
-            console.warn("AI decision failed, falling back to local heuristic rules:", e);
-          }
-
-          let shouldInitiate = isExtraverted;
-          let firstMessage = "";
-
-          if (apiResponse && apiResponse.text) {
-            try {
-              const cleanText = apiResponse.text.replace(/```json/g, "").replace(/```/g, "").trim();
-              const parsed = JSON.parse(cleanText);
-              if (typeof parsed.shouldInitiate === "boolean") {
-                shouldInitiate = parsed.shouldInitiate;
-              }
-              if (typeof parsed.firstMessage === "string") {
-                firstMessage = parsed.firstMessage;
-              }
-            } catch (jsonErr) {
-              console.warn("Failed to parse JSON response from AI:", jsonErr, apiResponse.text);
-            }
-          }
-
-          if (shouldInitiate) {
-            // Generate a first message if empty
-            if (!firstMessage || !firstMessage.trim()) {
-              const genPrompt = `请扮演角色“${activeCharacter.name}”。你刚和用户在微信上建立联系，且你们之前没有任何聊天记录。
-根据你的以下设定，主动发第一条微信消息向用户打个招呼：
-- 性格：${personalityText}
-- MBTI：${mbtiText}
-- 背景故事：${backstoryText}
-${worldBookPromptAdditions ? `\n相关世界书设定：\n${worldBookPromptAdditions}` : ""}
-
-要求：
-1. 语言极其符合你的角色口癖、语气和性格。
-2. 极其简短，控制在 30 个字以内，像真实的微信聊天。
-3. 直接输出你发送的话，绝对不要有任何括号注释、前缀、旁白、markdown 格式或任何多余文字。`;
-
-              const genRes = await apiChat({
-                message: genPrompt,
-                history: [],
-                apiKey: settings.apiKey,
-                model: settings.selectedModel || "gemini-3.5-flash",
-                apiEndpoint: settings.apiEndpoint,
-                apiTemperature: 0.8,
-                systemInstruction: `请扮演角色 ${activeCharacter.name}，极其简短、自然地发送第一条微信消息。不要带有任何多余格式。${
-                  worldBookPromptAdditions ? `\n请遵循以下相关背景和世界书设定进行扮演：\n${worldBookPromptAdditions}` : ""
-                }`
-              });
-              if (genRes && genRes.text) {
-                firstMessage = genRes.text.trim().replace(/^["']|["']$/g, "");
-              }
-            }
-
-            if (firstMessage && firstMessage.trim()) {
-              // Add a slight delay to simulate realistic typing
-              await new Promise(resolve => setTimeout(resolve, 1500));
-              const charMsg: Message = {
-                id: `msg-empty-greeting-${Date.now()}`,
-                characterId: activeChatCharId,
-                sender: "character",
-                content: firstMessage,
-                timestamp: Date.now(),
-              };
-              onSendMessage(charMsg);
-            }
-          }
-        } catch (err) {
-          console.error("Error in empty greeting decision process:", err);
-        } finally {
-          setIsTyping(false);
-        }
-      };
-
-      decideAndSend();
+      // No custom greeting set. According to user instruction:
+      // 如果没有开场白，则不主动发第一条信息，也不显示正在输入中。
     }
-  }, [activeChatCharId, activeCharacter, messages, onSendMessage, emptyGreetingCheckedCharIds, settings, worldBookEntries]);
+  }, [activeChatCharId, activeCharacter, messages, onSendMessage, sentGreetings]);
 
   // Background proactive check (every minute)
   useEffect(() => {
@@ -717,8 +689,165 @@ ${worldBookPromptAdditions ? `\n相关世界书设定：\n${worldBookPromptAddit
     return () => clearInterval(timer);
   }, [activeAttachModal, callingStatus]);
 
+  const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
+    if (!activeChatCharId || !activeCharacter) return;
+    setIsTyping(true);
+
+    try {
+      // Find all characters in this group chat
+      const groupMembers = (activeCharacter.memberIds || []).map(id => characters.find(c => c.id === id)).filter(Boolean) as Character[];
+      if (groupMembers.length === 0) {
+        setIsTyping(false);
+        return;
+      }
+
+      // Collect chat messages in this group
+      const sourceMsgs = customHistoryOverride || (userMsg ? [...currentChatMessages, userMsg] : [...currentChatMessages]);
+      const uniqueMsgsMap = new Map<string, Message>();
+      sourceMsgs.forEach(m => {
+        if (m) uniqueMsgsMap.set(m.id, m);
+      });
+      const finalMsgs = Array.from(uniqueMsgsMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+      // Limit history
+      const limit = activeCharacter.historyMemoryLimit || 150;
+      const slicedMsgs = finalMsgs.slice(-limit);
+
+      // Create a readable history for the AI, showing the user's name or character names as senders
+      const historyText = slicedMsgs.map((m) => {
+        if (m.sender === "user") {
+          return `${settings.name} (机主): ${m.content}`;
+        } else {
+          const senderChar = groupMembers.find(c => c.id === m.senderId);
+          const senderName = senderChar ? (senderChar.remark || senderChar.name) : (m.senderId || "成员");
+          return `${senderName}: ${m.content}`;
+        }
+      }).join("\n");
+
+      // Construct a system instruction that contains details about all members and how they should reply
+      const membersDefText = groupMembers.map((member, idx) => {
+        return `[群聊成员 ${idx + 1}: ${member.name}]
+- 角色人设/性格: ${member.personality}
+- 背景设定: ${member.backstory}
+- 与机主(${settings.name})的关系: 根据人设及世界观设定
+${member.compressedMemory ? `- 过去的互动记忆: ${member.compressedMemory}` : ""}`;
+      }).join("\n\n");
+
+      // Generate a comprehensive system prompt
+      const systemInstruction = `你正在扮演微信群聊中的多位群成员（AI角色），正在与机主“${settings.name}”在群名为“${activeCharacter.name}”的群组中进行互动。
+
+以下是微信群聊成员的设定档案：
+${membersDefText}
+
+【群聊互动核心原则】：
+1. 你的回复需要极其自然、生动。群聊人物会依据自己的人设、世界观设定、以及和机主的关系等，对最新消息进行相关的、贴合性格的回复。
+2. 🚨【回复概率与不回复机制】：并非每个成员在每次互动时都必须发言！在真实的微信群聊中，人物是否回复信息要参考对方人设、自己的世界观日程时间线、当前话题的兴趣度以及与说话人的关系等。
+   - 例如：高冷、忙碌或对该话题不感兴趣的角色应该保持沉默，或仅在极少数相关话题时插一句嘴；热情、爱凑热闹或与发言人关系亲密的角色则更可能频繁且积极地发言。
+   - 在生成的单次互动中，你应该让 1 到 3 位合适的成员进行回复（视话题和人设而定）。如果大家都觉得没有需要发言的内容，甚至可以只有 0~1 个人回复。
+3. 🚨【成员间互动】：成员之间不仅是单独回复机主，也可以互相回复、接话、吐槽或附和。
+4. 🚨【中国标点与格式规范】：
+   - 微信聊天简短而随意，请保持口语化、极度真实的微信聊天风格。
+   - 不要输出大段的长篇大论，尽量简短有力。
+   - 不要使用任何小说式的“旁白、场景描写、动作心理括号（如 '(笑)' 或 '（叹气）'）”。群聊里只能输出他们作为真人打字发在微信群里的文本。
+
+【🚨🚨🚨 极其严格的输出格式规则】：
+你必须按照以下格式输出成员的发言。请确保在每条发言的前一行，用且仅用 \`[SENDER_NAME: 角色名字]\` 指定发送者。不要输出任何其他 markdown 标记，不要输出 JSON 块。
+每一行只能由一个标签加发言内容组成，例如：
+
+[SENDER_NAME: 角色A名字]
+微信回复内容一...
+
+[SENDER_NAME: 角色B名字]
+微信回复内容二...
+
+确保 [SENDER_NAME: xxx] 中的“xxx”必须与你在群成员设定中被赋予的 name 完全一致！`;
+
+      const latestMsgText = userMsg ? userMsg.content : (slicedMsgs.length > 0 ? slicedMsgs[slicedMsgs.length - 1].content : "大家在吗？");
+
+      const promptMessage = userMsg 
+        ? `当前群聊最新历史消息记录：
+${historyText || "(暂无历史消息)"}
+
+请根据以上对话背景和人物状态，让合适的成员在群里发言（可回复最新消息，或承接之前的闲聊，或互相接话）。如果当前所有人设在此时都不适合发言，则不返回任何回复。
+按照规定的格式输出。`
+        : `当前群聊最新历史消息记录：
+${historyText || "(暂无历史消息)"}
+
+【🚨重要：用户点击了“继续/发送”按钮，但没有输入任何文本。这表示用户希望看到群成员继续聊天或互动。】
+${historyText ? "请根据以上的群聊历史，让合适的一位或多位群成员（建议 1 到 2 位）继续发言，成员们可以互相对话、继续之前的聊天话题、发表看法、吐槽、开启新话题、或者活跃气氛等。" : "群聊中目前没有任何消息，请让合适的一位或多位群成员（建议 1 到 2 位）主动发言，向机主问好、唠嗑、开启有趣的话题或自我介绍。"}请务必让部分成员发言，不要保持沉默。
+按照规定的格式输出。`;
+
+      // Call apiChat to generate responses
+      const data = await apiChat({
+        message: promptMessage,
+        history: [],
+        systemInstruction,
+        apiKey: settings.apiKey,
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+        apiTemperature: settings.apiTemperature,
+        streamCompatible: settings.streamCompatible,
+      });
+
+      if (data && data.text) {
+        // Parse replies
+        const lines = data.text.split("\n");
+        const parsedReplies: { charName: string; content: string }[] = [];
+        let currentReply: { charName: string; content: string } | null = null;
+
+        for (let line of lines) {
+          const senderMatch = line.match(/^\[SENDER_NAME:\s*(.+?)\]/i);
+          if (senderMatch) {
+            if (currentReply && currentReply.content.trim()) {
+              parsedReplies.push(currentReply);
+            }
+            currentReply = { charName: senderMatch[1].trim(), content: "" };
+          } else if (currentReply) {
+            currentReply.content += (currentReply.content ? "\n" : "") + line;
+          }
+        }
+        if (currentReply && currentReply.content.trim()) {
+          parsedReplies.push(currentReply);
+        }
+
+        // Filter and construct messages
+        let delayOffset = 1000;
+        parsedReplies.forEach((reply, idx) => {
+          // Find member by name
+          const member = groupMembers.find(
+            m => m.name.toLowerCase() === reply.charName.toLowerCase() || 
+                 (m.remark && m.remark.toLowerCase() === reply.charName.toLowerCase())
+          );
+          if (member) {
+            setTimeout(() => {
+              const charMsg: Message = {
+                id: `group-reply-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+                characterId: activeChatCharId, // Save under the Group's ID
+                sender: "character",
+                senderId: member.id, // Keep track of the specific sender!
+                content: reply.content.trim(),
+                timestamp: Date.now(),
+              };
+              onSendMessage(charMsg);
+            }, delayOffset);
+            delayOffset += 1500; // Staggered simulation of typing delays!
+          }
+        });
+      }
+    } catch (err) {
+      console.error("Group chat response generation failed:", err);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
   const generateResponseForUserMessage = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return;
+
+    if (activeCharacter.isGroupChat) {
+      return generateResponseForGroupChat(userMsg, customHistoryOverride);
+    }
+
     setIsTyping(true);
 
     try {
@@ -1505,7 +1634,9 @@ Please read the feedback carefully and rewrite your response to perfectly match 
     if (activeCharacter) {
       onSaveCharacter({
         ...activeCharacter,
-        remark: draftRemark.trim() || undefined,
+        name: activeCharacter.isGroupChat ? (draftRemark.trim() || activeCharacter.name) : activeCharacter.name,
+        remark: activeCharacter.isGroupChat ? undefined : (draftRemark.trim() || undefined),
+        avatar: activeCharacter.isGroupChat ? (draftAvatar || activeCharacter.avatar) : activeCharacter.avatar,
         isPinned: draftIsPinned,
         chatBg: draftChatBg,
         customCss: draftCustomCss,
@@ -1518,6 +1649,67 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       });
       setIsShowingCardModal(false);
     }
+  };
+
+  // Remove a member from the active group chat
+  const handleRemoveGroupMember = (memberId: string) => {
+    if (!activeCharacter || !activeCharacter.memberIds) return;
+    const member = characters.find(c => c.id === memberId);
+    const memberName = member ? (member.remark || member.name) : "成员";
+    
+    const updatedMemberIds = activeCharacter.memberIds.filter(id => id !== memberId);
+    
+    // Update character
+    const updatedChar = {
+      ...activeCharacter,
+      memberIds: updatedMemberIds,
+    };
+    onSaveCharacter(updatedChar);
+
+    // Create a narration message for member removal
+    const removeNarration: Message = {
+      id: `group-narrate-${Date.now()}`,
+      characterId: activeCharacter.id,
+      sender: "character",
+      isNarration: true,
+      content: `您将 ${memberName} 移出了群聊`,
+      timestamp: Date.now(),
+    };
+    onSendMessage(removeNarration);
+  };
+
+  // Add selected members to the active group chat
+  const handleAddGroupMembers = (newMemberIds: string[]) => {
+    if (!activeCharacter || !activeCharacter.memberIds) return;
+    if (newMemberIds.length === 0) return;
+
+    const updatedMemberIds = [...activeCharacter.memberIds, ...newMemberIds];
+    
+    // Update character
+    const updatedChar = {
+      ...activeCharacter,
+      memberIds: updatedMemberIds,
+    };
+    onSaveCharacter(updatedChar);
+
+    // Generate names of invited members
+    const invitedNames = newMemberIds.map(id => {
+      const c = characters.find(char => char.id === id);
+      return c ? (c.remark || c.name) : "";
+    }).filter(Boolean).join("、");
+
+    // Create initial narration message
+    const addNarration: Message = {
+      id: `group-narrate-${Date.now()}`,
+      characterId: activeCharacter.id,
+      sender: "character",
+      isNarration: true,
+      content: `您邀请了 ${invitedNames} 加入了群聊`,
+      timestamp: Date.now(),
+    };
+    onSendMessage(addNarration);
+
+    setShowAddMemberModal(false);
   };
 
   // Set chat specific background wallpaper (draft)
@@ -1841,20 +2033,25 @@ Your task: Write a short, natural comment on this Moment.
     }
   };
 
-  const handleAutoReplyToUserComment = async (momentId: string, userCommentText: string) => {
+  const handleAutoReplyToUserComment = async (momentId: string, userCommentText: string, replyingTo?: MomentComment) => {
     // Find the moment
     const targetMoment = moments.find(m => m.id === momentId);
     if (!targetMoment) return;
 
     // Identify which character should reply
-    // It should be the author of the moment (if it's a character), or if it's the user's moment,
-    // we can make the character who the user is replying to (or the active character) reply.
     let targetChar: Character | undefined;
-    if (targetMoment.characterId) {
-      targetChar = characters.find(c => c.id === targetMoment.characterId);
-    } else {
-      // Fallback to match authorName
-      targetChar = characters.find(c => c.name === targetMoment.authorName || c.remark === targetMoment.authorName);
+    if (replyingTo) {
+      // If user is replying to a specific character's comment, that character should reply!
+      targetChar = characters.find(c => c.name === replyingTo.authorName || c.remark === replyingTo.authorName);
+    }
+
+    if (!targetChar) {
+      if (targetMoment.characterId) {
+        targetChar = characters.find(c => c.id === targetMoment.characterId);
+      } else {
+        // Fallback to match authorName
+        targetChar = characters.find(c => c.name === targetMoment.authorName || c.remark === targetMoment.authorName);
+      }
     }
 
     // If the moment is posted by the user, and they are replying to a character's comment, or if we want a friend to reply
@@ -1933,11 +2130,18 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
           let cleanedReply = response.text.trim();
           cleanedReply = cleanedReply.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
 
+          // Clean up any existing AI-generated reply prefix to prevent duplication
+          cleanedReply = cleanedReply.replace(/^回复\s*[\(（].*?[\)）]\s*[:：]\s*/, "");
+          cleanedReply = cleanedReply.replace(/^回复\s*.*?\s*[:：]\s*/, "");
+
+          // Since the friend is replying to the user, the prefix must be 回复（${settings.name}）：
+          const finalReply = `回复（${settings.name}）：${cleanedReply}`;
+
           const newComment: MomentComment = {
             id: `${Date.now()}-reply-${Math.random().toString(36).substr(2, 5)}`,
             authorName: friend.remark || friend.name,
             authorAvatar: friend.avatar,
-            content: cleanedReply,
+            content: finalReply,
             timestamp: Date.now(),
           };
           onAddCommentToMoment(momentId, newComment);
@@ -2091,25 +2295,45 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
     const text = inlineCommentsTexts[momentId];
     if (!text || !text.trim()) return;
 
+    const replyingTo = replyingToCommentMap[momentId];
+    const prefix = replyingTo ? `回复（${replyingTo.authorName}）：` : "";
+    const finalContent = `${prefix}${text.trim()}`;
+
     const newComment: MomentComment = {
       id: Date.now().toString(),
       authorName: settings.name,
       authorAvatar: settings.avatar,
-      content: text.trim(),
+      content: finalContent,
       timestamp: Date.now(),
     };
 
     onAddCommentToMoment(momentId, newComment);
     setInlineCommentsTexts({ ...inlineCommentsTexts, [momentId]: "" });
     setShowCommentInputMap(prev => ({ ...prev, [momentId]: false }));
+    
+    // Clear the replying target
+    if (replyingTo) {
+      setReplyingToCommentMap(prev => {
+        const copy = { ...prev };
+        delete copy[momentId];
+        return copy;
+      });
+    }
 
     // Trigger character auto-reply to the user's new comment
-    handleAutoReplyToUserComment(momentId, text.trim());
+    handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
   };
 
   // Active chat threads list builder
   const chatThreads = characters
     .filter((char) => {
+      if (char.isGroupChat) {
+        const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
+        const hasMessages = threadMsgs.length > 0;
+        const isInitiated = initiatedChatIds.includes(char.id);
+        const isActive = char.id === activeChatCharId;
+        return hasMessages || isInitiated || isActive;
+      }
       if (!friendIds.includes(char.id)) return false;
       const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
       const hasMessages = threadMsgs.length > 0;
@@ -2132,6 +2356,24 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
     });
 
   const savedBookmarks = messages.filter((m) => m.isBookmarked);
+
+  // Get count of unread moments comments/replies
+  const getUnreadMomentsCount = () => {
+    let count = 0;
+    allMoments.forEach((mom) => {
+      mom.comments.forEach((comm) => {
+        if (comm.authorName !== settings.name && comm.timestamp > lastViewedMomentsTime) {
+          // Check if it's user's moment, or a reply targeting the user
+          const isUserMoment = mom.authorName === settings.name;
+          const isReplyToUser = comm.content.startsWith(`回复（${settings.name}）：`) || comm.content.startsWith(`回复 ${settings.name}：`);
+          if (isUserMoment || isReplyToUser) {
+            count++;
+          }
+        }
+      });
+    });
+    return count;
+  };
 
   // Moments feed filtering
   const filteredMoments = momentsFilterCharId
@@ -2474,22 +2716,37 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               </button>
               
               <div className="flex items-center gap-1.5 w-max max-w-[200px] header-title">
-                <img 
-                  src={activeCharacter.avatar} 
-                  alt="" 
-                  className="w-5 h-5 rounded-full object-cover shrink-0 border border-white/50 header-title-avatar"
-                />
+                {activeCharacter.isGroupChat ? (
+                  <div className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] shrink-0 header-title-avatar">
+                    👥
+                  </div>
+                ) : (
+                  <img 
+                    src={activeCharacter.avatar} 
+                    alt="" 
+                    className="w-5 h-5 rounded-full object-cover shrink-0 border border-white/50 header-title-avatar"
+                  />
+                )}
                 <h2 className="text-[13px] font-bold text-slate-800 tracking-tight truncate header-title-name">
                   {activeCharacter.remark || activeCharacter.name}
+                  {activeCharacter.isGroupChat && (
+                    <span className="text-slate-400 font-normal ml-0.5">
+                      ({1 + (activeCharacter.memberIds?.length || 0)})
+                    </span>
+                  )}
                 </h2>
-                <div className="flex items-center gap-0.5 character-status">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 status-indicator online animate-pulse" />
-                </div>
+                {!activeCharacter.isGroupChat && (
+                  <div className="flex items-center gap-0.5 character-status">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 status-indicator online animate-pulse" />
+                  </div>
+                )}
               </div>
 
               <button
                 onClick={() => {
-                  setDraftRemark(activeCharacter.remark || "");
+                  setDraftRemark(activeCharacter.isGroupChat ? activeCharacter.name : (activeCharacter.remark || ""));
+                  setDraftAvatar(activeCharacter.avatar);
+                  setIsDeleteMemberMode(false);
                   setDraftIsPinned(activeCharacter.isPinned || false);
                   setDraftChatBg(activeCharacter.chatBg);
                   setDraftCustomCss(activeCharacter.customCss || "");
@@ -2528,28 +2785,140 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               {/* Body */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* Character Profile Summary & Remark Settings */}
+                 {/* Character Profile Summary & Remark Settings */}
                 <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-                  <img
-                    src={activeCharacter.avatar}
-                    alt={activeCharacter.name}
-                    className="w-16 h-16 rounded-full border border-slate-100 object-cover shrink-0"
-                  />
+                  <div className="relative shrink-0">
+                    <RenderAvatar
+                      src={draftAvatar || (activeCharacter.isGroupChat ? "👥" : activeCharacter.avatar)}
+                      alt={activeCharacter.name}
+                      name={activeCharacter.name}
+                      className="w-16 h-16 rounded-2xl border border-slate-100 object-cover shrink-0 flex items-center justify-center text-3xl shadow-inner bg-slate-100 select-none"
+                    />
+                    {activeCharacter.isGroupChat && (
+                      <label className="absolute -bottom-1 -right-1 bg-neutral-950 text-white rounded-full p-1 border-2 border-white cursor-pointer shadow-sm hover:bg-neutral-900 transition-colors">
+                        <Sliders className="w-3 h-3" />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const compressed = await compressImage(file, 400, 400, 0.75);
+                                setDraftAvatar(compressed);
+                              } catch (err) {
+                                console.error("Group avatar compression failed:", err);
+                              }
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+                  </div>
                   <div className="flex-1 min-w-0 space-y-1">
                     <div className="text-base font-bold text-slate-800 truncate">
-                      {activeCharacter.name}
+                      {activeCharacter.isGroupChat ? "群聊名称设置" : activeCharacter.name}
                     </div>
                     <div>
                       <input
                         type="text"
                         value={draftRemark}
                         onChange={(e) => setDraftRemark(e.target.value)}
-                        placeholder="设置备注昵称..."
-                        className="w-full bg-slate-50 px-3 py-1.5 rounded-[32px] border border-slate-200 focus:outline-none text-xs text-slate-600 placeholder-slate-400"
+                        placeholder={activeCharacter.isGroupChat ? "输入新群名..." : "设置备注昵称..."}
+                        className="w-full bg-slate-50 px-3 py-1.5 rounded-[32px] border border-slate-200 focus:outline-none text-xs text-slate-600 placeholder-slate-400 font-semibold"
                       />
                     </div>
                   </div>
                 </div>
+
+                {/* Group Members List for Group Chats */}
+                {activeCharacter.isGroupChat && (
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                    <div className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2">
+                      群聊成员 ({1 + (activeCharacter.memberIds?.length || 0)} 人)
+                    </div>
+                    <div className="grid grid-cols-4 gap-3">
+                      {/* User */}
+                      <div className="flex flex-col items-center space-y-1 text-center">
+                        <RenderAvatar
+                          src={settings.avatar}
+                          alt="我"
+                          name="我"
+                          className="w-10 h-10 rounded-full border border-slate-100 object-cover shrink-0 flex items-center justify-center text-xs select-none font-bold"
+                        />
+                        <span className="text-[10px] font-bold text-slate-600 truncate w-full">我</span>
+                      </div>
+                      {/* Character Members */}
+                      {(activeCharacter.memberIds || []).map((memberId) => {
+                        const member = characters.find(c => c.id === memberId);
+                        if (!member) return null;
+                        return (
+                          <div key={member.id} className="flex flex-col items-center space-y-1 text-center relative">
+                            <div className="relative">
+                              <RenderAvatar
+                                src={member.avatar}
+                                alt={member.name}
+                                name={member.remark || member.name}
+                                className="w-10 h-10 rounded-full border border-slate-100 object-cover shrink-0 flex items-center justify-center text-xs select-none font-bold"
+                              />
+                              {isDeleteMemberMode && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleRemoveGroupMember(member.id);
+                                  }}
+                                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-sm transition-all"
+                                  title="移除此成员"
+                                >
+                                  <Minus className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-600 truncate w-full">
+                              {member.remark || member.name}
+                            </span>
+                          </div>
+                        );
+                      })}
+
+                      {/* Add Member Button */}
+                      <div className="flex flex-col items-center justify-center space-y-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDeleteMemberMode(false);
+                            setShowAddMemberModal(true);
+                          }}
+                          className="w-10 h-10 rounded-full border border-dashed border-slate-300 flex items-center justify-center hover:border-slate-400 hover:bg-slate-50 transition-colors"
+                        >
+                          <Plus className="w-5 h-5 text-slate-400" />
+                        </button>
+                        <span className="text-[10px] font-bold text-slate-400">添加</span>
+                      </div>
+
+                      {/* Remove Member Button */}
+                      <div className="flex flex-col items-center justify-center space-y-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDeleteMemberMode(!isDeleteMemberMode);
+                          }}
+                          className={`w-10 h-10 rounded-full border border-dashed flex items-center justify-center transition-colors ${
+                            isDeleteMemberMode 
+                              ? "border-red-500 bg-red-50 text-red-500" 
+                              : "border-slate-300 text-slate-400 hover:border-slate-400 hover:bg-slate-50"
+                          }`}
+                        >
+                          <Minus className="w-5 h-5" />
+                        </button>
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {isDeleteMemberMode ? "完成" : "删除"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Operations Group Card */}
                 <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-4 text-xs">
@@ -2813,7 +3182,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       保存设置
                     </button>
                     
-                    <div className="flex justify-center">
+                    <div className="flex flex-col items-center gap-2">
                       <button
                         type="button"
                         onClick={() => setShowClearHistoryModal(true)}
@@ -2821,6 +3190,16 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       >
                         清空对话记录
                       </button>
+
+                      {activeCharacter.isGroupChat && (
+                        <button
+                          type="button"
+                          onClick={() => setShowDisbandGroupModal(true)}
+                          className="text-xs text-red-600 hover:text-red-700 font-bold py-1 px-4 rounded-xl hover:bg-red-50/80 transition-colors flex items-center gap-1"
+                        >
+                          解除群聊
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2853,6 +3232,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           }
                           // Reset greeting checked state so a new proactive greeting can be generated immediately
                           setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
+                          setSentGreetings((prev) => prev.filter((id) => id !== activeChatCharId));
                           alert(`成功提取并整理了 ${count} 条核心记忆存入“记忆书”，当前对话已安全清除！`);
                         }}
                         disabled={isCompressingMemory}
@@ -2869,6 +3249,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             }
                             // Reset greeting checked state so a new proactive greeting can be generated immediately
                             setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
+                            setSentGreetings((prev) => prev.filter((id) => id !== activeChatCharId));
                           }
                         }}
                         className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-xs transition-colors border border-red-200"
@@ -2880,6 +3261,182 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs transition-colors"
                       >
                         取消
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Disband Group Choice Modal Overlay */}
+              {showDisbandGroupModal && (
+                <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white rounded-3xl p-6 max-w-xs w-full shadow-2xl border border-slate-100 text-center space-y-4 animate-fade-in">
+                    <div className="w-12 h-12 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto">
+                      <Trash2 className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="font-bold text-slate-800 text-sm">解除群聊</h3>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        确定要解除当前群聊吗？解除后该群聊及其所有对话记录和动态将被完全删除，且该操作不可撤销。
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2.5 pt-2">
+                      <button
+                        onClick={async () => {
+                          setShowDisbandGroupModal(false);
+                          setIsCompressingMemory(true);
+                          try {
+                            // Step 1: Extract memories to Memory Vault
+                            const count = await handleExtractMemories();
+                            alert(`成功提取并提炼了 ${count} 条核心群聊记忆存入“记忆书”，群聊已安全解除！`);
+                          } catch (err) {
+                            console.error("Extract memories failed:", err);
+                          } finally {
+                            setIsCompressingMemory(false);
+                          }
+                          // Step 2: Delete character / disband group
+                          if (onDeleteCharacter) {
+                            onDeleteCharacter(activeChatCharId!, true);
+                          }
+                          setIsShowingCardModal(false);
+                          setActiveChatCharId(null);
+                        }}
+                        disabled={isCompressingMemory}
+                        className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm disabled:opacity-50"
+                      >
+                        {isCompressingMemory ? "正在提炼并解除..." : "💡 提炼记忆存入记忆书并解除"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm("确定要直接解除并删除该群聊吗？该操作不可撤销，且不会保存任何记忆。")) {
+                            setShowDisbandGroupModal(false);
+                            if (onDeleteCharacter) {
+                              onDeleteCharacter(activeChatCharId!, true);
+                            }
+                            setIsShowingCardModal(false);
+                            setActiveChatCharId(null);
+                          }
+                        }}
+                        className="w-full py-2.5 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl text-xs transition-colors border border-red-600 shadow-sm"
+                      >
+                        直接彻底解除并删除
+                      </button>
+                      <button
+                        onClick={() => setShowDisbandGroupModal(false)}
+                        className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs transition-colors"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Add Group Member Modal Overlay */}
+              {showAddMemberModal && activeCharacter && (
+                <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white rounded-3xl p-5 shadow-2xl max-w-[320px] w-full flex flex-col max-h-[85%] animate-slide-up border border-slate-100">
+                    
+                    {/* Modal Header */}
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+                      <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                        <Users className="w-4 h-4 text-neutral-800" />
+                        <span>添加群成员</span>
+                      </h3>
+                      <button
+                        onClick={() => {
+                          setShowAddMemberModal(false);
+                          setSelectedAddMemberIds([]);
+                        }}
+                        className="p-1 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Modal Body */}
+                    <div className="flex-1 overflow-y-auto py-3 space-y-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                          选择要添加的成员 ({selectedAddMemberIds.length} 已选)
+                        </label>
+                        {(() => {
+                          const addCandidates = friends.filter(
+                            (c) => !(activeCharacter.memberIds || []).includes(c.id)
+                          );
+                          if (addCandidates.length === 0) {
+                            return (
+                              <p className="text-[10px] text-slate-400 italic py-2 text-center">所有好友都已在此群聊中。</p>
+                            );
+                          }
+                          return (
+                            <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+                              {addCandidates.map((char) => {
+                                const isSelected = selectedAddMemberIds.includes(char.id);
+                                return (
+                                  <div
+                                    key={char.id}
+                                    onClick={() => {
+                                      if (isSelected) {
+                                        setSelectedAddMemberIds(prev => prev.filter(id => id !== char.id));
+                                      } else {
+                                        setSelectedAddMemberIds(prev => [...prev, char.id]);
+                                      }
+                                    }}
+                                    className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                                      isSelected
+                                        ? "bg-neutral-50 border-neutral-950 shadow-sm"
+                                        : "bg-slate-50/50 border-slate-100 hover:bg-slate-50"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <img
+                                        src={char.avatar}
+                                        alt={char.name}
+                                        className="w-7 h-7 rounded-full object-cover bg-slate-100 border border-slate-100 shrink-0"
+                                      />
+                                      <div className="min-w-0">
+                                        <span className="text-[11px] font-bold text-slate-800 block truncate">{char.remark || char.name}</span>
+                                        <span className="text-[9px] text-slate-400 block truncate">{char.mbti || "MBTI"} &bull; {char.personality.substring(0, 15)}...</span>
+                                      </div>
+                                    </div>
+                                    <div className="shrink-0 pl-1.5">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        readOnly
+                                        className="rounded border-slate-300 text-neutral-950 focus:ring-neutral-950 w-3.5 h-3.5 cursor-pointer"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* Modal Footer */}
+                    <div className="pt-3 border-t border-slate-100 shrink-0 flex gap-2">
+                      <button
+                        onClick={() => {
+                          setShowAddMemberModal(false);
+                          setSelectedAddMemberIds([]);
+                        }}
+                        className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all text-center"
+                      >
+                        取消
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleAddGroupMembers(selectedAddMemberIds);
+                          setSelectedAddMemberIds([]);
+                        }}
+                        disabled={selectedAddMemberIds.length === 0}
+                        className="flex-1 py-2 bg-neutral-950 hover:bg-neutral-900 text-white rounded-xl text-xs font-bold transition-all text-center disabled:opacity-40"
+                      >
+                        确定添加
                       </button>
                     </div>
                   </div>
@@ -2983,9 +3540,21 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               const isSelf = msg.sender === "user";
               const prevMsg = idx > 0 ? currentChatMessages[idx - 1] : null;
               const shouldCollapse = settings.collapseConsecutiveAvatars !== false;
-              const isConsecutivePrev = prevMsg && prevMsg.sender === msg.sender;
+              const isConsecutivePrev = !!(
+                prevMsg &&
+                !prevMsg.isNarration &&
+                !msg.isNarration &&
+                prevMsg.sender === msg.sender &&
+                (msg.sender === "user" || !activeCharacter.isGroupChat || (!!msg.senderId && !!prevMsg.senderId && prevMsg.senderId === msg.senderId))
+              );
               const showAvatar = !isConsecutivePrev || !shouldCollapse;
               
+              const groupSenderChar = !isSelf && activeCharacter.isGroupChat && msg.senderId
+                ? (characters.find(c => c.id === msg.senderId) || characters.find(c => c.name === msg.senderId))
+                : null;
+              const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? settings.avatar : activeCharacter.avatar);
+              const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : (activeCharacter.remark || activeCharacter.name);
+
               return (
                 <div
                   key={msg.id}
@@ -3000,12 +3569,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     <div className={`flex items-center gap-2.5 mb-1.5 select-none ${
                       isSelf ? "flex-row-reverse" : "flex-row"
                     }`}>
-                      <img
-                        src={isSelf ? settings.avatar : activeCharacter.avatar}
+                      <RenderAvatar
+                        src={isSelf ? settings.avatar : msgAvatar}
                         alt=""
+                        name={isSelf ? settings.name : msgName}
                         onClick={() => {
                           if (!isSelf) {
-                            setSingleCharacterMomentsId(activeCharacter.id);
+                            setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
                           }
                         }}
                         className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
@@ -3016,7 +3586,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         {!isSelf && (
                           <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
                             <span>🖤</span>
-                            <span>{activeCharacter.remark || activeCharacter.name}</span>
+                            <span>{msgName}</span>
                           </div>
                         )}
                         <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
@@ -3269,9 +3839,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   <div className={`w-full flex flex-col items-start ${isTypingConsecutive ? "mt-1.5" : "mt-4.5"} cv-msg-row message message-container`}>
                     {!isTypingConsecutive && (
                       <div className="flex items-center gap-2.5 mb-1.5 select-none">
-                        <img 
+                        <RenderAvatar 
                           src={activeCharacter.avatar} 
                           alt="" 
+                          name={activeCharacter.remark || activeCharacter.name}
                           className={`w-9 h-9 border object-cover shrink-0 aspect-square avatar ai-avatar ${
                             isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"
                           }`} 
@@ -3953,7 +4524,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   <ChevronLeft className="w-4 h-4 text-slate-700" />
                 </button>
                 <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">聊天 ({chatThreads.length})</h2>
-                <div className="w-8 shrink-0" />
+                <button
+                  onClick={() => {
+                    setGroupNameInput("");
+                    setSelectedGroupMemberIds([]);
+                    setShowCreateGroupModal(true);
+                  }}
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10"
+                  title="发起群聊"
+                >
+                  <Plus className="w-4 h-4 text-slate-700" />
+                </button>
               </div>
 
               {chatThreads.length === 0 ? (
@@ -3981,10 +4562,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
                     {/* Avatar */}
                     <div className="relative shrink-0 mr-3">
-                      <img
-                        src={character.avatar}
+                      <RenderAvatar
+                        src={character.avatar || (character.isGroupChat ? "👥" : "")}
                         alt={character.name}
-                        className="w-11 h-11 rounded-full object-cover bg-slate-100 border border-slate-100 aspect-square"
+                        name={character.remark || character.name}
+                        className="w-11 h-11 rounded-full object-cover bg-slate-100 border border-slate-100 aspect-square flex items-center justify-center text-xl select-none"
                       />
                       {getUnreadCount(character.id) > 0 && (
                         <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 border border-white shadow-sm">
@@ -3998,6 +4580,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       <div className="flex items-center justify-between">
                         <h4 className="text-xs font-bold text-slate-800 truncate">
                           {character.remark || character.name}
+                          {character.isGroupChat && (
+                            <span className="text-slate-400 font-normal ml-1">
+                              ({1 + (character.memberIds?.length || 0)})
+                            </span>
+                          )}
                         </h4>
                         {lastMessage && (
                           <span className="text-[9px] text-slate-400 font-medium">
@@ -4006,7 +4593,22 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         )}
                       </div>
                       <p className="text-[11px] text-slate-500 truncate mt-0.5 leading-normal">
-                        {lastMessage ? lastMessage.content : ""}
+                        {lastMessage ? (
+                          character.isGroupChat ? (
+                            (() => {
+                              if (lastMessage.sender === "user") {
+                                return `我: ${lastMessage.content}`;
+                              }
+                              const senderChar = characters.find(c => c.id === lastMessage.senderId);
+                              const senderName = senderChar ? (senderChar.remark || senderChar.name) : "成员";
+                              return `${senderName}: ${lastMessage.content}`;
+                            })()
+                          ) : (
+                            lastMessage.content
+                          )
+                        ) : (
+                          ""
+                        )}
                       </p>
                     </div>
                   </div>
@@ -4265,7 +4867,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               </button>
 
                               <button
-                                onClick={() => setShowCommentInputMap(prev => ({ ...prev, [mom.id]: !prev[mom.id] }))}
+                                onClick={() => {
+                                  const isOpen = showCommentInputMap[mom.id];
+                                  setShowCommentInputMap(prev => ({ ...prev, [mom.id]: !prev[mom.id] }));
+                                  if (isOpen) {
+                                    setReplyingToCommentMap(prev => {
+                                      const copy = { ...prev };
+                                      delete copy[mom.id];
+                                      return copy;
+                                    });
+                                  }
+                                }}
                                 className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-600 font-semibold transition-colors"
                               >
                                 <MessageCircle className="w-3.5 h-3.5" />
@@ -4292,7 +4904,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                     const commChar = characters.find((c) => c.name === comm.authorName);
                                     const commAuthorName = commChar ? (commChar.remark || commChar.name) : comm.authorName;
                                     return (
-                                      <div key={comm.id} className="leading-relaxed text-slate-800">
+                                      <div
+                                        key={comm.id}
+                                        onClick={() => {
+                                          setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
+                                          setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
+                                        }}
+                                        className="leading-relaxed text-slate-800 cursor-pointer hover:bg-slate-200/50 rounded px-1 transition-colors"
+                                        title={`回复 ${commAuthorName}`}
+                                      >
                                         <span className="font-bold text-[#576b95] mr-1">
                                           {commAuthorName}
                                         </span>
@@ -4314,7 +4934,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                 onChange={(e) =>
                                   setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
                                 }
-                                placeholder="发表评论..."
+                                placeholder={replyingToCommentMap[mom.id] ? `回复（${replyingToCommentMap[mom.id].authorName}）：` : "发表评论..."}
                                 className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") {
@@ -4479,7 +5099,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               activeTab === "moments" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
             }`}
           >
-            <Compass className="w-5 h-5" />
+            <div className="relative">
+              <Compass className="w-5 h-5" />
+              {getUnreadMomentsCount() > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] bg-red-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-0.5 border border-white">
+                  {getUnreadMomentsCount()}
+                </span>
+              )}
+            </div>
             <span>朋友圈</span>
           </button>
 
@@ -4602,7 +5229,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               </button>
 
                               <button
-                                onClick={() => setShowCommentInputMap(prev => ({ ...prev, [mom.id]: !prev[mom.id] }))}
+                                onClick={() => {
+                                  const isOpen = showCommentInputMap[mom.id];
+                                  setShowCommentInputMap(prev => ({ ...prev, [mom.id]: !prev[mom.id] }));
+                                  if (isOpen) {
+                                    setReplyingToCommentMap(prev => {
+                                      const copy = { ...prev };
+                                      delete copy[mom.id];
+                                      return copy;
+                                    });
+                                  }
+                                }}
                                 className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-600 font-semibold transition-colors"
                               >
                                 <MessageCircle className="w-3.5 h-3.5" />
@@ -4629,7 +5266,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                     const commChar = characters.find((c) => c.name === comm.authorName);
                                     const commAuthorName = commChar ? (commChar.remark || commChar.name) : comm.authorName;
                                     return (
-                                      <div key={comm.id} className="leading-relaxed text-slate-800">
+                                      <div
+                                        key={comm.id}
+                                        onClick={() => {
+                                          setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
+                                          setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
+                                        }}
+                                        className="leading-relaxed text-slate-800 cursor-pointer hover:bg-slate-200/50 rounded px-1 transition-colors"
+                                        title={`回复 ${commAuthorName}`}
+                                      >
                                         <span className="font-bold text-[#576b95] mr-1">{commAuthorName}</span>
                                         <span className="text-slate-700">{comm.content}</span>
                                       </div>
@@ -4649,7 +5294,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                 onChange={(e) =>
                                   setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
                                 }
-                                placeholder="发表评论..."
+                                placeholder={replyingToCommentMap[mom.id] ? `回复（${replyingToCommentMap[mom.id].authorName}）：` : "发表评论..."}
                                 className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") {
@@ -4978,6 +5623,163 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
           </div>
         );
       })()}
+
+      {/* Group Chat Creation Modal */}
+      {showCreateGroupModal && (
+        <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-5 shadow-2xl max-w-[320px] w-full flex flex-col max-h-[85%] animate-slide-up border border-slate-100">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-neutral-800" />
+                <span>发起群聊</span>
+              </h3>
+              <button
+                onClick={() => setShowCreateGroupModal(false)}
+                className="p-1 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto py-3 space-y-4">
+              {/* Group Name Input */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">群聊名称</label>
+                <input
+                  type="text"
+                  value={groupNameInput}
+                  onChange={(e) => setGroupNameInput(e.target.value)}
+                  placeholder="例如：周五狂欢组, 开发茶话会..."
+                  className="w-full bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-900 text-xs text-slate-700 placeholder-slate-400 font-medium"
+                />
+              </div>
+
+              {/* Members Selection List */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                  选择群聊成员 ({selectedGroupMemberIds.length} 已选)
+                </label>
+                {friends.length === 0 ? (
+                  <p className="text-[10px] text-slate-400 italic py-2">您还没有可以邀请的好友，请先添加好友。</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                    {friends.map((char) => {
+                      const isSelected = selectedGroupMemberIds.includes(char.id);
+                      return (
+                        <div
+                          key={char.id}
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedGroupMemberIds(prev => prev.filter(id => id !== char.id));
+                            } else {
+                              setSelectedGroupMemberIds(prev => [...prev, char.id]);
+                            }
+                          }}
+                          className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                            isSelected
+                              ? "bg-neutral-50 border-neutral-950 shadow-sm"
+                              : "bg-slate-50/50 border-slate-100 hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <img
+                              src={char.avatar}
+                              alt={char.name}
+                              className="w-7 h-7 rounded-full object-cover bg-slate-100 border border-slate-100 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <span className="text-[11px] font-bold text-slate-800 block truncate">{char.remark || char.name}</span>
+                              <span className="text-[9px] text-slate-400 block truncate">{char.mbti || "MBTI"} &bull; {char.personality.substring(0, 15)}...</span>
+                            </div>
+                          </div>
+                          <div className="shrink-0 pl-1.5">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              readOnly
+                              className="rounded border-slate-300 text-neutral-950 focus:ring-neutral-950 w-3.5 h-3.5 cursor-pointer"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-slate-100 shrink-0 flex gap-2">
+              <button
+                onClick={() => setShowCreateGroupModal(false)}
+                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all text-center"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (selectedGroupMemberIds.length < 1) {
+                    alert("请至少选择一位群聊好友！");
+                    return;
+                  }
+                  const finalGroupName = groupNameInput.trim() || `群聊(${selectedGroupMemberIds.length + 1})`;
+                  const newGroupId = `group-${Date.now()}`;
+                  
+                  // Construct group character object
+                  const groupChar: Character = {
+                    id: newGroupId,
+                    name: finalGroupName,
+                    avatar: "👥",
+                    personality: `微信群聊：${finalGroupName}。`,
+                    backstory: `这是一个微信群聊，群名是「${finalGroupName}」。群内成员包括机主（${settings.name}）以及以下虚拟伙伴：${selectedGroupMemberIds.map(id => {
+                      const c = characters.find(char => char.id === id);
+                      return c ? (c.remark || c.name) : "";
+                    }).filter(Boolean).join("、")}。`,
+                    isGroupChat: true,
+                    memberIds: selectedGroupMemberIds,
+                  };
+
+                  // Save
+                  onSaveCharacter(groupChar);
+
+                  // Create initial narration message
+                  const invitedNames = selectedGroupMemberIds.map(id => {
+                    const c = characters.find(char => char.id === id);
+                    return c ? (c.remark || c.name) : "";
+                  }).filter(Boolean).join("、");
+
+                  const initialNarration: Message = {
+                    id: `group-narrate-${Date.now()}`,
+                    characterId: newGroupId,
+                    sender: "character",
+                    isNarration: true,
+                    content: `您邀请了 ${invitedNames} 加入了群聊`,
+                    timestamp: Date.now() - 1000,
+                  };
+                  onSendMessage(initialNarration);
+
+                  // Close and switch to the new group chat
+                  setShowCreateGroupModal(false);
+                  startChatWith(newGroupId);
+
+                  // Automatically trigger welcoming greetings after a short delay
+                  setTimeout(() => {
+                    generateResponseForGroupChat(null, [initialNarration]);
+                  }, 800);
+                }}
+                disabled={selectedGroupMemberIds.length < 1}
+                className="flex-1 py-2 bg-neutral-950 hover:bg-neutral-900 text-white disabled:bg-slate-200 disabled:text-slate-400 rounded-xl text-xs font-bold transition-all text-center"
+              >
+                创建群聊
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Long Press Bubble Context Menu */}
       {activeMenuMsg && (

@@ -32,12 +32,15 @@ export interface Character {
   disableBracketActions?: boolean;
   historyMemoryLimit?: number;
   enableTimeAwareness?: boolean;
+  isGroupChat?: boolean;
+  memberIds?: string[];
 }
 
 export interface Message {
   id: string;
   characterId: string;
   sender: "user" | "character";
+  senderId?: string;
   content: string;
   timestamp: number;
   isBookmarked?: boolean;
@@ -154,6 +157,7 @@ export interface UserSettings {
   selfBubbleRadius?: number;
   selfBubbleOpacity?: number;
   collapseConsecutiveAvatars?: boolean;
+  hideHomeWelcomeWidget?: boolean;
 }
 
 export interface ApiPreset {
@@ -179,7 +183,7 @@ export interface HomeScreenItem {
   id: string;
   type: "app" | "widget";
   widgetType?: "album" | "music" | "anniversary" | "todo";
-  size: "1x1" | "2x2";
+  size: "1x1" | "2x2" | "1x4" | "2x4";
   page: number;
 }
 
