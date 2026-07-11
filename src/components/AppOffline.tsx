@@ -51,7 +51,14 @@ export default function AppOffline({
   
   // Creation modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedCharIds, setSelectedCharIds] = useState<string[]>([]);
   const [newTitle, setNewTitle] = useState("");
+
+  useEffect(() => {
+    if (showCreateModal) {
+      setSelectedCharIds([selectedCharId]);
+    }
+  }, [showCreateModal, selectedCharId]);
   const [newMode, setNewMode] = useState<"director" | "continue" | "if">("director");
   const [newIfPrompt, setNewIfPrompt] = useState("");
   const [newStartFromChat, setNewStartFromChat] = useState<boolean>(false);
@@ -70,7 +77,18 @@ export default function AppOffline({
   };
 
   const selectedChar = characters.find(c => c.id === selectedCharId) || characters[0];
-  const charStories = offlineStories.filter(s => s.characterId === selectedCharId);
+  const charStories = offlineStories.filter(s => 
+    s.characterId === selectedCharId || (s.characterIds && s.characterIds.includes(selectedCharId))
+  );
+
+  const storyChars = activeStory 
+    ? (activeStory.characterIds && activeStory.characterIds.length > 0 
+        ? characters.filter(c => activeStory.characterIds?.includes(c.id))
+        : [selectedChar])
+    : [selectedChar];
+
+  const storyCharNamesLabel = storyChars.map(c => c.remark || c.name).join("、");
+  const firstActorLabel = storyChars.length > 1 ? "角色们" : (selectedChar.remark || selectedChar.name);
 
   const workspaceEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -117,8 +135,10 @@ export default function AppOffline({
       return;
     }
 
+    const storyCharsList = characters.filter(c => selectedCharIds.includes(c.id));
+    const charsLabel = storyCharsList.map(c => c.remark || c.name).join("、");
     const modeLabel = newMode === "director" ? "导演剧本" : newMode === "if" ? "IF假想线" : "续写故事";
-    const titleToUse = newTitle.trim() || `「${selectedChar.name}」的${modeLabel} - ${new Date().toLocaleDateString()}`;
+    const titleToUse = newTitle.trim() || `「${charsLabel}」的${modeLabel} - ${new Date().toLocaleDateString()}`;
 
     let initialMessages: Message[] = [];
 
@@ -147,6 +167,7 @@ export default function AppOffline({
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: selectedCharId,
+      characterIds: selectedCharIds.length > 0 ? selectedCharIds : [selectedCharId],
       title: titleToUse,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -190,30 +211,42 @@ export default function AppOffline({
     
     // Create a summarized memory of this offline development
     const lastMsgs = story.messages.slice(-5);
+    const storyCharsList = story.characterIds && story.characterIds.length > 0 
+      ? characters.filter(c => story.characterIds?.includes(c.id))
+      : [selectedChar];
+
+    const formattedCharsList = storyCharsList.map(c => c.remark || c.name).join("、");
     const summaryText = lastMsgs
-      .map(m => m.isNarration ? `[旁白描述] ${m.content}` : `[对话] ${m.sender === "user" ? "我" : selectedChar.name}: ${m.content}`)
+      .map(m => m.isNarration ? `[旁白描述] ${m.content}` : `[对话] ${m.sender === "user" ? "我" : "角色"}: ${m.content}`)
       .join(" \n");
 
-    const newMemoryContent = `[线下剧本《${story.title}》记忆同步]: 在离线虚构走向中发生：\n${summaryText}`;
+    const newMemoryContent = `[线下剧本《${story.title}》（参与者: ${formattedCharsList}）记忆同步]: 在离线虚构走向中发生：\n${summaryText}`;
 
-    // Avoid duplicates
-    const isDup = memories.some(m => m.characterId === selectedChar.id && m.content.includes(`《${story.title}》`));
-    if (isDup) {
-      showToast("最近进展已同步，无需重复同步");
-      return;
+    // Sync to all participating characters
+    const newMems = [...memories];
+    let syncedCount = 0;
+    storyCharsList.forEach(char => {
+      const isDup = memories.some(m => m.characterId === char.id && m.content.includes(`《${story.title}》`));
+      if (!isDup) {
+        const memoryItem: MemoryItem = {
+          id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          characterId: char.id,
+          content: newMemoryContent,
+          timestamp: Date.now(),
+          importance: 7,
+          isManual: true
+        };
+        newMems.unshift(memoryItem);
+        syncedCount++;
+      }
+    });
+
+    if (syncedCount > 0) {
+      onSaveMemories(newMems);
+      showToast(`剧情记忆已成功同步至 ${syncedCount} 位参与角色的主大脑！`);
+    } else {
+      showToast("所有角色的最近进展已同步，无需重复同步");
     }
-
-    const memoryItem: MemoryItem = {
-      id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      characterId: selectedChar.id,
-      content: newMemoryContent,
-      timestamp: Date.now(),
-      importance: 7,
-      isManual: true
-    };
-
-    onSaveMemories([memoryItem, ...memories]);
-    showToast("剧情记忆已成功同步至人物主大脑！");
   };
 
   // Delete individual plot record
@@ -253,22 +286,33 @@ export default function AppOffline({
         isOffline: true,
         isNarration: inputNarration
       };
-
-      updatedStory.messages = [...updatedStory.messages, userMsg];
-      updatedStory.updatedAt = Date.now();
+      updatedStory = {
+        ...activeStory,
+        messages: [...activeStory.messages, userMsg],
+        updatedAt: Date.now()
+      };
       onSaveOfflineStory(updatedStory);
       setActiveStory(updatedStory);
       setInputText("");
     }
 
-    // 2. Trigger AI Generation
     setIsGenerating(true);
+
     try {
       // Assemble history context
-      const historyContext = updatedStory.messages.map(m => ({
-        role: m.sender === "user" ? "user" : "model",
-        text: m.isNarration ? `(客观旁白) ${m.content}` : `${m.sender === "user" ? "我" : selectedChar.name}: “${m.content}”`
-      }));
+      const historyContext = updatedStory.messages.map(m => {
+        if (m.sender === "user") {
+          return {
+            role: "user",
+            text: m.isNarration ? `(客观旁白) ${m.content}` : `我: “${m.content}”`
+          };
+        } else {
+          return {
+            role: "model",
+            text: m.content
+          };
+        }
+      });
 
       // Assemble World Book context-aware trigger scanning
       const scanContextParts = [
@@ -276,34 +320,50 @@ export default function AppOffline({
         ...(updatedStory.messages || []).slice(-3).map(m => m.content)
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
-      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], selectedChar.id, scanText);
-      const wbPrompt = wbBlocks.formattedAll;
+
+      // We can collect worldbook blocks for all story characters
+      const storyCharsList = updatedStory.characterIds && updatedStory.characterIds.length > 0 
+        ? characters.filter(c => updatedStory.characterIds?.includes(c.id))
+        : [selectedChar];
+
+      const wbPrompts = storyCharsList.map(char => {
+        const blocks = buildWorldBookSystemBlocks(worldBookEntries || [], char.id, scanText);
+        return blocks.formattedAll ? `【${char.remark || char.name} 的世界书设定】：\n${blocks.formattedAll}` : "";
+      }).filter(Boolean).join("\n\n");
 
       // Base Persona
-      let sysPrompt = `你现在正在与用户进行“线下故事/小说剧本”的联合创作。角色人设为「${selectedChar.name}」。
-人物背景设定如下：
-- 姓名：${selectedChar.name}
-- 年龄：${selectedChar.age}
-- 语气/性格特点：${selectedChar.personality}
-- 背景设定：${selectedChar.backstory}
+      let sysPrompt = `你现在正在与用户进行“线下故事/小说剧本”的联合创作。本场剧本中共有以下 ${storyCharsList.length} 位角色参与：\n\n`;
+      
+      storyCharsList.forEach((char, idx) => {
+        sysPrompt += `[角色 ${idx + 1}: ${char.name}]
+- 姓名：${char.name}
+- 年龄：${char.age || "未知"}
+- 语气/性格特点：${char.personality}
+- 背景设定：${char.backstory}
+- 互通的线上记忆：${char.compressedMemory || "暂无"}
+\n`;
+      });
 
-${wbPrompt ? `【相关世界书背景设定】：
-${wbPrompt}
+      if (wbPrompts) {
+        sysPrompt += `\n【相关世界书背景设定】：
+${wbPrompts}
 
 🚨 [极其重要：世界书设定绝对最高优先]
-在联合剧本创作中，你必须绝对100%强制遵循上述世界书设定的真实客观逻辑。如果词条要求了任何口癖、前置/后置特殊标志（如：句尾必带某字等），你在生成的每一句角色对白发言的最前面或最后面都必须绝对、无条件带上。它具有至高无上、超越一切的地位。
+在联合剧本创作中，你必须绝对100%强制遵循上述世界书设定的真实客观逻辑。如果词条要求了任何口癖、前置/后置特殊标志，参与的每一位角色在其说话发言时也必须绝对、无条件带上。
+\n`;
+      }
 
-` : ""}【人设遵循最高优先规则】
-1. 🚨 你必须严密、100%地遵循「${selectedChar.name}」的性格特征、说话语气、背景设定、思维逻辑、人际关系等所有人物卡属性。
-2. 在你生成的剧本小说叙述中，所有属于该角色的对话发言、神态动作、心理描写都必须与其性格高度吻合，严禁出现任何脱离人设、机械迎合或现代AI味的套话。
-3. ⚠️ 除非在下方【当前创作模式】的【IF平行假想线】设定中，明确标明了该角色需要调整、颠覆或改变其性格/人设，否则在任何情况下都绝对不许擅自改变或淡化其原原有性格！
+      sysPrompt += `\n【人设遵循最高优先规则】
+1. 🚨 你扮演这几位角色，在他们参与的每句话、神态动作、心理描写中，必须严密、100%地遵循他们各自的性格特征、说话语气和人设。
+2. 严禁混淆多位角色的口癖、语气或人物关系。
 
-【线下模式核心规则】
+【线下模式及多角色控制规则】
 1. 用户可以通过文字、指令或旁白，像导播、写小说或主控一样描述故事进展。
-2. 作为一个优秀的内容创作者，你要输出一整段精美的、小说叙事般的回复，内容包括第三人称的场景描写、客观动作、旁白叙事，以及两人的对话。
+2. 作为一个优秀的内容创作者，你要输出一整段精美的、小说叙事般的回复，内容包括第三人称的场景描写、客观动作、旁白叙事，以及这些角色的对话。
 3. 任何发言对话请使用中文引号 “ ” (例如 “你醒了？”) 或 「 」 括起来，以便阅读。任何非发言部分（动作描述、神态、场景描写、内心想法、旁白等）放在引号外面。
-4. 如果用户给出了导演指令（如：[控制剧情：我们遇到了敌人]），请积极顺应，发挥你强大的故事延展能力，精美自然地推进剧情。
-5. 必须保持极高的人设契合度、动作细节和情感氛围描写。不要说任何破戏（OOC）的话，不要说你是AI。
+4. 确保在对话中，通过在引号前或文中清晰提及名字（例如：A冷笑了一声：“...” / B有些局促地拍了拍衣角：“...”）来指明是谁在说话，使读者能一眼分辨。
+5. 必须保持极高的人设契合度、动作细节 and 情感氛围描写。不要说任何破戏（OOC）的话，不要说你是AI。
+6. 如果用户给出了导演指令（如：[控制剧情：我们遇到了敌人]），请积极顺应，发挥你强大的故事延展能力，精美自然地推进剧情。
 
 【当前创作模式】：`;
 
@@ -317,21 +377,34 @@ ${wbPrompt}
         sysPrompt += `\n【续写模式】：以现有的聊天/故事为草稿，根据设定和目前的逻辑走向，续写故事的精彩发展。`;
       }
 
-      // Recall memories from vault
-      const relevantMems = getRelevantMemories(memories, selectedChar.id, text || "续写故事", 5);
-      if (relevantMems.length > 0) {
-        sysPrompt += `\n\n【互通的线上记忆库】：以下是你们曾在线上聊天中发生并提取的核心事实，请将其有机融入作为故事的背景事实支撑：\n${relevantMems.map(m => `* ${m.content}`).join("\n")}`;
+      // Recall memories from vault for all participating characters
+      const allMemoriesParts: string[] = [];
+      storyCharsList.forEach(char => {
+        const relevantMems = getRelevantMemories(memories, char.id, text || "续写故事", 3);
+        if (relevantMems.length > 0) {
+          const lines = relevantMems.map(m => `  - ${m.content}`).join("\n");
+          allMemoriesParts.push(`* 【${char.remark || char.name}】的线上记忆库事实：\n${lines}`);
+        }
+      });
+      if (allMemoriesParts.length > 0) {
+        sysPrompt += `\n\n【互通的线上记忆库】：以下是各个参与角色的线上对话中发生并提取的核心事实，请将其有机融入作为故事的背景事实支撑：\n${allMemoriesParts.join("\n")}`;
       }
 
-      // Recall online chat history
-      const onlineMsgs = (messages || [])
-        .filter(m => m.characterId === selectedChar.id && !m.isOffline)
-        .slice(-20);
-      if (onlineMsgs.length > 0) {
-        const onlineHistoryLines = onlineMsgs.map(m => `* ${m.sender === "user" ? "我" : selectedChar.name}: ${m.content}`).join("\n");
+      // Recall online chat history for all participating characters
+      const chatContextParts: string[] = [];
+      storyCharsList.forEach(char => {
+        const onlineMsgs = (messages || [])
+          .filter(m => m.characterId === char.id && !m.isOffline)
+          .slice(-10);
+        if (onlineMsgs.length > 0) {
+          const lines = onlineMsgs.map(m => `  - ${m.sender === "user" ? "我" : char.remark || char.name}: ${m.content}`).join("\n");
+          chatContextParts.push(`* 【与 ${char.remark || char.name}】的最新线上聊天：\n${lines}`);
+        }
+      });
+      if (chatContextParts.length > 0) {
         sysPrompt += `\n\n【互通的线上最新对话记忆（Online Chat Context）】：
-以下是你们最近在微信（线上聊天）中的最新真实对话。这些是你们当下关系的最新现状与真实记忆。请确保线下小说剧本的走向与其认知保持连贯和融合，避免发生剧情上的冲突：
-${onlineHistoryLines}`;
+以下是各位参与角色最近在微信（线上聊天）中的最新真实对话。这些是你们当下关系的最新现状与真实记忆。请确保线下小说剧本的走向与其认知保持连贯和融合，避免发生剧情上的冲突：
+${chatContextParts.join("\n")}`;
       }
 
       const lastUserMsgText = text || "请继续编织并续写这幕场景。";

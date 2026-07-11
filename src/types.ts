@@ -214,6 +214,7 @@ export interface ImmediateSummaryTask {
 export interface OfflineStory {
   id: string;
   characterId: string;
+  characterIds?: string[];
   title: string;
   createdAt: number;
   updatedAt: number;
