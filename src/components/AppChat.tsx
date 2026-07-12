@@ -586,6 +586,10 @@ export default function AppChat({
   const [redPacketGreeting, setRedPacketGreeting] = useState("恭喜发财，万事如意");
   const [showRedPacketOpenModal, setShowRedPacketOpenModal] = useState<boolean>(false);
   const [openRedPacketDetail, setOpenRedPacketDetail] = useState<{ amount: string; greeting: string } | null>(null);
+  const [openTransferDetail, setOpenTransferDetail] = useState<{ amount: string; memo: string; isConfirmed: boolean } | null>(null);
+  const [showTransferDetailModal, setShowTransferDetailModal] = useState<boolean>(false);
+  const [openVoiceId, setOpenVoiceId] = useState<string | null>(null);
+  const [voiceTimer, setVoiceTimer] = useState<any>(null);
 
   // Memory Compression and Proactive Chat states
   const [isCompressingMemory, setIsCompressingMemory] = useState(false);
@@ -2551,49 +2555,37 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               ${settings.bubbleTailEnabled ? `
                 #conv-screen .chat-bubble-self::after {
-                  content: '';
+                  content: '' !important;
+                  display: block !important;
                   position: absolute;
                   width: 0;
                   height: 0;
                   border-style: solid;
                   border-width: 6px;
                   border-color: transparent transparent transparent ${settings.selfBubbleBg || '#18181b'};
-                  ${settings.bubblePosition === 'above' ? `
-                    top: -12px;
-                    right: 12px;
-                    border-color: transparent transparent ${settings.selfBubbleBg || '#18181b'} transparent;
-                  ` : settings.bubblePosition === 'below' ? `
-                    bottom: -12px;
-                    right: 12px;
-                    border-color: ${settings.selfBubbleBg || '#18181b'} transparent transparent transparent;
-                  ` : `
-                    right: -11px;
-                    ${settings.bubbleTailVertical === 'top' ? 'top: 8px;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px;' : 'top: calc(50% - 6px);'}
-                  `}
+                  right: -11px;
+                  ${settings.bubbleTailVertical === 'top' ? 'top: 8px; bottom: auto;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px; top: auto;' : 'top: calc(50% - 6px); bottom: auto;'}
                 }
 
                 #conv-screen .chat-bubble-other::after {
-                  content: '';
+                  content: '' !important;
+                  display: block !important;
                   position: absolute;
                   width: 0;
                   height: 0;
                   border-style: solid;
                   border-width: 6px;
                   border-color: transparent ${settings.otherBubbleBg || '#f4f4f5'} transparent transparent;
-                  ${settings.bubblePosition === 'above' ? `
-                    top: -12px;
-                    left: 12px;
-                    border-color: transparent transparent ${settings.otherBubbleBg || '#f4f4f5'} transparent;
-                  ` : settings.bubblePosition === 'below' ? `
-                    bottom: -12px;
-                    left: 12px;
-                    border-color: ${settings.otherBubbleBg || '#f4f4f5'} transparent transparent transparent;
-                  ` : `
-                    left: -11px;
-                    ${settings.bubbleTailVertical === 'top' ? 'top: 8px;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px;' : 'top: calc(50% - 6px);'}
-                  `}
+                  left: -11px;
+                  ${settings.bubbleTailVertical === 'top' ? 'top: 8px; bottom: auto;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px; top: auto;' : 'top: calc(50% - 6px); bottom: auto;'}
                 }
-              ` : ''}
+              ` : `
+                #conv-screen .chat-bubble-self::after,
+                #conv-screen .chat-bubble-other::after {
+                  content: none !important;
+                  display: none !important;
+                }
+              `}
 
               ${settings.otherBubbleBg ? `
                 #conv-screen .chat-bubble-other,
@@ -3743,20 +3735,218 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? settings.avatar : activeCharacter.avatar);
               const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : (activeCharacter.remark || activeCharacter.name);
 
-              return (
-                <div
-                  key={msg.id}
-                  className={`w-full flex flex-col ${
-                    isSelf ? "items-end" : "items-start"
-                  } ${
-                    (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
-                  } cv-msg-row message message-container`}
-                >
-                  {/* Avatar + Meta Header */}
-                  {showAvatar && (
-                    <div className={`flex items-center gap-2.5 mb-1.5 select-none ${
-                      isSelf ? "flex-row-reverse" : "flex-row"
-                    }`}>
+              const renderBubbleInner = () => {
+                return (
+                  <div 
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setActiveMenuMsg(msg);
+                      setMenuPosition({ x: e.clientX, y: e.clientY });
+                    }}
+                    onPointerDown={(e) => {
+                      if (e.pointerType === "mouse" && e.button !== 0) return;
+                      const clientX = e.clientX;
+                      const clientY = e.clientY;
+                      const timer = setTimeout(() => {
+                        setActiveMenuMsg(msg);
+                        setMenuPosition({ x: clientX, y: clientY });
+                      }, 500);
+                      (e.currentTarget as any)._longPressTimer = timer;
+                    }}
+                    onPointerUp={(e) => {
+                      const timer = (e.currentTarget as any)._longPressTimer;
+                      if (timer) clearTimeout(timer);
+                    }}
+                    onPointerCancel={(e) => {
+                      const timer = (e.currentTarget as any)._longPressTimer;
+                      if (timer) clearTimeout(timer);
+                    }}
+                    onPointerLeave={(e) => {
+                      const timer = (e.currentTarget as any)._longPressTimer;
+                      if (timer) clearTimeout(timer);
+                    }}
+                    className="flex items-center gap-1 group relative cursor-pointer select-none"
+                  >
+                    {/* Actual chat bubble */}
+                    <div className="max-w-full">
+                      {msg.content.startsWith("data:image/") ? (
+                        <img
+                          src={msg.content}
+                          alt="chat-pic"
+                          className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
+                        />
+                      ) : msg.content.startsWith("[红包]") ? (() => {
+                        const [_, amount, greeting] = msg.content.split("|");
+                        return (
+                          <div 
+                            onClick={() => {
+                              setOpenRedPacketDetail({ amount: amount || "8.88", greeting: greeting || "恭喜发财" });
+                              setShowRedPacketOpenModal(true);
+                            }}
+                            className={`bg-[#fff6f5] border border-[#fecdd3]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#fff0ef] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
+                              isSelf ? "transfer-card" : "received-transfer-card"
+                            }`}
+                          >
+                            <div className="p-3.5 flex items-center gap-3 cv-transfer-body transfer-body">
+                              <div className="w-9 h-9 bg-[#e15241]/10 rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold text-[#e15241] shadow-inner cv-transfer-status transfer-icon confirm-icon">
+                                🧧
+                              </div>
+                              <div className="flex-1 min-w-0 text-left">
+                                <p className="text-xs font-bold text-stone-800 truncate">{greeting || "恭喜发财，万事如意"}</p>
+                                <p className="text-[10px] text-[#e15241] font-bold mt-0.5 cv-transfer-amount transfer-amount">查看红包</p>
+                              </div>
+                            </div>
+                            <div className="px-3.5 py-2 bg-stone-50 text-stone-400 text-[9px] font-bold flex items-center justify-between border-t border-rose-100/50 cv-transfer-ribbon transfer-status select-none">
+                              <span className="font-semibold text-stone-400">微信红包</span>
+                              <span className="font-mono text-stone-400/80">金额 ¥{amount || "8.88"}</span>
+                            </div>
+                          </div>
+                        );
+                      })() : msg.content.startsWith("[转账]") ? (() => {
+                        const [_, amount, memo, isConfirmedStr] = msg.content.split("|");
+                        const isConfirmed = isConfirmedStr === "true";
+                        return (
+                          <div 
+                            onClick={() => {
+                              setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
+                              setShowTransferDetailModal(true);
+                            }}
+                            className={`bg-[#fdfcfb] border border-[#f5ebe0]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#faf5f0] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
+                              isSelf ? "transfer-card" : "received-transfer-card"
+                            }`}
+                          >
+                            <div className="p-3.5 flex items-center gap-3 cv-transfer-body transfer-body">
+                              <div className={`w-9 h-9 ${isConfirmed ? "bg-orange-500/10 text-orange-500" : "bg-amber-500/10 text-amber-500"} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner cv-transfer-status transfer-icon confirm-icon`}>
+                                💸
+                              </div>
+                              <div className="flex-1 min-w-0 text-left">
+                                <p className="text-xs font-bold text-stone-800 truncate">¥{amount || "100.00"}</p>
+                                <p className="text-[10px] text-stone-400 mt-0.5 truncate">{memo || "转账"}</p>
+                              </div>
+                            </div>
+                            <div className="px-3.5 py-2 bg-stone-50 text-stone-400 text-[9px] font-bold flex items-center justify-between border-t border-orange-50 cv-transfer-ribbon transfer-status select-none">
+                              <span className="font-semibold text-stone-400">微信转账</span>
+                              <span className={`font-semibold ${isConfirmed ? "text-green-600" : "text-amber-600"}`}>
+                                {isConfirmed ? "已收钱" : "待接收"}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })() : msg.content.startsWith("[语音]") ? (() => {
+                        const [_, durationStr] = msg.content.split("|");
+                        const duration = parseInt(durationStr || "3", 10);
+                        const isPlaying = openVoiceId === msg.id;
+                        return (
+                          <div 
+                            onClick={() => {
+                              if (isPlaying) {
+                                setOpenVoiceId(null);
+                                if (voiceTimer) clearInterval(voiceTimer);
+                              } else {
+                                setOpenVoiceId(msg.id);
+                                let countdown = duration;
+                                if (voiceTimer) clearInterval(voiceTimer);
+                                const interval = setInterval(() => {
+                                  countdown -= 1;
+                                  if (countdown <= 0) {
+                                    setOpenVoiceId(null);
+                                    clearInterval(interval);
+                                  }
+                                }, 1000);
+                                setVoiceTimer(interval);
+                              }
+                            }}
+                            className={`px-3 py-2 text-xs font-semibold rounded-2xl shadow-sm cursor-pointer select-none transition-all flex items-center gap-1.5 border border-slate-100/40 voice-message-bar ${
+                              isSelf 
+                                ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self") 
+                                : (isFloatingCute ? "bg-white text-[#222] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other")
+                            }`}
+                            style={{ width: `${60 + duration * 12}px`, minWidth: "70px", maxWidth: "180px" }}
+                          >
+                            <span className="text-[13px] leading-none">{isPlaying ? "🔊" : "🔉"}</span>
+                            <span className="font-mono text-[10px] ml-auto opacity-70">{duration}"</span>
+                            <div className="cv-bubble-tail hidden" />
+                          </div>
+                        );
+                      })() : (
+                        <div
+                          className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble ${
+                            isSelf
+                              ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
+                              : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
+                          }`}
+                        >
+                          <div className="text-left">{msg.content}</div>
+                          <div className="cv-bubble-tail hidden" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              };
+
+              if (settings.bubblePosition === "below") {
+                return (
+                  <div
+                    key={msg.id}
+                    className={`w-full flex flex-col ${
+                      isSelf ? "items-end" : "items-start"
+                    } ${
+                      (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
+                    } cv-msg-row message message-container`}
+                  >
+                    {/* Avatar + Meta Header */}
+                    {showAvatar && (
+                      <div className={`flex items-center gap-2.5 mb-1.5 select-none ${
+                        isSelf ? "flex-row-reverse" : "flex-row"
+                      }`}>
+                        <RenderAvatar
+                          src={isSelf ? settings.avatar : msgAvatar}
+                          alt=""
+                          name={isSelf ? settings.name : msgName}
+                          onClick={() => {
+                            if (!isSelf) {
+                              setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
+                            }
+                          }}
+                          className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
+                            isSelf ? "user-avatar" : "ai-avatar"
+                          } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
+                        />
+                        <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header`}>
+                          {!isSelf && (
+                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
+                              <span>🖤</span>
+                              <span>{msgName}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
+                            <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                            <span>•</span>
+                            <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Message Bubble Block */}
+                    <div className="max-w-[85%]">
+                      {renderBubbleInner()}
+                    </div>
+                  </div>
+                );
+              } else {
+                return (
+                  <div
+                    key={msg.id}
+                    className={`w-full flex gap-2.5 ${
+                      isSelf ? "flex-row-reverse items-start justify-start" : "flex-row items-start justify-start"
+                    } ${
+                      (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
+                    } cv-msg-row message message-container`}
+                  >
+                    {/* Avatar */}
+                    {showAvatar ? (
                       <RenderAvatar
                         src={isSelf ? settings.avatar : msgAvatar}
                         alt=""
@@ -3770,247 +3960,34 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           isSelf ? "user-avatar" : "ai-avatar"
                         } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
                       />
-                      <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header`}>
-                        {!isSelf && (
-                          <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
-                            <span>🖤</span>
-                            <span>{msgName}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
-                          <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
-                          <span>•</span>
-                          <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="w-9 h-9 shrink-0" />
+                    )}
 
-                  {/* Message Bubble Block */}
-                  <div className="max-w-[85%]">
-                    <div 
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setActiveMenuMsg(msg);
-                        setMenuPosition({ x: e.clientX, y: e.clientY });
-                      }}
-                      onPointerDown={(e) => {
-                        if (e.pointerType === "mouse" && e.button !== 0) return;
-                        const clientX = e.clientX;
-                        const clientY = e.clientY;
-                        const timer = setTimeout(() => {
-                          setActiveMenuMsg(msg);
-                          setMenuPosition({ x: clientX, y: clientY });
-                        }, 500);
-                        (e.currentTarget as any)._longPressTimer = timer;
-                      }}
-                      onPointerUp={(e) => {
-                        const timer = (e.currentTarget as any)._longPressTimer;
-                        if (timer) clearTimeout(timer);
-                      }}
-                      onPointerCancel={(e) => {
-                        const timer = (e.currentTarget as any)._longPressTimer;
-                        if (timer) clearTimeout(timer);
-                      }}
-                      onPointerLeave={(e) => {
-                        const timer = (e.currentTarget as any)._longPressTimer;
-                        if (timer) clearTimeout(timer);
-                      }}
-                      className="flex items-center gap-1 group relative cursor-pointer select-none"
-                    >
-                      {/* Actual chat bubble */}
+                    {/* Meta Header + Message Bubble Column */}
+                    <div className={`flex flex-col max-w-[80%] ${isSelf ? "items-end" : "items-start"}`}>
+                      {showAvatar && (
+                        <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 mb-1 space-y-0.5 msg-meta-header`}>
+                          {!isSelf && (
+                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
+                              <span>🖤</span>
+                              <span>{msgName}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
+                            <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                            <span>•</span>
+                            <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </div>
+                        </div>
+                      )}
                       <div className="max-w-full">
-                        {msg.content.startsWith("data:image/") ? (
-                          <img
-                            src={msg.content}
-                            alt="chat-pic"
-                            className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
-                          />
-                        ) : msg.content.startsWith("[红包]") ? (() => {
-                          const [_, amount, greeting] = msg.content.split("|");
-                          return (
-                            <div 
-                              onClick={() => {
-                                setOpenRedPacketDetail({ amount: amount || "8.88", greeting: greeting || "恭喜发财" });
-                                setShowRedPacketOpenModal(true);
-                              }}
-                              className={`bg-[#fff6f5] border border-[#fecdd3]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#fff0ef] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
-                                isSelf ? "transfer-card" : "received-transfer-card"
-                              }`}
-                            >
-                              <div className="p-3.5 flex items-center gap-3 cv-transfer-body transfer-body">
-                                <div className="w-9 h-9 bg-[#e15241]/10 rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold text-[#e15241] shadow-inner cv-transfer-status transfer-icon confirm-icon">
-                                  🧧
-                                </div>
-                                <div className="flex-1 min-w-0 text-left">
-                                  <p className="text-xs font-bold text-stone-800 truncate">{greeting || "恭喜发财，万事如意"}</p>
-                                  <p className="text-[10px] text-[#e15241] font-bold mt-0.5 cv-transfer-amount transfer-amount">查看红包</p>
-                                </div>
-                              </div>
-                              <div className="px-3.5 py-2 bg-stone-50 text-stone-400 text-[9px] font-bold flex items-center justify-between border-t border-rose-100/50 cv-transfer-ribbon transfer-status select-none">
-                                <span className="font-semibold text-stone-400">微信红包</span>
-                                <span className="font-mono text-stone-400/80">金额 ¥{amount || "8.88"}</span>
-                              </div>
-                            </div>
-                          );
-                        })() : msg.content.startsWith("[音乐]") ? (() => {
-                          const [_, songTitle, artist] = msg.content.split("|");
-                          return (
-                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 p-3 flex items-center gap-3 shadow-sm cv-bubble">
-                              <div className="w-10 h-10 bg-gradient-to-tr from-amber-500 to-yellow-400 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm animate-pulse">
-                                <Music className="w-5 h-5" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-bold text-stone-900 truncate">{songTitle || "神秘音乐"}</p>
-                                <p className="text-[10px] text-stone-400 truncate mt-0.5">{artist || "未知歌手"}</p>
-                              </div>
-                              <div className="flex flex-col gap-0.5 shrink-0 text-amber-500 animate-pulse">
-                                <div className="w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
-                                <div className="w-1.5 h-3 bg-amber-500 rounded-full"></div>
-                                <div className="w-1.5 h-2 bg-amber-500 rounded-full"></div>
-                              </div>
-                            </div>
-                          );
-                        })() : msg.content.startsWith("[位置]") ? (() => {
-                          const [_, locName] = msg.content.split("|");
-                          return (
-                            <div className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 overflow-hidden shadow-sm cv-bubble">
-                              <div className="p-3">
-                                <p className="text-xs font-bold text-stone-900 truncate flex items-center gap-1">
-                                  <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                                  <span>{locName || "未知位置"}</span>
-                                </p>
-                                <p className="text-[10px] text-stone-400 mt-1 truncate">共享的实时地理位置</p>
-                              </div>
-                              <div className="h-16 bg-slate-100 relative flex items-center justify-center overflow-hidden border-t border-stone-100">
-                                <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px]"></div>
-                                <div className="absolute top-2 left-0 right-0 h-0.5 bg-slate-200 rotate-12"></div>
-                                <div className="absolute top-8 left-0 right-0 h-0.5 bg-slate-200 -rotate-6"></div>
-                                <div className="absolute top-0 bottom-0 left-12 w-0.5 bg-slate-200 rotate-45"></div>
-                                <div className="absolute top-0 bottom-0 left-28 w-0.5 bg-slate-200 -rotate-12"></div>
-                                <div className="w-4 h-4 bg-rose-500 rounded-full flex items-center justify-center text-white relative animate-bounce shadow-md">
-                                  <MapPin className="w-2.5 h-2.5" />
-                                  <div className="absolute inset-0 bg-rose-500 rounded-full animate-ping opacity-75"></div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })() : msg.content.startsWith("[文件]") ? (() => {
-                          const [_, fileName, fileContentRaw] = msg.content.split("|");
-                          let contentText = "";
-                          try {
-                            contentText = decodeURIComponent(fileContentRaw || "");
-                          } catch (e) {
-                            contentText = fileContentRaw || "";
-                          }
-                          const wordCount = contentText.length;
-                          return (
-                            <div 
-                              onClick={() => {
-                                setSelectedFileNote({ title: fileName || "无标题笔记", content: contentText });
-                              }}
-                              className="bg-white text-stone-800 rounded-xl border border-stone-200 w-56 p-3 flex items-center gap-3 shadow-sm hover:bg-slate-50 cursor-pointer active:scale-95 transition-all cv-bubble"
-                            >
-                              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center shrink-0 border border-blue-200">
-                                <FileText className="w-5 h-5" />
-                              </div>
-                              <div className="flex-1 min-w-0 text-left">
-                                <p className="text-xs font-bold text-stone-900 truncate leading-snug">{fileName || "备忘录笔记"}</p>
-                                <p className="text-[9px] text-blue-600 font-semibold mt-1 flex items-center gap-1">
-                                  <span>{wordCount} 字</span>
-                                  <span>•</span>
-                                  <span>点击阅读笔记</span>
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })() : msg.content.startsWith("[语音]|") ? (() => {
-                          const [_, seconds] = msg.content.split("|");
-                          const secs = seconds || "5";
-                          const widthPx = Math.min(180, 60 + parseInt(secs) * 8);
-                          return (
-                            <div 
-                              className={`voice-message-bar cv-audio-bubble message-content message-bubble flex items-center gap-2 justify-between cursor-pointer py-2 px-3 text-xs shadow-sm ${
-                                isSelf
-                                  ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white rounded-tr-sm chat-bubble-self")
-                                  : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100 chat-bubble-other")
-                              }`}
-                              style={{ width: `${widthPx}px` }}
-                              onClick={() => {
-                                const audio = new Audio("https://assets.mixkit.co/active_storage/sfx/2568/2568-84.wav");
-                                audio.volume = 0.4;
-                                audio.play().catch(() => {});
-                              }}
-                            >
-                              {isSelf ? (
-                                <>
-                                  <span className="voice-duration text-[11px] select-none font-mono font-medium">{secs}"</span>
-                                  <Volume2 className="w-4 h-4 voice-icon" />
-                                </>
-                              ) : (
-                                <>
-                                  <Volume2 className="w-4 h-4 voice-icon rotate-180" />
-                                  <span className="voice-duration text-[11px] select-none font-mono font-medium">{secs}"</span>
-                                </>
-                              )}
-                            </div>
-                          );
-                        })() : (msg.content.startsWith("[视频通话]") || msg.content.startsWith("[语音通话]")) ? (() => {
-                          const [tag, status] = msg.content.split("|");
-                          const isVideo = tag === "[视频通话]";
-                          return (
-                            <div className={`px-3 py-2 text-xs flex items-center gap-2 shadow-sm cv-bubble message-bubble ${
-                              isSelf
-                                ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
-                                : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 border border-slate-100 chat-bubble-other")
-                            }`}>
-                              {isVideo ? <Video className="w-3.5 h-3.5 shrink-0" /> : <Phone className="w-3.5 h-3.5 shrink-0" />}
-                              <span>{status || "通话已结束"}</span>
-                            </div>
-                          );
-                        })() : (() => {
-                          const match = msg.content.match(/^「引用 (.*?)：([\s\S]*?)」\n([\s\S]*)$/);
-                          if (match) {
-                            const [_, senderName, quotedText, replyText] = match;
-                            return (
-                              <div
-                                className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble ${
-                                  isSelf
-                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
-                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
-                                }`}
-                              >
-                                <div className={`p-1.5 rounded-lg text-[10px] mb-1.5 border-l-2 text-left cv-quote-ref ${
-                                  isSelf 
-                                    ? (isFloatingCute ? "bg-slate-300/40 border-slate-400 text-slate-700" : "bg-blue-600/40 border-blue-200 text-blue-100") 
-                                    : "bg-stone-50 border-stone-300 text-stone-500"
-                                }`}>
-                                  <span className="font-bold">{senderName}: </span>
-                                  <span>{quotedText}</span>
-                                </div>
-                                <div className="text-left">{replyText}</div>
-                                <div className="cv-bubble-tail hidden" />
-                              </div>
-                            );
-                          }
-                          return (
-                            <div
-                              className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble ${
-                                isSelf
-                                  ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
-                                  : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
-                              }`}
-                            >
-                              <div className="text-left">{msg.content}</div>
-                              <div className="cv-bubble-tail hidden" />
-                            </div>
-                          );
-                        })()}
+                        {renderBubbleInner()}
                       </div>
                     </div>
                   </div>
-                </div>
-              );
+                );
+              }
             })}
 
             {/* AI is writing/typing indicator */}

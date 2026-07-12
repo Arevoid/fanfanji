@@ -170,7 +170,7 @@ export default function AppSettings({
   const [iconBorderEnabled, setIconBorderEnabled] = useState(settings.iconBorderEnabled !== false);
   const [bubbleTailEnabled, setBubbleTailEnabled] = useState(settings.bubbleTailEnabled !== false);
   const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(settings.bubbleTailVertical || "top");
-  const [bubblePosition, setBubblePosition] = useState<"side" | "above" | "below">(settings.bubblePosition || "side");
+  const [bubblePosition, setBubblePosition] = useState<"side" | "above">(settings.bubblePosition === "above" ? "above" : "side");
   const [beautySubTab, setBeautySubTab] = useState<"desktop" | "chat" | "preset">("desktop");
 
   // Connection testing state
@@ -1332,17 +1332,58 @@ export default function AppSettings({
                   <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
                     <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">实时预览效果</div>
                     
-                    <div className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 space-y-4 relative overflow-hidden">
-                      {/* Other Speaker */}
-                      {bubblePosition !== "below" && (
-                        <div className={`flex gap-2.5 items-start ${bubblePosition === "above" ? "flex-col-reverse items-center" : "flex-row"}`}>
+                     <div className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 space-y-4 relative overflow-hidden">
+                      {/* Message 1: Other Speaker (Always has avatar) */}
+                      {bubblePosition === "above" ? (
+                        /* Stacked layout for above */
+                        <div className="w-full flex flex-col items-start">
+                          <div className="flex items-center gap-2.5 mb-1 select-none flex-row">
+                            <img
+                              src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
+                              alt=""
+                              className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
+                              style={{ borderRadius: `${avatarBorderRadius}px` }}
+                            />
+                            <div className="flex flex-col items-start text-[10px] text-slate-500/80">
+                              <span className="font-bold text-slate-700/85">聊天对象 (AI)</span>
+                            </div>
+                          </div>
+                          <div className="max-w-[75%] relative">
+                            <div
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200"
+                              style={{
+                                backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                color: otherBubbleColor,
+                                borderRadius: `${otherBubbleRadius}px`,
+                              }}
+                            >
+                              这里是对方气泡预览，颜色和圆角都是同步修改的。
+                              {bubbleTailEnabled && (
+                                <div
+                                  className="absolute w-0 h-0"
+                                  style={{
+                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
+                                    borderStyle: "solid",
+                                    borderWidth: "6px",
+                                    left: "-11px",
+                                    top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
+                                    bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Side by side layout for side */
+                        <div className="w-full flex flex-row items-start gap-2.5">
                           <img
                             src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
                             alt=""
                             className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
                             style={{ borderRadius: `${avatarBorderRadius}px` }}
                           />
-                          <div className={`flex flex-col max-w-[75%] ${bubblePosition === "above" ? "items-center" : "items-start"}`}>
+                          <div className="flex flex-col items-start max-w-[75%]">
                             <span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>
                             <div
                               className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
@@ -1357,20 +1398,12 @@ export default function AppSettings({
                                 <div
                                   className="absolute w-0 h-0"
                                   style={{
-                                    borderColor: bubblePosition === "side"
-                                      ? `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`
-                                      : bubblePosition === "above"
-                                        ? `${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent transparent`
-                                        : `transparent transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent`,
+                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
                                     borderStyle: "solid",
                                     borderWidth: "6px",
-                                    left: bubblePosition === "side" ? "-11px" : "calc(50% - 6px)",
-                                    top: bubblePosition === "side"
-                                      ? (bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto")
-                                      : "auto",
-                                    bottom: bubblePosition === "side"
-                                      ? (bubbleTailVertical === "bottom" ? "8px" : "auto")
-                                      : "-11px"
+                                    left: "-11px",
+                                    top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
+                                    bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
                                 />
                               )}
@@ -1379,49 +1412,172 @@ export default function AppSettings({
                         </div>
                       )}
 
-                      {/* Self Speaker */}
-                      <div className={`flex gap-2.5 items-start justify-end ${bubblePosition === "above" ? "flex-col-reverse items-center" : "flex-row-reverse"}`}>
-                        <img
-                          src={settings.avatar || "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png"}
-                          alt=""
-                          className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
-                          style={{ borderRadius: `${avatarBorderRadius}px` }}
-                        />
-                        <div className={`flex flex-col max-w-[75%] ${bubblePosition === "above" ? "items-center" : "items-end"}`}>
-                          <span className="text-[9px] font-bold text-slate-400 mb-0.5">{settings.name || "我"}</span>
-                          <div
-                            className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
-                            style={{
-                              backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
-                              color: selfBubbleColor,
-                              borderRadius: `${selfBubbleRadius}px`,
-                            }}
-                          >
-                            我的专属气泡！效果完全同步 ✨
-                            {bubbleTailEnabled && (
-                              <div
-                                className="absolute w-0 h-0"
-                                style={{
-                                  borderColor: bubblePosition === "side"
-                                    ? `transparent transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)}`
-                                    : bubblePosition === "above"
-                                      ? `${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)} transparent transparent transparent`
-                                      : `transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)} transparent`,
-                                  borderStyle: "solid",
-                                  borderWidth: "6px",
-                                  right: bubblePosition === "side" ? "-11px" : "calc(50% - 6px)",
-                                  top: bubblePosition === "side"
-                                    ? (bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto")
-                                    : "auto",
-                                  bottom: bubblePosition === "side"
-                                    ? (bubbleTailVertical === "bottom" ? "8px" : "auto")
-                                    : "-11px"
-                                }}
+                      {/* Message 2: Other Speaker (Consecutive message, avatar collapses based on state) */}
+                      {bubblePosition === "above" ? (
+                        /* Stacked layout for above */
+                        <div className="w-full flex flex-col items-start mt-1.5">
+                          {!collapseConsecutiveAvatars && (
+                            <div className="flex items-center gap-2.5 mb-1 select-none flex-row">
+                              <img
+                                src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
+                                alt=""
+                                className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
+                                style={{ borderRadius: `${avatarBorderRadius}px` }}
                               />
-                            )}
+                              <div className="flex flex-col items-start text-[10px] text-slate-500/80">
+                                <span className="font-bold text-slate-700/85">聊天对象 (AI)</span>
+                              </div>
+                            </div>
+                          )}
+                          <div className="max-w-[75%] relative">
+                            <div
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200"
+                              style={{
+                                backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                color: otherBubbleColor,
+                                borderRadius: `${otherBubbleRadius}px`,
+                              }}
+                            >
+                              启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
+                              {bubbleTailEnabled && (
+                                <div
+                                  className="absolute w-0 h-0"
+                                  style={{
+                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
+                                    borderStyle: "solid",
+                                    borderWidth: "6px",
+                                    left: "-11px",
+                                    top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
+                                    bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
+                                  }}
+                                />
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      ) : (
+                        /* Side by side layout for side */
+                        <div className="w-full flex flex-row items-start gap-2.5 mt-1.5">
+                          {!collapseConsecutiveAvatars ? (
+                            <img
+                              src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
+                              alt=""
+                              className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
+                              style={{ borderRadius: `${avatarBorderRadius}px` }}
+                            />
+                          ) : (
+                            /* Spacer to align bubble perfectly */
+                            <div className="w-8 h-8 shrink-0" />
+                          )}
+                          <div className="flex flex-col items-start max-w-[75%]">
+                            {!collapseConsecutiveAvatars && (
+                              <span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>
+                            )}
+                            <div
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
+                              style={{
+                                backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                color: otherBubbleColor,
+                                borderRadius: `${otherBubbleRadius}px`,
+                              }}
+                            >
+                              启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
+                              {bubbleTailEnabled && (
+                                <div
+                                  className="absolute w-0 h-0"
+                                  style={{
+                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
+                                    borderStyle: "solid",
+                                    borderWidth: "6px",
+                                    left: "-11px",
+                                    top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
+                                    bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Message 3: Self Speaker */}
+                      {bubblePosition === "above" ? (
+                        /* Stacked layout for above */
+                        <div className="w-full flex flex-col items-end">
+                          <div className="flex items-center gap-2.5 mb-1 select-none flex-row-reverse">
+                            <img
+                              src={settings.avatar || "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png"}
+                              alt=""
+                              className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
+                              style={{ borderRadius: `${avatarBorderRadius}px` }}
+                            />
+                            <div className="flex flex-col items-end text-[10px] text-slate-500/80">
+                              <span className="font-bold text-slate-700/85">{settings.name || "我"}</span>
+                            </div>
+                          </div>
+                          <div className="max-w-[75%] relative">
+                            <div
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200"
+                              style={{
+                                backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                                color: selfBubbleColor,
+                                borderRadius: `${selfBubbleRadius}px`,
+                              }}
+                            >
+                              我的专属气泡！效果完全同步 ✨
+                              {bubbleTailEnabled && (
+                                <div
+                                  className="absolute w-0 h-0"
+                                  style={{
+                                    borderColor: `transparent transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)}`,
+                                    borderStyle: "solid",
+                                    borderWidth: "6px",
+                                    right: "-11px",
+                                    top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
+                                    bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Side by side layout for side */
+                        <div className="w-full flex flex-row-reverse items-start gap-2.5">
+                          <img
+                            src={settings.avatar || "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png"}
+                            alt=""
+                            className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
+                            style={{ borderRadius: `${avatarBorderRadius}px` }}
+                          />
+                          <div className="flex flex-col items-end max-w-[75%]">
+                            <span className="text-[9px] font-bold text-slate-400 mb-0.5">{settings.name || "我"}</span>
+                            <div
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
+                              style={{
+                                backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                                color: selfBubbleColor,
+                                borderRadius: `${selfBubbleRadius}px`,
+                              }}
+                            >
+                              我的专属气泡！效果完全同步 ✨
+                              {bubbleTailEnabled && (
+                                <div
+                                  className="absolute w-0 h-0"
+                                  style={{
+                                    borderColor: `transparent transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)}`,
+                                    borderStyle: "solid",
+                                    borderWidth: "6px",
+                                    right: "-11px",
+                                    top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
+                                    bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1560,28 +1716,28 @@ export default function AppSettings({
                       </div>
                     )}
 
-                    <div className="flex flex-col gap-2 pt-2 border-t border-slate-50">
-                      <span className="text-xs font-bold text-slate-700">气泡相对头像位置</span>
-                      <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
-                        {(["side", "above", "below"] as const).map((pos) => (
-                          <button
-                            key={pos}
-                            type="button"
-                            onClick={() => {
-                              setBubblePosition(pos);
-                              handleSave({ bubblePosition: pos });
-                            }}
-                            className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
-                              bubblePosition === pos
-                                ? "bg-white text-slate-900 shadow-sm"
-                                : "text-slate-500 hover:text-slate-700"
-                            }`}
-                          >
-                            {pos === "side" ? "头像两侧" : pos === "above" ? "头像上方" : "头像下方"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                     <div className="flex flex-col gap-2 pt-2 border-t border-slate-50">
+                       <span className="text-xs font-bold text-slate-700">气泡相对头像位置</span>
+                       <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+                         {(["side", "above"] as const).map((pos) => (
+                           <button
+                             key={pos}
+                             type="button"
+                             onClick={() => {
+                               setBubblePosition(pos);
+                               handleSave({ bubblePosition: pos });
+                             }}
+                             className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                               bubblePosition === pos
+                                 ? "bg-white text-slate-900 shadow-sm"
+                                 : "text-slate-500 hover:text-slate-700"
+                             }`}
+                           >
+                             {pos === "side" ? "头像两侧" : "头像上方"}
+                           </button>
+                         ))}
+                       </div>
+                     </div>
                   </div>
 
                   {/* 极简视觉调色盘 */}
