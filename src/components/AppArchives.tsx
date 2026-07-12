@@ -171,7 +171,12 @@ export default function AppArchives({
         }
         importedChar = mapSillyTavernToCharacter(parsedJson, imgDataUrl);
         const innerData = parsedJson.data || parsedJson;
-        characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
+        const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
+        if (mwb && Array.isArray(mwb)) {
+          characterBook = { entries: mwb };
+        } else {
+          characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
+        }
       } else if (isJson) {
         const text = await new Promise<string>((resolve, reject) => {
           const r = new FileReader();
@@ -182,7 +187,12 @@ export default function AppArchives({
         const parsedJson = JSON.parse(text);
         importedChar = mapSillyTavernToCharacter(parsedJson, "");
         const innerData = parsedJson.data || parsedJson;
-        characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
+        const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
+        if (mwb && Array.isArray(mwb)) {
+          characterBook = { entries: mwb };
+        } else {
+          characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
+        }
       } else if (isTxt) {
         const text = await new Promise<string>((resolve, reject) => {
           const r = new FileReader();

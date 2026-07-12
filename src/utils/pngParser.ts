@@ -88,6 +88,12 @@ export const mapSillyTavernToCharacter = (json: any, defaultAvatar: string): Cha
   if (data.scenario || data.world_scenario) pDetails += `【背景/情境】\n${data.scenario || data.world_scenario}\n\n`;
   if (data.mes_example) pDetails += `【对话范例】\n${data.mes_example}\n\n`;
   
+  // Support Sully Character Card format or system prompt fields
+  const sysPrompt = data.systemPrompt || data.system_prompt || json.systemPrompt || json.system_prompt;
+  if (sysPrompt) {
+    pDetails += `【系统提示/设定】\n${sysPrompt}\n\n`;
+  }
+  
   let bstory = data.creator_notes || data.creator || "";
   
   // Try mapping common fields
@@ -98,13 +104,19 @@ export const mapSillyTavernToCharacter = (json: any, defaultAvatar: string): Cha
       ageNum = parsedAge;
     }
   } else {
-    const ageMatch = pDetails.match(/(?:年龄|Age|age|岁)[:：\s]*(\d+)/);
+    const ageMatch = pDetails.match(/(?:年龄|Age|age|岁)[:：\s]*(\d+)/i);
     if (ageMatch) {
       ageNum = parseInt(ageMatch[1]);
     }
   }
 
-  const genderStr = data.gender || "";
+  let genderStr = data.gender || "";
+  if (!genderStr) {
+    const genderMatch = pDetails.match(/(?:性别|Gender|gender)[:：\s]*([男女MaleFemale]+)/i);
+    if (genderMatch) {
+      genderStr = genderMatch[1].trim();
+    }
+  }
   
   // Heuristic for MBTI
   let mbtiStr = "";
@@ -178,6 +190,8 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
     kwString = stEntry.keys.join(", ");
   } else if (stEntry.keys) {
     kwString = String(stEntry.keys);
+  } else if (stEntry.keywords) {
+    kwString = String(stEntry.keywords);
   }
 
   let mappedPos: "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history" = "after_char_def";
@@ -327,8 +341,11 @@ export function splitTextToOfflineSegments(text: string): { content: string; isN
 export function cleanOnlineMessage(text: string, disableBracketActions: boolean): string {
   if (!text) return "";
   
+  // Strip any accidental "[发送时间: ...]" prefixes from the model output
+  let processedText = text.replace(/\[\s*发送时间\s*:\s*[^\]]+\]/gi, "").trim();
+  
   // Clean up any double empty parentheses or brackets if they happen to appear
-  let processedText = text.replace(/\(\s*\)|（\s*）/g, "").trim();
+  processedText = processedText.replace(/\(\s*\)|（\s*）/g, "").trim();
 
   // Check if there are any quotes in the response (Chinese or standard quotes)
   const hasQuotes = /[“「『”」』]/.test(processedText);
@@ -422,6 +439,12 @@ export function splitIntoWeChatBubbles(text: string, keepPeriods: boolean = fals
   for (const line of lines) {
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
+    
+    // Do not split red packet lines
+    if (trimmedLine.startsWith("[红包]")) {
+      results.push(trimmedLine);
+      continue;
+    }
     
     // Split the line by major sentence endings: 。！？!?
     const regex = /[^。！？!?]+[。！？!?]*/g;

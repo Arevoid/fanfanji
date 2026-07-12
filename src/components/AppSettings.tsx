@@ -172,6 +172,18 @@ export default function AppSettings({
   const [bubbleTailEnabled, setBubbleTailEnabled] = useState(settings.bubbleTailEnabled !== false);
   const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(settings.bubbleTailVertical || "top");
   const [bubblePosition, setBubblePosition] = useState<"side" | "above">(settings.bubblePosition === "above" ? "above" : "side");
+  
+  // Bubble border states
+  const [bubbleBorderEnabled, setBubbleBorderEnabled] = useState(!!settings.bubbleBorderEnabled);
+  const [bubbleBorderWidth, setBubbleBorderWidth] = useState(settings.bubbleBorderWidth !== undefined ? settings.bubbleBorderWidth : 1);
+  const [otherBubbleBorderColor, setOtherBubbleBorderColor] = useState(settings.otherBubbleBorderColor || "#e4e4e7");
+  const [selfBubbleBorderColor, setSelfBubbleBorderColor] = useState(settings.selfBubbleBorderColor || "#27272a");
+
+  // Avatar border states
+  const [avatarBorderEnabled, setAvatarBorderEnabled] = useState(!!settings.avatarBorderEnabled);
+  const [avatarBorderWidth, setAvatarBorderWidth] = useState(settings.avatarBorderWidth !== undefined ? settings.avatarBorderWidth : 1);
+  const [avatarBorderColor, setAvatarBorderColor] = useState(settings.avatarBorderColor || "#e4e4e7");
+
   const [beautySubTab, setBeautySubTab] = useState<"desktop" | "chat" | "preset">("desktop");
 
   // Connection testing state
@@ -1342,8 +1354,11 @@ export default function AppSettings({
                             <img
                               src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
                               alt=""
-                              className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
-                              style={{ borderRadius: `${avatarBorderRadius}px` }}
+                              className="w-8 h-8 object-cover bg-slate-100 shrink-0"
+                              style={{ 
+                                borderRadius: `${avatarBorderRadius}px`,
+                                border: avatarBorderEnabled ? `${avatarBorderWidth}px solid ${avatarBorderColor}` : 'none'
+                              }}
                             />
                             {!hideNicknames && (<div className="flex flex-col items-start text-[10px] text-slate-500/80">
                               <span className="font-bold text-slate-700/85">聊天对象 (AI)</span>
@@ -1356,6 +1371,7 @@ export default function AppSettings({
                                 backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
                                 color: otherBubbleColor,
                                 borderRadius: `${otherBubbleRadius}px`,
+                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${otherBubbleBorderColor}` : 'none',
                               }}
                             >
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
@@ -1381,8 +1397,11 @@ export default function AppSettings({
                           <img
                             src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
                             alt=""
-                            className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
-                            style={{ borderRadius: `${avatarBorderRadius}px` }}
+                            className="w-8 h-8 object-cover bg-slate-100 shrink-0"
+                            style={{ 
+                              borderRadius: `${avatarBorderRadius}px`,
+                              border: avatarBorderEnabled ? `${avatarBorderWidth}px solid ${avatarBorderColor}` : 'none'
+                            }}
                           />
                           <div className="flex flex-col items-start max-w-[75%]">
                             {!hideNicknames && (<span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>)}
@@ -1392,6 +1411,7 @@ export default function AppSettings({
                                 backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
                                 color: otherBubbleColor,
                                 borderRadius: `${otherBubbleRadius}px`,
+                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${otherBubbleBorderColor}` : 'none',
                               }}
                             >
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
@@ -1422,8 +1442,11 @@ export default function AppSettings({
                               <img
                                 src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
                                 alt=""
-                                className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
-                                style={{ borderRadius: `${avatarBorderRadius}px` }}
+                                className="w-8 h-8 object-cover bg-slate-100 shrink-0"
+                                style={{ 
+                                  borderRadius: `${avatarBorderRadius}px`,
+                                  border: avatarBorderEnabled ? `${avatarBorderWidth}px solid ${avatarBorderColor}` : 'none'
+                                }}
                               />
                               {!hideNicknames && (<div className="flex flex-col items-start text-[10px] text-slate-500/80">
                                 <span className="font-bold text-slate-700/85">聊天对象 (AI)</span>
@@ -1437,6 +1460,7 @@ export default function AppSettings({
                                 backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
                                 color: otherBubbleColor,
                                 borderRadius: `${otherBubbleRadius}px`,
+                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${otherBubbleBorderColor}` : 'none',
                               }}
                             >
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
@@ -1463,8 +1487,11 @@ export default function AppSettings({
                             <img
                               src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
                               alt=""
-                              className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
-                              style={{ borderRadius: `${avatarBorderRadius}px` }}
+                              className="w-8 h-8 object-cover bg-slate-100 shrink-0"
+                              style={{ 
+                                borderRadius: `${avatarBorderRadius}px`,
+                                border: avatarBorderEnabled ? `${avatarBorderWidth}px solid ${avatarBorderColor}` : 'none'
+                              }}
                             />
                           ) : (
                             /* Spacer to align bubble perfectly */
@@ -1480,6 +1507,7 @@ export default function AppSettings({
                                 backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
                                 color: otherBubbleColor,
                                 borderRadius: `${otherBubbleRadius}px`,
+                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${otherBubbleBorderColor}` : 'none',
                               }}
                             >
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
@@ -1509,8 +1537,11 @@ export default function AppSettings({
                             <img
                               src={settings.avatar || "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png"}
                               alt=""
-                              className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
-                              style={{ borderRadius: `${avatarBorderRadius}px` }}
+                              className="w-8 h-8 object-cover bg-slate-100 shrink-0"
+                              style={{ 
+                                borderRadius: `${avatarBorderRadius}px`,
+                                border: avatarBorderEnabled ? `${avatarBorderWidth}px solid ${avatarBorderColor}` : 'none'
+                              }}
                             />
                             {!hideNicknames && (<div className="flex flex-col items-end text-[10px] text-slate-500/80">
                               <span className="font-bold text-slate-700/85">{settings.name || "我"}</span>
@@ -1523,6 +1554,7 @@ export default function AppSettings({
                                 backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
                                 color: selfBubbleColor,
                                 borderRadius: `${selfBubbleRadius}px`,
+                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${selfBubbleBorderColor}` : 'none',
                               }}
                             >
                               我的专属气泡！效果完全同步 ✨
@@ -1548,8 +1580,11 @@ export default function AppSettings({
                           <img
                             src={settings.avatar || "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png"}
                             alt=""
-                            className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
-                            style={{ borderRadius: `${avatarBorderRadius}px` }}
+                            className="w-8 h-8 object-cover bg-slate-100 shrink-0"
+                            style={{ 
+                              borderRadius: `${avatarBorderRadius}px`,
+                              border: avatarBorderEnabled ? `${avatarBorderWidth}px solid ${avatarBorderColor}` : 'none'
+                            }}
                           />
                           <div className="flex flex-col items-end max-w-[75%]">
                             {!hideNicknames && (<span className="text-[9px] font-bold text-slate-400 mb-0.5">{settings.name || "我"}</span>)}
@@ -1559,6 +1594,7 @@ export default function AppSettings({
                                 backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
                                 color: selfBubbleColor,
                                 borderRadius: `${selfBubbleRadius}px`,
+                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${selfBubbleBorderColor}` : 'none',
                               }}
                             >
                               我的专属气泡！效果完全同步 ✨
@@ -1646,6 +1682,67 @@ export default function AppSettings({
                         />
                       </button>
                     </div>
+
+                    {/* 头像边框 */}
+                    <div className="flex items-center justify-between py-2.5 border-t border-slate-50">
+                      <span className="text-xs font-bold text-slate-700">启用头像边框</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVal = !avatarBorderEnabled;
+                          setAvatarBorderEnabled(nextVal);
+                          handleSave({ avatarBorderEnabled: nextVal });
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          avatarBorderEnabled ? "bg-neutral-950" : "bg-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            avatarBorderEnabled ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {avatarBorderEnabled && (
+                      <div className="space-y-3 pt-2.5 border-t border-slate-50">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-xs font-bold text-slate-700 shrink-0">边框粗细</span>
+                          <div className="flex-1 flex items-center gap-2">
+                            <input
+                              type="range"
+                              min="1"
+                              max="8"
+                              value={avatarBorderWidth}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                setAvatarBorderWidth(val);
+                                  handleSave({ avatarBorderWidth: val });
+                              }}
+                              className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                            />
+                            <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{avatarBorderWidth}px</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-700">边框颜色</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={avatarBorderColor}
+                              onChange={(e) => {
+                                setAvatarBorderColor(e.target.value);
+                                handleSave({ avatarBorderColor: e.target.value });
+                              }}
+                              className="w-8 h-8 rounded cursor-pointer border border-slate-200 p-0"
+                            />
+                            <span className="text-[10px] text-slate-400 font-mono uppercase">{avatarBorderColor}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* 聊天气泡高级配置 */}
@@ -1760,6 +1857,83 @@ export default function AppSettings({
                          ))}
                        </div>
                      </div>
+
+                     {/* 气泡边框设置 */}
+                     <div className="flex items-center justify-between py-2.5 border-t border-slate-50">
+                       <span className="text-xs font-bold text-slate-700">启用气泡边框</span>
+                       <button
+                         type="button"
+                         onClick={() => {
+                           const nextVal = !bubbleBorderEnabled;
+                           setBubbleBorderEnabled(nextVal);
+                           handleSave({ bubbleBorderEnabled: nextVal });
+                         }}
+                         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                           bubbleBorderEnabled ? "bg-neutral-950" : "bg-slate-200"
+                         }`}
+                       >
+                         <span
+                           className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                             bubbleBorderEnabled ? "translate-x-4" : "translate-x-0"
+                           }`}
+                         />
+                       </button>
+                     </div>
+
+                     {bubbleBorderEnabled && (
+                       <div className="space-y-3 pt-2.5 border-t border-slate-50">
+                         <div className="flex items-center justify-between gap-4">
+                           <span className="text-xs font-bold text-slate-700 shrink-0">边框粗细</span>
+                           <div className="flex-1 flex items-center gap-2">
+                             <input
+                               type="range"
+                               min="1"
+                               max="8"
+                               value={bubbleBorderWidth}
+                               onChange={(e) => {
+                                 const val = parseInt(e.target.value, 10);
+                                 setBubbleBorderWidth(val);
+                                 handleSave({ bubbleBorderWidth: val });
+                               }}
+                               className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                             />
+                             <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{bubbleBorderWidth}px</span>
+                           </div>
+                         </div>
+
+                         <div className="grid grid-cols-2 gap-4">
+                           <div className="flex items-center justify-between p-2 bg-slate-50 rounded-xl border border-slate-100">
+                             <span className="text-[10px] font-bold text-slate-500">对方气泡边框</span>
+                             <div className="flex items-center gap-1.5">
+                               <input
+                                 type="color"
+                                 value={otherBubbleBorderColor}
+                                 onChange={(e) => {
+                                   setOtherBubbleBorderColor(e.target.value);
+                                   handleSave({ otherBubbleBorderColor: e.target.value });
+                                 }}
+                                 className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
+                               />
+                             </div>
+                           </div>
+
+                           <div className="flex items-center justify-between p-2 bg-slate-50 rounded-xl border border-slate-100">
+                             <span className="text-[10px] font-bold text-slate-500">我方气泡边框</span>
+                             <div className="flex items-center gap-1.5">
+                               <input
+                                 type="color"
+                                 value={selfBubbleBorderColor}
+                                 onChange={(e) => {
+                                   setSelfBubbleBorderColor(e.target.value);
+                                   handleSave({ selfBubbleBorderColor: e.target.value });
+                                 }}
+                                 className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
+                               />
+                             </div>
+                           </div>
+                         </div>
+                       </div>
+                     )}
                   </div>
 
                   {/* 极简视觉调色盘 */}

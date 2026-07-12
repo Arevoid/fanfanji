@@ -599,6 +599,8 @@ export default function AppChat({
   const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
+  const [draftProactiveStartTime, setDraftProactiveStartTime] = useState("09:00");
+  const [draftProactiveEndTime, setDraftProactiveEndTime] = useState("22:00");
   const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
   const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
   const [draftEnableTimeAwareness, setDraftEnableTimeAwareness] = useState(false);
@@ -722,14 +724,37 @@ export default function AppChat({
   // Background proactive check (every minute)
   useEffect(() => {
     const checkProactive = setInterval(() => {
+      const now = new Date();
+      const hh = now.getHours().toString().padStart(2, "0");
+      const mm = now.getMinutes().toString().padStart(2, "0");
+      const currentHM = `${hh}:${mm}`;
+
       friends.forEach((friend) => {
-        const lastActive = friend.lastActiveTime || Date.now();
-        const threeHoursMs = 3 * 60 * 60 * 1000;
-        if (
-          friend.enableProactiveChat &&
-          Date.now() - lastActive >= threeHoursMs
-        ) {
-          // Reset timer first to avoid flooding
+        if (!friend.enableProactiveChat) return;
+
+        const startTime = friend.proactiveStartTime || "09:00";
+        const endTime = friend.proactiveEndTime || "22:00";
+
+        // Helper to check if current time is within range
+        let isWithinRange = false;
+        if (startTime === endTime) {
+          isWithinRange = true; // e.g., 00:00-00:00 covers all day
+        } else if (startTime < endTime) {
+          isWithinRange = currentHM >= startTime && currentHM <= endTime;
+        } else {
+          isWithinRange = currentHM >= startTime || currentHM <= endTime; // overnight e.g. 22:00 to 06:00
+        }
+
+        if (!isWithinRange) return;
+
+        const lastActive = friend.lastActiveTime || (Date.now() - 4 * 60 * 60 * 1000);
+        const cooldownMs = 2 * 60 * 60 * 1000; // 2 hours minimum cooldown since last conversation
+        
+        // Random probability: 0.5% chance per minute (approx once every 3.3 hours on average)
+        const isRandomTrigger = Math.random() < 0.005;
+
+        if (Date.now() - lastActive >= cooldownMs && isRandomTrigger) {
+          // Reset timer/lastActiveTime first to avoid flooding
           onSaveCharacter({
             ...friend,
             lastActiveTime: Date.now(),
@@ -1011,18 +1036,27 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
       const slicedMsgs = msgsForHistory.slice(-limit);
 
       const history = slicedMsgs.map((m) => {
-        const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
-          month: "long",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false
-        });
         return {
           role: m.sender === "user" ? "user" : "model",
-          text: `[发送时间: ${timeStr}] ${m.content}`,
+          text: m.content,
         };
       });
+
+      let timeLogString = "";
+      if (activeCharacter.enableTimeAwareness !== false) {
+        timeLogString = slicedMsgs.map((m) => {
+          const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
+            month: "long",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+          });
+          const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
+          const snippet = m.content.length > 20 ? m.content.slice(0, 20) + "..." : m.content;
+          return `- ${senderName}: "${snippet}" (发送于: ${timeStr})`;
+        }).join("\n");
+      }
 
       // Construct system instructions based on multi-block SillyTavern positioning rules
       let mainPromptText = isOfflineModeActive 
@@ -1042,10 +1076,11 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 
 🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
 1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
+2. [🚨 RED PACKET CAPABILITY / 对方发红包设定]: You have the capability to send WeChat red packets (微信红包) to the user as a cute gesture, appreciation, surprise, or interactive response. To send a red packet, output a single separate line matching the format exactly: "[红包]|金额|祝福语" (e.g. "[红包]|8.88|天天开心" or "[红包]|5.20|一生一世"). You can mix normal conversational dialogue messages and red packets. E.g. "给你塞个小红包，要开心哦！\n[红包]|6.66|天天开心".
 ${activeCharacter.disableBracketActions 
-  ? `2. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
-3. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${activeCharacter.name}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`
-  : `2. If your character's backstory, personality card, or World Book entries naturally utilize parenthesized action descriptions or physical gestures (e.g., "(微笑)", "（叹气）", "*摸摸头*"), you are encouraged to output them inside brackets/parentheses to maintain realistic roleplay expressiveness. Keep them spontaneous, descriptive, and emotionally rich.`
+  ? `3. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
+4. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${activeCharacter.name}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`
+  : `3. If your character's backstory, personality card, or World Book entries naturally utilize parenthesized action descriptions or physical gestures (e.g., "(微笑)", "（叹气）", "*摸摸头*"), you are encouraged to output them inside brackets/parentheses to maintain realistic roleplay expressiveness. Keep them spontaneous, descriptive, and emotionally rich.`
 }`;
 
       if (!isOfflineModeActive && activeCharacter.disableBracketActions) {
@@ -1108,13 +1143,16 @@ ${activeCharacter.disableBracketActions
         });
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
-在聊天历史和当前用户消息中，每条消息的前面都带有 \`[发送时间: 月日 时分]\` 形式的物理时间戳（例如 \`[发送时间: 7月12日 08:15]\`）。
-这代表消息实际发生的物理时刻，是你判断“现实时间流逝与时间差”的最高客观依据：
-1. 【精准判断时间跨度与间隔】：通过对比每条消息的发送时间，请精准识别出消息与消息之间间隔了多久。
-   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是八小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”，绝不要犯下“不是才刚说完晚安吗”之类的时间感知错乱错误！
+
+以下是最近几条聊天消息的精确发送时间记录，请作为你判断时间流逝的客观依据：
+${timeLogString}
+
+【重要时间感知规则】：
+1. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
+   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”！
    - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
 2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
-3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
+3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
       }
 
       // 2. After Main Prompt entries
@@ -1220,16 +1258,6 @@ ${activeCharacter.disableBracketActions
         promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒）。由于微信语音默认无法直接识别文字，请假设你听到了我用温暖/俏皮的声音发给你的语音（内容可以由你自行结合之前的话题进行脑补/想象，或者是日常可爱的闲聊）。请对此做出一个非常符合你人设、温暖、极其简短像真人在微信回语音或文字一样的回复。`;
       }
 
-      // Prepend current message timestamp for better time awareness
-      const currentNowStr = new Date(userMsg ? userMsg.timestamp : Date.now()).toLocaleString("zh-CN", {
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false
-      });
-      promptMessage = `[发送时间: ${currentNowStr}] ${promptMessage}`;
-
       const data = await apiChat({
         message: promptMessage,
         history,
@@ -1242,6 +1270,9 @@ ${activeCharacter.disableBracketActions
       });
 
       if (data && data.text) {
+        // Clean any accidental "[发送时间: ...]" prefixes
+        data.text = data.text.replace(/\[\s*发送时间\s*:\s*[^\]]+\]/gi, "").trim();
+
         if (isOfflineModeActive) {
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
           const paragraphs = data.text.split("\n").map(p => {
@@ -1638,18 +1669,27 @@ ${activeCharacter.disableBracketActions
 
       // Map history with timestamps for time awareness
       const history = slicedMsgs.map((m) => {
-        const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
-          month: "long",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false
-        });
         return {
           role: m.sender === "user" ? "user" : "model",
-          text: `[发送时间: ${timeStr}] ${m.content}`,
+          text: m.content,
         };
       });
+
+      let timeLogString = "";
+      if (activeCharacter.enableTimeAwareness !== false) {
+        timeLogString = slicedMsgs.map((m) => {
+          const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
+            month: "long",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+          });
+          const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
+          const snippet = m.content.length > 20 ? m.content.slice(0, 20) + "..." : m.content;
+          return `- ${senderName}: "${snippet}" (发送于: ${timeStr})`;
+        }).join("\n");
+      }
 
       // Construct system instructions
       let mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
@@ -1734,13 +1774,16 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         });
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
-在聊天历史和当前用户消息中，每条消息的前面都带有 \`[发送时间: 月日 时分]\` 形式的物理时间戳（例如 \`[发送时间: 7月12日 08:15]\`）。
-这代表消息实际发生的物理时刻，是你判断“现实时间流逝与时间差”的最高客观依据：
-1. 【精准判断时间跨度与间隔】：通过对比每条消息的发送时间，请精准识别出消息与消息之间间隔了多久。
-   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是八小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”，绝不要犯下“不是才刚说完晚安吗”之类的时间感知错乱错误！
-   - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气 and 对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
+
+以下是最近几条聊天消息的精确发送时间记录，请作为你判断时间流逝的客观依据：
+${timeLogString}
+
+【重要时间感知规则】：
+1. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
+   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”！
+   - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
 2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
-3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
+3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
       }
 
       // 2. After Main Prompt entries
@@ -1802,16 +1845,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
-      const regenNowStr = new Date(lastUserMsg.timestamp).toLocaleString("zh-CN", {
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false
-      });
-
       const data = await apiChat({
-        message: `[发送时间: ${regenNowStr}] ${lastUserMsg.content}`,
+        message: lastUserMsg.content,
         history,
         systemInstruction,
         apiKey: settings.apiKey,
@@ -1860,6 +1895,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         chatStylePreset: draftChatStylePreset,
         enableProactiveChat: draftEnableProactiveChat,
         proactiveChatInterval: draftProactiveChatInterval,
+        proactiveStartTime: draftProactiveStartTime,
+        proactiveEndTime: draftProactiveEndTime,
         disableBracketActions: draftDisableBracketActions,
         historyMemoryLimit: draftHistoryMemoryLimit,
         enableTimeAwareness: draftEnableTimeAwareness,
@@ -2665,6 +2702,42 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 }
               ` : ''}
 
+              ${settings.avatarBorderEnabled ? `
+                #conv-screen .avatar, 
+                #conv-screen .user-avatar, 
+                #conv-screen .ai-avatar {
+                  border: ${settings.avatarBorderWidth !== undefined ? settings.avatarBorderWidth : 1}px solid ${settings.avatarBorderColor || '#e4e4e7'} !important;
+                }
+              ` : `
+                #conv-screen .avatar, 
+                #conv-screen .user-avatar, 
+                #conv-screen .ai-avatar {
+                  border: none !important;
+                }
+              `}
+
+              ${settings.bubbleBorderEnabled ? `
+                #conv-screen .chat-bubble-self,
+                #conv-screen .transfer-card,
+                #conv-screen .voice-message-bar.chat-bubble-self {
+                  border: ${settings.bubbleBorderWidth !== undefined ? settings.bubbleBorderWidth : 1}px solid ${settings.selfBubbleBorderColor || '#27272a'} !important;
+                }
+                #conv-screen .chat-bubble-other,
+                #conv-screen .received-transfer-card,
+                #conv-screen .voice-message-bar.chat-bubble-other {
+                  border: ${settings.bubbleBorderWidth !== undefined ? settings.bubbleBorderWidth : 1}px solid ${settings.otherBubbleBorderColor || '#e4e4e7'} !important;
+                }
+              ` : `
+                #conv-screen .chat-bubble-self,
+                #conv-screen .transfer-card,
+                #conv-screen .voice-message-bar.chat-bubble-self,
+                #conv-screen .chat-bubble-other,
+                #conv-screen .received-transfer-card,
+                #conv-screen .voice-message-bar.chat-bubble-other {
+                  border: none !important;
+                }
+              `}
+
               ${settings.otherBubbleRadius !== undefined ? `
                 #conv-screen .chat-bubble-other,
                 #conv-screen .voice-message-bar.chat-bubble-other {
@@ -3059,6 +3132,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftChatStylePreset(activeCharacter.chatStylePreset || "default");
                   setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
                   setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
+                  setDraftProactiveStartTime(activeCharacter.proactiveStartTime || "09:00");
+                  setDraftProactiveEndTime(activeCharacter.proactiveEndTime || "22:00");
                   setDraftDisableBracketActions(activeCharacter.disableBracketActions || false);
                   setDraftHistoryMemoryLimit(activeCharacter.historyMemoryLimit || 150);
                   setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness || false);
@@ -3459,28 +3534,54 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       {draftEnableProactiveChat && (
                         <div className="space-y-3 pt-2.5 border-t border-slate-100">
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] text-[#52525b] font-medium">联络时间间隔</span>
-                            <span className="text-xs font-bold text-slate-700 font-mono">{draftProactiveChatInterval} 小时</span>
+                            <span className="text-[11px] text-[#52525b] font-medium">联络时间段设置</span>
+                            <span className="text-xs font-bold text-slate-700 font-mono">
+                              {draftProactiveStartTime} - {draftProactiveEndTime}
+                            </span>
                           </div>
-                          <input
-                            type="range"
-                            min={1}
-                            max={24}
-                            value={draftProactiveChatInterval}
-                            onChange={(e) => setDraftProactiveChatInterval(parseInt(e.target.value))}
-                            className="w-full accent-neutral-950 h-1 bg-slate-100 rounded-lg appearance-none cursor-pointer"
-                          />
-                          <div className="flex justify-between text-[9px] text-slate-400 font-mono">
-                            <span>1h</span>
-                            <span>6h</span>
-                            <span>12h</span>
-                            <span>18h</span>
-                            <span>24h</span>
+                          
+                          {/* Time Picker Dropdowns */}
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex flex-col flex-1">
+                              <span className="text-[9px] text-slate-400 font-bold mb-1">开始时间</span>
+                              <select
+                                value={draftProactiveStartTime}
+                                onChange={(e) => setDraftProactiveStartTime(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
+                              >
+                                {Array.from({ length: 48 }, (_, i) => {
+                                  const h = Math.floor(i / 2).toString().padStart(2, "0");
+                                  const m = (i % 2 === 0 ? "00" : "30");
+                                  const t = `${h}:${m}`;
+                                  return (
+                                    <option key={t} value={t}>{t}</option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+                            <span className="text-xs text-slate-400 font-bold self-end mb-2">至</span>
+                            <div className="flex flex-col flex-1">
+                              <span className="text-[9px] text-slate-400 font-bold mb-1">结束时间</span>
+                              <select
+                                value={draftProactiveEndTime}
+                                onChange={(e) => setDraftProactiveEndTime(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
+                              >
+                                {Array.from({ length: 48 }, (_, i) => {
+                                  const h = Math.floor(i / 2).toString().padStart(2, "0");
+                                  const m = (i % 2 === 0 ? "00" : "30");
+                                  const t = `${h}:${m}`;
+                                  return (
+                                    <option key={t} value={t}>{t}</option>
+                                  );
+                                })}
+                              </select>
+                            </div>
                           </div>
 
                           <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between gap-2">
                             <span className="text-[10px] text-slate-400 leading-snug">
-                              失联后 Ta 将分享日常或关心您。
+                              Ta 将在此时间段内随机主动给您发送消息。
                             </span>
                             <button
                               type="button"

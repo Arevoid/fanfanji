@@ -25,6 +25,8 @@ export interface Character {
   compressedMemory?: string;
   enableProactiveChat?: boolean;
   proactiveChatInterval?: number;
+  proactiveStartTime?: string;
+  proactiveEndTime?: string;
   lastActiveTime?: number;
   customCss?: string;
   chatStylePreset?: "default" | "floating-cute" | "liquid-glass";
@@ -167,6 +169,13 @@ export interface UserSettings {
   bubbleTailVertical?: "top" | "center" | "bottom";
   bubblePosition?: "side" | "above" | "below";
   hideNicknames?: boolean;
+  bubbleBorderEnabled?: boolean;
+  bubbleBorderWidth?: number;
+  otherBubbleBorderColor?: string;
+  selfBubbleBorderColor?: string;
+  avatarBorderEnabled?: boolean;
+  avatarBorderWidth?: number;
+  avatarBorderColor?: string;
 }
 
 export interface ApiPreset {

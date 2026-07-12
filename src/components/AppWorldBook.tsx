@@ -115,7 +115,10 @@ export const parseWorldBookImport = (json: any): WorldBookEntry[] => {
   if (Array.isArray(json)) {
     rawEntries = json;
   } else if (json && typeof json === "object") {
-    if (Array.isArray(json.entries)) {
+    const mwb = json.mountedWorldbooks || json.mounted_worldbooks || json.mounted_world_books || (json.data && (json.data.mountedWorldbooks || json.data.mounted_worldbooks || json.data.mounted_world_books));
+    if (mwb && Array.isArray(mwb)) {
+      rawEntries = mwb;
+    } else if (Array.isArray(json.entries)) {
       rawEntries = json.entries;
     } else if (json.entries && typeof json.entries === "object") {
       rawEntries = Object.values(json.entries);
@@ -418,7 +421,11 @@ export default function AppWorldBook({
         const parsedJson = JSON.parse(text);
         const innerData = parsedJson.data || parsedJson;
         const charName = innerData.name || "";
-        const characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
+        let characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
+        const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
+        if (mwb && Array.isArray(mwb)) {
+          characterBook = { entries: mwb };
+        }
         if (characterBook && Array.isArray(characterBook.entries)) {
           imported = characterBook.entries.map((entry: any) => {
             const mapped = mapSillyTavernEntry(entry, "global");

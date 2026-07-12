@@ -1593,6 +1593,13 @@ export default function App() {
   const handleSendMessage = (msg: Message) => {
     setMessages((prev) => [...prev, msg]);
 
+    // Update character's last active time on message exchange
+    setCharacters((prev) =>
+      prev.map((c) =>
+        c.id === msg.characterId ? { ...c, lastActiveTime: Date.now() } : c
+      )
+    );
+
     // Check if auto-translation is enabled and the message needs translation
     const char = characters.find((c) => c.id === msg.characterId);
     if (
