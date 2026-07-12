@@ -2630,7 +2630,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             {activeStylePreset === "liquid-glass" && (
               <style>{`
                 #conv-screen {
-                  background: url("${activeCharacter.chatBg || 'https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW88JqUKBwtMIU2FxO5zQh4CKBC_pHUAACASQAAgvDiFZ7fSrFa6akITwE.png'}") center/cover no-repeat !important;
+                  ${activeCharacter.chatBg ? `background: url("${activeCharacter.chatBg}") center/cover no-repeat !important;` : 'background: transparent !important;'}
                 }
                 .cv-messages-list {
                   background: transparent !important;
@@ -3633,7 +3633,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
-                : `url("https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW88JqUKBwtMIU2FxO5zQh4CKBC_pHUAACASQAAgvDiFZ7fSrFa6akITwE.png") center/cover no-repeat`,
+                : undefined,
               WebkitOverflowScrolling: "touch",
             }}
           >
@@ -3885,7 +3885,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 );
               };
 
-              if (settings.bubblePosition === "below") {
+              if (settings.bubblePosition === "above" || settings.bubblePosition === "below") {
                 return (
                   <div
                     key={msg.id}
@@ -3914,7 +3914,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
                         />
                         <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header`}>
-                          {!isSelf && (
+                          {!isSelf && !settings.hideNicknames && (
                             <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
                               <span>🖤</span>
                               <span>{msgName}</span>
@@ -3966,7 +3966,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
                     {/* Meta Header + Message Bubble Column */}
                     <div className={`flex flex-col max-w-[80%] ${isSelf ? "items-end" : "items-start"}`}>
-                      {showAvatar && (
+                      {showAvatar && !settings.hideNicknames && (
                         <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 mb-1 space-y-0.5 msg-meta-header`}>
                           {!isSelf && (
                             <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">

@@ -164,6 +164,7 @@ export interface UserSettings {
   bubbleTailEnabled?: boolean;
   bubbleTailVertical?: "top" | "center" | "bottom";
   bubblePosition?: "side" | "above" | "below";
+  hideNicknames?: boolean;
 }
 
 export interface ApiPreset {

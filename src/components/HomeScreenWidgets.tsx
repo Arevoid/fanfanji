@@ -21,7 +21,7 @@ import {
 
 // Pre-seeded high-quality images for the Album Widget to look gorgeous
 const ALBUM_IMAGES = [
-  "https://images.unsplash.com/photo-1518156677180-95a2893f3e9f?w=400&h=400&fit=crop", // Stargazing aesthetic
+  "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=400&h=400&fit=crop", // Moody dark ocean wave
   "https://images.unsplash.com/photo-1544816155-12df9643f363?w=400&h=400&fit=crop", // Magical forest library
   "https://images.unsplash.com/photo-1513542789411-b6a5d4f31634?w=400&h=400&fit=crop", // Soft clouds/sky
   "https://images.unsplash.com/photo-1490730141103-6cac27aaab94?w=400&h=400&fit=crop", // Sunset reflection

@@ -27,6 +27,8 @@ export default function AppArchives({
   onClose,
   onSaveWorldBookEntries,
 }: AppArchivesProps) {
+  const visibleCharacters = characters.filter((c) => !c.isGroupChat);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
@@ -915,7 +917,7 @@ export default function AppArchives({
           })()
         ) : (
           <div className="space-y-3 max-w-md mx-auto">
-            {characters.length === 0 ? (
+            {visibleCharacters.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
                 <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400 border border-slate-200">
                   <User className="w-8 h-8" />
@@ -934,7 +936,7 @@ export default function AppArchives({
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-3">
-                {characters.map((char) => (
+                {visibleCharacters.map((char) => (
                   <div
                     key={char.id}
                     onClick={() => handleEdit(char)}

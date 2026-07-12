@@ -681,34 +681,46 @@ export default function App() {
   // HomeScreen layout items (Apps + Widgets)
   const [homeScreenItems, setHomeScreenItems] = useState<HomeScreenItem[]>(() => {
     const raw = localStorage.getItem("phone_homescreen_items");
+    const migratedV3 = localStorage.getItem("phone_layout_migrated_v3");
+    
     let items: HomeScreenItem[] = [];
-    if (raw) {
+    if (raw && migratedV3) {
       try {
         items = JSON.parse(raw);
       } catch (e) {}
     } else {
+      // Force default gorgeous layout with Album & Music widgets arranged matching user screenshot
       items = [
-        { id: "chat", type: "app", size: "1x1", page: 0 },
+        { id: "album_widget_1", type: "widget", widgetType: "album", size: "2x2", page: 0 },
         { id: "archives", type: "app", size: "1x1", page: 0 },
         { id: "worldbook", type: "app", size: "1x1", page: 0 },
+        { id: "chat", type: "app", size: "1x1", page: 0 },
+        { id: "offline", type: "app", size: "1x1", page: 0 },
         { id: "music", type: "app", size: "1x1", page: 0 },
-        { id: "notes", type: "app", size: "1x1", page: 0 },
+        { id: "memory", type: "app", size: "1x1", page: 0 },
+        { id: "music_widget_1", type: "widget", widgetType: "music", size: "2x2", page: 0 },
         { id: "store", type: "app", size: "1x1", page: 0 },
         { id: "settings", type: "app", size: "1x1", page: 0 },
-        { id: "offline", type: "app", size: "1x1", page: 0 },
+        { id: "notes", type: "app", size: "1x1", page: 1 },
       ];
+      localStorage.setItem("phone_homescreen_items", JSON.stringify(items));
+      localStorage.setItem("phone_layout_migrated_v3", "true");
     }
     // Filter out schedule app
     items = items.filter((item) => item.id !== "schedule");
-    // Automatically add memory app on the home screen if it's missing (keeps existing state but adds new feature)
+    // Ensure all standard apps and widgets are present in layout
+    if (!items.some(item => item.id === "album_widget_1")) {
+      items.unshift({ id: "album_widget_1", type: "widget", widgetType: "album", size: "2x2", page: 0 });
+    }
+    if (!items.some(item => item.id === "music_widget_1")) {
+      items.push({ id: "music_widget_1", type: "widget", widgetType: "music", size: "2x2", page: 0 });
+    }
     if (!items.some(item => item.id === "memory")) {
       items.push({ id: "memory", type: "app", size: "1x1", page: 0 });
     }
-    // Automatically add notes app on the home screen if it's missing
     if (!items.some(item => item.id === "notes")) {
-      items.push({ id: "notes", type: "app", size: "1x1", page: 0 });
+      items.push({ id: "notes", type: "app", size: "1x1", page: 1 });
     }
-    // Automatically add offline app on the home screen if it's missing
     if (!items.some(item => item.id === "offline")) {
       items.push({ id: "offline", type: "app", size: "1x1", page: 0 });
     }

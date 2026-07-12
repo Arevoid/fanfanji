@@ -163,6 +163,7 @@ export default function AppSettings({
   const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.selfBubbleRadius !== undefined ? settings.selfBubbleRadius : 18);
   const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100);
   const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
+  const [hideNicknames, setHideNicknames] = useState(!!settings.hideNicknames);
 
   // New beauty settings states
   const [dockBorderRadius, setDockBorderRadius] = useState(settings.dockBorderRadius !== undefined ? settings.dockBorderRadius : 26);
@@ -1344,9 +1345,9 @@ export default function AppSettings({
                               className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
                               style={{ borderRadius: `${avatarBorderRadius}px` }}
                             />
-                            <div className="flex flex-col items-start text-[10px] text-slate-500/80">
+                            {!hideNicknames && (<div className="flex flex-col items-start text-[10px] text-slate-500/80">
                               <span className="font-bold text-slate-700/85">聊天对象 (AI)</span>
-                            </div>
+                            </div>)}
                           </div>
                           <div className="max-w-[75%] relative">
                             <div
@@ -1384,7 +1385,7 @@ export default function AppSettings({
                             style={{ borderRadius: `${avatarBorderRadius}px` }}
                           />
                           <div className="flex flex-col items-start max-w-[75%]">
-                            <span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>
+                            {!hideNicknames && (<span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>)}
                             <div
                               className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
                               style={{
@@ -1424,9 +1425,9 @@ export default function AppSettings({
                                 className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
                                 style={{ borderRadius: `${avatarBorderRadius}px` }}
                               />
-                              <div className="flex flex-col items-start text-[10px] text-slate-500/80">
+                              {!hideNicknames && (<div className="flex flex-col items-start text-[10px] text-slate-500/80">
                                 <span className="font-bold text-slate-700/85">聊天对象 (AI)</span>
-                              </div>
+                              </div>)}
                             </div>
                           )}
                           <div className="max-w-[75%] relative">
@@ -1470,7 +1471,7 @@ export default function AppSettings({
                             <div className="w-8 h-8 shrink-0" />
                           )}
                           <div className="flex flex-col items-start max-w-[75%]">
-                            {!collapseConsecutiveAvatars && (
+                            {!collapseConsecutiveAvatars && !hideNicknames && (
                               <span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>
                             )}
                             <div
@@ -1511,9 +1512,9 @@ export default function AppSettings({
                               className="w-8 h-8 object-cover bg-slate-100 border border-slate-200 shrink-0"
                               style={{ borderRadius: `${avatarBorderRadius}px` }}
                             />
-                            <div className="flex flex-col items-end text-[10px] text-slate-500/80">
+                            {!hideNicknames && (<div className="flex flex-col items-end text-[10px] text-slate-500/80">
                               <span className="font-bold text-slate-700/85">{settings.name || "我"}</span>
-                            </div>
+                            </div>)}
                           </div>
                           <div className="max-w-[75%] relative">
                             <div
@@ -1551,7 +1552,7 @@ export default function AppSettings({
                             style={{ borderRadius: `${avatarBorderRadius}px` }}
                           />
                           <div className="flex flex-col items-end max-w-[75%]">
-                            <span className="text-[9px] font-bold text-slate-400 mb-0.5">{settings.name || "我"}</span>
+                            {!hideNicknames && (<span className="text-[9px] font-bold text-slate-400 mb-0.5">{settings.name || "我"}</span>)}
                             <div
                               className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
                               style={{
@@ -1620,6 +1621,27 @@ export default function AppSettings({
                         <span
                           className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                             collapseConsecutiveAvatars ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between py-2.5 border-t border-slate-50">
+                      <span className="text-xs font-bold text-slate-700">隐藏昵称</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVal = !hideNicknames;
+                          setHideNicknames(nextVal);
+                          handleSave({ hideNicknames: nextVal });
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          hideNicknames ? "bg-neutral-950" : "bg-slate-200"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            hideNicknames ? "translate-x-4" : "translate-x-0"
                           }`}
                         />
                       </button>
