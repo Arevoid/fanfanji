@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { apiChat, apiExtractMemories } from "../utils/apiHelper";
+import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory } from "../types";
 import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles, compressImage } from "../utils/pngParser";
@@ -42,7 +42,8 @@ import {
   Smile,
   Copy,
   BookOpen,
-  RefreshCw
+  RefreshCw,
+  Languages
 } from "lucide-react";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
@@ -139,6 +140,7 @@ interface AppChatProps {
   onLikeMoment: (momentId: string, userName: string) => void;
   onToggleBookmark: (messageId: string) => void;
   onDeleteMessage?: (messageId: string) => void;
+  onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>) => void;
   onClose: () => void;
   onSaveSettings: (settings: UserSettings) => void;
   onNavigateToApp: (appId: string) => void;
@@ -273,6 +275,7 @@ export default function AppChat({
   onLikeMoment,
   onToggleBookmark,
   onDeleteMessage,
+  onUpdateMessage,
   onClose,
   onSaveSettings,
   onNavigateToApp,
@@ -538,6 +541,31 @@ export default function AppChat({
     }
   };
 
+  const handleTranslateMessage = (msg: Message) => {
+    if (!onUpdateMessage) return;
+    
+    showToast("正在翻译中...");
+    
+    apiTranslate({
+      text: msg.content,
+      apiKey: settings.apiKey || "",
+      model: settings.selectedModel,
+      apiEndpoint: settings.apiEndpoint
+    })
+    .then(res => {
+      if (res && res.text) {
+        onUpdateMessage(msg.id, { translation: res.text });
+        showToast("翻译完成");
+      } else {
+        showToast("翻译无结果");
+      }
+    })
+    .catch(err => {
+      console.error("Translate message failed:", err);
+      showToast("翻译失败，请检查 API 配置");
+    });
+  };
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 1500);
@@ -574,6 +602,7 @@ export default function AppChat({
   const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
   const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
   const [draftEnableTimeAwareness, setDraftEnableTimeAwareness] = useState(false);
+  const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
@@ -1757,6 +1786,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
   // Save settings draft
   const handleSaveSettings = () => {
     if (activeCharacter) {
+      const isEnablingAutoTranslate = draftEnableAutoTranslate && !activeCharacter.enableAutoTranslate;
+
       onSaveCharacter({
         ...activeCharacter,
         name: activeCharacter.isGroupChat ? (draftRemark.trim() || activeCharacter.name) : activeCharacter.name,
@@ -1771,7 +1802,41 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         disableBracketActions: draftDisableBracketActions,
         historyMemoryLimit: draftHistoryMemoryLimit,
         enableTimeAwareness: draftEnableTimeAwareness,
+        enableAutoTranslate: draftEnableAutoTranslate,
       });
+
+      // Automatically translate existing non-Chinese messages in current chat
+      if (isEnablingAutoTranslate && onUpdateMessage) {
+        const currentChatMessages = messages.filter(
+          (m) => m.characterId === activeCharacter.id && m.sender === "character" && !m.isNarration && !m.translation
+        );
+
+        currentChatMessages.forEach((msg) => {
+          const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(msg.content);
+          const hasKorean = /[\uac00-\ud7af]/.test(msg.content);
+          const hasChinese = /[\u4e00-\u9fa5]/.test(msg.content);
+          const hasEnglish = /[a-zA-Z]{3,}/.test(msg.content);
+          const isNonChinese = hasJapanese || hasKorean || (!hasChinese && hasEnglish);
+
+          if (isNonChinese) {
+            apiTranslate({
+              text: msg.content,
+              apiKey: settings.apiKey || "",
+              model: settings.selectedModel,
+              apiEndpoint: settings.apiEndpoint,
+            })
+              .then((res) => {
+                if (res && res.text && res.text !== msg.content) {
+                  onUpdateMessage(msg.id, { translation: res.text });
+                }
+              })
+              .catch((err) => {
+                console.error("Batch auto-translation error:", err);
+              });
+          }
+        });
+      }
+
       setIsShowingCardModal(false);
     }
   };
@@ -2936,6 +3001,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftDisableBracketActions(activeCharacter.disableBracketActions || false);
                   setDraftHistoryMemoryLimit(activeCharacter.historyMemoryLimit || 150);
                   setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness || false);
+                  setDraftEnableAutoTranslate(activeCharacter.enableAutoTranslate || false);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
@@ -3173,6 +3239,22 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           type="checkbox"
                           checked={draftEnableTimeAwareness}
                           onChange={(e) => setDraftEnableTimeAwareness(e.target.checked)}
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Auto Translate Toggle */}
+                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                      <div className="space-y-0.5">
+                        <span className="text-[#52525b] font-bold text-xs">全部自动翻译</span>
+                        <span className="text-[10px] text-slate-400 block">对方发言非中文时，启用后自动将对方的发言翻译为中文</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={draftEnableAutoTranslate}
+                          onChange={(e) => setDraftEnableAutoTranslate(e.target.checked)}
                           className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                         />
                       </label>
@@ -3877,6 +3959,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           }`}
                         >
                           <div className="text-left">{msg.content}</div>
+                          {msg.translation && (
+                            <>
+                              <div className={`my-1.5 border-t border-dashed ${isSelf ? "border-white/20" : "border-stone-200"}`} />
+                              <div className={`text-left text-[11px] leading-relaxed ${isSelf ? "text-white/90" : "text-stone-500"}`}>
+                                {msg.translation}
+                              </div>
+                            </>
+                          )}
                           <div className="cv-bubble-tail hidden" />
                         </div>
                       )}
@@ -6037,6 +6127,19 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               >
                 <AlertCircle className="w-3.5 h-3.5 text-stone-500" />
                 <span>OOC 注释</span>
+              </button>
+            )}
+
+            {!activeMenuMsg.content.startsWith("data:image/") && !activeMenuMsg.content.startsWith("[红包]") && (
+              <button
+                onClick={() => {
+                  handleTranslateMessage(activeMenuMsg);
+                  setActiveMenuMsg(null);
+                }}
+                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
+              >
+                <Languages className="w-3.5 h-3.5 text-stone-500" />
+                <span>翻译</span>
               </button>
             )}
           </motion.div>

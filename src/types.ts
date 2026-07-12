@@ -20,6 +20,7 @@ export interface Character {
   album?: string[]; // Personal photo gallery / album
   references?: CharacterReference[];
   enableAutoSummary?: boolean;
+  enableAutoTranslate?: boolean;
   summaryTriggerRound?: number;
   compressedMemory?: string;
   enableProactiveChat?: boolean;
@@ -46,6 +47,7 @@ export interface Message {
   isBookmarked?: boolean;
   isOffline?: boolean;
   isNarration?: boolean;
+  translation?: string;
 }
 
 export interface MomentComment {

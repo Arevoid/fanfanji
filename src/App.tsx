@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { apiExtractMemories } from "./utils/apiHelper";
+import { apiExtractMemories, apiTranslate } from "./utils/apiHelper";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory } from "./types";
 import { 
   AlbumWidget, 
@@ -1151,12 +1151,12 @@ export default function App() {
       setDraggedItem(item);
       setDraggedItemIndex(index);
     } else {
-      // In non-editing mode: long press for 500ms to enter edit mode and start dragging
+      // In non-editing mode: long press for 400ms (snappier!) to enter edit mode and start dragging
       longPressTimerRef.current = setTimeout(() => {
         setIsEditingHomeScreen(true);
         setDraggedItem(item);
         setDraggedItemIndex(index);
-      }, 500);
+      }, 400);
     }
   };
 
@@ -1205,6 +1205,13 @@ export default function App() {
     const clientX = e.clientX;
     const clientY = e.clientY;
 
+    // Direct DOM styling for real-time responsiveness without waiting for React render cycles
+    const cloneEl = document.getElementById("tactile-drag-clone");
+    if (cloneEl) {
+      cloneEl.style.left = `${clientX}px`;
+      cloneEl.style.top = `${clientY}px`;
+    }
+
     setDragCurrent({ x: clientX, y: clientY });
 
     if (pageContainerRef.current) {
@@ -1228,18 +1235,21 @@ export default function App() {
     if (pageContainerRef.current) {
       const items = pageContainerRef.current.querySelectorAll(`.grid-item[data-page="${currentPage}"]`);
       let targetId: string | null = null;
+      let minDistance = Infinity;
 
       items.forEach((el) => {
         const id = el.getAttribute("data-id");
         if (id === draggedItem.id) return;
 
         const rect = el.getBoundingClientRect();
-        if (
-          clientX >= rect.left &&
-          clientX <= rect.right &&
-          clientY >= rect.top &&
-          clientY <= rect.bottom
-        ) {
+        // Distance-to-center proximity check for incredibly "跟手" and smooth placement
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const dist = Math.hypot(clientX - centerX, clientY - centerY);
+
+        const threshold = Math.max(rect.width, rect.height) * 0.85;
+        if (dist < threshold && dist < minDistance) {
+          minDistance = dist;
           targetId = id;
         }
       });
@@ -1582,6 +1592,43 @@ export default function App() {
   // Chat message send handler
   const handleSendMessage = (msg: Message) => {
     setMessages((prev) => [...prev, msg]);
+
+    // Check if auto-translation is enabled and the message needs translation
+    const char = characters.find((c) => c.id === msg.characterId);
+    if (
+      char &&
+      char.enableAutoTranslate &&
+      msg.sender === "character" &&
+      !msg.isNarration &&
+      !msg.content.startsWith("data:image/") &&
+      !msg.content.startsWith("[红包]")
+    ) {
+      // Check if text is non-Chinese
+      const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(msg.content);
+      const hasKorean = /[\uac00-\ud7af]/.test(msg.content);
+      const hasChinese = /[\u4e00-\u9fa5]/.test(msg.content);
+      const hasEnglish = /[a-zA-Z]{3,}/.test(msg.content);
+      const isNonChinese = hasJapanese || hasKorean || (!hasChinese && hasEnglish);
+
+      if (isNonChinese) {
+        apiTranslate({
+          text: msg.content,
+          apiKey: settings.apiKey || "",
+          model: settings.selectedModel,
+          apiEndpoint: settings.apiEndpoint,
+        })
+          .then((res) => {
+            if (res && res.text && res.text !== msg.content) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === msg.id ? { ...m, translation: res.text } : m))
+              );
+            }
+          })
+          .catch((err) => {
+            console.error("Auto translation error:", err);
+          });
+      }
+    }
   };
 
   const handleToggleBookmark = (id: string) => {
@@ -1592,6 +1639,12 @@ export default function App() {
 
   const handleDeleteMessage = (id: string) => {
     setMessages((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  const handleUpdateMessage = (id: string, updatedFields: Partial<Message>) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...updatedFields } : m))
+    );
   };
 
   // Moments Handlers
@@ -2616,6 +2669,7 @@ export default function App() {
                     onLikeMoment={handleLikeMoment}
                     onToggleBookmark={handleToggleBookmark}
                     onDeleteMessage={handleDeleteMessage}
+                    onUpdateMessage={handleUpdateMessage}
                     onClose={() => setActiveApp(null)}
                     onSaveSettings={setSettings}
                     onNavigateToApp={setActiveApp}
@@ -2767,7 +2821,8 @@ export default function App() {
         {/* Tactile absolute clone of the dragged item following cursor */}
         {draggedItem && (
           <div
-            className="fixed pointer-events-none z-50 transform -translate-x-1/2 -translate-y-1/2 scale-110 shadow-2xl opacity-90 transition-transform duration-100"
+            id="tactile-drag-clone"
+            className="fixed pointer-events-none z-50 transform -translate-x-1/2 -translate-y-1/2 scale-110 shadow-2xl opacity-90 transition-none"
             style={{
               left: dragCurrent.x,
               top: dragCurrent.y,

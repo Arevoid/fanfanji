@@ -496,3 +496,63 @@ ${referencesText}
     }
   }
 }
+
+// translate wrapper
+export async function apiTranslate(params: {
+  text: string;
+  apiKey: string;
+  model: string;
+  apiEndpoint?: string;
+}): Promise<{ text: string }> {
+  try {
+    const res = await fetch("/api/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data.text === "string") {
+        return { text: data.text };
+      }
+    }
+    throw new Error("后端服务不可用，尝试直连");
+  } catch (err) {
+    console.warn("apiTranslate backend failed, trying client direct fallback:", err);
+    try {
+      const prompt = `你是一个专业的翻译官。请将下面这段文本翻译成简体中文。
+      
+【待翻译文本】：
+${params.text}
+
+【翻译要求】：
+1. 如果该文本本身已经是简体中文或繁体中文，直接原样返回该文本，不做任何修改。
+2. 尽量保留原文的语气、标点符号、动作语态（如括号内的动作或描摹描述）和行文风格。
+3. 请直接输出翻译结果，不要包含任何多余的说明、解释或 markdown 格式包装。`;
+
+      let targetModel = params.model;
+      if (params.apiEndpoint && params.apiEndpoint.trim()) {
+        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
+          targetModel = "deepseek-chat";
+        }
+      }
+
+      const result = await directClientChat({
+        message: prompt,
+        history: [],
+        apiKey: params.apiKey,
+        model: targetModel,
+        apiEndpoint: params.apiEndpoint,
+        apiTemperature: 0.3,
+        systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
+          ? "你是一个翻译助手，直接输出目标简体中文，不要带任何废话和解释。"
+          : undefined
+      });
+
+      return { text: result.text };
+    } catch (fallbackErr: any) {
+      console.error("Direct translate fallback failed:", fallbackErr);
+      throw new Error(fallbackErr.message || "直连翻译失败");
+    }
+  }
+}

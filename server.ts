@@ -479,6 +479,92 @@ ${historyText}
     }
   });
 
+  // API Route: Translate text to Chinese (if non-Chinese)
+  app.post("/api/translate", async (req, res) => {
+    try {
+      const { text, apiKey, model, apiEndpoint } = req.body;
+      const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
+      if (!apiKeyValue) {
+        return res.status(400).json({
+          error: "未检测到 API Key。请在手机“设置” -> “API设置”中填写您的 API Key，或由管理员配置后台默认 Key。",
+        });
+      }
+
+      const prompt = `你是一个专业的翻译官。请将下面这段文本翻译成简体中文。
+      
+【待翻译文本】：
+${text}
+
+【翻译要求】：
+1. 如果该文本本身已经是简体中文或繁体中文，直接原样返回该文本，不做任何修改。
+2. 尽量保留原文的语气、标点符号、动作语态（如括号内的动作或描摹描述）和行文风格。
+3. 请直接输出翻译结果，不要包含任何多余的说明、解释或 markdown 格式包装。`;
+
+      // 1. Custom endpoint
+      if (apiEndpoint && apiEndpoint.trim()) {
+        let endpointUrl = apiEndpoint.trim();
+        if (!endpointUrl.endsWith("/chat/completions")) {
+          endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
+        }
+
+        let targetModel = model;
+        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
+          targetModel = "deepseek-v4-flash";
+        }
+
+        const responseFetch = await fetch(endpointUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKeyValue}`
+          },
+          body: JSON.stringify({
+            model: targetModel,
+            messages: [
+              { role: "system", content: "你是一个翻译助手，直接输出目标简体中文，不要带任何废话和解释。" },
+              { role: "user", content: prompt }
+            ],
+            temperature: 0.3
+          })
+        });
+
+        if (!responseFetch.ok) {
+          const errorText = await responseFetch.text();
+          return res.status(responseFetch.status).json({
+            error: `中转接口翻译失败 (${responseFetch.status}): ${errorText || "服务器未响应"}`
+          });
+        }
+
+        const dataFetch = await responseFetch.json();
+        const aiText = dataFetch.choices?.[0]?.message?.content || "";
+        return res.json({ text: aiText });
+      }
+
+      // 2. Default Gemini API
+      const ai = new GoogleGenAI({
+        apiKey: apiKeyValue,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          },
+        },
+      });
+
+      const response = await ai.models.generateContent({
+        model: model || "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          temperature: 0.3,
+        },
+      });
+
+      res.json({ text: response.text });
+    } catch (error: any) {
+      console.error("Translate Error:", error);
+      res.status(500).json({ error: error.message || "翻译发生异常，请检查配置或稍后再试。" });
+    }
+  });
+
   // API Route: Test API connection and Key validity
   app.post("/api/test-key", async (req, res) => {
     try {
