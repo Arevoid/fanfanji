@@ -300,7 +300,12 @@ export default function AppOffline({
 
     try {
       // Assemble history context
-      const historyContext = updatedStory.messages.map(m => {
+      // If we added a user message in this turn, exclude it from historyContext because it will be passed as the separate 'message' parameter.
+      const msgsForHistory = (text && !forceAIOnly && updatedStory.messages.length > 0 && updatedStory.messages[updatedStory.messages.length - 1].sender === "user")
+        ? updatedStory.messages.slice(0, -1)
+        : updatedStory.messages;
+
+      const historyContext = msgsForHistory.map(m => {
         if (m.sender === "user") {
           return {
             role: "user",

@@ -1003,12 +1003,26 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
       // Limit history to active character's historyMemoryLimit (default 150 messages / 75 turns)
       const limit = activeCharacter.historyMemoryLimit || 150;
-      const slicedMsgs = finalMsgs.slice(-limit);
+      
+      // If userMsg is provided and is the last message in finalMsgs, exclude it from history because it will be passed as the separate 'message' parameter.
+      const msgsForHistory = (userMsg && finalMsgs.length > 0 && finalMsgs[finalMsgs.length - 1].id === userMsg.id)
+        ? finalMsgs.slice(0, -1)
+        : finalMsgs;
+      const slicedMsgs = msgsForHistory.slice(-limit);
 
-      const history = slicedMsgs.map((m) => ({
-        role: m.sender === "user" ? "user" : "model",
-        text: m.content,
-      }));
+      const history = slicedMsgs.map((m) => {
+        const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
+          month: "long",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        });
+        return {
+          role: m.sender === "user" ? "user" : "model",
+          text: `[发送时间: ${timeStr}] ${m.content}`,
+        };
+      });
 
       // Construct system instructions based on multi-block SillyTavern positioning rules
       let mainPromptText = isOfflineModeActive 
@@ -1094,8 +1108,13 @@ ${activeCharacter.disableBracketActions
         });
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
-你对时间有精准的实时感知。请在你的回复中，极度自然地融合这一时间感（例如：如果在深夜，你可以表现出困倦或关心地催促对方去睡觉；如果在清晨，可以道早安；如果到饭点，可以提一句吃饭）。
-请确保不要刻板、生硬地报时，而是像一个真实生活在该时区、该时刻的真人一样表现和说话。`);
+在聊天历史和当前用户消息中，每条消息的前面都带有 \`[发送时间: 月日 时分]\` 形式的物理时间戳（例如 \`[发送时间: 7月12日 08:15]\`）。
+这代表消息实际发生的物理时刻，是你判断“现实时间流逝与时间差”的最高客观依据：
+1. 【精准判断时间跨度与间隔】：通过对比每条消息的发送时间，请精准识别出消息与消息之间间隔了多久。
+   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是八小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”，绝不要犯下“不是才刚说完晚安吗”之类的时间感知错乱错误！
+   - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
+2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
+3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
       }
 
       // 2. After Main Prompt entries
@@ -1200,6 +1219,16 @@ ${activeCharacter.disableBracketActions
         const secs = parts[1] || "5";
         promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒）。由于微信语音默认无法直接识别文字，请假设你听到了我用温暖/俏皮的声音发给你的语音（内容可以由你自行结合之前的话题进行脑补/想象，或者是日常可爱的闲聊）。请对此做出一个非常符合你人设、温暖、极其简短像真人在微信回语音或文字一样的回复。`;
       }
+
+      // Prepend current message timestamp for better time awareness
+      const currentNowStr = new Date(userMsg ? userMsg.timestamp : Date.now()).toLocaleString("zh-CN", {
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      });
+      promptMessage = `[发送时间: ${currentNowStr}] ${promptMessage}`;
 
       const data = await apiChat({
         message: promptMessage,
@@ -1333,9 +1362,16 @@ ${activeCharacter.disableBracketActions
               // Trigger automatic memory extraction in background
               setTimeout(async () => {
                 const count = await handleExtractMemories(eligibleMsgs);
-                if (count > 0 && onClearMessages) {
-                  // Keep the last 4 messages to preserve conversational thread
-                  onClearMessages(activeChatCharId, 4);
+                if (count > 0) {
+                  // Do NOT delete user's chat history! Keep all logs.
+                  // Save the last summarized message ID to character so auto-summary can skip them next time
+                  const lastMsg = eligibleMsgs[eligibleMsgs.length - 1];
+                  if (lastMsg) {
+                    onSaveCharacter({
+                      ...activeCharacter,
+                      lastImmediateSummaryMsgId: lastMsg.id,
+                    });
+                  }
                 }
               }, 200);
             }
@@ -1595,13 +1631,25 @@ ${activeCharacter.disableBracketActions
     try {
       // Limit history to active character's historyMemoryLimit (default 150 messages / 75 turns)
       const limit = activeCharacter.historyMemoryLimit || 150;
-      const slicedMsgs = previousMessages.slice(-limit);
+      
+      // Exclude lastUserMsg from the history parameter since it is sent as the main message parameter.
+      const msgsForHistory = previousMessages.filter(m => m.id !== lastUserMsg.id);
+      const slicedMsgs = msgsForHistory.slice(-limit);
 
-      // Map history
-      const history = slicedMsgs.map((m) => ({
-        role: m.sender === "user" ? "user" : "model",
-        text: m.content,
-      }));
+      // Map history with timestamps for time awareness
+      const history = slicedMsgs.map((m) => {
+        const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
+          month: "long",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        });
+        return {
+          role: m.sender === "user" ? "user" : "model",
+          text: `[发送时间: ${timeStr}] ${m.content}`,
+        };
+      });
 
       // Construct system instructions
       let mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
@@ -1686,8 +1734,13 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         });
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
-你对时间有精准的实时感知。请在你的回复中，极度自然地融合这一时间感（例如：如果在深夜，你可以表现出困倦或关心地催促对方去睡觉；如果在清晨，可以道早安；如果到饭点，可以提一句吃饭）。
-请确保不要刻板、生硬地报时，而是像一个真实生活在该时区、该时刻的真人一样表现和说话。`);
+在聊天历史和当前用户消息中，每条消息的前面都带有 \`[发送时间: 月日 时分]\` 形式的物理时间戳（例如 \`[发送时间: 7月12日 08:15]\`）。
+这代表消息实际发生的物理时刻，是你判断“现实时间流逝与时间差”的最高客观依据：
+1. 【精准判断时间跨度与间隔】：通过对比每条消息的发送时间，请精准识别出消息与消息之间间隔了多久。
+   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是八小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”，绝不要犯下“不是才刚说完晚安吗”之类的时间感知错乱错误！
+   - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气 and 对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
+2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
+3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
       }
 
       // 2. After Main Prompt entries
@@ -1749,8 +1802,16 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
+      const regenNowStr = new Date(lastUserMsg.timestamp).toLocaleString("zh-CN", {
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      });
+
       const data = await apiChat({
-        message: lastUserMsg.content,
+        message: `[发送时间: ${regenNowStr}] ${lastUserMsg.content}`,
         history,
         systemInstruction,
         apiKey: settings.apiKey,
