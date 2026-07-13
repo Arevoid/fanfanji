@@ -66,6 +66,83 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
 
+// Parse recent messages to detect if an agreed proactive contact time exists
+const getScheduledContactTime = (charMsgs: any[], settingsName: string) => {
+  if (!charMsgs || charMsgs.length === 0) return null;
+
+  // Scan recent messages from the end (last 15 messages)
+  const recentMsgs = charMsgs.slice(-15);
+  for (let i = recentMsgs.length - 1; i >= 0; i--) {
+    const msg = recentMsgs[i];
+    if (msg.isOffline || msg.isNarration) continue;
+
+    const content = msg.content || "";
+    
+    // Check various patterns
+    const generalSoonRegex = /(等会|待会|等一下|稍后|稍後|等会儿|待會|一会儿|一會儿|待会儿|待會兒)/;
+    const halfHourRegex = /(半小时|半個小时|半个小时|半h|半小時)/;
+    const oneHourRegex = /(一小时|一个小时|一個小時|一小時)/;
+    const twoHoursRegex = /(两小时|两个小时|兩個小時|兩小時)/;
+    
+    // Check for "20分后", "20分後", "20分钟后" etc.
+    const numericRegex = /(\d+(?:\.\d+)?)\s*(分钟|分|小时|h|m|mins?|hours?|分|後|后|小時)(后|後|之后|之內|内)?/i;
+
+    let minutes = 0;
+    let found = false;
+    let matchedText = "";
+
+    if (numericRegex.test(content)) {
+      const match = content.match(numericRegex);
+      if (match) {
+        const num = parseFloat(match[1]);
+        const unit = match[2].toLowerCase();
+        
+        // Ensure there is some indicator that it's a future relative time
+        const hasFutureIndicator = content.includes("后") || content.includes("後") || content.includes("内") || content.includes("內") || /后|後|内|內|after|in/i.test(match[3] || "") || /联系|联络|聊|见|说|来|找/i.test(content);
+        
+        if (hasFutureIndicator) {
+          if (unit.includes("小时") || unit.includes("小时") || unit.includes("hour") || unit === "h") {
+            minutes = num * 60;
+          } else {
+            minutes = num;
+          }
+          found = true;
+          matchedText = match[0];
+        }
+      }
+    }
+
+    if (!found && halfHourRegex.test(content)) {
+      minutes = 30;
+      found = true;
+      matchedText = content.match(halfHourRegex)?.[0] || "";
+    } else if (!found && oneHourRegex.test(content)) {
+      minutes = 60;
+      found = true;
+      matchedText = content.match(oneHourRegex)?.[0] || "";
+    } else if (!found && twoHoursRegex.test(content)) {
+      minutes = 120;
+      found = true;
+      matchedText = content.match(twoHoursRegex)?.[0] || "";
+    } else if (!found && generalSoonRegex.test(content)) {
+      minutes = 15;
+      found = true;
+      matchedText = content.match(generalSoonRegex)?.[0] || "";
+    }
+
+    if (found && minutes > 0) {
+      return {
+        msgId: msg.id,
+        timestamp: msg.timestamp,
+        triggerTime: msg.timestamp + minutes * 60 * 1000,
+        durationMinutes: minutes,
+        text: matchedText,
+      };
+    }
+  }
+  return null;
+};
+
 const RenderAvatar = ({ 
   src, 
   alt, 
@@ -841,6 +918,29 @@ export default function AppChat({
       friends.forEach((friend) => {
         if (!friend.enableProactiveChat) return;
 
+        // 1. Check for agreed scheduled contact time FIRST
+        const charMsgs = messagesRef.current.filter((m) => m.characterId === friend.id);
+        const schedule = getScheduledContactTime(charMsgs, settings.name);
+
+        if (schedule) {
+          const lastMsg = charMsgs[charMsgs.length - 1];
+          const isSilent = lastMsg ? (Date.now() - lastMsg.timestamp >= 2 * 60 * 1000) : true; // 2 minutes of silence limit so we don't interrupt active conversations
+
+          // If the scheduled time has arrived AND no messages have been sent after the scheduled time, AND the user/character has been quiet for 2 minutes
+          if (Date.now() >= schedule.triggerTime && (!lastMsg || lastMsg.timestamp < schedule.triggerTime) && isSilent) {
+            onSaveCharacter({
+              ...friend,
+              lastActiveTime: Date.now(),
+            });
+
+            const customTaskText = `You and the user previously agreed that you would contact or chat with them after a certain amount of time (which has now passed). You are proactively initiating contact exactly as promised/agreed. Please follow up on what they went to do (e.g., if they went to eat lunch, ask how the food was or what they ate, or follow up on whatever other topic you were discussing), show concern, or start a fresh, warm conversation as promised, keeping it spontaneous, natural, and perfectly matching your character profile.`;
+
+            triggerProactiveFor(friend.id, customTaskText);
+            return; // Skip standard random proactive check for this friend
+          }
+        }
+
+        // 2. Standard random proactive check
         const startTime = friend.proactiveStartTime || "09:00";
         const endTime = friend.proactiveEndTime || "22:00";
 
@@ -1781,6 +1881,11 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
   const lastActiveCharIdRef = useRef<string | null>(null);
   const lastMsgCountRef = useRef<number>(0);
 
+  const messagesRef = useRef<Message[]>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   // Pre-seed moments if state empty
   const allMoments = moments.length === 0 ? PRESEED_MOMENTS : moments;
 
@@ -2466,7 +2571,7 @@ ${proactivePrompt}`;
   };
 
   // Automated background proactive message generator for any character
-  const triggerProactiveFor = async (charId: string) => {
+  const triggerProactiveFor = async (charId: string, customTaskText?: string) => {
     const friend = characters.find((c) => c.id === charId);
     if (!friend) return;
 
@@ -2481,10 +2586,12 @@ ${proactivePrompt}`;
         instructionsPrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
-      const charMsgs = messages.filter(m => m.characterId === charId);
+      const charMsgs = messagesRef.current.filter(m => m.characterId === charId);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], charId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
+
+      const taskPrompt = customTaskText || "It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.";
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
@@ -2505,7 +2612,7 @@ User Profile (interacting with you):
 - Personality/Bio: ${settings.bio}
 
 ${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}PROACTIVE CONTACT TASK:
-It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.
+${taskPrompt}
 
 ${instructionsPrompt}`;
 
