@@ -43,7 +43,8 @@ import {
   Copy,
   BookOpen,
   RefreshCw,
-  Languages
+  Languages,
+  Search
 } from "lucide-react";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
@@ -138,6 +139,7 @@ interface AppChatProps {
   onAddMoment: (moment: Moment) => void;
   onAddCommentToMoment: (momentId: string, comment: MomentComment) => void;
   onLikeMoment: (momentId: string, userName: string) => void;
+  onDeleteMoment?: (momentId: string) => void;
   onToggleBookmark: (messageId: string) => void;
   onDeleteMessage?: (messageId: string) => void;
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>) => void;
@@ -157,6 +159,65 @@ interface AppChatProps {
 }
 
 const PRESEED_MOMENTS: Moment[] = [];
+
+const cleanAndExtractMoment = (content: string) => {
+  let cleanContent = content.trim();
+  const selfComments: string[] = [];
+
+  // 1. Remove starting "(xx发了朋友圈)" or "(xx发了条朋友圈)" or similar
+  const startPostRegex = /^[（\(]\s*[^）\)]*?发了[^）\)]*?朋友圈\s*[）\)]\s*\n*/i;
+  cleanContent = cleanContent.replace(startPostRegex, "");
+
+  // 2. Extract and remove self-comments from the content
+  const selfCommentRegex = /[（\(](?:评论区(?:自己)?补了一?条|评论区(?:自己)?补了一?句|评论区自己补了|自己(?:在评论区)?补了一?条|自己(?:在评论区)?补了一?句|自评)\s*[：:]\s*(.*?)[）\)]/g;
+  cleanContent = cleanContent.replace(selfCommentRegex, (fullMatch, commentText) => {
+    if (commentText && commentText.trim()) {
+      selfComments.push(commentText.trim());
+    }
+    return "";
+  });
+
+  const lineCommentRegex = /(?:^|\n)\s*(?:评论|评论区补|自评|评论区自己补了一?条|自己补了一?条)\s*[：:]\s*(.*?)(?=\n|$)/g;
+  cleanContent = cleanContent.replace(lineCommentRegex, (fullMatch, commentText) => {
+    if (commentText && commentText.trim()) {
+      selfComments.push(commentText.trim());
+    }
+    return "";
+  });
+
+  cleanContent = cleanContent.trim();
+  cleanContent = cleanContent.replace(/^\n+|\n+$/g, "").trim();
+
+  return {
+    content: cleanContent,
+    selfComments,
+  };
+};
+
+const renderMomentContent = (content: string) => {
+  const parsed = cleanAndExtractMoment(content);
+  return parsed.content;
+};
+
+const getMomentComments = (mom: Moment) => {
+  const parsed = cleanAndExtractMoment(mom.content);
+  const dynamicComments: typeof mom.comments = [];
+  
+  parsed.selfComments.forEach((text, index) => {
+    const exists = mom.comments.some(c => c.content === text && c.authorName === mom.authorName);
+    if (!exists) {
+      dynamicComments.push({
+        id: `${mom.id}-dynamic-self-${index}`,
+        authorName: mom.authorName,
+        authorAvatar: mom.authorAvatar,
+        content: text,
+        timestamp: mom.timestamp + (index + 1) * 1000,
+      });
+    }
+  });
+
+  return [...mom.comments, ...dynamicComments];
+};
 
 const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ownerName: string) => {
   if (!allMoments || allMoments.length === 0) return "";
@@ -273,6 +334,7 @@ export default function AppChat({
   onAddMoment,
   onAddCommentToMoment,
   onLikeMoment,
+  onDeleteMoment,
   onToggleBookmark,
   onDeleteMessage,
   onUpdateMessage,
@@ -615,6 +677,7 @@ export default function AppChat({
   const [callingDuration, setCallingDuration] = useState(0);
   const [redPacketAmount, setRedPacketAmount] = useState("8.88");
   const [redPacketGreeting, setRedPacketGreeting] = useState("恭喜发财，万事如意");
+  const [redPacketSender, setRedPacketSender] = useState<"user" | "character">("user");
   const [showRedPacketOpenModal, setShowRedPacketOpenModal] = useState<boolean>(false);
   const [openRedPacketDetail, setOpenRedPacketDetail] = useState<{ amount: string; greeting: string } | null>(null);
   const [openTransferDetail, setOpenTransferDetail] = useState<{ amount: string; memo: string; isConfirmed: boolean } | null>(null);
@@ -638,6 +701,52 @@ export default function AppChat({
   const [selectedFileNote, setSelectedFileNote] = useState<{ title: string; content: string } | null>(null);
   const [showOocCommentModal, setShowOocCommentModal] = useState<Message | null>(null);
   const [oocCommentText, setOocCommentText] = useState("");
+
+  // Moments long-press popup menu and state
+  const [momentContextMenu, setMomentContextMenu] = useState<{
+    momentId: string;
+    text: string;
+    x: number;
+    y: number;
+    authorName: string;
+    authorAvatar: string;
+    isOwn: boolean;
+    timestamp: number;
+  } | null>(null);
+
+  const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("phone_moment_translations") || "{}");
+    } catch {
+      return {};
+    }
+  });
+
+  const [momentFavorites, setMomentFavorites] = useState<{
+    id: string;
+    momentId: string;
+    authorName: string;
+    authorAvatar: string;
+    content: string;
+    timestamp: number;
+  }[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("phone_moment_favorites") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  const [favedTab, setFavedTab] = useState<"chats" | "moments">("chats");
+
+  // Sync favorites & translations to localStorage when updated
+  useEffect(() => {
+    localStorage.setItem("phone_moment_translations", JSON.stringify(momentTranslations));
+  }, [momentTranslations]);
+
+  useEffect(() => {
+    localStorage.setItem("phone_moment_favorites", JSON.stringify(momentFavorites));
+  }, [momentFavorites]);
 
   useEffect(() => {
     if (activeAttachModal === "file") {
@@ -1471,6 +1580,200 @@ ${timeLogString}
     };
     onSendMessage(userMsg);
     generateResponseForUserMessage(userMsg);
+  };
+
+  const sendPartnerRedPacket = async (amount: string, greeting: string) => {
+    if (!activeChatCharId || !activeCharacter) return;
+    
+    // 1. Send the red packet message as "character"
+    const charRedPacketMsg: Message = {
+      id: `char-rp-${Date.now()}`,
+      characterId: activeChatCharId,
+      sender: "character",
+      content: `[红包]|${amount}|${greeting}`,
+      timestamp: Date.now(),
+    };
+    onSendMessage(charRedPacketMsg);
+
+    // 2. Trigger a conversational dialogue follow-up from the character in-character
+    setIsTyping(true);
+    try {
+      const history = messages
+        .filter((m) => m.characterId === activeChatCharId && !m.isOffline)
+        .slice(-15)
+        .map((m) => ({
+          role: m.sender === "user" ? "user" as const : "model" as const,
+          parts: [{ text: m.content }],
+        }));
+
+      const assembledInstructions = [];
+      assembledInstructions.push(`You are roleplaying as "${activeCharacter.name}". You just sent the user a WeChat red packet with the greeting "${greeting}" for amount ¥${amount}. Now, output a single very brief, sweet, realistic chat message following the red packet (e.g., telling them to buy themselves a treat or expressing your affection).
+Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO action/ambient descriptions in brackets.`);
+      
+      const systemInstruction = assembledInstructions.join("\n\n");
+      const data = await apiChat({
+        message: `[System action: You just sent a red packet for ¥${amount} with greeting "${greeting}". Respond with a short, sweet conversational message in-character.]`,
+        history,
+        systemInstruction,
+        apiKey: settings.apiKey,
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+        apiTemperature: settings.apiTemperature,
+        streamCompatible: settings.streamCompatible,
+      });
+
+      if (data && data.text) {
+        const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
+        const textMsg: Message = {
+          id: `char-rp-text-${Date.now()}`,
+          characterId: activeChatCharId,
+          sender: "character",
+          content: cleanedText || data.text,
+          timestamp: Date.now() + 100,
+        };
+        onSendMessage(textMsg);
+      }
+    } catch (e) {
+      console.error("Partner red packet message generation failed", e);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const longPressTimerRef = useRef<any>(null);
+
+  const handleMomentTextPointerDown = (
+    e: React.PointerEvent,
+    momentId: string,
+    text: string,
+    authorName: string,
+    authorAvatar: string,
+    isOwn: boolean,
+    timestamp: number
+  ) => {
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+
+    longPressTimerRef.current = setTimeout(() => {
+      setMomentContextMenu({
+        momentId,
+        text,
+        x: clientX,
+        y: clientY,
+        authorName,
+        authorAvatar,
+        isOwn,
+        timestamp,
+      });
+    }, 600);
+  };
+
+  const handleMomentTextPointerUpOrLeave = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleMomentTextPointerMove = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleMomentTextContextMenu = (
+    e: React.MouseEvent,
+    momentId: string,
+    text: string,
+    authorName: string,
+    authorAvatar: string,
+    isOwn: boolean,
+    timestamp: number
+  ) => {
+    e.preventDefault();
+    setMomentContextMenu({
+      momentId,
+      text,
+      x: e.clientX,
+      y: e.clientY,
+      authorName,
+      authorAvatar,
+      isOwn,
+      timestamp,
+    });
+  };
+
+  const handleCopyMomentText = (text: string) => {
+    navigator.clipboard.writeText(text);
+    showToast("已复制到剪贴板");
+    setMomentContextMenu(null);
+  };
+
+  const handleFavoriteMoment = (momentId: string, text: string, authorName: string, authorAvatar: string, timestamp: number) => {
+    const isAlreadyFaved = momentFavorites.some(f => f.momentId === momentId && f.content === text);
+    if (isAlreadyFaved) {
+      setMomentFavorites(prev => prev.filter(f => !(f.momentId === momentId && f.content === text)));
+      showToast("已取消收藏");
+    } else {
+      const newFav = {
+        id: `fav-moment-${Date.now()}`,
+        momentId,
+        authorName,
+        authorAvatar,
+        content: text,
+        timestamp: timestamp || Date.now()
+      };
+      setMomentFavorites(prev => [newFav, ...prev]);
+      showToast("已收藏");
+    }
+    setMomentContextMenu(null);
+  };
+
+  const handleTranslateMoment = async (momentId: string, text: string) => {
+    setMomentContextMenu(null);
+    if (momentTranslations[momentId]) {
+      const copy = { ...momentTranslations };
+      delete copy[momentId];
+      setMomentTranslations(copy);
+      return;
+    }
+
+    showToast("正在翻译中...");
+    try {
+      const res = await apiTranslate({
+        text,
+        apiKey: settings.apiKey || "",
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+      });
+      if (res && res.text) {
+        setMomentTranslations(prev => ({
+          ...prev,
+          [momentId]: res.text
+        }));
+        showToast("翻译完成");
+      } else {
+        showToast("翻译无结果");
+      }
+    } catch (err) {
+      console.error("Translate moment failed:", err);
+      showToast("翻译失败，请检查 API 配置");
+    }
+  };
+
+  const handleDeleteMomentClick = (momentId: string) => {
+    setMomentContextMenu(null);
+    if (confirm("确定要删除这条朋友圈吗？")) {
+      if (onDeleteMoment) {
+        onDeleteMoment(momentId);
+        showToast("已删除朋友圈");
+      } else {
+        showToast("删除失败：未提供删除接口");
+      }
+    }
   };
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -2470,6 +2773,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 2. The post content must be natural, engaging, and in Chinese.
 3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
 4. Do NOT use OOC tags, narration brackets, or talk like an AI. Just output the text of the Moment post.
+5. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)" or "(配图：...)" at the start.
+6. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 `;
 
       const response = await apiChat({
@@ -2486,6 +2791,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         let cleanedContent = response.text.trim();
         cleanedContent = cleanedContent.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
 
+        const parsed = cleanAndExtractMoment(cleanedContent);
+
         let momentImage: string | undefined = undefined;
         if (friend.album && friend.album.length > 0) {
           // 40% chance of attaching a photo from their album
@@ -2500,10 +2807,16 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
           characterId: friend.id,
           authorName: friend.remark || friend.name,
           authorAvatar: friend.avatar,
-          content: cleanedContent,
+          content: parsed.content,
           timestamp: Date.now(),
           likes: [],
-          comments: [],
+          comments: parsed.selfComments.map((text, idx) => ({
+            id: `${Date.now()}-self-comment-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+            authorName: friend.remark || friend.name,
+            authorAvatar: friend.avatar,
+            content: text,
+            timestamp: Date.now() + (idx + 1) * 1000,
+          })),
           image: momentImage,
         };
 
@@ -2649,7 +2962,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
   const getUnreadMomentsCount = () => {
     let count = 0;
     allMoments.forEach((mom) => {
-      mom.comments.forEach((comm) => {
+      getMomentComments(mom).forEach((comm) => {
         if (comm.authorName !== settings.name && comm.timestamp > lastViewedMomentsTime) {
           // Check if it's user's moment, or a reply targeting the user
           const isUserMoment = mom.authorName === settings.name;
@@ -2825,6 +3138,33 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   color: ${settings.selfBubbleColor} !important;
                 }
               ` : ''}
+
+              /* 朋友圈评论区无气泡卡片，细线分隔 */
+              .moments-comment-list {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 0 !important;
+              }
+              .moments-comment-item {
+                background-color: transparent !important;
+                background-image: none !important;
+                border-radius: 0px !important;
+                border-left: none !important;
+                border-right: none !important;
+                border-bottom: none !important;
+                box-shadow: none !important;
+                padding-top: 5px !important;
+                padding-bottom: 5px !important;
+                padding-left: 2px !important;
+                padding-right: 2px !important;
+                margin: 0 !important;
+              }
+              .moments-comment-item:not(:first-child) {
+                border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
+              }
+              .moments-comment-item:hover {
+                background-color: rgba(0, 0, 0, 0.03) !important;
+              }
             `}</style>
             {activeStylePreset === "liquid-glass" && (
               <style>{`
@@ -3519,7 +3859,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
                           <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
-                          <span className="text-[10px] text-slate-400 block">失联一定时间后根据性格主动给您发信息</span>
+                          <span className="text-[10px] text-slate-400 block">设置时间段后，对方会在时间段内随机主动发送信息（支持设置 00:00-00:00 为全天随时）</span>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer">
                           <input
@@ -3581,7 +3921,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
                           <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between gap-2">
                             <span className="text-[10px] text-slate-400 leading-snug">
-                              Ta 将在此时间段内随机主动给您发送消息。
+                              Ta 将在此时间段内随机主动给您发送消息。若设为 00:00 - 00:00 则为全天候随机发信。
                             </span>
                             <button
                               type="button"
@@ -4172,11 +4512,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               <span>{msgName}</span>
                             </div>
                           )}
-                          <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
-                            <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
-                            <span>•</span>
-                            <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
-                          </div>
+                          {isSelf && (
+                            <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
+                              <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                              <span>•</span>
+                              <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -4226,11 +4568,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               <span>{msgName}</span>
                             </div>
                           )}
-                          <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
-                            <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
-                            <span>•</span>
-                            <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
-                          </div>
+                          {isSelf && (
+                            <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
+                              <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                              <span>•</span>
+                              <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                            </div>
+                          )}
                         </div>
                       )}
                       <div className="max-w-full">
@@ -4563,7 +4907,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
               <div className="bg-white rounded-[32px] w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-slate-100 animate-scale-up text-stone-800">
                 <div className="px-5 py-4 bg-stone-50 border-b border-stone-100 flex items-center justify-between shrink-0">
-                  <h3 className="text-xs font-bold text-stone-800">发送红包</h3>
+                  <h3 className="text-xs font-bold text-stone-800">红包设置</h3>
                   <button 
                     onClick={() => setActiveAttachModal(null)}
                     className="p-1 hover:bg-stone-200/50 rounded-full transition-colors text-stone-500"
@@ -4573,6 +4917,32 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 </div>
 
                 <div className="p-5 space-y-4 flex-1">
+                  {/* Sender Selection */}
+                  <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setRedPacketSender("user")}
+                      className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                        redPacketSender === "user" 
+                          ? "bg-white text-stone-900 shadow-sm" 
+                          : "text-stone-500 hover:text-stone-800"
+                      }`}
+                    >
+                      我发送给Ta
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRedPacketSender("character")}
+                      className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                        redPacketSender === "character" 
+                          ? "bg-white text-stone-900 shadow-sm" 
+                          : "text-stone-500 hover:text-stone-800"
+                      }`}
+                    >
+                      让Ta发给我
+                    </button>
+                  </div>
+
                   {/* Amount Field */}
                   <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-3 focus-within:ring-1 focus-within:ring-[#e15241]/30 focus-within:border-[#e15241]/50 transition-all">
                     <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">红包金额 (元)</label>
@@ -4618,12 +4988,16 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     onClick={() => {
                       const finalAmount = parseFloat(redPacketAmount) > 0 ? redPacketAmount : "8.88";
                       const finalGreeting = redPacketGreeting.trim() || "恭喜发财，万事如意";
-                      sendCustomMessage(`[红包]|${finalAmount}|${finalGreeting}`);
+                      if (redPacketSender === "character") {
+                        sendPartnerRedPacket(finalAmount, finalGreeting);
+                      } else {
+                        sendCustomMessage(`[红包]|${finalAmount}|${finalGreeting}`);
+                      }
                       setActiveAttachModal(null);
                     }}
                     className="w-full py-2.5 bg-[#e15241] hover:bg-[#c94334] text-white font-extrabold text-xs rounded-xl shadow-sm transition-all active:scale-[0.98]"
                   >
-                    塞钱进红包
+                    {redPacketSender === "character" ? "让对方发送红包" : "塞钱进红包"}
                   </button>
                 </div>
               </div>
@@ -5155,75 +5529,75 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 {/* Top Spacing for Overlapping Avatar */}
                 <div className="h-10"></div>
 
-              {/* Filter State Banner */}
-              {momentsFilterCharId && (
-                <div className="mx-4 my-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl flex justify-between items-center text-xs">
-                  <span className="font-medium text-slate-500">正在查看好友的朋友圈</span>
-                  <button
-                    onClick={() => setMomentsFilterCharId(null)}
-                    className="text-blue-500 hover:text-blue-600 font-bold"
-                  >
-                    查看全部
-                  </button>
-                </div>
-              )}
-
-              {/* Moments publishing Modal inline */}
-              {showMomentPublisher && (
-                <form
-                  onSubmit={handlePublishMoment}
-                  className="bg-white p-4 border border-slate-100 space-y-3 mx-4 my-3 rounded-2xl shadow-sm"
-                >
-                  <div className="flex justify-between items-center pb-1">
-                    <span className="text-xs font-bold text-slate-400">分享新鲜事...</span>
-                    <button type="button" onClick={() => setShowMomentPublisher(false)} className="text-slate-400">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <textarea
-                    rows={3}
-                    required
-                    value={momentInputText}
-                    onChange={(e) => setMomentInputText(e.target.value)}
-                    placeholder="说点什么吧，可以配个好看的插图..."
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed"
-                  />
-
-                  <div className="flex justify-between items-center">
-                    <label className="cursor-pointer text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold">
-                      <ImageIcon className="w-4 h-4" />
-                      <span>添加配图</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleMomentImageUpload}
-                        className="hidden"
-                      />
-                    </label>
-
+                {/* Filter State Banner */}
+                {momentsFilterCharId && (
+                  <div className="mx-4 my-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl flex justify-between items-center text-xs">
+                    <span className="font-medium text-slate-500">正在查看好友的朋友圈</span>
                     <button
-                      type="submit"
-                      className="px-4 py-1.5 bg-neutral-950 hover:bg-neutral-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                      onClick={() => setMomentsFilterCharId(null)}
+                      className="text-blue-500 hover:text-blue-600 font-bold"
                     >
-                      发布动态
+                      查看全部
                     </button>
                   </div>
+                )}
 
-                  {momentAttachedImage && (
-                    <div className="relative w-24 h-24 rounded-lg overflow-hidden border">
-                      <img src={momentAttachedImage} alt="" className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => setMomentAttachedImage(null)}
-                        className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5"
-                      >
-                        <X className="w-3 h-3" />
+                {/* Moments publishing Modal inline */}
+                {showMomentPublisher && (
+                  <form
+                    onSubmit={handlePublishMoment}
+                    className="bg-white p-4 border border-slate-100 space-y-3 mx-4 my-3 rounded-2xl shadow-sm"
+                  >
+                    <div className="flex justify-between items-center pb-1">
+                      <span className="text-xs font-bold text-slate-400">分享新鲜事...</span>
+                      <button type="button" onClick={() => setShowMomentPublisher(false)} className="text-slate-400">
+                        <X className="w-4 h-4" />
                       </button>
                     </div>
-                  )}
-                </form>
-              )}
+
+                    <textarea
+                      rows={3}
+                      required
+                      value={momentInputText}
+                      onChange={(e) => setMomentInputText(e.target.value)}
+                      placeholder="说点什么吧，可以配个好看的插图..."
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed text-left"
+                    />
+
+                    <div className="flex justify-between items-center">
+                      <label className="cursor-pointer text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold">
+                        <ImageIcon className="w-4 h-4" />
+                        <span>添加配图</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleMomentImageUpload}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <button
+                        type="submit"
+                        className="px-4 py-1.5 bg-neutral-950 hover:bg-neutral-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                      >
+                        发布动态
+                      </button>
+                    </div>
+
+                    {momentAttachedImage && (
+                      <div className="relative w-24 h-24 rounded-lg overflow-hidden border">
+                        <img src={momentAttachedImage} alt="" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setMomentAttachedImage(null)}
+                          className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </form>
+                )}
 
               {/* Moments list */}
               <div className="px-4 divide-y divide-slate-100 max-w-md mx-auto">
@@ -5255,9 +5629,44 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </h4>
 
                           {/* Content text */}
-                          <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1">
-                            {mom.content}
+                          <p 
+                            className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
+                            title="长按/右键 弹出菜单"
+                            onContextMenu={(e) => handleMomentTextContextMenu(
+                              e,
+                              mom.id,
+                              renderMomentContent(mom.content),
+                              momAuthorName,
+                              momAuthorAvatar,
+                              mom.characterId === undefined || mom.characterId === null,
+                              mom.timestamp
+                            )}
+                            onPointerDown={(e) => handleMomentTextPointerDown(
+                              e,
+                              mom.id,
+                              renderMomentContent(mom.content),
+                              momAuthorName,
+                              momAuthorAvatar,
+                              mom.characterId === undefined || mom.characterId === null,
+                              mom.timestamp
+                            )}
+                            onPointerUp={handleMomentTextPointerUpOrLeave}
+                            onPointerLeave={handleMomentTextPointerUpOrLeave}
+                            onPointerMove={handleMomentTextPointerMove}
+                          >
+                            {renderMomentContent(mom.content)}
                           </p>
+
+                          {/* Translation block if exists */}
+                          {momentTranslations[mom.id] && (
+                            <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-600 leading-relaxed bg-slate-50/60 p-2.5 rounded-lg animate-fade-in">
+                              <div className="flex items-center gap-1 text-[9px] text-slate-400 mb-1 font-bold">
+                                <Languages className="w-3 h-3" />
+                                <span>翻译 (由 AI 翻译)</span>
+                              </div>
+                              <p className="whitespace-pre-wrap">{momentTranslations[mom.id]}</p>
+                            </div>
+                          )}
 
                           {/* Attached Photo */}
                           {mom.image && (
@@ -5300,13 +5709,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                 className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-600 font-semibold transition-colors"
                               >
                                 <MessageCircle className="w-3.5 h-3.5" />
-                                <span>{mom.comments.length || "评论"}</span>
+                                <span>{getMomentComments(mom).length || "评论"}</span>
                               </button>
                             </div>
                           </div>
 
                           {/* Integrated Like & Comment Block (WeChat style) */}
-                          {(mom.likes.length > 0 || mom.comments.length > 0) && (
+                          {(mom.likes.length > 0 || getMomentComments(mom).length > 0) && (
                             <div className="bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
                               {/* Likes list */}
                               {mom.likes.length > 0 && (
@@ -5317,9 +5726,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               )}
 
                               {/* Comments list */}
-                              {mom.comments.length > 0 && (
-                                <div className="space-y-1.5">
-                                  {mom.comments.map((comm) => {
+                              {getMomentComments(mom).length > 0 && (
+                                <div className="moments-comment-list py-0.5">
+                                  {getMomentComments(mom).map((comm) => {
                                     const commChar = characters.find((c) => c.name === comm.authorName);
                                     const commAuthorName = commChar ? (commChar.remark || commChar.name) : comm.authorName;
                                     return (
@@ -5329,7 +5738,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                           setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
                                           setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
                                         }}
-                                        className="leading-relaxed text-slate-800 cursor-pointer hover:bg-slate-200/50 rounded px-1 transition-colors"
+                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer hover:bg-slate-200/30 transition-colors text-[11px] block text-left bg-transparent rounded-none shadow-none border-none moments-comment-item"
                                         title={`回复 ${commAuthorName}`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">
@@ -5426,52 +5835,117 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               {/* SAVED BOOKMARKS LIST (信息收藏) */}
               <div className="m-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
-                <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <FolderHeart className="w-4 h-4 text-amber-500" />
-                  <span>信息收藏 ({savedBookmarks.length})</span>
-                </h4>
-
-                {savedBookmarks.length === 0 ? (
-                  <p className="text-[11px] text-slate-400 text-center py-4">
-                    暂无收藏的聊天话语。在聊天窗口中，长按或点击气泡左侧的收藏标签即可将特定对话保存在这里！
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {savedBookmarks.map((bm) => {
-                      const owner = characters.find((c) => c.id === bm.characterId);
-                      return (
-                        <div
-                          key={bm.id}
-                          className="p-3 bg-slate-50 border border-slate-100 rounded-xl relative group flex gap-2.5 items-start"
-                        >
-                          <img
-                            src={bm.sender === "user" ? settings.avatar : (owner?.avatar || "")}
-                            alt=""
-                            className="w-7 h-7 rounded-full object-cover shrink-0"
-                          />
-                          <div className="flex-1 min-w-0 text-xs">
-                            <span className="font-bold text-slate-500">
-                              {bm.sender === "user" ? "我" : (owner?.name || "未知")}
-                            </span>
-                            <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-white p-2 rounded border border-slate-100">
-                              "{bm.content}"
-                            </p>
-                            <span className="text-[9px] text-slate-400 block mt-1">
-                              收藏于 {new Date(bm.timestamp).toLocaleDateString()}
-                            </span>
-                          </div>
-
-                          <button
-                            onClick={() => onToggleBookmark(bm.id)}
-                            className="text-rose-400 hover:text-rose-600 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="取消收藏"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      );
-                    })}
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <FolderHeart className="w-4 h-4 text-amber-500" />
+                    <span>信息收藏 ({savedBookmarks.length + momentFavorites.length})</span>
+                  </h4>
+                  
+                  {/* Segmented Control Tabs */}
+                  <div className="flex bg-slate-100 p-0.5 rounded-lg text-[10px] font-bold shrink-0">
+                    <button
+                      onClick={() => setFavedTab("chats")}
+                      className={`px-2 py-1 rounded-md transition-all ${favedTab === "chats" ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
+                    >
+                      聊天 ({savedBookmarks.length})
+                    </button>
+                    <button
+                      onClick={() => setFavedTab("moments")}
+                      className={`px-2 py-1 rounded-md transition-all ${favedTab === "moments" ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
+                    >
+                      朋友圈 ({momentFavorites.length})
+                    </button>
                   </div>
+                </div>
+
+                {favedTab === "chats" ? (
+                  savedBookmarks.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 text-center py-4">
+                      暂无收藏的聊天话语。在聊天窗口中，长按或点击气泡左侧的收藏标签即可将特定对话保存在这里！
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {savedBookmarks.map((bm) => {
+                        const owner = characters.find((c) => c.id === bm.characterId);
+                        return (
+                          <div
+                            key={bm.id}
+                            className="p-3 bg-slate-50 border border-slate-100 rounded-xl relative group flex gap-2.5 items-start text-left"
+                          >
+                            <img
+                              src={bm.sender === "user" ? settings.avatar : (owner?.avatar || "")}
+                              alt=""
+                              className="w-7 h-7 rounded-full object-cover shrink-0"
+                            />
+                            <div className="flex-1 min-w-0 text-xs text-left">
+                              <span className="font-bold text-slate-500">
+                                {bm.sender === "user" ? "我" : (owner?.name || "未知")}
+                              </span>
+                              <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-white p-2 rounded border border-slate-100">
+                                "{bm.content}"
+                              </p>
+                              <span className="text-[9px] text-slate-400 block mt-1">
+                                收藏于 {new Date(bm.timestamp).toLocaleDateString()}
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={() => onToggleBookmark(bm.id)}
+                              className="text-rose-400 hover:text-rose-600 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="取消收藏"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : (
+                  momentFavorites.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 text-center py-4">
+                      暂无收藏的朋友圈动态。长按朋友圈文字，即可将精彩瞬间文案收藏在这里！
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {momentFavorites.map((fav) => {
+                        return (
+                          <div
+                            key={fav.id}
+                            className="p-3 bg-slate-50 border border-slate-100 rounded-xl relative group flex gap-2.5 items-start text-left"
+                          >
+                            <img
+                              src={fav.authorAvatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop"}
+                              alt=""
+                              className="w-7 h-7 rounded-full object-cover shrink-0"
+                            />
+                            <div className="flex-1 min-w-0 text-xs text-left">
+                              <span className="font-bold text-slate-500">
+                                {fav.authorName}
+                              </span>
+                              <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-white p-2 rounded border border-slate-100">
+                                "{fav.content}"
+                              </p>
+                              <span className="text-[9px] text-slate-400 block mt-1">
+                                收藏于 {new Date(fav.timestamp).toLocaleDateString()}
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={() => {
+                                setMomentFavorites(prev => prev.filter(f => f.id !== fav.id));
+                                showToast("已取消收藏");
+                              }}
+                              className="text-rose-400 hover:text-rose-600 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="取消收藏"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
                 )}
               </div>
 
@@ -5617,9 +6091,44 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </h4>
 
                           {/* Content text */}
-                          <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1">
-                            {mom.content}
+                          <p 
+                            className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
+                            title="长按/右键 弹出菜单"
+                            onContextMenu={(e) => handleMomentTextContextMenu(
+                              e,
+                              mom.id,
+                              renderMomentContent(mom.content),
+                              momAuthorName,
+                              momAuthorAvatar,
+                              mom.characterId === undefined || mom.characterId === null,
+                              mom.timestamp
+                            )}
+                            onPointerDown={(e) => handleMomentTextPointerDown(
+                              e,
+                              mom.id,
+                              renderMomentContent(mom.content),
+                              momAuthorName,
+                              momAuthorAvatar,
+                              mom.characterId === undefined || mom.characterId === null,
+                              mom.timestamp
+                            )}
+                            onPointerUp={handleMomentTextPointerUpOrLeave}
+                            onPointerLeave={handleMomentTextPointerUpOrLeave}
+                            onPointerMove={handleMomentTextPointerMove}
+                          >
+                            {renderMomentContent(mom.content)}
                           </p>
+
+                          {/* Translation block if exists */}
+                          {momentTranslations[mom.id] && (
+                            <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-600 leading-relaxed bg-slate-50/60 p-2.5 rounded-lg animate-fade-in">
+                              <div className="flex items-center gap-1 text-[9px] text-slate-400 mb-1 font-bold">
+                                <Languages className="w-3 h-3" />
+                                <span>翻译 (由 AI 翻译)</span>
+                              </div>
+                              <p className="whitespace-pre-wrap">{momentTranslations[mom.id]}</p>
+                            </div>
+                          )}
 
                           {/* Photo if attached */}
                           {mom.image && (
@@ -5662,13 +6171,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                 className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-600 font-semibold transition-colors"
                               >
                                 <MessageCircle className="w-3.5 h-3.5" />
-                                <span>{mom.comments.length || "评论"}</span>
+                                <span>{getMomentComments(mom).length || "评论"}</span>
                               </button>
                             </div>
                           </div>
 
                           {/* WeChat-style integrated Like & Comment Shelf */}
-                          {(mom.likes.length > 0 || mom.comments.length > 0) && (
+                          {(mom.likes.length > 0 || getMomentComments(mom).length > 0) && (
                             <div className="bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
                               {/* Likes shelf details */}
                               {mom.likes.length > 0 && (
@@ -5679,9 +6188,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               )}
 
                               {/* Comments list shelf */}
-                              {mom.comments.length > 0 && (
-                                <div className="space-y-1.5">
-                                  {mom.comments.map((comm) => {
+                              {getMomentComments(mom).length > 0 && (
+                                <div className="moments-comment-list py-0.5">
+                                  {getMomentComments(mom).map((comm) => {
                                     const commChar = characters.find((c) => c.name === comm.authorName);
                                     const commAuthorName = commChar ? (commChar.remark || commChar.name) : comm.authorName;
                                     return (
@@ -5691,7 +6200,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                           setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
                                           setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
                                         }}
-                                        className="leading-relaxed text-slate-800 cursor-pointer hover:bg-slate-200/50 rounded px-1 transition-colors"
+                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer hover:bg-slate-200/30 transition-colors text-[11px] block text-left bg-transparent rounded-none shadow-none border-none moments-comment-item"
                                         title={`回复 ${commAuthorName}`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">{commAuthorName}</span>
@@ -6398,6 +6907,67 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Moments Text Context Menu Overlay */}
+      {momentContextMenu && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/10 flex items-center justify-center backdrop-blur-[1px]" 
+          onClick={() => setMomentContextMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setMomentContextMenu(null); }}
+        >
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[140px] text-stone-800 space-y-1"
+            style={{
+              position: "absolute",
+              top: Math.max(10, Math.min(window.innerHeight - 220, momentContextMenu.y - 10)),
+              left: Math.max(10, Math.min(window.innerWidth - 160, momentContextMenu.x - 70)),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => handleCopyMomentText(momentContextMenu.text)}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5 text-stone-500" />
+              <span>复制文案</span>
+            </button>
+
+            <button
+              onClick={() => handleFavoriteMoment(
+                momentContextMenu.momentId,
+                momentContextMenu.text,
+                momentContextMenu.authorName,
+                momentContextMenu.authorAvatar,
+                momentContextMenu.timestamp
+              )}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+            >
+              <Heart className={`w-3.5 h-3.5 ${momentFavorites.some(f => f.momentId === momentContextMenu.momentId && f.content === momentContextMenu.text) ? "fill-rose-500 text-rose-500" : "text-stone-400"}`} />
+              <span>
+                {momentFavorites.some(f => f.momentId === momentContextMenu.momentId && f.content === momentContextMenu.text) ? "取消收藏" : "加入收藏"}
+              </span>
+            </button>
+
+            <button
+              onClick={() => handleTranslateMoment(momentContextMenu.momentId, momentContextMenu.text)}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+            >
+              <Languages className="w-3.5 h-3.5 text-stone-500" />
+              <span>{momentTranslations[momentContextMenu.momentId] ? "显示原文" : "AI 翻译"}</span>
+            </button>
+
+            <button
+              onClick={() => handleDeleteMomentClick(momentContextMenu.momentId)}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-red-500 hover:text-red-600 rounded-lg flex items-center gap-2 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <span>删除动态</span>
+            </button>
+          </motion.div>
         </div>
       )}
 

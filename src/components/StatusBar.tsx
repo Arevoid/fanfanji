@@ -82,9 +82,12 @@ export default function StatusBar({ wallpaper }: StatusBarProps) {
 
   return (
     <div 
-      className={`absolute top-0 left-0 right-0 z-50 flex justify-between items-center px-6 pt-[11px] pb-[7px] text-xs font-semibold select-none transition-all duration-300 bg-transparent border-none shadow-none pointer-events-none ${
+      className={`absolute top-0 left-0 right-0 z-50 flex justify-between items-center px-6 pb-[7px] text-xs font-semibold select-none transition-all duration-300 bg-transparent border-none shadow-none pointer-events-none ${
         isDark ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" : "text-gray-800"
       }`}
+      style={{
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 11px)"
+      }}
     >
       <div className="flex items-center space-x-1.5 pointer-events-auto">
         <span className="font-sans text-sm tracking-tight">{time}</span>

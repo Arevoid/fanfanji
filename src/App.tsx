@@ -908,6 +908,36 @@ export default function App() {
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const pageSwitchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const [viewportHeight, setViewportHeight] = useState<string>("100%");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateHeight = () => {
+      if (window.visualViewport && window.innerWidth < 768) {
+        setViewportHeight(`${window.visualViewport.height}px`);
+        const activeEl = document.activeElement;
+        if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) {
+          setTimeout(() => {
+            activeEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          }, 80);
+        }
+      } else {
+        setViewportHeight("100%");
+      }
+    };
+
+    window.visualViewport?.addEventListener("resize", updateHeight);
+    window.visualViewport?.addEventListener("scroll", updateHeight);
+    window.addEventListener("resize", updateHeight);
+    updateHeight();
+
+    return () => {
+      window.visualViewport?.removeEventListener("resize", updateHeight);
+      window.visualViewport?.removeEventListener("scroll", updateHeight);
+      window.removeEventListener("resize", updateHeight);
+    };
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("phone_homescreen_items", JSON.stringify(homeScreenItems));
   }, [homeScreenItems]);
@@ -1674,6 +1704,10 @@ export default function App() {
     );
   };
 
+  const handleDeleteMoment = (momentId: string) => {
+    setMoments((prev) => prev.filter((m) => m.id !== momentId));
+  };
+
   const handleAddCommentToMoment = (momentId: string, comment: MomentComment) => {
     setMoments((prev) =>
       prev.map((mom) => {
@@ -2240,7 +2274,7 @@ export default function App() {
             ? settings.wallpaper
             : `url(${settings.wallpaper}) center/cover no-repeat`,
           position: "relative",
-          height: (typeof window !== "undefined" && window.innerWidth < 768) ? "100%" : undefined,
+          height: (typeof window !== "undefined" && window.innerWidth < 768) ? viewportHeight : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
         }}
       >
@@ -2290,7 +2324,11 @@ export default function App() {
         <div className="flex-1 relative overflow-hidden flex flex-col">
           {activeApp === null ? (
             <div 
-              className="flex-1 flex flex-col justify-between p-4 pt-[40px] pb-6 select-none touch-none"
+              className="flex-1 flex flex-col justify-between p-4 select-none touch-none"
+              style={{
+                paddingTop: "calc(env(safe-area-inset-top, 0px) + 40px)",
+                paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 24px)"
+              }}
               onPointerDown={handleDesktopPointerDown}
               onPointerUp={handleDesktopPointerUp}
               onPointerLeave={handleDesktopPointerUp}
@@ -2661,7 +2699,13 @@ export default function App() {
             </div>
           ) : (
             // Full screen app view ports with transitions
-            <div className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full pt-[36px]">
+            <div 
+              className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full"
+              style={{
+                paddingTop: "calc(env(safe-area-inset-top, 0px) + 36px)",
+                paddingBottom: "env(safe-area-inset-bottom, 0px)"
+              }}
+            >
               <div className="w-full flex-1 min-h-0 relative">
                 <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
                   <AppChat
@@ -2674,6 +2718,7 @@ export default function App() {
                     onAddMoment={handleAddMoment}
                     onAddCommentToMoment={handleAddCommentToMoment}
                     onLikeMoment={handleLikeMoment}
+                    onDeleteMoment={handleDeleteMoment}
                     onToggleBookmark={handleToggleBookmark}
                     onDeleteMessage={handleDeleteMessage}
                     onUpdateMessage={handleUpdateMessage}
