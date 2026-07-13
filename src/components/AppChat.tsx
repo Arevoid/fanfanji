@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup } from "../types";
 import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles, compressImage } from "../utils/pngParser";
+import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
+import StickerSettings from "./StickerSettings";
 import {
   MessageSquare,
   Users,
@@ -44,7 +46,11 @@ import {
   BookOpen,
   RefreshCw,
   Languages,
-  Search
+  Search,
+  Wallet,
+  ChevronRight,
+  Sparkles,
+  CreditCard
 } from "lucide-react";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
@@ -431,6 +437,36 @@ export default function AppChat({
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
 
+  // Sticker groups state
+  const [stickerGroups, setStickerGroups] = useState<StickerGroup[]>([]);
+  const triggerCreateStickerGroupRef = useRef<(() => void) | null>(null);
+  const [activeStickerGroupIndex, setActiveStickerGroupIndex] = useState<number>(0);
+  const [showStickerSelector, setShowStickerSelector] = useState<boolean>(false);
+  const [isManagingStickers, setIsManagingStickers] = useState<boolean>(false);
+
+  // Load sticker groups on mount
+  useEffect(() => {
+    const loadStickers = async () => {
+      try {
+        const groups = await stickerDb.getGroups();
+        if (groups.length === 0) {
+          const defaultGroup: StickerGroup = {
+            id: "default-sticker-group",
+            name: "默认分组",
+            stickers: [],
+          };
+          await stickerDb.saveGroup(defaultGroup);
+          setStickerGroups([defaultGroup]);
+        } else {
+          setStickerGroups(groups);
+        }
+      } catch (err) {
+        console.error("Failed to load sticker groups:", err);
+      }
+    };
+    loadStickers();
+  }, []);
+
   // Initiated chats state to satisfy: unless user initiates chat or proactive message received, don't show thread
   const [initiatedChatIds, setInitiatedChatIds] = useState<string[]>(() => {
     try {
@@ -619,6 +655,22 @@ export default function AppChat({
 
   // User profile edit states
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [meActiveSubView, setMeActiveSubView] = useState<"none" | "identities" | "wallet" | "stickers" | "favorites">("none");
+  const [showTopUpModal, setShowTopUpModal] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState("");
+  const [walletBalance, setWalletBalance] = useState<number>(() => {
+    try {
+      const stored = localStorage.getItem("wechat_wallet_balance");
+      return stored ? parseFloat(stored) : 0.00;
+    } catch {
+      return 0.00;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("wechat_wallet_balance", walletBalance.toFixed(2));
+  }, [walletBalance]);
+
   const [editMyName, setEditMyName] = useState(settings.name);
   const [editMySignature, setEditMySignature] = useState(settings.signature);
   const [editMyBio, setEditMyBio] = useState(settings.bio);
@@ -1408,6 +1460,24 @@ ${timeLogString}
         assembledInstructions.push(groupMemoriesContext);
       }
 
+      // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
+      const allStickers1 = stickerGroups.flatMap(g => g.stickers);
+      if (allStickers1.length > 0) {
+        const stickerListStr = allStickers1.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
+        assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
+你作为扮演角色，现在可以使用我的自定义表情包来回复我！当你想要表达特定情绪、调侃、撒娇或进行有趣回应时，你可以在你发出的消息序列中【单独一行发送表情包】，或者直接把表情包作为一条独立的消息发送出来。
+发送表情包的格式必须完全符合以下严格语法格式：
+[表情]|表情名称|图片URL
+
+以下是你可以无缝调用的自定义表情包列表（每一行对应一个表情包，你可以直接【一字不差地复制】下面的格式并输出它）：
+${stickerListStr}
+
+【强制输出规则】：
+1. 绝对不允许胡编乱造不存在的表情包名称或图片URL！你只能从上面给出的列表中挑选！
+2. 发送时格式必须极其严格：[表情]|名称|URL。不能有任何多余的字符。
+3. 当你发送表情包时，通常伴随着一个简短的台词（台词写在另一个独立消息中，或者在同一消息的另一行）。请表现得非常自然，像个真正活在微信里、喜欢斗图撒娇的朋友！`);
+      }
+
       // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
       assembledInstructions.push(`[🚨🚨🚨 极其重要：世界书设定绝对最高优先 🚨🚨🚨]
 1. 【最高绝对优先权（Absolute Supreme Priority）】：
@@ -1464,7 +1534,14 @@ ${timeLogString}
       } else if (promptMessage.startsWith("[语音]|")) {
         const parts = promptMessage.split("|");
         const secs = parts[1] || "5";
-        promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒）。由于微信语音默认无法直接识别文字，请假设你听到了我用温暖/俏皮的声音发给你的语音（内容可以由你自行结合之前的话题进行脑补/想象，或者是日常可爱的闲聊）。请对此做出一个非常符合你人设、温暖、极其简短像真人在微信回语音或文字一样的回复。`;
+        promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒）。由于微信语音默认无法直接识别文字，请假设 you 听到了我用温暖/俏皮的声音发给你的语音（内容可以由你自行结合之前的话题进行脑补/想象，或者是日常可爱的闲聊）。请对此做出一个非常符合你人设、温暖、极其简短像真人在微信回语音或文字一样的回复。`;
+      } else if (promptMessage.startsWith("[表情]|")) {
+        const parts = promptMessage.split("|");
+        const stickerName = parts[1] || "表情";
+        promptMessage = `[发送表情包] 我给你发送了一个表达当下状态或心情的表情包，名称是：“${stickerName}”。
+【重要表情包处理规则】：
+这个表情包只是我正常聊天时随性表达的状态、心情、气场或情绪。你【绝对不一定要】针对这个表情包特意进行点评、中断我们之前正在进行的话题、或者刻意为了回复这个表情而说多余的话（例如不要说“你发了个表情包”、“你表情包真多”这类废话）。
+请你根据我们正在聊天的上下文话题或我们之前的对话脉络【极其自然、顺畅地继续对话】。如果当下适合，你也可以顺应氛围跟着发一个你自己的表情包，或者在文字对话里自然带过，保持微信好友日常聊天和斗图的真实、轻松感。`;
       }
 
       const data = await apiChat({
@@ -2234,6 +2311,24 @@ ${timeLogString}
       const groupMemoriesContextRegen = getGroupChatMemories(activeCharacter, characters, messages, settings.name);
       if (groupMemoriesContextRegen) {
         assembledInstructions.push(groupMemoriesContextRegen);
+      }
+
+      // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
+      const allStickers2 = stickerGroups.flatMap(g => g.stickers);
+      if (allStickers2.length > 0) {
+        const stickerListStr = allStickers2.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
+        assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
+你作为扮演角色，现在可以使用我的自定义表情包来回复我！当你想要表达特定情绪、调侃、撒娇或进行有趣回应时，你可以在你发出的消息序列中【单独一行发送表情包】，或者直接把表情包作为一条独立的消息发送出来。
+发送表情包的格式必须完全符合以下严格语法格式：
+[表情]|表情名称|图片URL
+
+以下是你可以无缝调用的自定义表情包列表（每一行对应一个表情包，你可以直接【一字不差地复制】下面的格式并输出它）：
+${stickerListStr}
+
+【强制输出规则】：
+1. 绝对不允许胡编乱造不存在的表情包名称或图片URL！你只能从上面给出的列表中挑选！
+2. 发送时格式必须极其严格：[表情]|名称|URL。不能有任何多余的字符。
+3. 当你发送表情包时，通常伴随着一个简短的台词（台词写在另一个独立消息中，或者在同一消息的另一行）。请表现得非常自然，像个真正活在微信里、喜欢斗图撒娇的朋友！`);
       }
 
       // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
@@ -4475,13 +4570,37 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           alt="chat-pic"
                           className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
                         />
-                      ) : msg.content.startsWith("[红包]") ? (() => {
+                      ) : msg.content.startsWith("[表情]|") ? (() => {
+                        const [_, stickerName, stickerUrl] = msg.content.split("|");
+                        return (
+                          <div className="max-w-[130px] rounded-xl overflow-hidden relative select-none">
+                            <img
+                              src={stickerUrl}
+                              alt={stickerName}
+                              className="w-full h-auto max-h-[130px] object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                            <span className="sr-only">[{stickerName}]</span>
+                          </div>
+                        );
+                      })() : msg.content.startsWith("[红包]") ? (() => {
                         const [_, amount, greeting] = msg.content.split("|");
                         return (
                           <div 
                             onClick={() => {
-                              setOpenRedPacketDetail({ amount: amount || "8.88", greeting: greeting || "恭喜发财" });
+                              const packetAmount = amount || "8.88";
+                              setOpenRedPacketDetail({ amount: packetAmount, greeting: greeting || "恭喜发财" });
                               setShowRedPacketOpenModal(true);
+                              if (!isSelf) {
+                                const parsed = parseFloat(packetAmount);
+                                if (!isNaN(parsed)) {
+                                  setWalletBalance(prev => {
+                                    const next = prev + parsed;
+                                    localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
+                                    return next;
+                                  });
+                                }
+                              }
                             }}
                             className={`bg-[#fff6f5] border border-[#fecdd3]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#fff0ef] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
                               isSelf ? "transfer-card" : "received-transfer-card"
@@ -4784,7 +4903,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               {/* Plus (+) Button */}
               <button
                 type="button"
-                onClick={() => setShowAttachPanel(!showAttachPanel)}
+                onClick={() => {
+                  setShowAttachPanel(!showAttachPanel);
+                  setShowStickerSelector(false);
+                }}
                 className={`w-10 h-10 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn text-slate-700 ${
                   showAttachPanel
                     ? "bg-stone-100 rotate-45"
@@ -4949,9 +5071,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 <button
                   type="button"
                   onClick={() => {
-                    const emojis = ["😊", "👍", "❤️", "🌹", "🎉", "🔥", "✨", "😆", "🥰", "👀", "😘", "😭", "🥱", "👿", "🤡", "💖", "🌟"];
-                    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-                    setChatInputText(prev => prev + randomEmoji);
+                    setShowStickerSelector(true);
                     setShowAttachPanel(false);
                   }}
                   className="flex-1 flex flex-col items-center justify-center group min-w-10"
@@ -4961,6 +5081,135 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
                 </button>
+              </div>
+            )}
+
+            {/* Sticker Selector Panel */}
+            {showStickerSelector && (
+              <div className="bg-slate-50 border-t border-slate-200/50 flex flex-col h-[260px] overflow-hidden select-none animate-slide-up shrink-0">
+                {/* Scrollable grid of stickers */}
+                <div className="flex-1 overflow-y-auto p-3 scrollbar-thin">
+                  {(() => {
+                    const currentGroup = stickerGroups[activeStickerGroupIndex] || stickerGroups[0] || null;
+                    if (!currentGroup || currentGroup.stickers.length === 0) {
+                      return (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-2">
+                          <Smile className="w-8 h-8 opacity-65 text-slate-300" />
+                          <p className="text-[11px] font-semibold">该分组下暂无自定义表情包</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTab("me");
+                              setShowStickerSelector(false);
+                            }}
+                            className="text-[10px] bg-slate-900 text-white font-bold px-3 py-1 rounded-full shadow-sm hover:bg-black transition-all"
+                          >
+                            去“我”添加表情
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-5 gap-3">
+                        {currentGroup.stickers.map((sticker) => (
+                          <div
+                            key={sticker.id}
+                            onClick={() => {
+                              sendCustomMessage(`[表情]|${sticker.name}|${sticker.url}`);
+                              setShowStickerSelector(false);
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              if (confirm(`确认要在分组中删除表情“${sticker.name}”吗？`)) {
+                                stickerDb.deleteStickerImage(sticker.id).then(() => {
+                                  const updatedStickers = currentGroup.stickers.filter(s => s.id !== sticker.id);
+                                  const updatedGroup = { ...currentGroup, stickers: updatedStickers };
+                                  stickerDb.saveGroup(updatedGroup).then(() => {
+                                    const updated = [...stickerGroups];
+                                    updated[activeStickerGroupIndex] = updatedGroup;
+                                    setStickerGroups(updated);
+                                  });
+                                });
+                              }
+                            }}
+                            onTouchStart={(e) => {
+                              const target = e.currentTarget;
+                              const timer = setTimeout(() => {
+                                if (confirm(`确认要在分组中删除表情“${sticker.name}”吗？`)) {
+                                  stickerDb.deleteStickerImage(sticker.id).then(() => {
+                                    const updatedStickers = currentGroup.stickers.filter(s => s.id !== sticker.id);
+                                    const updatedGroup = { ...currentGroup, stickers: updatedStickers };
+                                    stickerDb.saveGroup(updatedGroup).then(() => {
+                                      const updated = [...stickerGroups];
+                                      updated[activeStickerGroupIndex] = updatedGroup;
+                                      setStickerGroups(updated);
+                                    });
+                                  });
+                                }
+                              }, 800);
+                              target.dataset.longPressTimer = String(timer);
+                            }}
+                            onTouchEnd={(e) => {
+                              const timer = e.currentTarget.dataset.longPressTimer;
+                              if (timer) clearTimeout(Number(timer));
+                            }}
+                            className="flex flex-col items-center bg-white border border-slate-200/40 hover:border-slate-300 rounded-xl p-1 shadow-sm hover:shadow active:scale-95 transition-all select-none relative"
+                          >
+                            <div className="w-full aspect-square bg-slate-50/50 rounded-lg overflow-hidden flex items-center justify-center">
+                              <img
+                                src={sticker.url}
+                                alt={sticker.name}
+                                className="w-full h-full object-contain"
+                                referrerPolicy="no-referrer"
+                              />
+                            </div>
+                            <span className="text-[9px] font-bold text-slate-500 truncate w-full text-center mt-1 px-0.5">
+                              {sticker.name}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Bottom navigation bar */}
+                <div className="h-11 bg-white border-t border-slate-100 flex items-center px-2 justify-between shrink-0">
+                  <div className="flex items-center gap-1.5 overflow-x-auto max-w-[80%] scrollbar-none">
+                    {stickerGroups.map((group, idx) => (
+                      <button
+                        key={group.id}
+                        type="button"
+                        onClick={() => setActiveStickerGroupIndex(idx)}
+                        className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all shrink-0 ${
+                          activeStickerGroupIndex === idx
+                            ? "bg-slate-950 text-white shadow-sm"
+                            : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                        }`}
+                      >
+                        {group.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Settings gear shortcut */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("me");
+                      setShowStickerSelector(false);
+                      setTimeout(() => {
+                        const el = document.querySelector(".me-tab-sticker-settings");
+                        el?.scrollIntoView({ behavior: "smooth" });
+                      }, 200);
+                    }}
+                    className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors flex items-center justify-center shrink-0"
+                    title="管理表情包"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-slate-500" />
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -5906,165 +6155,542 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
           {/* TABS: ME PROFILE (我) */}
           {activeTab === "me" && (
-            <div className="bg-slate-50 min-h-full pb-20">
-              {/* Sticky header */}
-              <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative">
-                <button
-                  onClick={onClose}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-                  title="返回主页"
-                >
-                  <ChevronLeft className="w-4 h-4 text-slate-700" />
-                </button>
-                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">我</h2>
-                <button
-                  onClick={() => setIsEditingProfile(true)}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-                  title="编辑资料"
-                >
-                  <Settings className="w-4 h-4 text-slate-700" />
-                </button>
-              </div>
-
-              {/* Profile Card banner */}
-              <div className="bg-white p-5 border-b border-slate-100 shadow-sm flex items-center gap-4">
-                <img
-                  src={settings.avatar}
-                  alt="My avatar"
-                  className="w-14 h-14 rounded-2xl border bg-slate-100 object-cover"
-                />
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-base font-bold text-slate-800 truncate">{settings.name}</h3>
-                  <p className="text-[11px] text-slate-400 mt-1 truncate leading-normal italic">
-                    {settings.signature || "暂无签名"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Personal Biography description */}
-              <div className="m-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-2">
-                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">我的人设背景</h4>
-                <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">
-                  {settings.bio || "暂无定义人设背景。在桌面打开“设置”即可配置我的人设背景，让档案馆里的伙伴们更好地认识您，展开更个性化的超现实对话！"}
-                </p>
-              </div>
-
-              {/* SAVED BOOKMARKS LIST (信息收藏) */}
-              <div className="m-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                    <FolderHeart className="w-4 h-4 text-amber-500" />
-                    <span>信息收藏 ({savedBookmarks.length + momentFavorites.length})</span>
-                  </h4>
-                  
-                  {/* Segmented Control Tabs */}
-                  <div className="flex bg-slate-100 p-0.5 rounded-lg text-[10px] font-bold shrink-0">
+            <div className="bg-slate-50 min-h-full pb-20 flex flex-col font-sans">
+              {meActiveSubView === "none" ? (
+                <>
+                  {/* Sticky header */}
+                  <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative shrink-0">
                     <button
-                      onClick={() => setFavedTab("chats")}
-                      className={`px-2 py-1 rounded-md transition-all ${favedTab === "chats" ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
+                      onClick={onClose}
+                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+                      title="返回主页"
                     >
-                      聊天 ({savedBookmarks.length})
+                      <ChevronLeft className="w-4 h-4 text-slate-700" />
                     </button>
-                    <button
-                      onClick={() => setFavedTab("moments")}
-                      className={`px-2 py-1 rounded-md transition-all ${favedTab === "moments" ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
+                    <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">我</h2>
+                    <div className="w-8 h-8 shrink-0" />
+                  </div>
+
+                  {/* Settings Main Entrance Menu */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+                    {/* User Profile Card */}
+                    <div 
+                      onClick={() => setIsEditingProfile(true)}
+                      className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm flex flex-col gap-4 relative overflow-hidden cursor-pointer hover:bg-slate-50/40 transition-colors text-left"
                     >
-                      朋友圈 ({momentFavorites.length})
+                      {/* Background decorative soft blur gradients */}
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50/40 rounded-full blur-2xl pointer-events-none" />
+                      <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-purple-50/30 rounded-full blur-2xl pointer-events-none" />
+                      
+                      <div className="flex items-start justify-between relative z-10">
+                        <div className="flex gap-4">
+                          <div className="relative">
+                            <img
+                              src={settings.avatar}
+                              alt={settings.name}
+                              className="w-16 h-16 rounded-full border border-slate-200/80 object-cover shadow-sm bg-slate-50"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute -bottom-1 -right-1 bg-neutral-950 text-white rounded-full p-1 border border-white shadow-sm">
+                              <Sliders className="w-3 h-3 text-white" />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col justify-center min-h-[64px]">
+                            <span className="text-base font-extrabold text-slate-800 tracking-tight">{settings.name}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsEditingProfile(true);
+                          }}
+                          className="text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all px-3.5 py-1.5 rounded-full shadow-sm"
+                        >
+                          编辑资料
+                        </button>
+                      </div>
+
+                      {/* Signature */}
+                      <div className="space-y-1.5 pt-2 border-t border-slate-100/60 relative z-10 text-left">
+                        <div className="text-xs text-slate-700 flex items-start gap-1">
+                          <span className="text-slate-400 font-medium shrink-0">签名:</span>
+                          <span className="italic text-slate-600 font-medium line-clamp-1">{settings.signature || "暂无签名"}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Navigation Entry List */}
+                    <div className="bg-white rounded-[24px] border border-slate-100 shadow-sm overflow-hidden divide-y divide-slate-100/60 text-left">
+                      {/* 1. Wallet */}
+                      <button
+                        onClick={() => setMeActiveSubView("wallet")}
+                        className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
+                      >
+                        <div className="flex items-center gap-3.5">
+                          <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
+                            <Wallet className="w-5 h-5 text-emerald-500" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-bold text-slate-800">我的钱包</span>
+                            <p className="text-[10px] text-slate-400 mt-0.5">红包零钱和交易明细</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-emerald-600">¥ {walletBalance.toFixed(2)}</span>
+                          <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
+                        </div>
+                      </button>
+
+                      {/* 2. Sticker Management */}
+                      <button
+                        onClick={() => setMeActiveSubView("stickers")}
+                        className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
+                      >
+                        <div className="flex items-center gap-3.5">
+                          <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
+                            <Smile className="w-5 h-5 text-indigo-500" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-bold text-slate-800">表情包管理</span>
+                            <p className="text-[10px] text-slate-400 mt-0.5">新建分组、上传及导入表情</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">{stickerGroups.length} 个分组</span>
+                          <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
+                        </div>
+                      </button>
+
+                      {/* 3. Favorites */}
+                      <button
+                        onClick={() => setMeActiveSubView("favorites")}
+                        className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
+                      >
+                        <div className="flex items-center gap-3.5">
+                          <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
+                            <FolderHeart className="w-5 h-5 text-rose-500" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-bold text-slate-800">我的收藏</span>
+                            <p className="text-[10px] text-slate-400 mt-0.5">收藏的聊天语录与朋友圈</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">({savedBookmarks.length + momentFavorites.length})</span>
+                          <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* Footnote */}
+                    <div className="py-6 text-center">
+                      <p className="text-[10px] text-slate-300 font-medium">微信多维互动面板 v2.0</p>
+                    </div>
+                  </div>
+                </>
+              ) : meActiveSubView === "identities" ? (
+                // SUB-VIEW: ROLE PRESETS (角色预设)
+                <div className="animate-fade-in">
+                  <div className="px-4 py-1.5 bg-white sticky top-0 z-10 flex items-center justify-between border-b border-slate-100">
+                    <button
+                      onClick={() => setMeActiveSubView("none")}
+                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-slate-700" />
+                    </button>
+                    <h2 className="text-sm font-bold text-slate-800 tracking-tight">角色预设</h2>
+                    <div className="w-8 h-8 shrink-0" />
+                  </div>
+
+                  <div className="p-4 bg-indigo-50/40 border-b border-indigo-100">
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      💡 你可在下方快速选择和切换你的<b>分身预设</b>。在进行对话或群聊时，你使用的身份将会完美呈现在消息列表与属性中。
+                    </p>
+                  </div>
+
+                  {/* Active identity details */}
+                  <div className="m-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3 text-left">
+                    <div className="flex items-center gap-3">
+                      <img src={settings.avatar} alt="" className="w-10 h-10 rounded-xl object-cover border" />
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">当前活跃身份：{settings.name}</h4>
+                        <p className="text-[10px] text-slate-400 italic mt-0.5">{settings.signature || "暂无签名"}</p>
+                      </div>
+                    </div>
+                    <div className="border-t border-slate-100 pt-3">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">活跃背景设定</span>
+                      <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        {settings.bio || "暂无设定背景，系统将采用默认极简人设。您可以点击下方编辑按钮来丰富它。"}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => setIsEditingProfile(true)}
+                      className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 mt-2"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      <span>编辑当前活跃人设资料</span>
                     </button>
                   </div>
-                </div>
 
-                {favedTab === "chats" ? (
-                  savedBookmarks.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 text-center py-4">
-                      暂无收藏的聊天话语。在聊天窗口中，长按或点击气泡左侧的收藏标签即可将特定对话保存在这里！
-                    </p>
-                  ) : (
+                  {/* Preset list */}
+                  <div className="m-4">
+                    <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 text-left px-1">可用分身库 ({settings.identities?.length || 1})</h3>
                     <div className="space-y-2">
-                      {savedBookmarks.map((bm) => {
-                        const owner = characters.find((c) => c.id === bm.characterId);
-                        return (
-                          <div
-                            key={bm.id}
-                            className="p-3 bg-slate-50 border border-slate-100 rounded-xl relative group flex gap-2.5 items-start text-left"
-                          >
-                            <img
-                              src={bm.sender === "user" ? settings.avatar : (owner?.avatar || "")}
-                              alt=""
-                              className="w-7 h-7 rounded-full object-cover shrink-0"
-                            />
-                            <div className="flex-1 min-w-0 text-xs text-left">
-                              <span className="font-bold text-slate-500">
-                                {bm.sender === "user" ? "我" : (owner?.name || "未知")}
-                              </span>
-                              <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-white p-2 rounded border border-slate-100">
-                                "{bm.content}"
-                              </p>
-                              <span className="text-[9px] text-slate-400 block mt-1">
-                                收藏于 {new Date(bm.timestamp).toLocaleDateString()}
-                              </span>
-                            </div>
-
-                            <button
-                              onClick={() => onToggleBookmark(bm.id)}
-                              className="text-rose-400 hover:text-rose-600 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                              title="取消收藏"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )
-                ) : (
-                  momentFavorites.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 text-center py-4">
-                      暂无收藏的朋友圈动态。长按朋友圈文字，即可将精彩瞬间文案收藏在这里！
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {momentFavorites.map((fav) => {
-                        return (
-                          <div
-                            key={fav.id}
-                            className="p-3 bg-slate-50 border border-slate-100 rounded-xl relative group flex gap-2.5 items-start text-left"
-                          >
-                            <img
-                              src={fav.authorAvatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop"}
-                              alt=""
-                              className="w-7 h-7 rounded-full object-cover shrink-0"
-                            />
-                            <div className="flex-1 min-w-0 text-xs text-left">
-                              <span className="font-bold text-slate-500">
-                                {fav.authorName}
-                              </span>
-                              <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-white p-2 rounded border border-slate-100">
-                                "{fav.content}"
-                              </p>
-                              <span className="text-[9px] text-slate-400 block mt-1">
-                                收藏于 {new Date(fav.timestamp).toLocaleDateString()}
-                              </span>
-                            </div>
-
-                            <button
+                      {/* Default primary first */}
+                      {(settings.identities || []).length === 0 ? (
+                        <div className="bg-white p-4 rounded-2xl border text-center text-xs text-slate-400">
+                          未创建其他分身。您可在系统设置中为自己添加更多独特身份和头像！
+                        </div>
+                      ) : (
+                        settings.identities?.map((idty) => {
+                          const isActive = idty.name === settings.name;
+                          return (
+                            <div
+                              key={idty.id}
                               onClick={() => {
-                                setMomentFavorites(prev => prev.filter(f => f.id !== fav.id));
-                                showToast("已取消收藏");
+                                setEditMyName(idty.name);
+                                setEditMyAvatar(idty.avatar);
+                                setEditMySignature(idty.signature || "");
+                                setEditMyBio(idty.bio || "");
+                                onSaveSettings({
+                                  ...settings,
+                                  name: idty.name,
+                                  avatar: idty.avatar,
+                                  signature: idty.signature || "",
+                                  bio: idty.bio || ""
+                                });
+                                showToast(`成功切换分身为：${idty.name}`);
                               }}
-                              className="text-rose-400 hover:text-rose-600 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                              title="取消收藏"
+                              className={`p-3 bg-white rounded-xl border transition-all flex items-center justify-between cursor-pointer text-left ${isActive ? "border-indigo-500 shadow-sm ring-1 ring-indigo-100" : "border-slate-100 hover:border-slate-300"}`}
                             >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        );
-                      })}
+                              <div className="flex items-center gap-3">
+                                <img src={idty.avatar} alt="" className="w-9 h-9 rounded-lg object-cover border" />
+                                <div>
+                                  <p className="text-xs font-bold text-slate-800">{idty.name}</p>
+                                  <p className="text-[10px] text-slate-400 truncate max-w-[180px]">{idty.signature || "无签名"}</p>
+                                </div>
+                              </div>
+                              {isActive ? (
+                                <span className="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-bold">使用中</span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold px-2 py-0.5 bg-slate-50 rounded-full border">切换</span>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
-                  )
-                )}
-              </div>
+                  </div>
+                </div>
+              ) : meActiveSubView === "wallet" ? (
+                // SUB-VIEW: WALLET (钱包)
+                <div className="animate-fade-in text-left">
+                  <div className="px-4 py-1.5 bg-white sticky top-0 z-10 flex items-center justify-between border-b border-slate-100">
+                    <button
+                      onClick={() => setMeActiveSubView("none")}
+                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-slate-700" />
+                    </button>
+                    <h2 className="text-sm font-bold text-slate-800 tracking-tight">零钱钱包</h2>
+                    <div className="w-8 h-8 shrink-0" />
+                  </div>
 
+                  {/* Wallet Card */}
+                  <div className="m-4 bg-gradient-to-br from-emerald-600 to-teal-500 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                    <div className="absolute right-0 top-0 translate-x-4 -translate-y-4 opacity-10 text-9xl pointer-events-none">🧧</div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-bold tracking-wider opacity-85 text-white">WeChat Pay / 我的零钱</span>
+                      <CreditCard className="w-4 h-4 opacity-75" />
+                    </div>
+                    <div className="mt-6 mb-3">
+                      <span className="text-xs opacity-75 text-white">我的零钱余额</span>
+                      <h3 className="text-3xl font-extrabold tracking-tight mt-1 text-white">¥ {walletBalance.toFixed(2)}</h3>
+                    </div>
+                    <p className="text-[9px] opacity-60 text-white/70">账户享有网联清算安全中心全程技术保障</p>
+                  </div>
+
+                  {/* Simulated top up button */}
+                  <div className="mx-4">
+                    <button
+                      onClick={() => {
+                        setTopUpAmount("");
+                        setShowTopUpModal(true);
+                      }}
+                      className="w-full py-3 bg-white border border-emerald-200 hover:bg-emerald-50 text-emerald-600 font-extrabold rounded-xl text-xs text-center transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                    >
+                      <Plus className="w-4 h-4 text-emerald-500" />
+                      <span>充值零钱</span>
+                    </button>
+                  </div>
+
+                  {/* Transaction History (收支明细) - pulling dynamically from database history! */}
+                  <div className="m-4">
+                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">收支账单明细 (实时同步)</h4>
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden divide-y divide-slate-100">
+                      
+                      {/* Filter real messages for red envelope transactions! */}
+                      {(() => {
+                        // Gather received red envelopes that user didn't send
+                        const receivedRedPackets = messages.filter(m => m.content.startsWith("[红包]") && m.sender !== "user");
+                        
+                        if (receivedRedPackets.length === 0) {
+                          return (
+                            <div className="p-5 text-center text-[10px] text-slate-400 bg-slate-50/50">
+                              暂无收到其他红包记录。聊天中让对方给你发红包，点击拆开后会自动结算到这里！
+                            </div>
+                          );
+                        }
+
+                        return receivedRedPackets.map((m) => {
+                          const [_, amountStr, greetingStr] = m.content.split("|");
+                          const amount = parseFloat(amountStr || "8.88");
+                          const char = characters.find(c => c.id === m.characterId);
+                          const senderName = char?.remark || char?.name || "未知好友";
+                          const senderAvatar = char?.avatar || "🧧";
+                          const formattedTime = new Date(m.timestamp).toLocaleDateString() + " " + new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+                          return (
+                            <div key={m.id} className="p-3.5 flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-3">
+                                <img src={senderAvatar} alt="" className="w-8 h-8 rounded-full object-cover border" onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+                                <div>
+                                  <p className="font-bold text-slate-800">收到 [{senderName}] 的红包</p>
+                                  <p className="text-[9px] text-stone-400 mt-0.5">“{greetingStr || "恭喜发财"}” · {formattedTime}</p>
+                                </div>
+                              </div>
+                              <span className="font-extrabold text-emerald-600">+ ¥{amount.toFixed(2)}</span>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Top Up Input Modal */}
+                  {showTopUpModal && (
+                    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in text-slate-800">
+                      <div className="bg-white rounded-[24px] w-full max-w-sm overflow-hidden shadow-2xl border border-slate-100 animate-scale-up p-5 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xs font-bold text-slate-800">微信零钱充值</h3>
+                          <button
+                            onClick={() => setShowTopUpModal(false)}
+                            className="p-1 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="space-y-1.5 text-left">
+                          <label className="block text-[10px] text-slate-400 font-extrabold uppercase">请输入充值金额 (元)</label>
+                          <div className="relative flex items-center">
+                            <span className="absolute left-3.5 text-lg font-bold text-slate-800">¥</span>
+                            <input
+                              type="number"
+                              value={topUpAmount}
+                              onChange={(e) => setTopUpAmount(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-8 pr-3 text-sm font-bold text-slate-850 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:bg-white transition-all"
+                              placeholder="0.00"
+                              min="0.01"
+                              step="0.01"
+                              autoFocus
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => setShowTopUpModal(false)}
+                            className="px-3.5 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const amountVal = parseFloat(topUpAmount);
+                              if (isNaN(amountVal) || amountVal <= 0) {
+                                showToast("请输入有效的充值金额");
+                                return;
+                              }
+                              setWalletBalance(prev => {
+                                const next = prev + amountVal;
+                                localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
+                                return next;
+                              });
+                              showToast(`充值成功！余额已增加 ¥${amountVal.toFixed(2)}`);
+                              setShowTopUpModal(false);
+                            }}
+                            className="px-4 py-1.5 text-xs font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow-sm hover:shadow transition-all"
+                          >
+                            确认充值
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : meActiveSubView === "stickers" ? (
+                // SUB-VIEW: STICKER PACK SETTINGS (表情包设置)
+                <div className="animate-fade-in text-left">
+                  <div className="px-4 py-1.5 bg-white sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 shrink-0">
+                    <button
+                      onClick={() => setMeActiveSubView("none")}
+                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-slate-700" />
+                    </button>
+                    <h2 className="text-sm font-bold text-slate-800 tracking-tight">表情包管理</h2>
+                    <button
+                      onClick={() => triggerCreateStickerGroupRef.current?.()}
+                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                      title="新建分组"
+                    >
+                      <Plus className="w-4 h-4 text-slate-700" />
+                    </button>
+                  </div>
+
+                  <div className="m-4 me-tab-sticker-settings">
+                    <StickerSettings
+                      settings={settings}
+                      stickerGroups={stickerGroups}
+                      onUpdateStickerGroups={setStickerGroups}
+                      triggerCreateGroupRef={triggerCreateStickerGroupRef}
+                    />
+                  </div>
+                </div>
+              ) : (
+                // SUB-VIEW: SAVED BOOKMARKS LIST (收藏)
+                <div className="animate-fade-in text-left">
+                  <div className="px-4 py-1.5 bg-white sticky top-0 z-10 flex items-center justify-between border-b border-slate-100">
+                    <button
+                      onClick={() => setMeActiveSubView("none")}
+                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-slate-700" />
+                    </button>
+                    <h2 className="text-sm font-bold text-slate-800 tracking-tight">我的收藏</h2>
+                    
+                    {/* Segmented Control Tabs */}
+                    <div className="flex bg-slate-100 p-0.5 rounded-lg text-[10px] font-bold shrink-0">
+                      <button
+                        onClick={() => setFavedTab("chats")}
+                        className={`px-2 py-1 rounded-md transition-all ${favedTab === "chats" ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
+                      >
+                        聊天 ({savedBookmarks.length})
+                      </button>
+                      <button
+                        onClick={() => setFavedTab("moments")}
+                        className={`px-2 py-1 rounded-md transition-all ${favedTab === "moments" ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
+                      >
+                        朋友圈 ({momentFavorites.length})
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-4">
+                    {favedTab === "chats" ? (
+                      savedBookmarks.length === 0 ? (
+                        <div className="text-center py-10 bg-white rounded-2xl border border-slate-100 p-5 mt-4">
+                          <Bookmark className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                          <p className="text-[11px] text-slate-400">
+                            暂无收藏的聊天话语。在聊天窗口中，长按或点击气泡左侧的收藏标签即可将特定对话保存在这里！
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 mt-4">
+                          {savedBookmarks.map((bm) => {
+                            const owner = characters.find((c) => c.id === bm.characterId);
+                            return (
+                              <div
+                                key={bm.id}
+                                className="p-3 bg-white border border-slate-100 rounded-xl relative group flex gap-2.5 items-start text-left shadow-sm"
+                              >
+                                <img
+                                  src={bm.sender === "user" ? settings.avatar : (owner?.avatar || "")}
+                                  alt=""
+                                  className="w-7 h-7 rounded-full object-cover shrink-0"
+                                />
+                                <div className="flex-1 min-w-0 text-xs text-left">
+                                  <span className="font-bold text-slate-500">
+                                    {bm.sender === "user" ? "我" : (owner?.name || "未知")}
+                                  </span>
+                                  <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-slate-50 p-2 rounded border border-slate-100/60">
+                                    "{bm.content}"
+                                  </p>
+                                  <span className="text-[9px] text-slate-400 block mt-1">
+                                    收藏于 {new Date(bm.timestamp).toLocaleDateString()}
+                                  </span>
+                                </div>
+
+                                <button
+                                  onClick={() => onToggleBookmark(bm.id)}
+                                  className="text-rose-400 hover:text-rose-600 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="取消收藏"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )
+                    ) : (
+                      momentFavorites.length === 0 ? (
+                        <div className="text-center py-10 bg-white rounded-2xl border border-slate-100 p-5 mt-4">
+                          <Heart className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                          <p className="text-[11px] text-slate-400">
+                            暂无收藏的朋友圈动态。长按朋友圈文字，即可将精彩瞬间文案收藏在这里！
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 mt-4">
+                          {momentFavorites.map((fav) => {
+                            return (
+                              <div
+                                key={fav.id}
+                                className="p-3 bg-white border border-slate-100 rounded-xl relative group flex gap-2.5 items-start text-left shadow-sm"
+                              >
+                                <img
+                                  src={fav.authorAvatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop"}
+                                  alt=""
+                                  className="w-7 h-7 rounded-full object-cover shrink-0"
+                                />
+                                <div className="flex-1 min-w-0 text-xs text-left">
+                                  <span className="font-bold text-slate-500">
+                                    {fav.authorName}
+                                  </span>
+                                  <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-slate-50 p-2 rounded border border-slate-100/60">
+                                    "{fav.content}"
+                                  </p>
+                                  <span className="text-[9px] text-slate-400 block mt-1">
+                                    收藏于 {new Date(fav.timestamp).toLocaleDateString()}
+                                  </span>
+                                </div>
+
+                                <button
+                                  onClick={() => {
+                                    setMomentFavorites(prev => prev.filter(f => f.id !== fav.id));
+                                    showToast("已取消收藏");
+                                  }}
+                                  className="text-rose-400 hover:text-rose-600 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="取消收藏"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -251,4 +251,17 @@ export interface OfflineStory {
   customCss?: string;
 }
 
+export interface Sticker {
+  id: string;
+  name: string;
+  url: string; // Dynamic ObjectURL or base64/url
+}
+
+export interface StickerGroup {
+  id: string;
+  name: string;
+  stickers: Sticker[];
+}
+
+
 
