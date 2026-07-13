@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiExtractMemories, apiTranslate } from "./utils/apiHelper";
+import { audioDb } from "./utils/audioDb";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory } from "./types";
 import { 
   AlbumWidget, 
@@ -562,6 +563,56 @@ export default function App() {
     };
   }, []);
 
+  // Restore local track object URLs on mount from IndexedDB
+  useEffect(() => {
+    const restoreLocalTracks = async () => {
+      const raw = localStorage.getItem("phone_music_tracks");
+      if (!raw) return;
+      try {
+        const parsedTracks = JSON.parse(raw) as MusicTrack[];
+        const localTracks = parsedTracks.filter((t) => t.isLocal);
+        if (localTracks.length === 0) return;
+
+        let updated = false;
+        const restored = await Promise.all(
+          parsedTracks.map(async (track) => {
+            if (track.isLocal) {
+              try {
+                const blob = await audioDb.getTrackFile(track.id);
+                if (blob) {
+                  const newUrl = URL.createObjectURL(blob);
+                  updated = true;
+                  return { ...track, url: newUrl };
+                }
+              } catch (err) {
+                console.error("Failed to restore local track:", track.id, err);
+              }
+            }
+            return track;
+          })
+        );
+
+        if (updated) {
+          setTracks(restored);
+          // Also sync currentTrack if it's local
+          setCurrentTrack((current) => {
+            if (current && current.isLocal) {
+              const matching = restored.find((t) => t.id === current.id);
+              if (matching) {
+                return matching;
+              }
+            }
+            return current;
+          });
+        }
+      } catch (e) {
+        console.error("Failed to parse music tracks for restoration:", e);
+      }
+    };
+
+    restoreLocalTracks();
+  }, []);
+
   // Auto-close global notification after 3 seconds
   useEffect(() => {
     if (globalNotification) {
@@ -644,6 +695,15 @@ export default function App() {
     }
   };
 
+  const handlePrevTrack = () => {
+    const allTracks = [...PRESEED_MUSIC_TRACKS, ...tracks];
+    if (allTracks.length === 0) return;
+    const currentIndex = allTracks.findIndex((t) => t.id === currentTrack?.id);
+    const prevIndex = (currentIndex - 1 + allTracks.length) % allTracks.length;
+    setCurrentTrack(allTracks[prevIndex]);
+    setIsPlaying(true);
+  };
+
   useEffect(() => {
     if (!globalAudioRef.current) {
       globalAudioRef.current = new Audio();
@@ -677,6 +737,52 @@ export default function App() {
       audio.pause();
     }
   }, [currentTrack, isPlaying]);
+
+  // Sync with navigator.mediaSession for robust background playback
+  useEffect(() => {
+    if (typeof window === "undefined" || !("mediaSession" in navigator) || !currentTrack) return;
+
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentTrack.title || "未知曲目",
+        artist: currentTrack.artist || "未知歌手",
+        album: "朋友圈音乐馆",
+        artwork: [
+          { src: currentTrack.coverUrl || "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=256&h=256&fit=crop", sizes: "256x256", type: "image/jpeg" }
+        ]
+      });
+
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+
+      navigator.mediaSession.setActionHandler("play", () => {
+        setIsPlaying(true);
+      });
+      navigator.mediaSession.setActionHandler("pause", () => {
+        setIsPlaying(false);
+      });
+      navigator.mediaSession.setActionHandler("previoustrack", () => {
+        handlePrevTrack();
+      });
+      navigator.mediaSession.setActionHandler("nexttrack", () => {
+        handleNextTrack();
+      });
+    } catch (e) {
+      console.warn("MediaSession interaction error: ", e);
+    }
+
+    return () => {
+      if ("mediaSession" in navigator) {
+        try {
+          navigator.mediaSession.setActionHandler("play", null);
+          navigator.mediaSession.setActionHandler("pause", null);
+          navigator.mediaSession.setActionHandler("previoustrack", null);
+          navigator.mediaSession.setActionHandler("nexttrack", null);
+        } catch (err) {
+          // ignore cleanup failures
+        }
+      }
+    };
+  }, [currentTrack, isPlaying, tracks, playMode]);
 
   // HomeScreen layout items (Apps + Widgets)
   const [homeScreenItems, setHomeScreenItems] = useState<HomeScreenItem[]>(() => {
@@ -914,7 +1020,8 @@ export default function App() {
     if (typeof window === "undefined") return;
     const updateHeight = () => {
       if (window.visualViewport && window.innerWidth < 768) {
-        setViewportHeight(`${window.visualViewport.height}px`);
+        const isKeyboardOpen = (window.innerHeight - window.visualViewport.height) > 120;
+        setViewportHeight(isKeyboardOpen ? `${window.visualViewport.height}px` : "100dvh");
         const activeEl = document.activeElement;
         if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) {
           setTimeout(() => {
@@ -1791,7 +1898,15 @@ export default function App() {
   };
 
   const handleDeleteMusicTrack = (id: string) => {
-    setTracks((prev) => prev.filter((t) => t.id !== id));
+    setTracks((prev) => {
+      const track = prev.find((t) => t.id === id);
+      if (track?.isLocal) {
+        audioDb.deleteTrackFile(id).catch((err) => {
+          console.error("Failed to delete local track from IndexedDB:", err);
+        });
+      }
+      return prev.filter((t) => t.id !== id);
+    });
   };
 
   const handleAddMusicPlaylist = (pl: MusicPlaylist) => {
@@ -1879,7 +1994,7 @@ export default function App() {
         top: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
         left: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
         width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvWidth}px` : "100%",
-        height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : "100vh",
+        height: (typeof window !== "undefined" && window.innerWidth < 768) ? (isMobileKeyboardActive ? `${visualViewportHeight}px` : "100dvh") : "100vh",
       }}
     >
       
@@ -2288,7 +2403,8 @@ export default function App() {
               setActiveChatCharId(globalNotification.characterId);
               setGlobalNotification(null);
             }}
-            className="absolute top-10 left-3.5 right-3.5 z-50 animate-slide-down bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 p-3 flex items-center gap-3 cursor-pointer select-none"
+            className="absolute left-3.5 right-3.5 z-50 animate-slide-down bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 p-3 flex items-center gap-3 cursor-pointer select-none animate-fade-in"
+            style={{ top: "calc(env(safe-area-inset-top, 0px) + 48px)" }}
           >
             {/* Avatar */}
             <img

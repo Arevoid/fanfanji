@@ -180,7 +180,7 @@ export default function AppStore({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜索应用或分类..."
-              className="w-full pl-9 pr-4 py-2 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs"
+              className="w-full pl-9 pr-4 py-2 bg-white rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs"
             />
           </div>
 

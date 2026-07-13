@@ -268,7 +268,7 @@ export default function AppForum({ onClose }: { onClose: () => void }) {
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   placeholder="请输入吸引人的标题..."
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
                 />
               </div>
 
@@ -277,7 +277,7 @@ export default function AppForum({ onClose }: { onClose: () => void }) {
                 <select
                   value={newCategory}
                   onChange={(e) => setNewCategory(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs"
                 >
                   <option value="闲聊讨论">闲聊讨论</option>
                   <option value="气泡美化">气泡美化</option>
@@ -294,7 +294,7 @@ export default function AppForum({ onClose }: { onClose: () => void }) {
                   value={newContent}
                   onChange={(e) => setNewContent(e.target.value)}
                   placeholder="在这里畅所欲言，分享您的创意人设、代码或者是手机使用心得吧..."
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs resize-none leading-relaxed"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs resize-none leading-relaxed"
                 />
               </div>
 
@@ -451,7 +451,7 @@ export default function AppForum({ onClose }: { onClose: () => void }) {
                         ? `回复 @${replyingToComment.authorName}...`
                         : "写点什么，参与热烈讨论..."
                     }
-                    className="flex-1 bg-slate-50 border border-slate-200 focus:outline-none rounded-lg px-3 py-1.5 text-xs text-slate-800"
+                    className="flex-1 bg-slate-50 border border-slate-200 focus:outline-none rounded-[8px] px-3 py-1.5 text-xs text-slate-800"
                   />
                   <button
                     type="submit"
@@ -474,7 +474,7 @@ export default function AppForum({ onClose }: { onClose: () => void }) {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="搜索话题、标签..."
-                  className="w-full pl-9 pr-4 py-2 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs"
+                  className="w-full pl-9 pr-4 py-2 bg-white rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs"
                 />
               </div>
 

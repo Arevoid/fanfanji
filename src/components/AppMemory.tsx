@@ -233,7 +233,7 @@ export default function AppMemory({
                   initial={{ opacity: 0, scale: 0.95, y: -10 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                  className="absolute right-0 mt-2 w-40 bg-white border border-slate-100 rounded-2xl shadow-xl z-40 py-1.5 overflow-hidden"
+                  className="absolute right-0 mt-2 w-40 bg-white border border-slate-100 rounded-[12px] shadow-xl z-40 py-1.5 overflow-hidden"
                 >
                   <button
                     onClick={() => {
@@ -345,7 +345,7 @@ export default function AppMemory({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜索记忆条目..."
-              className="w-full bg-white pl-10 pr-4 py-2.5 text-xs text-slate-700 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950/10 focus:border-neutral-950 transition-all font-medium placeholder-slate-400 shadow-sm"
+              className="w-full bg-white pl-10 pr-4 py-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950/10 focus:border-neutral-950 transition-all font-medium placeholder-slate-400 shadow-sm"
             />
             {searchQuery && (
               <button
@@ -458,7 +458,7 @@ export default function AppMemory({
                             value={editContent}
                             onChange={(e) => setEditContent(e.target.value)}
                             rows={2}
-                            className="w-full bg-slate-50 p-2 text-xs text-slate-700 rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 resize-none leading-relaxed font-medium"
+                            className="w-full bg-slate-50 p-2 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 resize-none leading-relaxed font-medium"
                           />
                           <div className="flex justify-end gap-2">
                             <button
@@ -557,7 +557,7 @@ export default function AppMemory({
                     value={newCharId}
                     onChange={(e) => setNewCharId(e.target.value)}
                     required
-                    className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                    className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
                   >
                     <option value="">-- 请选择关联角色 --</option>
                     {characters.map((char) => (
@@ -579,7 +579,7 @@ export default function AppMemory({
                     required
                     rows={3}
                     placeholder="请输入简短、精炼的事实性记忆，例如：“用户在考试前对陆沉砚说想吃抹茶冰淇淋，陆沉砚承诺考试通过后就带其去买。”"
-                    className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 resize-none font-medium leading-relaxed"
+                    className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 resize-none font-medium leading-relaxed"
                   />
                 </div>
 
@@ -632,7 +632,7 @@ export default function AppMemory({
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-[28px] p-5 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4"
+              className="bg-white rounded-[24px] p-5 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4"
             >
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
@@ -660,7 +660,7 @@ export default function AppMemory({
                   <select
                     value={recallSettings.extractModel || "gemini-3.5-flash"}
                     onChange={(e) => onSaveRecallSettings({ ...recallSettings, extractModel: e.target.value })}
-                    className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                    className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
                   >
                     <option value="gemini-3.5-flash">Gemini 3.5 Flash (推荐：快速低开销)</option>
                     <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
@@ -669,7 +669,7 @@ export default function AppMemory({
                   </select>
                 </div>
 
-                <div className="bg-amber-50 p-3 rounded-2xl border border-amber-100 text-[11px] text-amber-700 font-medium leading-relaxed flex gap-2">
+                <div className="bg-amber-50 p-3 rounded-[16px] border border-amber-100 text-[11px] text-amber-700 font-medium leading-relaxed flex gap-2">
                   <Sparkles className="w-4 h-4 text-amber-500 shrink-0 mt-0.5 animate-pulse" />
                   <span>
                     💡 提示：记忆库在执行提炼时，会默认调用这里配置的模型。如果想要更稳定的提炼格式，推荐使用默认配置好的 <strong>Gemini 3.5 Flash</strong> 模型。
@@ -678,7 +678,7 @@ export default function AppMemory({
 
                 <button
                   onClick={() => setShowApiPoolModal(false)}
-                  className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
+                  className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm"
                 >
                   确定并应用
                 </button>
@@ -696,7 +696,7 @@ export default function AppMemory({
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-[28px] p-5 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4"
+              className="bg-white rounded-[24px] p-5 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4"
             >
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
@@ -725,7 +725,7 @@ export default function AppMemory({
                     <select
                       value={selectedCharForAutoSummary}
                       onChange={(e) => handleSelectCharForAutoSummary(e.target.value)}
-                      className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-bold"
+                      className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-bold"
                     >
                       {characters.map((char) => (
                         <option key={char.id} value={char.id}>
@@ -792,7 +792,7 @@ export default function AppMemory({
                       }
                       setShowRecallModal(false);
                     }}
-                    className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
+                    className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm"
                   >
                     保存设置
                   </button>
@@ -888,7 +888,7 @@ export default function AppMemory({
                         <select
                           value={immediateCharId}
                           onChange={(e) => setImmediateCharId(e.target.value)}
-                          className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-bold"
+                          className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-bold"
                         >
                           {characters.map((char) => (
                             <option key={char.id} value={char.id}>

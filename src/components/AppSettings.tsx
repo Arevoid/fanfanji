@@ -536,7 +536,7 @@ export default function AppSettings({
           /* Settings Main Entrance Menu (QQ Style) */
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
             {/* QQ Style User Profile Card */}
-            <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm flex flex-col gap-4 relative overflow-hidden">
+            <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm flex flex-col gap-4 relative overflow-hidden">
               {/* Background decorative soft blur gradients */}
               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50/40 rounded-full blur-2xl pointer-events-none" />
               <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-purple-50/30 rounded-full blur-2xl pointer-events-none" />
@@ -586,7 +586,7 @@ export default function AppSettings({
             </div>
 
             {/* Navigation Entry List */}
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden divide-y divide-slate-100/60">
+            <div className="bg-white rounded-[24px] border border-slate-100 shadow-sm overflow-hidden divide-y divide-slate-100/60">
               {/* 2. API Settings */}
               <button
                 onClick={() => setActiveTab("api")}
@@ -667,7 +667,7 @@ export default function AppSettings({
           
           {/* PROFILE SETTINGS TAB */}
           {activeTab === "profile" && (
-            <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+            <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">个人资料</h3>
               
               {/* Identity Switcher */}
@@ -680,7 +680,7 @@ export default function AppSettings({
                         key={idty.id}
                         type="button"
                         onClick={() => handleSwitchIdentity(idty.id)}
-                        className={`flex items-center justify-center py-2 px-3 rounded-xl border text-center transition-all ${
+                        className={`flex items-center justify-center py-2 px-3 rounded-[16px] border text-center transition-all ${
                           isSelected
                             ? "border-neutral-950 ring-1 ring-neutral-950 text-neutral-950 font-bold bg-white"
                             : "border-slate-200 text-slate-400 bg-white hover:bg-slate-50 hover:text-slate-600"
@@ -726,7 +726,7 @@ export default function AppSettings({
                     setName(e.target.value);
                     handleSave({ name: e.target.value });
                   }}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
                 />
               </div>
 
@@ -740,7 +740,7 @@ export default function AppSettings({
                     setSignature(e.target.value);
                     handleSave({ signature: e.target.value });
                   }}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs"
                 />
               </div>
 
@@ -755,7 +755,7 @@ export default function AppSettings({
                     handleSave({ bio: e.target.value });
                   }}
                   placeholder=""
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs resize-none leading-relaxed"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs resize-none leading-relaxed"
                 />
               </div>
             </div>
@@ -763,7 +763,7 @@ export default function AppSettings({
 
           {/* API SETTINGS TAB */}
           {activeTab === "api" && (
-            <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+            <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <Lock className="w-3.5 h-3.5" />
                 <span>智能体模型设置</span>
@@ -776,7 +776,7 @@ export default function AppSettings({
                   <select
                     value={activeApiPresetId}
                     onChange={(e) => handleSelectPreset(e.target.value)}
-                    className="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
+                    className="flex-1 px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
                   >
                     {apiPresets.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -788,7 +788,7 @@ export default function AppSettings({
                   <button
                     onClick={handleAddPreset}
                     type="button"
-                    className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                    className="p-2 bg-slate-100 hover:bg-slate-200 rounded-[16px] transition-colors"
                     title="添加新配置"
                   >
                     <Plus className="w-4 h-4 text-slate-600" />
@@ -797,7 +797,7 @@ export default function AppSettings({
                   <button
                     onClick={() => handleDeletePreset(activeApiPresetId)}
                     type="button"
-                    className="p-2 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors"
+                    className="p-2 bg-rose-50 hover:bg-rose-100 rounded-[16px] transition-colors"
                     title="删除当前配置"
                   >
                     <Trash2 className="w-4 h-4 text-rose-600" />
@@ -813,7 +813,7 @@ export default function AppSettings({
                   value={presetName}
                   onChange={(e) => setPresetName(e.target.value)}
                   placeholder="请输入配置名称"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-bold"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-bold"
                 />
               </div>
 
@@ -825,7 +825,7 @@ export default function AppSettings({
                   value={apiEndpoint}
                   onChange={(e) => setApiEndpoint(e.target.value)}
                   placeholder="例如 https://api.deepseek.com/v1"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-mono"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-mono"
                 />
               </div>
 
@@ -838,7 +838,7 @@ export default function AppSettings({
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                     placeholder="请输入 API Key"
-                    className="w-full pl-3 pr-10 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-mono"
+                    className="w-full pl-3 pr-10 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-mono"
                   />
                   <button
                     type="button"
@@ -873,7 +873,7 @@ export default function AppSettings({
                   <select
                     value={selectedModel}
                     onChange={(e) => setSelectedModel(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
+                    className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
                   >
                     {modelSuggestions.map((m) => (
                       <option key={m} value={m}>
@@ -887,7 +887,7 @@ export default function AppSettings({
                     value={selectedModel}
                     onChange={(e) => setSelectedModel(e.target.value)}
                     placeholder="先拉取列表或手动输入模型名"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
+                    className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
                   />
                 )}
               </div>
@@ -936,7 +936,7 @@ export default function AppSettings({
                   type="button"
                   onClick={handleTestConnection}
                   disabled={isTesting}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 text-white font-bold rounded-xl text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
                 >
                   {isTesting ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -949,7 +949,7 @@ export default function AppSettings({
                 <button
                   type="button"
                   onClick={handleSaveApiConfig}
-                  className="flex-1 py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>保存配置</span>
@@ -958,7 +958,7 @@ export default function AppSettings({
 
               {testResult && (
                 <div
-                  className={`p-3 rounded-xl text-xs font-semibold border ${
+                  className={`p-3 rounded-[16px] text-xs font-semibold border ${
                     testResult.success
                       ? "bg-emerald-50 text-emerald-800 border-emerald-100"
                       : "bg-rose-50 text-rose-800 border-rose-100"
@@ -974,11 +974,11 @@ export default function AppSettings({
           {activeTab === "beauty" && (
             <div className="space-y-4 text-left">
               {/* Classification Navigation Bar */}
-              <div className="flex items-center p-1 bg-slate-100 rounded-2xl gap-1.5 select-none mb-4">
+              <div className="flex items-center p-1 bg-slate-100 rounded-[16px] gap-1.5 select-none mb-4">
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("desktop")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
                     beautySubTab === "desktop"
                       ? "bg-white text-slate-900 shadow-sm"
                       : "text-slate-500 hover:text-slate-700"
@@ -989,7 +989,7 @@ export default function AppSettings({
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("chat")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
                     beautySubTab === "chat"
                       ? "bg-white text-slate-900 shadow-sm"
                       : "text-slate-500 hover:text-slate-700"
@@ -1000,7 +1000,7 @@ export default function AppSettings({
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("preset")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
                     beautySubTab === "preset"
                       ? "bg-white text-slate-900 shadow-sm"
                       : "text-slate-500 hover:text-slate-700"
@@ -1014,7 +1014,7 @@ export default function AppSettings({
               {beautySubTab === "desktop" && (
                 <div className="space-y-4 animate-fade-in">
                   {/* 手机壁纸设置 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <div className="flex justify-between items-center pb-1 border-b border-slate-50">
                       <span className="text-xs font-bold text-slate-700">手机壁纸设置</span>
                       {wallpaper && !wallpaper.startsWith("linear-gradient") && (
@@ -1033,7 +1033,7 @@ export default function AppSettings({
                     </div>
                     
                     {wallpaper && !wallpaper.startsWith("linear-gradient") ? (
-                      <div className="relative w-full h-32 rounded-[20px] overflow-hidden border border-slate-200 group">
+                      <div className="relative w-full h-32 rounded-[16px] overflow-hidden border border-slate-200 group">
                         <img
                           src={wallpaper}
                           alt="Wallpaper Preview"
@@ -1063,7 +1063,7 @@ export default function AppSettings({
                         </div>
                       </div>
                     ) : (
-                      <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-6 rounded-[20px] text-xs transition-colors group w-full">
+                      <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-6 rounded-[16px] text-xs transition-colors group w-full">
                         <span className="text-slate-500 font-medium group-hover:text-slate-700">点击上传手机壁纸图片</span>
                         <input
                           type="file"
@@ -1076,7 +1076,7 @@ export default function AppSettings({
                   </div>
 
                   {/* Dock 栏设置 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-2">
                     <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">Dock 栏设置</div>
                     
                     <div className="flex items-center justify-between gap-4 py-2">
@@ -1119,7 +1119,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 小组件卡片设置 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-2">
                     <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">小组件卡片设置</div>
 
                     <div className="flex items-center justify-between gap-4 py-2">
@@ -1162,7 +1162,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 全局应用图标参数组 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-2">
                     <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">全局应用图标参数组</div>
 
                     <div className="flex items-center justify-between gap-4 py-2">
@@ -1268,7 +1268,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 隐藏应用名称 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm flex items-center justify-between">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-700">隐藏桌面应用名称</span>
                     <button
                       type="button"
@@ -1290,7 +1290,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 自定义图标区域 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <div className="flex items-center justify-between pb-1 border-b border-slate-50">
                       <span className="text-xs font-bold text-slate-700">自定义应用图标</span>
                       <button
@@ -1342,7 +1342,7 @@ export default function AppSettings({
               {beautySubTab === "chat" && (
                 <div className="space-y-4 animate-fade-in">
                   {/* 实时预览窗口 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">实时预览效果</div>
                     
                      <div className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 space-y-4 relative overflow-hidden">
@@ -1619,7 +1619,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 双方头像圆角 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-2">
                     <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">头像设置</div>
                     
                     <div className="flex items-center justify-between gap-4 py-2">
@@ -1736,7 +1736,7 @@ export default function AppSettings({
                                 setAvatarBorderColor(e.target.value);
                                 handleSave({ avatarBorderColor: e.target.value });
                               }}
-                              className="w-8 h-8 rounded cursor-pointer border border-slate-200 p-0"
+                              className="w-8 h-8 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                             />
                             <span className="text-[10px] text-slate-400 font-mono uppercase">{avatarBorderColor}</span>
                           </div>
@@ -1746,7 +1746,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 聊天气泡高级配置 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">聊天气泡高级配置</div>
 
                     <div className="flex items-center justify-between gap-4 py-1">
@@ -1812,7 +1812,7 @@ export default function AppSettings({
                       <div className="space-y-4 pt-1 border-t border-slate-50">
                         <div className="flex flex-col gap-2">
                           <span className="text-xs font-bold text-slate-700">尖角垂直位置</span>
-                          <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+                          <div className="flex bg-slate-100 p-1 rounded-[16px] gap-1">
                             {(["top", "center", "bottom"] as const).map((pos) => (
                               <button
                                 key={pos}
@@ -1837,7 +1837,7 @@ export default function AppSettings({
 
                      <div className="flex flex-col gap-2 pt-2 border-t border-slate-50">
                        <span className="text-xs font-bold text-slate-700">气泡相对头像位置</span>
-                       <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+                       <div className="flex bg-slate-100 p-1 rounded-[16px] gap-1">
                          {(["side", "above"] as const).map((pos) => (
                            <button
                              key={pos}
@@ -1902,7 +1902,7 @@ export default function AppSettings({
                          </div>
 
                          <div className="grid grid-cols-2 gap-4">
-                           <div className="flex items-center justify-between p-2 bg-slate-50 rounded-xl border border-slate-100">
+                           <div className="flex items-center justify-between p-2 bg-slate-50 rounded-[16px] border border-slate-100">
                              <span className="text-[10px] font-bold text-slate-500">对方气泡边框</span>
                              <div className="flex items-center gap-1.5">
                                <input
@@ -1912,12 +1912,12 @@ export default function AppSettings({
                                    setOtherBubbleBorderColor(e.target.value);
                                    handleSave({ otherBubbleBorderColor: e.target.value });
                                  }}
-                                 className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
+                                 className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                                />
                              </div>
                            </div>
 
-                           <div className="flex items-center justify-between p-2 bg-slate-50 rounded-xl border border-slate-100">
+                           <div className="flex items-center justify-between p-2 bg-slate-50 rounded-[16px] border border-slate-100">
                              <span className="text-[10px] font-bold text-slate-500">我方气泡边框</span>
                              <div className="flex items-center gap-1.5">
                                <input
@@ -1927,7 +1927,7 @@ export default function AppSettings({
                                    setSelfBubbleBorderColor(e.target.value);
                                    handleSave({ selfBubbleBorderColor: e.target.value });
                                  }}
-                                 className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
+                                 className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                                />
                              </div>
                            </div>
@@ -1937,7 +1937,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 极简视觉调色盘 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">极简视觉调色盘</div>
 
                     {/* 对方气泡 */}
@@ -1954,7 +1954,7 @@ export default function AppSettings({
                               setOtherBubbleBg(e.target.value);
                               handleSave({ otherBubbleBg: e.target.value });
                             }}
-                            className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
+                            className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                           />
                         </div>
                         <div className="flex items-center gap-2">
@@ -1966,7 +1966,7 @@ export default function AppSettings({
                               setOtherBubbleColor(e.target.value);
                               handleSave({ otherBubbleColor: e.target.value });
                             }}
-                            className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
+                            className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                           />
                         </div>
                       </div>
@@ -2005,7 +2005,7 @@ export default function AppSettings({
                               setSelfBubbleBg(e.target.value);
                               handleSave({ selfBubbleBg: e.target.value });
                             }}
-                            className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
+                            className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                           />
                         </div>
                         <div className="flex items-center gap-2">
@@ -2017,7 +2017,7 @@ export default function AppSettings({
                               setSelfBubbleColor(e.target.value);
                               handleSave({ selfBubbleColor: e.target.value });
                             }}
-                            className="w-6 h-6 rounded cursor-pointer border border-slate-200 p-0"
+                            className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                           />
                         </div>
                       </div>
@@ -2044,7 +2044,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 自定义 CSS */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
                     <span className="text-xs font-bold text-slate-700">高阶自定义气泡 CSS 样式</span>
                     <textarea
                       rows={3}
@@ -2054,7 +2054,7 @@ export default function AppSettings({
                         handleSave({ bubbleCss: e.target.value });
                       }}
                       placeholder={`.chat-bubble-self { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%) !important; }`}
-                      className="w-full px-4 py-3 rounded-[24px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
+                      className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
                     />
                   </div>
                 </div>
@@ -2064,7 +2064,7 @@ export default function AppSettings({
               {beautySubTab === "preset" && (
                 <div className="space-y-4 animate-fade-in">
                   {/* 保存预设 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <span className="text-xs font-bold text-slate-700">保存当前样式为新预设</span>
                     <form onSubmit={handleSaveCurrentAsPreset} className="flex gap-2">
                       <input
@@ -2073,11 +2073,11 @@ export default function AppSettings({
                         value={newPresetName}
                         onChange={(e) => setNewPresetName(e.target.value)}
                         placeholder="请输入预设名称..."
-                        className="flex-1 bg-slate-50 rounded-[32px] px-4 py-2 text-xs text-slate-800 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                        className="flex-1 bg-slate-50 rounded-[8px] px-4 py-2 text-xs text-slate-800 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
                       />
                       <button
                         type="submit"
-                        className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[32px] text-xs transition-colors flex items-center gap-1 shrink-0 shadow-sm"
+                        className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[24px] text-xs transition-colors flex items-center gap-1 shrink-0 shadow-sm"
                       >
                         <Save className="w-3.5 h-3.5" />
                         <span>保存</span>
@@ -2086,7 +2086,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 切换视觉预设 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
                     <span className="text-xs font-bold text-slate-700 block">预设模板库</span>
                     <div className="space-y-2">
                       {activePresetsList.map((preset) => {
@@ -2095,7 +2095,7 @@ export default function AppSettings({
                         return (
                           <div
                             key={preset.id}
-                            className={`flex items-center justify-between p-2.5 rounded-[32px] border transition-all ${
+                            className={`flex items-center justify-between p-2.5 rounded-[24px] border transition-all ${
                               isActive
                                 ? "bg-stone-100 border-stone-300 text-stone-905"
                                 : "bg-slate-50 border-slate-100 text-slate-700 hover:bg-slate-100"
@@ -2125,7 +2125,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 全局 CSS 注入 */}
-                  <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
                     <span className="text-xs font-bold text-slate-700">全局高阶 CSS 样式注入</span>
                     <textarea
                       rows={3}
@@ -2135,7 +2135,7 @@ export default function AppSettings({
                         handleSave({ globalCss: e.target.value });
                       }}
                       placeholder={`/* 全局样式覆盖 */\n.phone-screen-container {\n  filter: contrast(1.05);\n}`}
-                      className="w-full px-4 py-3 rounded-[24px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
+                      className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
                     />
                   </div>
                 </div>
@@ -2147,7 +2147,7 @@ export default function AppSettings({
           {activeTab === "system_config" && (
             <div className="space-y-4 text-left">
               {/* Floating Home Button Settings */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="text-xs font-bold text-slate-800 tracking-wide">一键回到主页悬浮按钮</h4>
@@ -2176,7 +2176,7 @@ export default function AppSettings({
               </div>
 
               {/* PWA 渐进式独立应用管理器 */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <h4 className="text-xs font-bold text-slate-800 tracking-wide">PWA 独立全屏应用模式</h4>
                   <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold ${
@@ -2193,7 +2193,7 @@ export default function AppSettings({
                 </p>
 
                 {isStandalone ? (
-                  <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100/60 text-[10px] text-emerald-700 space-y-1">
+                  <div className="bg-emerald-50/50 p-3 rounded-[16px] border border-emerald-100/60 text-[10px] text-emerald-700 space-y-1">
                     <p className="font-bold flex items-center gap-1.5">
                       <span>🎉</span> 恭喜！您已成功运行在 PWA 独立全屏环境下。
                     </p>
@@ -2206,13 +2206,13 @@ export default function AppSettings({
                       <button
                         type="button"
                         onClick={handlePwaInstall}
-                        className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-extrabold rounded-2xl text-xs transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                        className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-extrabold rounded-[16px] text-xs transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
                         <span>立即安装「饭饭机」到主屏幕</span>
                       </button>
                     ) : (
-                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100/80 text-[10px] text-slate-600 space-y-1.5">
+                      <div className="bg-slate-50 p-3 rounded-[16px] border border-slate-100/80 text-[10px] text-slate-600 space-y-1.5">
                         <p className="font-bold text-slate-700 flex items-center gap-1.5">
                           <span>💡</span> 温馨提示：如果上述按钮未出现，您可以手动安装：
                         </p>
@@ -2224,7 +2224,7 @@ export default function AppSettings({
                       </div>
                     )}
 
-                    <div className="bg-amber-50/40 p-3 rounded-2xl border border-amber-100/50 text-[10px] text-amber-700 space-y-1">
+                    <div className="bg-amber-50/40 p-3 rounded-[16px] border border-amber-100/50 text-[10px] text-amber-700 space-y-1">
                       <p className="font-bold flex items-center gap-1">
                         <span>⚠️</span> 极重要注意事项:
                       </p>
@@ -2242,7 +2242,7 @@ export default function AppSettings({
           {activeTab === "system" && (
             <div className="space-y-4 text-left">
               {/* Data Backup and Restore */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">数据备份与还原</h3>
                 
                 <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -2287,7 +2287,7 @@ export default function AppSettings({
                         alert("导出备份失败: " + err.message);
                       }
                     }}
-                    className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all group"
+                    className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group"
                   >
                     <Download className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
                     <span className="text-xs font-bold text-slate-700">导出数据备份</span>
@@ -2295,7 +2295,7 @@ export default function AppSettings({
                   </button>
 
                   {/* Import Button */}
-                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all group cursor-pointer">
+                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group cursor-pointer">
                     <Upload className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
                     <span className="text-xs font-bold text-slate-700">导入备份还原</span>
                     <span className="text-[8px] text-slate-400 mt-1">上传备份 JSON 文件</span>
@@ -2342,7 +2342,7 @@ export default function AppSettings({
               </div>
 
               {/* Reset Cache and Return to Default */}
-              <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-rose-500 uppercase tracking-wider">危险区域</h3>
                 <p className="text-[10px] text-slate-400 leading-relaxed">
                   清除缓存将删除此设备上的所有自定义角色、历史对话、世界书、日程、备忘录和朋友圈，系统也将恢复为最干净的初始设置。请注意此操作无法撤销。
@@ -2356,7 +2356,7 @@ export default function AppSettings({
                       window.location.reload();
                     }
                   }}
-                  className="w-full py-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 text-rose-600 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                  className="w-full py-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 text-rose-600 rounded-[16px] font-bold text-xs transition-all flex items-center justify-center gap-1.5"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>清除缓存并恢复为默认</span>

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { MusicTrack, MusicPlaylist } from "../types";
+import { audioDb } from "../utils/audioDb";
 import {
   Play,
   Pause,
@@ -43,32 +44,7 @@ interface AppMusicProps {
   setVolume: React.Dispatch<React.SetStateAction<number>>;
 }
 
-const PRESEED_TRACKS: MusicTrack[] = [
-  {
-    id: "preseed-track-1",
-    title: "图书馆的午后茶会",
-    artist: "希尔薇 (Silvy)",
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-    isLocal: false,
-    duration: "06:12"
-  },
-  {
-    id: "preseed-track-2",
-    title: "星际巡防机动装甲 BGM",
-    artist: "雷恩少校 (Ryan)",
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-    isLocal: false,
-    duration: "07:05"
-  },
-  {
-    id: "preseed-track-3",
-    title: "暗星域能源枢纽",
-    artist: "秦彻",
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-    isLocal: false,
-    duration: "05:44"
-  }
-];
+const PRESEED_TRACKS: MusicTrack[] = [];
 
 const WAVE_BARS = [
   4, 4, 6, 8, 10, 14, 12, 8, 6, 8, 12, 18, 24, 28, 20, 14, 16, 22, 30, 34,
@@ -201,22 +177,42 @@ export default function AppMusic({
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const handleLocalUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLocalUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const fileUrl = URL.createObjectURL(file);
-      const newTrack: MusicTrack = {
-        id: Date.now().toString(),
-        title: file.name.replace(/\.[^/.]+$/, ""),
-        artist: "本地上传",
-        url: fileUrl,
-        isLocal: true,
-      };
-      onAddTrack(newTrack);
-      setCurrentTrack(newTrack);
-      setIsPlaying(true);
-      setIsShowingImportModal(false);
-      setActiveTab("library");
+      const trackId = `local-track-${Date.now()}`;
+      try {
+        await audioDb.saveTrackFile(trackId, file);
+        const fileUrl = URL.createObjectURL(file);
+        const newTrack: MusicTrack = {
+          id: trackId,
+          title: file.name.replace(/\.[^/.]+$/, ""),
+          artist: "本地上传",
+          url: fileUrl,
+          isLocal: true,
+        };
+        onAddTrack(newTrack);
+        setCurrentTrack(newTrack);
+        setIsPlaying(true);
+        setIsShowingImportModal(false);
+        setActiveTab("library");
+      } catch (err) {
+        console.error("Failed to save local track to IndexedDB:", err);
+        // Fallback: add anyway
+        const fileUrl = URL.createObjectURL(file);
+        const newTrack: MusicTrack = {
+          id: `local-track-${Date.now()}`,
+          title: file.name.replace(/\.[^/.]+$/, ""),
+          artist: "本地上传",
+          url: fileUrl,
+          isLocal: true,
+        };
+        onAddTrack(newTrack);
+        setCurrentTrack(newTrack);
+        setIsPlaying(true);
+        setIsShowingImportModal(false);
+        setActiveTab("library");
+      }
     }
   };
 
@@ -642,7 +638,7 @@ export default function AppMusic({
                       value={newTitle}
                       onChange={(e) => setNewTitle(e.target.value)}
                       placeholder="如: 绝美旋律"
-                      className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-xl px-3 py-2 text-xs text-stone-800"
+                      className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-[8px] px-3 py-2 text-xs text-stone-800"
                     />
                   </div>
 
@@ -653,7 +649,7 @@ export default function AppMusic({
                       value={newArtist}
                       onChange={(e) => setNewArtist(e.target.value)}
                       placeholder="如: 纯音幻境"
-                      className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-xl px-3 py-2 text-xs text-stone-800"
+                      className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-[8px] px-3 py-2 text-xs text-stone-800"
                     />
                   </div>
 
@@ -665,7 +661,7 @@ export default function AppMusic({
                       value={newUrl}
                       onChange={(e) => setNewUrl(e.target.value)}
                       placeholder="https://example.com/audio.mp3"
-                      className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-xl px-3 py-2 text-xs text-stone-800"
+                      className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-[8px] px-3 py-2 text-xs text-stone-800"
                     />
                   </div>
 

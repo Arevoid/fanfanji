@@ -302,7 +302,7 @@ export default function AppSchedule({
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   placeholder="去做什么？"
-                  className="w-full px-4 py-2 rounded-full bg-white border border-stone-200/60 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-medium"
+                  className="w-full px-4 py-2 rounded-[8px] bg-white border border-stone-200/60 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-medium"
                 />
               </div>
               <div>
@@ -312,7 +312,7 @@ export default function AppSchedule({
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
                   placeholder="添加说明"
-                  className="w-full px-4 py-2 rounded-full bg-white border border-stone-200/60 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-medium"
+                  className="w-full px-4 py-2 rounded-[8px] bg-white border border-stone-200/60 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-medium"
                 />
               </div>
               <div className="flex justify-end gap-2 text-xs font-bold pt-1">

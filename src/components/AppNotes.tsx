@@ -294,7 +294,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
                 placeholder="搜索你的笔记..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs shadow-sm"
+                className="w-full pl-9 pr-4 py-2 bg-white rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs shadow-sm"
               />
             </div>
 
@@ -428,7 +428,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
                     placeholder="输入要准备的事务，如: 约陆沉砚去写生..."
                     value={newTodoText}
                     onChange={(e) => setNewTodoText(e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-base focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-base focus:outline-none focus:ring-1 focus:ring-neutral-950"
                   />
                   <button
                     type="submit"

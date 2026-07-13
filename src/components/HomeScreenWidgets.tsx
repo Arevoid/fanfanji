@@ -425,7 +425,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
         >
           <form 
             onSubmit={handleSaveSettings} 
-            className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-5 border border-stone-100 flex flex-col gap-4 animate-scale-up text-left text-stone-800" 
+            className="bg-white rounded-[24px] w-full max-w-sm overflow-hidden shadow-2xl p-5 border border-stone-100 flex flex-col gap-4 animate-scale-up text-left text-stone-800" 
             onClick={e => e.stopPropagation()}
           >
             <div className="flex justify-between items-center pb-2 border-b border-stone-100">
@@ -450,7 +450,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                   <button
                     type="button"
                     onClick={() => setDraftWidgetType("anniversary")}
-                    className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all ${
+                    className={`flex-1 py-2 text-xs font-bold rounded-[16px] border transition-all ${
                       draftWidgetType === "anniversary" 
                         ? "bg-rose-500 border-rose-500 text-white shadow-md shadow-rose-100" 
                         : "bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100"
@@ -461,7 +461,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                   <button
                     type="button"
                     onClick={() => setDraftWidgetType("countdown")}
-                    className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all ${
+                    className={`flex-1 py-2 text-xs font-bold rounded-[16px] border transition-all ${
                       draftWidgetType === "countdown" 
                         ? "bg-blue-500 border-blue-500 text-white shadow-md shadow-blue-100" 
                         : "bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100"
@@ -479,7 +479,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                   type="text" 
                   value={draftTitle} 
                   onChange={e => setDraftTitle(e.target.value)} 
-                  className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-bold bg-stone-50/50"
+                  className="w-full px-3 py-2 text-xs border border-stone-200 rounded-[8px] focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-bold bg-stone-50/50"
                   placeholder="如：与希尔薇相连"
                   maxLength={16}
                   required
@@ -493,7 +493,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                   type="date" 
                   value={draftTargetDate} 
                   onChange={e => setDraftTargetDate(e.target.value)} 
-                  className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-bold bg-stone-50/50"
+                  className="w-full px-3 py-2 text-xs border border-stone-200 rounded-[8px] focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-bold bg-stone-50/50"
                   required
                 />
               </div>
@@ -567,7 +567,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                   <label className="text-[11px] font-extrabold text-stone-500 tracking-wider">
                     文字与天数颜色
                   </label>
-                  <div className="flex items-center gap-1.5 bg-stone-50 px-2 py-0.5 rounded-lg border border-stone-200">
+                  <div className="flex items-center gap-1.5 bg-stone-50 px-2 py-0.5 rounded-[16px] border border-stone-200">
                     <span className="text-[9px] text-stone-400 font-bold">当前色值:</span>
                     <div 
                       className="w-3.5 h-3.5 rounded-full border border-stone-300 shadow-inner" 
@@ -581,7 +581,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                   <button
                     type="button"
                     onClick={() => setDraftFontColor("default")}
-                    className={`flex-1 py-1 text-[10px] font-extrabold rounded-lg border transition-all ${
+                    className={`flex-1 py-1 text-[10px] font-extrabold rounded-[16px] border transition-all ${
                       draftFontColor === "default"
                         ? "border-stone-900 bg-stone-900 text-white shadow-sm"
                         : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
@@ -592,7 +592,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                   <button
                     type="button"
                     onClick={() => setDraftFontColor("#ffffff")}
-                    className={`flex-1 py-1 text-[10px] font-extrabold rounded-lg border transition-all ${
+                    className={`flex-1 py-1 text-[10px] font-extrabold rounded-[16px] border transition-all ${
                       draftFontColor === "#ffffff" || draftFontColor === "white"
                         ? "border-stone-900 bg-stone-900 text-white shadow-sm"
                         : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
@@ -603,7 +603,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                   <button
                     type="button"
                     onClick={() => setDraftFontColor("#1c1917")}
-                    className={`flex-1 py-1 text-[10px] font-extrabold rounded-lg border transition-all ${
+                    className={`flex-1 py-1 text-[10px] font-extrabold rounded-[16px] border transition-all ${
                       draftFontColor === "#1c1917" || draftFontColor === "dark"
                         ? "border-stone-900 bg-stone-900 text-white shadow-sm"
                         : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
@@ -614,7 +614,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                 </div>
 
                 {/* Custom Hue Slider */}
-                <div className="space-y-1.5 bg-stone-50/50 p-2.5 rounded-xl border border-stone-150">
+                <div className="space-y-1.5 bg-stone-50/50 p-2.5 rounded-[16px] border border-stone-150">
                   <span className="text-[10px] font-bold text-stone-400 block">滑动颜色色条 (自定义彩色)</span>
                   <div className="flex items-center gap-2">
                     <input
@@ -626,7 +626,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                         const hue = Number(e.target.value);
                         setDraftFontColor(`hsl(${hue}, 85%, 45%)`);
                       }}
-                      className="color-slider-hue w-full h-2.5 rounded-lg appearance-none cursor-pointer outline-none transition-all"
+                      className="color-slider-hue w-full h-2.5 rounded-[16px] appearance-none cursor-pointer outline-none transition-all"
                       style={{
                         background: 'linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)'
                       }}
@@ -645,26 +645,26 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                   accept="image/*" 
                   className="hidden" 
                 />
-                <div className="flex items-center gap-3 bg-stone-50/50 p-2 border border-stone-150 rounded-xl">
+                <div className="flex items-center gap-3 bg-stone-50/50 p-2 border border-stone-150 rounded-[16px]">
                   {draftBgImage ? (
                     <>
                       <img 
                         src={draftBgImage} 
                         alt="Preview" 
-                        className="w-10 h-10 rounded-lg object-cover border border-stone-200 shadow-sm"
+                        className="w-10 h-10 rounded-[16px] object-cover border border-stone-200 shadow-sm"
                       />
                       <div className="flex-1 flex gap-1.5">
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="px-2.5 py-1 bg-white hover:bg-stone-100 border border-stone-200 rounded-lg text-[10px] font-extrabold transition-colors text-stone-700"
+                          className="px-2.5 py-1 bg-white hover:bg-stone-100 border border-stone-200 rounded-[16px] text-[10px] font-extrabold transition-colors text-stone-700"
                         >
                           更换图片
                         </button>
                         <button
                           type="button"
                           onClick={() => setDraftBgImage(undefined)}
-                          className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg text-[10px] font-extrabold transition-colors text-rose-600"
+                          className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-[16px] text-[10px] font-extrabold transition-colors text-rose-600"
                         >
                           清除背景
                         </button>
@@ -675,7 +675,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        className="w-full py-2.5 bg-white border border-dashed border-stone-300 hover:bg-stone-50 rounded-xl text-[11px] font-extrabold transition-colors text-stone-600 flex items-center justify-center gap-1.5"
+                        className="w-full py-2.5 bg-white border border-dashed border-stone-300 hover:bg-stone-50 rounded-[16px] text-[11px] font-extrabold transition-colors text-stone-600 flex items-center justify-center gap-1.5"
                       >
                         <ImageIcon className="w-4 h-4 text-stone-400" />
                         <span>选择背景图片</span>
@@ -691,13 +691,13 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
               <button
                 type="button"
                 onClick={() => setIsEditingSettings(false)}
-                className="flex-1 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-black transition-colors"
+                className="flex-1 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-[16px] text-xs font-black transition-colors"
               >
                 取消
               </button>
               <button 
                 type="submit" 
-                className="flex-1 py-2 bg-stone-900 hover:bg-stone-850 text-white rounded-xl text-xs font-black transition-colors shadow-lg shadow-stone-900/10"
+                className="flex-1 py-2 bg-stone-900 hover:bg-stone-850 text-white rounded-[16px] text-xs font-black transition-colors shadow-lg shadow-stone-900/10"
               >
                 保存设置
               </button>

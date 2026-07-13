@@ -485,7 +485,7 @@ export default function AppArchives({
               {showAddMenu && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowAddMenu(false)} />
-                  <div className="absolute right-0 top-10 bg-white border border-slate-200 shadow-xl rounded-[24px] p-1.5 z-50 flex flex-col gap-0.5 min-w-[130px] animate-fade-in text-left">
+                  <div className="absolute right-0 top-10 bg-white border border-slate-200 shadow-xl rounded-[12px] p-1.5 z-50 flex flex-col gap-0.5 min-w-[130px] animate-fade-in text-left">
                     <button
                       type="button"
                       onClick={() => {
@@ -573,7 +573,7 @@ export default function AppArchives({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="请输入姓名"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
                 />
               </div>
               <div>
@@ -585,7 +585,7 @@ export default function AppArchives({
                   value={age}
                   onChange={(e) => setAge(e.target.value === "" ? "" : parseInt(e.target.value))}
                   placeholder="请输入年龄"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
                 />
               </div>
             </div>
@@ -598,7 +598,7 @@ export default function AppArchives({
                 <select
                   value={gender}
                   onChange={(e) => setGender(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
                 >
                   <option value="">请选择性别 (选填)</option>
                   <option value="女">女</option>
@@ -614,7 +614,7 @@ export default function AppArchives({
                 <select
                   value={mbti}
                   onChange={(e) => setMbti(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
                 >
                   <option value="">请选择MBTI (选填)</option>
                   {MBTI_LIST.map((m) => (
@@ -636,7 +636,7 @@ export default function AppArchives({
                 value={personality}
                 onChange={(e) => setPersonality(e.target.value)}
                 placeholder="在此输入详细的人格性格设定、语气特征、来历背景、生活背景或各种设定细节..."
-                className="w-full px-5 py-4 rounded-[32px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed font-medium"
+                className="w-full px-5 py-4 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed font-medium"
               />
             </div>
 
@@ -650,7 +650,7 @@ export default function AppArchives({
                 value={greeting}
                 onChange={(e) => setGreeting(e.target.value)}
                 placeholder="在此输入角色的开场白。开启聊天时，角色会自动、主动发送这段话..."
-                className="w-full px-5 py-4 rounded-[32px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed font-semibold"
+                className="w-full px-5 py-4 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed font-semibold"
               />
             </div>
 
@@ -883,7 +883,7 @@ export default function AppArchives({
                         value={newRefTitle}
                         onChange={(e) => setNewRefTitle(e.target.value)}
                         placeholder="请输入参考标题，如：对白片段一 / 经典日志"
-                        className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-neutral-950 font-semibold"
+                        className="w-full px-3 py-2 bg-white rounded-[8px] border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-neutral-950 font-semibold"
                       />
                     </div>
                     <div>
@@ -892,7 +892,7 @@ export default function AppArchives({
                         value={newRefContent}
                         onChange={(e) => setNewRefContent(e.target.value)}
                         placeholder="请输入该角色相关的故事描述、生活日志、或是经典原著对白内容。建议多提供能反映角色性格特征或说话口癖的句子..."
-                        className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-neutral-950 resize-none leading-relaxed"
+                        className="w-full px-3 py-2 bg-white rounded-[8px] border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-neutral-950 resize-none leading-relaxed"
                       />
                     </div>
                     <button

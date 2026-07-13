@@ -241,6 +241,14 @@ export interface OfflineStory {
   sourceChatId?: string; // Optional reference source
   sourceChatMsgCount?: number;
   messages: Message[];
+  wordLimit?: number;
+  partnerPerspective?: string;
+  userPerspective?: string;
+  stylePresetId?: string;
+  stylePromptName?: string;
+  stylePromptContent?: string;
+  showAvatars?: boolean;
+  customCss?: string;
 }
 
 

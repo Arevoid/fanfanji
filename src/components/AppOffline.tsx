@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { 
   ArrowLeft, Plus, Trash2, Send, Sparkles, BookOpen, 
   Link2, Calendar, MessageSquare, ChevronRight, HelpCircle, 
-  Settings, Check, RefreshCw, Layers, Eye, BookMarked, Cpu
+  Settings, Check, RefreshCw, Layers, Eye, BookMarked, Cpu, Pencil
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, Message, OfflineStory, MemoryItem, UserSettings, WorldBookEntry } from "../types";
@@ -76,6 +76,126 @@ export default function AppOffline({
     setTimeout(() => setToast(""), 3000);
   };
 
+  // Editing Message Content state
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+
+  const handleStartEdit = (msgId: string, currentContent: string) => {
+    setEditingMessageId(msgId);
+    setEditingText(currentContent);
+  };
+
+  const handleSaveEdit = (msgId: string) => {
+    if (!activeStory) return;
+    const updatedMessages = activeStory.messages.map(m => {
+      if (m.id === msgId) {
+        return { ...m, content: editingText };
+      }
+      return m;
+    });
+    const updatedStory = {
+      ...activeStory,
+      messages: updatedMessages,
+      updatedAt: Date.now()
+    };
+    onSaveOfflineStory(updatedStory);
+    setActiveStory(updatedStory);
+    setEditingMessageId(null);
+    setEditingText("");
+    showToast("修改内容已保存");
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditingText("");
+  };
+
+  // Default Style Presets
+  const DEFAULT_STYLE_PRESETS = [
+    { id: "none", name: "默认风格", description: "无附加文风限制，由大模型自行生成合适笔触。" },
+    { id: "delicate", name: "细腻言情", description: "文笔细腻温柔，富有画面感，注重心理细节、细微神态描写与人物微表情，情感温和而饱满。" },
+    { id: "classic_chinese", name: "古典风雅", description: "词藻典雅凝练，带有浓郁的古风或武侠韵味，常运用四字成语、古雅景物描摹以及文质彬彬的对答。" },
+    { id: "light_novel", name: "轻小说动漫", description: "语言活泼欢快，多有内心独白或俏皮吐槽，画面感强烈，具有鲜明的轻小说和二次元戏剧色彩。" },
+    { id: "realist", name: "硬核写实", description: "笔触洗练干脆、直白有力，绝不娇揉造作，注重尘世烟火、生活细节与真实客观的场景反应。" },
+    { id: "philosophical", name: "文艺内敛", description: "富含哲学思考，语调略带沉郁或文艺，善于运用象征、留白与深沉隽永的内心活动描写。" }
+  ];
+
+  // Custom style presets state loaded from localStorage
+  const [customPresets, setCustomPresets] = useState<any[]>(() => {
+    const raw = localStorage.getItem("offline_custom_style_presets");
+    return raw ? JSON.parse(raw) : [];
+  });
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsWordLimit, setSettingsWordLimit] = useState("");
+  const [settingsPartnerP, setSettingsPartnerP] = useState("third");
+  const [settingsUserP, setSettingsUserP] = useState("first");
+  const [settingsStylePresetId, setSettingsStylePresetId] = useState("none");
+  const [settingsStylePromptName, setSettingsStylePromptName] = useState("");
+  const [settingsStylePromptContent, setSettingsStylePromptContent] = useState("");
+  const [settingsShowAvatars, setSettingsShowAvatars] = useState(true);
+  const [settingsCustomCss, setSettingsCustomCss] = useState("");
+
+  const [newPresetName, setNewPresetName] = useState("");
+  const [newPresetContent, setNewPresetContent] = useState("");
+
+  useEffect(() => {
+    if (activeStory && isSettingsOpen) {
+      setSettingsWordLimit(activeStory.wordLimit ? String(activeStory.wordLimit) : "");
+      setSettingsPartnerP(activeStory.partnerPerspective || "third");
+      setSettingsUserP(activeStory.userPerspective || "first");
+      setSettingsStylePresetId(activeStory.stylePresetId || "none");
+      setSettingsStylePromptName(activeStory.stylePromptName || "");
+      setSettingsStylePromptContent(activeStory.stylePromptContent || "");
+      setSettingsShowAvatars(activeStory.showAvatars !== false); // default to true
+      setSettingsCustomCss(activeStory.customCss || "");
+    }
+  }, [activeStory, isSettingsOpen]);
+
+  const handleSaveSettings = () => {
+    if (!activeStory) return;
+
+    const limit = parseInt(settingsWordLimit.trim(), 10);
+    const parsedLimit = isNaN(limit) || limit <= 0 ? undefined : limit;
+
+    const updatedStory = {
+      ...activeStory,
+      wordLimit: parsedLimit,
+      partnerPerspective: settingsPartnerP,
+      userPerspective: settingsUserP,
+      stylePresetId: settingsStylePresetId,
+      stylePromptName: settingsStylePromptName,
+      stylePromptContent: settingsStylePromptContent,
+      showAvatars: settingsShowAvatars,
+      customCss: settingsCustomCss,
+      updatedAt: Date.now()
+    };
+
+    onSaveOfflineStory(updatedStory);
+    setActiveStory(updatedStory);
+    setIsSettingsOpen(false);
+    showToast("剧本配置已保存！");
+  };
+
+  const handleCreateCustomPreset = () => {
+    if (!settingsStylePromptName.trim() || !settingsStylePromptContent.trim()) {
+      showToast("文风名称和描述不能为空！");
+      return;
+    }
+    const newPreset = {
+      id: `custom_${Date.now()}`,
+      name: settingsStylePromptName.trim(),
+      description: settingsStylePromptContent.trim()
+    };
+    const updated = [...customPresets, newPreset];
+    setCustomPresets(updated);
+    localStorage.setItem("offline_custom_style_presets", JSON.stringify(updated));
+    
+    // Select the new preset
+    setSettingsStylePresetId(newPreset.id);
+    showToast("文风保存为预设成功！");
+  };
+
   const selectedChar = characters.find(c => c.id === selectedCharId) || characters[0];
   const charStories = offlineStories.filter(s => 
     s.characterId === selectedCharId || (s.characterIds && s.characterIds.includes(selectedCharId))
@@ -124,6 +244,7 @@ export default function AppOffline({
   // Exit story workspace back to list
   const handleExitStoryWorkspace = () => {
     setActiveStory(null);
+    setIsSettingsOpen(false);
     localStorage.removeItem(`offline_story_id_${selectedCharId}`);
     localStorage.setItem(`offline_mode_active_${selectedCharId}`, "false");
   };
@@ -362,9 +483,35 @@ ${wbPrompts}
 1. 🚨 你扮演这几位角色，在他们参与的每句话、神态动作、心理描写中，必须严密、100%地遵循他们各自的性格特征、说话语气和人设。
 2. 严禁混淆多位角色的口癖、语气或人物关系。
 
-【线下模式及多角色控制规则】
+【人称写作视角限制】
+- 对方人物视角（${storyCharsList.map(c => c.name).join("/")}）：【${(activeStory.partnerPerspective || "third") === "first" ? "第一人称" : (activeStory.partnerPerspective || "third") === "second" ? "第二人称" : "第三人称"}】。`;
+      if ((activeStory.partnerPerspective || "third") === "first") {
+        sysPrompt += `你在描写或代替该人物进行心理解说、旁白叙述或发言时，应当站在该角色自身视角，采用第一人称“我”或契合其身份的自称（如“本座”、“本王”、“人家”等）。`;
+      } else if ((activeStory.partnerPerspective || "third") === "second") {
+        sysPrompt += `你在叙事中指向对方自身时采用第二人称“你”（极罕见）。`;
+      } else {
+        sysPrompt += `你在叙事和描述中，应当采用客观的第三人称（如“他”、“她”、“${storyCharsList[0]?.name || "对方"}”）来描述该角色的言行、神态和内心戏。`;
+      }
+      sysPrompt += `\n- 用户（我）的视角：【${(activeStory.userPerspective || "first") === "first" ? "第一人称 (我)" : (activeStory.userPerspective || "first") === "second" ? "第二人称 (你)" : "第三人称 (他/她/具体名字)"}】。`;
+      if ((activeStory.userPerspective || "first") === "first") {
+        sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第一人称“我”指代用户（例如：“你深深凝视着我，缓步走来”）。`;
+      } else if ((activeStory.userPerspective || "first") === "second") {
+        sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第二人称“你”指代用户（例如：“他走到你面前，拉起你的手”）。`;
+      } else {
+        sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第三人称“他/她/具体名字 ${settings.name || "主角"}”来指代用户（例如：“他向 ${settings.name || "主角"} 微微颔首”）。`;
+      }
+
+      if (activeStory.wordLimit && activeStory.wordLimit > 0) {
+        sysPrompt += `\n\n🚨 【重要字数限制提示】：你的本次续写回复总字数（包括对话与旁白叙事）必须严格限制在 【${activeStory.wordLimit}】 字以内，请尽量精炼、点到即止，切勿啰嗦冗长！`;
+      }
+
+      if (activeStory.stylePromptContent) {
+        sysPrompt += `\n\n✨ 【写作风格/笔触规范 (当前预设: ${activeStory.stylePromptName || "自定义"})】：\n${activeStory.stylePromptContent}\n请在生成本次续写内容时，全程严格执行并契合上述写作风格规范。`;
+      }
+
+      sysPrompt += `\n\n【线下模式及多角色控制规则】
 1. 用户可以通过文字、指令或旁白，像导播、写小说或主控一样描述故事进展。
-2. 作为一个优秀的内容创作者，你要输出一整段精美的、小说叙事般的回复，内容包括第三人称的场景描写、客观动作、旁白叙事，以及这些角色的对话。
+2. 作为一个优秀的内容创作者，你要输出一整段精美的、小说叙事般的回复，内容包括指定人称视角的场景描写、客观动作、旁白叙事，以及这些角色的对话。
 3. 任何发言对话请使用中文引号 “ ” (例如 “你醒了？”) 或 「 」 括起来，以便阅读。任何非发言部分（动作描述、神态、场景描写、内心想法、旁白等）放在引号外面。
 4. 确保在对话中，通过在引号前或文中清晰提及名字（例如：A冷笑了一声：“...” / B有些局促地拍了拍衣角：“...”）来指明是谁在说话，使读者能一眼分辨。
 5. 必须保持极高的人设契合度、动作细节 and 情感氛围描写。不要说任何破戏（OOC）的话，不要说你是AI。
@@ -647,8 +794,253 @@ ${chatContextParts.join("\n")}`;
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50"
+            className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50 offline-workspace-container"
           >
+            {isSettingsOpen ? (
+              /* ================= STORY SETTINGS PAGE ================= */
+              <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
+                {/* Header */}
+                <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm z-10 shrink-0 relative">
+                  <button 
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors shrink-0"
+                    title="返回剧本空间"
+                  >
+                    <ArrowLeft className="w-4 h-4 text-slate-700" />
+                  </button>
+                  <h3 className="text-xs font-bold text-slate-800 absolute left-1/2 -translate-x-1/2 w-max">
+                    剧本高级设置
+                  </h3>
+                  <div className="w-8 h-8" />
+                </div>
+
+                {/* Settings Body */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+                  {/* Sync memory button is now placed at the top of settings as requested */}
+                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-2 text-left">
+                    <div className="flex items-center gap-2">
+                      <Cpu className="w-4 h-4 text-indigo-500" />
+                      <span className="text-xs font-bold text-slate-800">同步剧本记忆</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400">将此离线剧本空间的当前进展记忆同步并沉淀到角色的长期记忆库中，让他们在后续对话中感知到这些事件。</p>
+                    <button
+                      type="button"
+                      onClick={() => handleSyncMemoryToBrain(activeStory)}
+                      className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-[16px] border border-indigo-200/50 transition-all text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Cpu className="w-3.5 h-3.5" />
+                      <span>同步当前进展记忆至角色大脑</span>
+                    </button>
+                  </div>
+
+                  {/* Word limit */}
+                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
+                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">每次生成回复字数限制</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        value={settingsWordLimit}
+                        onChange={(e) => setSettingsWordLimit(e.target.value)}
+                        placeholder="不限制 (或输入数字，如：300)"
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                      />
+                      {settingsWordLimit && (
+                        <button
+                          type="button"
+                          onClick={() => setSettingsWordLimit("")}
+                          className="px-2.5 py-1 text-[10px] font-bold border border-slate-200 rounded-[16px] text-slate-500 hover:bg-slate-50"
+                        >
+                          清除限制
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-400">设定单次生成的最大字数范围，避免回复过长或过短。</p>
+                  </div>
+
+                  {/* Perspectives */}
+                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
+                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">人称写作视角选择</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-500 block">对方 (角色们) 的人称</span>
+                        <select
+                          value={settingsPartnerP}
+                          onChange={(e) => setSettingsPartnerP(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                        >
+                          <option value="third">名字</option>
+                          <option value="first">我</option>
+                          <option value="second">你</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-500 block">我 (主角/用户) 的人称</span>
+                        <select
+                          value={settingsUserP}
+                          onChange={(e) => setSettingsUserP(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                        >
+                          <option value="first">我</option>
+                          <option value="second">你</option>
+                          <option value="third">名字</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Style Presets */}
+                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
+                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">自定义剧本文风设定</label>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-slate-400 block font-medium">快捷文风预设</span>
+                      <select
+                        value={settingsStylePresetId}
+                        onChange={(e) => {
+                          const selId = e.target.value;
+                          setSettingsStylePresetId(selId);
+                          const matched = [...DEFAULT_STYLE_PRESETS, ...customPresets].find(p => p.id === selId);
+                          if (matched) {
+                            setSettingsStylePromptName(matched.name === "默认风格" ? "" : matched.name);
+                            setSettingsStylePromptContent(selId === "none" ? "" : matched.description);
+                          }
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                      >
+                        {[...DEFAULT_STYLE_PRESETS, ...customPresets].map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.id.startsWith("custom_") ? `⭐ ${p.name} (自定义)` : p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2 pt-1.5 border-t border-slate-100">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-500 block">文风名称</span>
+                        <input
+                          type="text"
+                          value={settingsStylePromptName}
+                          onChange={(e) => {
+                            setSettingsStylePromptName(e.target.value);
+                            setSettingsStylePresetId("custom_edit");
+                          }}
+                          placeholder="例如: 刀刀见血 / 王家卫风..."
+                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                        />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-500 block">文风详细提示词 (Prompt)</span>
+                        <textarea
+                          value={settingsStylePromptContent}
+                          onChange={(e) => {
+                            setSettingsStylePromptContent(e.target.value);
+                            setSettingsStylePresetId("custom_edit");
+                          }}
+                          placeholder="描述你想要的语言笔触，例：充满电影感、留白极多，使用短句、充满孤寂感。角色说话前会微眯眼睛等..."
+                          rows={3}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                        />
+                      </div>
+
+                      {settingsStylePresetId === "custom_edit" && settingsStylePromptName.trim() && settingsStylePromptContent.trim() && (
+                        <button
+                          type="button"
+                          onClick={handleCreateCustomPreset}
+                          className="w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-[16px] border border-indigo-200/50 transition-all text-[10px]"
+                        >
+                          💾 保存当前文风为自定义永久预设
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Show Avatars Toggle */}
+                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm flex items-center justify-between text-left">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">是否显示双方头像</span>
+                      <span className="text-[10px] text-slate-400">开启后会在剧本左右侧显示头像与名称标识</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settingsShowAvatars}
+                      onChange={(e) => setSettingsShowAvatars(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Custom CSS */}
+                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">线下卡片美化 (自定义 CSS)</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSettingsCustomCss(`/* 仿宣纸文艺背景 */
+.offline-workspace-container {
+  background-color: #fdfaf2 !important;
+}
+.offline-message-list {
+  background-color: transparent !important;
+}
+.offline-msg-content {
+  font-size: 15px !important;
+  color: #3f3f46 !important;
+  line-height: 1.8 !important;
+  letter-spacing: 0.05em !important;
+}
+.offline-dialogue-text {
+  color: #c2410c !important; /* 朱红色对话高亮 */
+  font-weight: 600 !important;
+}
+.offline-narrative-text {
+  color: #52525b !important;
+  font-style: italic !important;
+}`);
+                        }}
+                        className="text-[10px] text-indigo-600 font-bold hover:underline"
+                      >
+                        导入文艺宣纸模板
+                      </button>
+                    </div>
+                    <textarea
+                      value={settingsCustomCss}
+                      onChange={(e) => setSettingsCustomCss(e.target.value)}
+                      placeholder={`/* 支持代码美化，常用CSS类名： */
+.offline-workspace-container { ... }
+.offline-message-list { ... }
+.offline-msg-content { ... }`}
+                      rows={5}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-[8px] px-3 py-2 text-emerald-400 font-mono text-[10px] focus:outline-none focus:border-indigo-500"
+                    />
+                    <p className="text-[10px] text-slate-400">在这里输入 CSS 样式规则，点击保存后即可在当前剧本空间内实时渲染应用！</p>
+                  </div>
+                </div>
+
+                {/* Footer buttons */}
+                <div className="p-4 bg-white border-t border-slate-100 flex gap-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="flex-1 py-3 rounded-[16px] border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold text-xs transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSaveSettings();
+                      setIsSettingsOpen(false);
+                    }}
+                    className="flex-1 py-3 rounded-[16px] bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-colors shadow-md"
+                  >
+                    保存设置
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
             {/* Header */}
             <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm z-10">
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -671,15 +1063,16 @@ ${chatContextParts.join("\n")}`;
                 </div>
               </div>
 
-              {/* Memory Sync button */}
-              <button
-                onClick={() => handleSyncMemoryToBrain(activeStory)}
-                className="px-2.5 py-1.5 rounded-full bg-slate-100 hover:bg-indigo-50 text-indigo-600 hover:text-indigo-700 font-bold text-[11px] flex items-center gap-1 transition-all shrink-0 border border-slate-200"
-                title="同步本次进展记忆至角色大脑"
-              >
-                <Cpu className="w-3 h-3" />
-                <span>同步记忆</span>
-              </button>
+              {/* Action buttons */}
+              <div className="flex items-center shrink-0">
+                <button
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors shrink-0"
+                  title="高级剧本配置"
+                >
+                  <Settings className="w-4 h-4 text-slate-600" />
+                </button>
+              </div>
             </div>
 
             {/* Source Reference banner */}
@@ -709,7 +1102,16 @@ ${chatContextParts.join("\n")}`;
             )}
 
             {/* Messaging Workspace Body */}
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white">
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white offline-message-list">
+              
+              {activeStory.customCss && (
+                <style dangerouslySetInnerHTML={{
+                  __html: `
+                    /* Custom CSS from story settings */
+                    ${activeStory.customCss}
+                  `
+                }} />
+              )}
               
               {activeStory.messages.length > 0 && (
                 /* Elegant session metadata header */
@@ -738,28 +1140,112 @@ ${chatContextParts.join("\n")}`;
               {activeStory.messages.map((msg) => {
                 const isSelf = msg.sender === "user";
                 const isUserSpoken = isSelf && !msg.isNarration;
+                const showAvatars = activeStory.showAvatars !== false;
+
+                // Determine avatar/name for character messages
+                let charToUse = selectedChar;
+                if (!isSelf && activeStory.characterIds && activeStory.characterIds.length > 0) {
+                  const matched = characters.filter(c => activeStory.characterIds?.includes(c.id)).find(c => {
+                    const nameStr = c.remark || c.name;
+                    return msg.content.includes(nameStr);
+                  });
+                  if (matched) charToUse = matched;
+                }
+
+                const isEditing = editingMessageId === msg.id;
 
                 if (isUserSpoken) {
-                  // User Spoken Dialogue - beautiful center-right soft grey bubble
+                  // User Spoken Dialogue
                   return (
                     <div 
                       key={msg.id}
-                      className="w-full flex justify-end my-5 group relative pr-7 select-text"
+                      id={`offline-msg-${msg.id}`}
+                      className="offline-message-item offline-msg-user w-full flex items-start justify-end my-5 gap-3 group relative pr-7 select-text"
                     >
-                      <div className="relative max-w-[85%] bg-slate-100 rounded-2xl px-4 py-2.5 shadow-sm hover:shadow-md transition-all border border-slate-200/40">
-                        <p className="text-[13.5px] leading-relaxed text-[#5e6672] font-medium font-sans italic whitespace-pre-wrap">
-                          {msg.content}
-                        </p>
+                      {/* Edit or Delete Action triggers */}
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10">
+                        <button
+                          onClick={() => handleStartEdit(msg.id, msg.content)}
+                          className="p-1 rounded bg-slate-50 hover:bg-slate-100 text-slate-500 shadow-sm border border-slate-200"
+                          title="编辑该段内容"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMessage(msg.id)}
+                          className="p-1 rounded bg-red-50 hover:bg-red-100 text-red-500 shadow-sm border border-slate-200"
+                          title="删除这段发言"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
-                      
-                      {/* Subtle Hover Deletion Button */}
-                      <button
-                        onClick={() => handleDeleteMessage(msg.id)}
-                        className="absolute right-0 top-1/2 -translate-y-1/2 p-1 rounded bg-red-50 hover:bg-red-100 text-red-500 opacity-60 md:opacity-0 group-hover:opacity-100 hover:opacity-100 transition-all shadow-sm"
-                        title="删除这段发言"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
+
+                      <div className="flex flex-col items-end max-w-[80%]">
+                        {showAvatars && (
+                          <span className="offline-nickname text-[10px] text-slate-400 mb-1">
+                            {settings.name || "我"}
+                          </span>
+                        )}
+                        
+                        {isEditing ? (
+                          <div className="w-full bg-white p-3 rounded-[16px] border border-slate-100 shadow-lg space-y-3 min-w-[240px]">
+                            <textarea
+                              value={editingText}
+                              onChange={(e) => setEditingText(e.target.value)}
+                              className="w-full p-3 text-xs border border-slate-200 rounded-[8px] focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-slate-50/50 text-slate-800 min-h-[80px] leading-relaxed resize-none text-left"
+                              placeholder="编辑这段文字..."
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                onClick={handleCancelEdit}
+                                className="px-3 py-1.5 text-[11px] font-bold rounded-[8px] bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all"
+                              >
+                                取消
+                              </button>
+                              <button
+                                onClick={() => handleSaveEdit(msg.id)}
+                                className="px-3.5 py-1.5 text-[11px] font-bold rounded-[8px] bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1 transition-all"
+                              >
+                                <Check className="w-3 h-3" />
+                                保存
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="offline-bubble relative bg-slate-100 rounded-2xl px-4 py-2.5 border border-slate-200/40 shadow-sm hover:shadow-md transition-all">
+                            <p className="offline-msg-content text-[13.5px] leading-relaxed text-[#5e6672] font-medium font-sans italic whitespace-pre-wrap">
+                              {(() => {
+                                const parts = msg.content.split(/(“[^”]*”|「[^」]*」)/g);
+                                return parts.map((part, index) => {
+                                  if ((part.startsWith('“') && part.endsWith('”')) || (part.startsWith('「') && part.endsWith('」'))) {
+                                    return (
+                                      <span key={index} className="offline-dialogue-text font-medium text-slate-900">
+                                        {part}
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <span key={index} className="offline-narrative-text text-slate-600">
+                                      {part}
+                                    </span>
+                                  );
+                                });
+                              })()}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {showAvatars && (
+                        <div className="offline-avatar-container shrink-0">
+                          <img 
+                            src={settings.avatar} 
+                            alt={settings.name || "我"} 
+                            referrerPolicy="no-referrer"
+                            className="offline-avatar w-8 h-8 rounded-full border border-slate-200 object-cover shadow-sm"
+                          />
+                        </div>
+                      )}
                     </div>
                   );
                 } else {
@@ -767,20 +1253,91 @@ ${chatContextParts.join("\n")}`;
                   return (
                     <div 
                       key={msg.id}
-                      className="w-full text-left my-4 group relative pr-7 select-text transition-all duration-200 hover:bg-slate-50/50 rounded-lg py-1 px-1"
+                      id={`offline-msg-${msg.id}`}
+                      className="offline-message-item offline-msg-character w-full flex items-start my-4 gap-3 group relative pr-7 select-text transition-all duration-200 hover:bg-slate-50/50 rounded-lg py-1 px-1"
                     >
-                      <p className="text-[14px] leading-loose text-slate-700 font-sans tracking-wide text-justify whitespace-pre-wrap">
-                        {msg.content}
-                      </p>
-                      
-                      {/* Subtle Hover Deletion Button */}
-                      <button
-                        onClick={() => handleDeleteMessage(msg.id)}
-                        className="absolute right-0 top-1/2 -translate-y-1/2 p-1 rounded bg-red-50 hover:bg-red-100 text-red-500 opacity-60 md:opacity-0 group-hover:opacity-100 hover:opacity-100 transition-all shadow-sm"
-                        title="删除这段剧情"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
+                      {showAvatars && (
+                        <div className="offline-avatar-container shrink-0 mt-0.5">
+                          <img 
+                            src={charToUse.avatar} 
+                            alt={charToUse.remark || charToUse.name} 
+                            referrerPolicy="no-referrer"
+                            className="offline-avatar w-8 h-8 rounded-full border border-slate-200 object-cover shadow-sm"
+                          />
+                        </div>
+                      )}
+
+                      <div className="flex-1 flex flex-col min-w-0">
+                        {showAvatars && (
+                          <span className="offline-nickname text-[10px] text-slate-400 mb-1">
+                            {charToUse.remark || charToUse.name}
+                          </span>
+                        )}
+
+                        {isEditing ? (
+                          <div className="w-full bg-white p-3 rounded-[16px] border border-slate-100 shadow-lg space-y-3">
+                            <textarea
+                              value={editingText}
+                              onChange={(e) => setEditingText(e.target.value)}
+                              className="w-full p-3 text-xs border border-slate-200 rounded-[8px] focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-slate-50/50 text-slate-800 min-h-[100px] leading-relaxed resize-none text-left"
+                              placeholder="编辑这段文字..."
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                onClick={handleCancelEdit}
+                                className="px-3 py-1.5 text-[11px] font-bold rounded-[8px] bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all"
+                              >
+                                取消
+                              </button>
+                              <button
+                                onClick={() => handleSaveEdit(msg.id)}
+                                className="px-3.5 py-1.5 text-[11px] font-bold rounded-[8px] bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1 transition-all"
+                              >
+                                <Check className="w-3 h-3" />
+                                保存
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="offline-msg-content text-[14px] leading-loose text-slate-700 font-sans tracking-wide text-justify whitespace-pre-wrap">
+                            {(() => {
+                              const parts = msg.content.split(/(“[^”]*”|「[^」]*」)/g);
+                              return parts.map((part, index) => {
+                                if ((part.startsWith('“') && part.endsWith('”')) || (part.startsWith('「') && part.endsWith('」'))) {
+                                  return (
+                                    <span key={index} className="offline-dialogue-text font-medium text-slate-900">
+                                      {part}
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span key={index} className="offline-narrative-text text-slate-600">
+                                    {part}
+                                  </span>
+                                );
+                              });
+                            })()}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Edit or Delete Action triggers */}
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10">
+                        <button
+                          onClick={() => handleStartEdit(msg.id, msg.content)}
+                          className="p-1 rounded bg-slate-50 hover:bg-slate-100 text-slate-500 shadow-sm border border-slate-200"
+                          title="编辑这段内容"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMessage(msg.id)}
+                          className="p-1 rounded bg-red-50 hover:bg-red-100 text-red-500 shadow-sm border border-slate-200"
+                          title="删除这段剧情"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
                   );
                 }
@@ -860,7 +1417,7 @@ ${chatContextParts.join("\n")}`;
                         ? "发出简短指令控制后续走向 (例: [突降暴雨，我们躲在桥下])" 
                         : "输入发言，继续对话剧情..."
                   }
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-[8px] px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />
                 <button
                   type="submit"
@@ -871,6 +1428,8 @@ ${chatContextParts.join("\n")}`;
                 </button>
               </form>
             </div>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -908,7 +1467,7 @@ ${chatContextParts.join("\n")}`;
                     value={newTitle}
                     onChange={(e) => setNewTitle(e.target.value)}
                     placeholder="例如: 废土末日平行线 / 暴雨中的午后 / 导演控制篇..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
                   />
                 </div>
 
@@ -947,7 +1506,7 @@ ${chatContextParts.join("\n")}`;
                       onChange={(e) => setNewIfPrompt(e.target.value)}
                       placeholder="例：如果我们在一个赛博朋克霓虹街头第一次相遇，你是一个身负重伤的骇客，而我是一个义体医生..."
                       rows={3}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                 )}
@@ -977,6 +1536,8 @@ ${chatContextParts.join("\n")}`;
           </div>
         )}
       </AnimatePresence>
+
+
 
     </div>
   );

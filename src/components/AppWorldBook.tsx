@@ -521,7 +521,7 @@ export default function AppWorldBook({
               {showAddMenu && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowAddMenu(false)} />
-                  <div className="absolute right-0 top-10 bg-white border border-stone-200 shadow-xl rounded-[24px] p-1.5 z-50 flex flex-col gap-0.5 min-w-[130px] animate-fade-in text-left">
+                  <div className="absolute right-0 top-10 bg-white border border-stone-200 shadow-xl rounded-[12px] p-1.5 z-50 flex flex-col gap-0.5 min-w-[130px] animate-fade-in text-left">
                     <button
                       type="button"
                       onClick={() => {
@@ -595,7 +595,7 @@ export default function AppWorldBook({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="如: 修真界、奥术核心"
-                  className="w-full px-3 py-2 rounded-xl bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
+                  className="w-full px-3 py-2 rounded-[8px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
                 />
               </div>
 
@@ -610,7 +610,7 @@ export default function AppWorldBook({
                       value={category}
                       onChange={(e) => setCategory(e.target.value)}
                       placeholder="输入新分组名称，如: 地理、魔法"
-                      className="w-full px-3 py-2 rounded-xl bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
+                      className="w-full px-3 py-2 rounded-[8px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
                     />
                     <button
                       type="button"
@@ -649,7 +649,7 @@ export default function AppWorldBook({
                                 setCategory(val);
                               }
                             }}
-                            className="w-full pl-3 pr-8 py-2 rounded-xl bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-extrabold text-stone-700 appearance-none cursor-pointer"
+                            className="w-full pl-3 pr-8 py-2 rounded-[8px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-extrabold text-stone-700 appearance-none cursor-pointer"
                           >
                             {uniqueCategories.map(cat => (
                               <option key={cat} value={cat}>
@@ -715,7 +715,7 @@ export default function AppWorldBook({
                         <select
                           value={boundCharacterId}
                           onChange={(e) => setBoundCharacterId(e.target.value)}
-                          className="w-full pl-3 pr-8 py-1.5 rounded-xl bg-white border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold appearance-none cursor-pointer"
+                          className="w-full pl-3 pr-8 py-1.5 rounded-[8px] bg-white border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold appearance-none cursor-pointer"
                         >
                           {characters.map((char) => (
                             <option key={char.id} value={char.id}>
@@ -808,7 +808,7 @@ export default function AppWorldBook({
                     value={keywords}
                     onChange={(e) => setKeywords(e.target.value)}
                     placeholder="例如: 修真界, 飞升, 洞天福地"
-                    className="w-full px-3 py-2 rounded-xl bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-medium"
+                    className="w-full px-3 py-2 rounded-[8px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-medium"
                   />
                 </div>
               )}
@@ -820,7 +820,7 @@ export default function AppWorldBook({
                   <select
                     value={position}
                     onChange={(e) => setPosition(e.target.value as any)}
-                    className="w-full pl-3 pr-8 py-2 rounded-xl bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-extrabold text-stone-700 appearance-none cursor-pointer"
+                    className="w-full pl-3 pr-8 py-2 rounded-[8px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-extrabold text-stone-700 appearance-none cursor-pointer"
                   >
                     <option value="after_main_prompt">主提示词后 (System Prompt 之后)</option>
                     <option value="before_char_def">角色定义前 (人设 Profile 之前)</option>
@@ -865,7 +865,7 @@ export default function AppWorldBook({
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   placeholder="在此详述该地理、人物、组织、科学/魔法法则。支持纯文本，或粘贴 JSON 格式设定内容..."
-                  className="w-full px-5 py-4 rounded-[32px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed text-left font-medium"
+                  className="w-full px-5 py-4 rounded-[8px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed text-left font-medium"
                 />
               </div>
 
@@ -909,7 +909,7 @@ export default function AppWorldBook({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="搜索词条名称或设定细节..."
-                  className="w-full pl-9 pr-4 py-2 bg-white rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs text-stone-800"
+                  className="w-full pl-9 pr-4 py-2 bg-white rounded-[8px] border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs text-stone-800"
                 />
               </div>
 
@@ -1208,7 +1208,7 @@ export default function AppWorldBook({
                 value={newCategoryNameInput}
                 onChange={(e) => setNewCategoryNameInput(e.target.value)}
                 placeholder="输入新的分组名称"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
+                className="w-full px-3.5 py-2.5 rounded-[8px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
                 autoFocus
               />
             </div>

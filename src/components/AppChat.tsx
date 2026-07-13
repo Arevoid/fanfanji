@@ -3247,28 +3247,37 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               ` : ''}
 
               /* 朋友圈评论区无气泡卡片，细线分隔 */
+              .phone-screen-container .moments-comment-list,
               .moments-comment-list {
                 display: flex !important;
                 flex-direction: column !important;
                 gap: 0 !important;
+                background-color: transparent !important;
+                border: none !important;
+                border-radius: 0px !important;
+                box-shadow: none !important;
               }
+              .phone-screen-container .moments-comment-item,
               .moments-comment-item {
                 background-color: transparent !important;
                 background-image: none !important;
-                border-radius: 0px !important;
+                border-top: none !important;
                 border-left: none !important;
                 border-right: none !important;
                 border-bottom: none !important;
+                border-radius: 0px !important;
                 box-shadow: none !important;
-                padding-top: 5px !important;
-                padding-bottom: 5px !important;
+                padding-top: 6px !important;
+                padding-bottom: 6px !important;
                 padding-left: 2px !important;
                 padding-right: 2px !important;
                 margin: 0 !important;
               }
+              .phone-screen-container .moments-comment-item:not(:first-child),
               .moments-comment-item:not(:first-child) {
-                border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
+                border-top: 1px solid rgba(0, 0, 0, 0.08) !important;
               }
+              .phone-screen-container .moments-comment-item:hover,
               .moments-comment-item:hover {
                 background-color: rgba(0, 0, 0, 0.03) !important;
               }
@@ -3615,7 +3624,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               {/* Body */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                  {/* Character Profile Summary & Remark Settings */}
-                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm flex items-center gap-4">
                   <div className="relative shrink-0">
                     <RenderAvatar
                       src={draftAvatar || (activeCharacter.isGroupChat ? "👥" : activeCharacter.avatar)}
@@ -3655,7 +3664,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         value={draftRemark}
                         onChange={(e) => setDraftRemark(e.target.value)}
                         placeholder={activeCharacter.isGroupChat ? "输入新群名..." : "设置备注昵称..."}
-                        className="w-full bg-slate-50 px-3 py-1.5 rounded-[32px] border border-slate-200 focus:outline-none text-xs text-slate-600 placeholder-slate-400 font-semibold"
+                        className="w-full bg-slate-50 px-3 py-1.5 rounded-[8px] border border-slate-200 focus:outline-none text-xs text-slate-600 placeholder-slate-400 font-semibold"
                       />
                     </div>
                   </div>
@@ -3663,7 +3672,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
                 {/* Group Members List for Group Chats */}
                 {activeCharacter.isGroupChat && (
-                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                  <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
                     <div className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2">
                       群聊成员 ({1 + (activeCharacter.memberIds?.length || 0)} 人)
                     </div>
@@ -3750,7 +3759,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 )}
 
                 {/* Operations Group Card */}
-                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-4 text-xs">
+                <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm space-y-4 text-xs">
                   {/* Settings toggles */}
                   <div className="divide-y divide-slate-100 pt-1 space-y-4">
                     {/* Pin Chat */}
@@ -3773,7 +3782,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         <button
                           type="button"
                           onClick={() => setDraftChatStylePreset("default")}
-                          className={`py-1.5 px-2 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                          className={`py-1.5 px-2 rounded-[16px] border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
                             draftChatStylePreset === "default"
                               ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
                               : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
@@ -3784,7 +3793,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         <button
                           type="button"
                           onClick={() => setDraftChatStylePreset("liquid-glass")}
-                          className={`py-1.5 px-2 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                          className={`py-1.5 px-2 rounded-[16px] border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
                             draftChatStylePreset === "liquid-glass"
                               ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
                               : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
@@ -3847,10 +3856,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     <div className="py-3 space-y-2 border-t border-slate-100">
                       <span className="text-[#52525b] font-bold block text-xs">专属背景壁纸</span>
                       {draftChatBg ? (
-                        <div className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-50 h-24 flex items-center justify-center">
+                        <div className="relative group rounded-[16px] overflow-hidden border border-slate-200 bg-slate-50 h-24 flex items-center justify-center">
                           <img src={draftChatBg} className="absolute inset-0 w-full h-full object-cover opacity-60" />
                           <div className="relative z-10 flex gap-2">
-                            <label className="cursor-pointer bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-colors shadow-sm border border-slate-200">
+                            <label className="cursor-pointer bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-[16px] text-[10px] font-bold transition-colors shadow-sm border border-slate-200">
                               更换背景
                               <input
                                 type="file"
@@ -3862,14 +3871,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             <button
                               type="button"
                               onClick={() => setDraftChatBg(undefined)}
-                              className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold transition-colors shadow-sm"
+                              className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-[16px] text-[10px] font-bold transition-colors shadow-sm"
                             >
                               移除
                             </button>
                           </div>
                         </div>
                       ) : (
-                        <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-4 rounded-xl text-xs transition-colors group">
+                        <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-4 rounded-[16px] text-xs transition-colors group">
                           <span className="text-slate-500 font-medium group-hover:text-slate-700">点击上传专属背景图片</span>
                           <span className="text-[10px] text-slate-400 mt-0.5">支持 PNG, JPG 等格式</span>
                           <input
@@ -3900,7 +3909,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         step={50}
                         value={draftHistoryMemoryLimit}
                         onChange={(e) => setDraftHistoryMemoryLimit(parseInt(e.target.value))}
-                        className="w-full accent-neutral-950 h-1 bg-slate-100 rounded-lg appearance-none cursor-pointer"
+                        className="w-full accent-neutral-950 h-1 bg-slate-100 rounded-[16px] appearance-none cursor-pointer"
                       />
                       <div className="flex justify-between text-[9px] text-slate-400 font-mono">
                         <span>50条</span>
@@ -3957,7 +3966,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
   background: url('发送回复按钮图片URL') center/contain no-repeat !important;
 }
 `}
-                        className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[20px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono leading-relaxed h-48"
+                        className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono leading-relaxed h-48"
                       />
                     </div>
 
@@ -3994,7 +4003,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               <select
                                 value={draftProactiveStartTime}
                                 onChange={(e) => setDraftProactiveStartTime(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
                               >
                                 {Array.from({ length: 48 }, (_, i) => {
                                   const h = Math.floor(i / 2).toString().padStart(2, "0");
@@ -4012,7 +4021,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               <select
                                 value={draftProactiveEndTime}
                                 onChange={(e) => setDraftProactiveEndTime(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
                               >
                                 {Array.from({ length: 48 }, (_, i) => {
                                   const h = Math.floor(i / 2).toString().padStart(2, "0");
@@ -4026,7 +4035,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             </div>
                           </div>
 
-                          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between gap-2">
+                          <div className="bg-slate-50 p-2.5 rounded-[16px] border border-slate-100 flex items-center justify-between gap-2">
                             <span className="text-[10px] text-slate-400 leading-snug">
                               Ta 将在此时间段内随机主动给您发送消息。若设为 00:00 - 00:00 则为全天候随机发信。
                             </span>
@@ -4034,7 +4043,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               type="button"
                               onClick={handleTriggerProactiveMessage}
                               disabled={isTriggeringProactive}
-                              className="shrink-0 px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white font-bold rounded-lg text-[9px] transition-colors shadow-sm disabled:opacity-50"
+                              className="shrink-0 px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white font-bold rounded-[16px] text-[9px] transition-colors shadow-sm disabled:opacity-50"
                             >
                               {isTriggeringProactive ? "正在发送..." : "⚡ 模拟主动发信"}
                             </button>
@@ -4048,7 +4057,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   <div className="pt-4 space-y-3 border-t border-slate-100">
                     <button
                       onClick={handleSaveSettings}
-                      className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                      className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
                     >
                       保存设置
                     </button>
@@ -4057,7 +4066,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       <button
                         type="button"
                         onClick={() => setShowClearHistoryModal(true)}
-                        className="text-xs text-red-500 hover:text-red-600 font-medium py-1 px-4 rounded-xl hover:bg-red-50/50 transition-colors"
+                        className="text-xs text-red-500 hover:text-red-600 font-medium py-1 px-4 rounded-[16px] hover:bg-red-50/50 transition-colors"
                       >
                         清空对话记录
                       </button>
@@ -4066,7 +4075,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         <button
                           type="button"
                           onClick={() => setShowDisbandGroupModal(true)}
-                          className="text-xs text-red-600 hover:text-red-700 font-bold py-1 px-4 rounded-xl hover:bg-red-50/80 transition-colors flex items-center gap-1"
+                          className="text-xs text-red-600 hover:text-red-700 font-bold py-1 px-4 rounded-[16px] hover:bg-red-50/80 transition-colors flex items-center gap-1"
                         >
                           解除群聊
                         </button>
@@ -4079,7 +4088,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               {/* Clear History Choice Modal Overlay */}
               {showClearHistoryModal && (
                 <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                  <div className="bg-white rounded-3xl p-6 max-w-xs w-full shadow-2xl border border-slate-100 text-center space-y-4">
+                  <div className="bg-white rounded-[24px] p-6 max-w-xs w-full shadow-2xl border border-slate-100 text-center space-y-4">
                     <div className="w-12 h-12 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto">
                       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -4807,7 +4816,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         : "输入发言，继续剧本对话...")
                     : `发送消息给 ${activeCharacter.name}...`
                 }
-                className={`flex-1 h-10 border focus:outline-none rounded-[20px] px-4 text-xs text-slate-800 chat-input ${
+                className={`flex-1 h-10 border focus:outline-none rounded-[8px] px-4 text-xs text-slate-800 chat-input ${
                   isFloatingCute 
                     ? "bg-white/60 border-slate-200/40 focus:bg-white" 
                     : "bg-slate-50 border-slate-200/80"
@@ -5230,7 +5239,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         placeholder="输入自定义位置..."
                         value={manualLocationText}
                         onChange={(e) => setManualLocationText(e.target.value)}
-                        className="w-full pl-8 pr-3 py-2 bg-white border border-stone-200 rounded-xl text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-rose-500/30 focus:border-rose-500"
+                        className="w-full pl-8 pr-3 py-2 bg-white border border-stone-200 rounded-[8px] text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-rose-500/30 focus:border-rose-500"
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && manualLocationText.trim()) {
                             sendCustomMessage(`[位置]|${manualLocationText.trim()}`);
@@ -5668,7 +5677,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       value={momentInputText}
                       onChange={(e) => setMomentInputText(e.target.value)}
                       placeholder="说点什么吧，可以配个好看的插图..."
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed text-left"
+                      className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed text-left"
                     />
 
                     <div className="flex justify-between items-center">
@@ -5845,7 +5854,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                           setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
                                           setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
                                         }}
-                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer hover:bg-slate-200/30 transition-colors text-[11px] block text-left bg-transparent rounded-none shadow-none border-none moments-comment-item"
+                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
                                         title={`回复 ${commAuthorName}`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">
@@ -6307,7 +6316,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                           setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
                                           setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
                                         }}
-                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer hover:bg-slate-200/30 transition-colors text-[11px] block text-left bg-transparent rounded-none shadow-none border-none moments-comment-item"
+                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
                                         title={`回复 ${commAuthorName}`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">{commAuthorName}</span>
@@ -6451,7 +6460,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   type="text"
                   value={editMyName}
                   onChange={(e) => setEditMyName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold text-slate-800"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold text-slate-800"
                 />
               </div>
 
@@ -6462,7 +6471,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   type="text"
                   value={editMySignature}
                   onChange={(e) => setEditMySignature(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs text-slate-800"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs text-slate-800"
                 />
               </div>
 
@@ -6474,7 +6483,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   value={editMyBio}
                   onChange={(e) => setEditMyBio(e.target.value)}
                   placeholder=""
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs resize-none leading-relaxed text-slate-800"
+                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs resize-none leading-relaxed text-slate-800"
                 />
               </div>
 
@@ -6688,7 +6697,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   value={groupNameInput}
                   onChange={(e) => setGroupNameInput(e.target.value)}
                   placeholder="例如：周五狂欢组, 开发茶话会..."
-                  className="w-full bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-900 text-xs text-slate-700 placeholder-slate-400 font-medium"
+                  className="w-full bg-slate-50 px-3.5 py-2 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-900 text-xs text-slate-700 placeholder-slate-400 font-medium"
                 />
               </div>
 
@@ -6948,7 +6957,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               onChange={(e) => setOocCommentText(e.target.value)}
               placeholder="请输入对此回答的修正意见（例如：语气太温柔了，他现在应该是冷傲的，绝对不会用这么多感叹号，更不会说么么哒。）"
               rows={3}
-              className="w-full text-[11px] p-2.5 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-neutral-950 bg-stone-50/50 resize-none font-medium leading-relaxed text-left"
+              className="w-full text-[11px] p-2.5 border border-stone-200 rounded-[8px] focus:outline-none focus:ring-1 focus:ring-neutral-950 bg-stone-50/50 resize-none font-medium leading-relaxed text-left"
             />
 
             <div className="flex gap-2">
