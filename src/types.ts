@@ -37,6 +37,8 @@ export interface Character {
   enableTimeAwareness?: boolean;
   isGroupChat?: boolean;
   memberIds?: string[];
+  minimaxVoiceId?: string;
+  minimaxSpeed?: number;
 }
 
 export interface Message {
@@ -50,6 +52,9 @@ export interface Message {
   isOffline?: boolean;
   isNarration?: boolean;
   translation?: string;
+  audioUrl?: string;
+  audioDuration?: number;
+  isVoiceMessage?: boolean;
 }
 
 export interface MomentComment {
@@ -176,6 +181,16 @@ export interface UserSettings {
   avatarBorderEnabled?: boolean;
   avatarBorderWidth?: number;
   avatarBorderColor?: string;
+
+  // MiniMax TTS Settings
+  enableMiniMaxTts?: boolean;
+  minimaxApiKey?: string;
+  minimaxGroupId?: string;
+  minimaxModel?: string;
+  minimaxSpeed?: number;
+  minimaxPitch?: number;
+  minimaxVol?: number;
+  minimaxProxyUrl?: string;
 }
 
 export interface ApiPreset {

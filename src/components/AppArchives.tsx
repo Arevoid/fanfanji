@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { Character, WorldBookEntry } from "../types";
 import { apiSummarizePersonality } from "../utils/apiHelper";
-import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare } from "lucide-react";
+import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2 } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
+import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 
 interface AppArchivesProps {
   characters: Character[];
@@ -87,6 +88,65 @@ export default function AppArchives({
   const [greeting, setGreeting] = useState("");
   const [album, setAlbum] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
+  const [minimaxVoiceId, setMinimaxVoiceId] = useState("");
+  const [isAuditioning, setIsAuditioning] = useState(false);
+  const [auditionAudio, setAuditionAudio] = useState<HTMLAudioElement | null>(null);
+
+  const handleAudition = async () => {
+    if (isAuditioning) {
+      if (auditionAudio) {
+        auditionAudio.pause();
+        setAuditionAudio(null);
+      }
+      setIsAuditioning(false);
+      return;
+    }
+
+    try {
+      setIsAuditioning(true);
+      setErrorMsg("");
+
+      let settings: any = {};
+      try {
+        const saved = localStorage.getItem("phone_settings");
+        if (saved) settings = JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+
+      const ttsOptions = {
+        apiKey: settings.minimaxApiKey || undefined,
+        groupId: settings.minimaxGroupId || undefined,
+        model: settings.minimaxModel || "speech-2.8-hd",
+        speed: settings.minimaxSpeed !== undefined ? settings.minimaxSpeed : 1.0,
+        pitch: settings.minimaxPitch !== undefined ? settings.minimaxPitch : 0,
+        vol: settings.minimaxVol !== undefined ? settings.minimaxVol : 1.0,
+        voiceId: minimaxVoiceId || "female-shaonv",
+        proxyUrl: settings.minimaxProxyUrl || undefined,
+      };
+
+      const auditionText = "您好！我已经成功绑定了此项语音。请问您喜欢我的这个声音吗？";
+      const blob = await getSpeechForText(auditionText, ttsOptions);
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      setAuditionAudio(audio);
+      audio.onended = () => {
+        setIsAuditioning(false);
+        setAuditionAudio(null);
+      };
+      audio.onerror = (e) => {
+        console.error("Audition playback failed:", e);
+        setErrorMsg("试听音频播放失败，请检查 MiniMax 配置");
+        setIsAuditioning(false);
+        setAuditionAudio(null);
+      };
+      audio.play();
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err.message || "试听合成失败，请确认 MiniMax 语音设置中已填写有效的 Key 与 Group ID！");
+      setIsAuditioning(false);
+    }
+  };
 
   const resetForm = () => {
     setName("");
@@ -99,6 +159,12 @@ export default function AppArchives({
     setGreeting("");
     setAlbum([]);
     setErrorMsg("");
+    setMinimaxVoiceId("");
+    if (auditionAudio) {
+      auditionAudio.pause();
+      setAuditionAudio(null);
+    }
+    setIsAuditioning(false);
     setEditingId(null);
     setIsCreating(false);
   };
@@ -110,6 +176,7 @@ export default function AppArchives({
     setGender(char.gender);
     setMbti(char.mbti);
     setAvatar(char.avatar);
+    setMinimaxVoiceId(char.minimaxVoiceId || "");
     
     // Combine existing backstory if populated and valid
     let combined = char.personality;
@@ -322,6 +389,7 @@ export default function AppArchives({
       isPinned: originalChar ? originalChar.isPinned : false,
       chatBg: originalChar ? originalChar.chatBg : undefined,
       references: originalChar ? originalChar.references : [],
+      minimaxVoiceId: minimaxVoiceId,
     };
 
     onSaveCharacter(savedChar);
@@ -652,6 +720,46 @@ export default function AppArchives({
                 placeholder="在此输入角色的开场白。开启聊天时，角色会自动、主动发送这段话..."
                 className="w-full px-5 py-4 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed font-semibold"
               />
+            </div>
+
+            {/* MiniMax Voice ID Binding */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-500">
+                绑定 MiniMax 专属音色 (选填)
+              </label>
+              <div className="flex gap-2">
+                <select
+                  value={minimaxVoiceId}
+                  onChange={(e) => setMinimaxVoiceId(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-[8px] bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
+                >
+                  <option value="">未绑定语音 (不自动合成)</option>
+                  {MINIMAX_DEFAULT_VOICES.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!minimaxVoiceId}
+                  onClick={handleAudition}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 shrink-0 ${
+                    !minimaxVoiceId
+                      ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                      : isAuditioning
+                      ? "bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                  }`}
+                  title="试听绑定音色"
+                >
+                  <Volume2 className={`w-3.5 h-3.5 ${isAuditioning ? "animate-pulse text-rose-500" : ""}`} />
+                  <span>{isAuditioning ? "停止" : "试听"}</span>
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium">
+                绑定专属音色后，该角色发送消息时会调用此音色。请确保在手机“设置” → “MiniMax 语音”中已配置相应参数。
+              </p>
             </div>
 
             {/* Save Button Only */}

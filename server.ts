@@ -725,6 +725,92 @@ ${text}
     }
   });
 
+  // API Route: MiniMax TTS Proxy to bypass CORS and hide API Key
+  app.post("/api/minimax-tts", async (req, res) => {
+    try {
+      const {
+        text,
+        apiKey,
+        groupId,
+        model,
+        voiceId,
+        speed,
+        pitch,
+        vol,
+      } = req.body;
+
+      const finalApiKey = apiKey || process.env.MINIMAX_API_KEY;
+      const finalGroupId = groupId || process.env.MINIMAX_GROUP_ID;
+
+      if (!finalApiKey || !finalGroupId) {
+        return res.status(400).json({
+          error: "未配置 MiniMax API Key 或 Group ID。请在手机“设置” -> “MiniMax 语音”中进行配置，或由管理员配置后台环境变量。",
+        });
+      }
+
+      const url = `https://api.minimax.chat/v1/t2a_v2?GroupId=${finalGroupId}`;
+      const headers = {
+        "Authorization": `Bearer ${finalApiKey}`,
+        "Content-Type": "application/json",
+      };
+
+      const body = {
+        model: model || "speech-2.8-hd",
+        text,
+        stream: false,
+        voice_setting: {
+          voice_id: voiceId || "female-shaonv",
+          speed: speed !== undefined ? Number(speed) : 1.0,
+          vol: vol !== undefined ? Number(vol) : 1.0,
+          pitch: pitch !== undefined ? Number(pitch) : 0,
+        },
+        audio_setting: {
+          sample_rate: 32000,
+          bitrate: 128000,
+          format: "mp3",
+        },
+      };
+
+      const responseFetch = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      if (!responseFetch.ok) {
+        const errText = await responseFetch.text();
+        return res.status(responseFetch.status).json({
+          error: `MiniMax API 接口返回错误 (${responseFetch.status}): ${errText}`,
+        });
+      }
+
+      const data = await responseFetch.json();
+      if (!data || !data.data || !data.data.audio) {
+        const errMsg = data?.base_resp?.status_msg || "未收到有效的语音合成数据";
+        return res.status(400).json({
+          error: `MiniMax 合成失败: ${errMsg}`,
+          raw: data,
+        });
+      }
+
+      const audioHexOrBase64 = data.data.audio;
+      let audioBuffer: Buffer;
+      const isHex = /^[0-9a-fA-F]+$/.test(audioHexOrBase64);
+      if (isHex) {
+        audioBuffer = Buffer.from(audioHexOrBase64, "hex");
+      } else {
+        audioBuffer = Buffer.from(audioHexOrBase64, "base64");
+      }
+
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+      return res.send(audioBuffer);
+    } catch (error: any) {
+      console.error("MiniMax TTS Proxy Error:", error);
+      return res.status(500).json({ error: error.message || "MiniMax 语音代理服务异常" });
+    }
+  });
+
   // Vite dev or production static file serving
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -38,7 +38,14 @@ export default function StickerSettings({
   const [newGroupNameVal, setNewGroupNameVal] = useState<string>("");
   const [bulkUrls, setBulkUrls] = useState<string>("");
   const [isAiNamingActive, setIsAiNamingActive] = useState<boolean>(false);
-  const [aiNamingProgress, setAiNamingProgress] = useState<string>("");
+  const [aiNamingProgress, setAiNamingProgress] = useState<string>( "");
+  const [modalConfig, setModalConfig] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+    showCancel?: boolean;
+    confirmText?: string;
+  } | null>(null);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
@@ -72,25 +79,34 @@ export default function StickerSettings({
   // Delete current group
   const handleDeleteGroup = async (idx: number) => {
     if (stickerGroups.length <= 1) {
-      alert("必须保留至少一个表情包分组！");
+      setModalConfig({
+        title: "无法删除",
+        message: "必须保留至少一个表情包分组！🐾",
+        showCancel: false,
+        onConfirm: () => {}
+      });
       return;
     }
     const groupToDelete = stickerGroups[idx];
-    if (!confirm(`确定要删除分组《${groupToDelete.name}》及其所有表情吗？`)) {
-      return;
-    }
-    try {
-      // Delete images associated with this group
-      await Promise.all(
-        groupToDelete.stickers.map((s) => stickerDb.deleteStickerImage(s.id))
-      );
-      await stickerDb.deleteGroup(groupToDelete.id);
-      const updated = stickerGroups.filter((_, i) => i !== idx);
-      onUpdateStickerGroups(updated);
-      setActiveGroupIdx(Math.max(0, idx - 1));
-    } catch (err) {
-      console.error("Failed to delete group:", err);
-    }
+    setModalConfig({
+      title: "删除分组",
+      message: `确定要删除分组《${groupToDelete.name}》及其所有表情吗？该操作不可撤销！`,
+      showCancel: true,
+      onConfirm: async () => {
+        try {
+          // Delete images associated with this group
+          await Promise.all(
+            groupToDelete.stickers.map((s) => stickerDb.deleteStickerImage(s.id))
+          );
+          await stickerDb.deleteGroup(groupToDelete.id);
+          const updated = stickerGroups.filter((_, i) => i !== idx);
+          onUpdateStickerGroups(updated);
+          setActiveGroupIdx(Math.max(0, idx - 1));
+        } catch (err) {
+          console.error("Failed to delete group:", err);
+        }
+      }
+    });
   };
 
   // Start editing group name
@@ -171,7 +187,12 @@ export default function StickerSettings({
       .filter((url) => url.startsWith("http://") || url.startsWith("https://"));
 
     if (urls.length === 0) {
-      alert("请输入有效的 http 或 https 图片链接！");
+      setModalConfig({
+        title: "无效链接",
+        message: "请输入有效的 http 或 https 图片链接！",
+        showCancel: false,
+        onConfirm: () => {}
+      });
       return;
     }
 
@@ -234,22 +255,29 @@ export default function StickerSettings({
   };
 
   // Delete a sticker
-  const handleDeleteSticker = async (stickerId: string) => {
+  const handleDeleteSticker = (stickerId: string) => {
     if (!activeGroup) return;
-    if (!confirm("确认要删除这个表情吗？")) return;
-    try {
-      await stickerDb.deleteStickerImage(stickerId);
-      const updatedGroup = {
-        ...activeGroup,
-        stickers: activeGroup.stickers.filter((s) => s.id !== stickerId),
-      };
-      await stickerDb.saveGroup(updatedGroup);
-      const updated = [...stickerGroups];
-      updated[activeGroupIdx] = updatedGroup;
-      onUpdateStickerGroups(updated);
-    } catch (err) {
-      console.error("Failed to delete sticker:", err);
-    }
+    const sticker = activeGroup.stickers.find((s) => s.id === stickerId);
+    setModalConfig({
+      title: "删除表情",
+      message: `确认要删除表情“${sticker?.name || "当前表情"}”吗？`,
+      showCancel: true,
+      onConfirm: async () => {
+        try {
+          await stickerDb.deleteStickerImage(stickerId);
+          const updatedGroup = {
+            ...activeGroup,
+            stickers: activeGroup.stickers.filter((s) => s.id !== stickerId),
+          };
+          await stickerDb.saveGroup(updatedGroup);
+          const updated = [...stickerGroups];
+          updated[activeGroupIdx] = updatedGroup;
+          onUpdateStickerGroups(updated);
+        } catch (err) {
+          console.error("Failed to delete sticker:", err);
+        }
+      }
+    });
   };
 
   // Update sticker name manually
@@ -273,69 +301,82 @@ export default function StickerSettings({
   const handleAiAutoNaming = async () => {
     if (!activeGroup || activeGroup.stickers.length === 0) return;
     if (!settings.apiKey) {
-      alert("请先在系统设置中配置有效的 API Key 才能使用 AI 命名功能！");
+      setModalConfig({
+        title: "需要 API Key",
+        message: "请先在系统设置中配置有效的 API Key 才能使用 AI 命名功能！",
+        showCancel: false,
+        onConfirm: () => {}
+      });
       return;
     }
 
-    if (!confirm("AI 将智能分析当前分组内所有表情包图片，自动生成符合情绪和画面内容的中文名字。是否开始？")) {
-      return;
-    }
+    setModalConfig({
+      title: "AI 批量命名",
+      message: "AI 将智能分析当前分组内所有表情包图片，自动生成符合情绪和画面内容的中文名字。是否开始？",
+      showCancel: true,
+      onConfirm: async () => {
+        setIsAiNamingActive(true);
+        const updatedStickers = [...activeGroup.stickers];
 
-    setIsAiNamingActive(true);
-    const updatedStickers = [...activeGroup.stickers];
+        for (let i = 0; i < updatedStickers.length; i++) {
+          const sticker = updatedStickers[i];
+          setAiNamingProgress(`正在智能分析第 ${i + 1}/${updatedStickers.length} 张表情包: "${sticker.name}"...`);
 
-    for (let i = 0; i < updatedStickers.length; i++) {
-      const sticker = updatedStickers[i];
-      setAiNamingProgress(`正在智能分析第 ${i + 1}/${updatedStickers.length} 张表情包: "${sticker.name}"...`);
-
-      try {
-        let imageBlob: Blob | null = null;
-        // 1. Try to load from local IndexedDB first
-        imageBlob = await stickerDb.getStickerImage(sticker.id);
-
-        // 2. If it is a remote URL and not cached locally, try to fetch it
-        if (!imageBlob && sticker.url && !sticker.url.startsWith("blob:") && !sticker.url.startsWith("data:")) {
           try {
-            const res = await fetch(sticker.url);
-            if (res.ok) {
-              imageBlob = await res.blob();
+            let imageBlob: Blob | null = null;
+            // 1. Try to load from local IndexedDB first
+            imageBlob = await stickerDb.getStickerImage(sticker.id);
+
+            // 2. If it is a remote URL and not cached locally, try to fetch it
+            if (!imageBlob && sticker.url && !sticker.url.startsWith("blob:") && !sticker.url.startsWith("data:")) {
+              try {
+                const res = await fetch(sticker.url);
+                if (res.ok) {
+                  imageBlob = await res.blob();
+                }
+              } catch (e) {
+                console.warn("CORS/Fetch error loading remote image for AI naming:", e);
+              }
             }
-          } catch (e) {
-            console.warn("CORS/Fetch error loading remote image for AI naming:", e);
+
+            if (imageBlob) {
+              const aiName = await aiNameSticker(
+                imageBlob,
+                settings.apiKey,
+                settings.selectedModel,
+                settings.apiEndpoint
+              );
+              if (aiName && aiName.trim()) {
+                updatedStickers[i] = { ...sticker, name: aiName.trim() };
+              }
+            } else {
+              console.log(`Skipping AI naming for "${sticker.name}" - image data is inaccessible due to CORS constraints.`);
+            }
+          } catch (err) {
+            console.error("AI naming failed for sticker:", sticker.name, err);
           }
         }
 
-        if (imageBlob) {
-          const aiName = await aiNameSticker(
-            imageBlob,
-            settings.apiKey,
-            settings.selectedModel,
-            settings.apiEndpoint
-          );
-          if (aiName && aiName.trim()) {
-            updatedStickers[i] = { ...sticker, name: aiName.trim() };
-          }
-        } else {
-          console.log(`Skipping AI naming for "${sticker.name}" - image data is inaccessible due to CORS constraints.`);
+        const updatedGroup = { ...activeGroup, stickers: updatedStickers };
+        try {
+          await stickerDb.saveGroup(updatedGroup);
+          const updated = [...stickerGroups];
+          updated[activeGroupIdx] = updatedGroup;
+          onUpdateStickerGroups(updated);
+          setAiNamingProgress("");
+          setIsAiNamingActive(false);
+          setModalConfig({
+            title: "命名完成",
+            message: "AI 批量命名表情包完成！已根据画面内容更新名字。🎉",
+            showCancel: false,
+            onConfirm: () => {}
+          });
+        } catch (err) {
+          console.error("Failed to save AI naming results:", err);
+          setIsAiNamingActive(false);
         }
-      } catch (err) {
-        console.error("AI naming failed for sticker:", sticker.name, err);
       }
-    }
-
-    const updatedGroup = { ...activeGroup, stickers: updatedStickers };
-    try {
-      await stickerDb.saveGroup(updatedGroup);
-      const updated = [...stickerGroups];
-      updated[activeGroupIdx] = updatedGroup;
-      onUpdateStickerGroups(updated);
-      setAiNamingProgress("");
-      setIsAiNamingActive(false);
-      alert("AI 批量命名表情包完成！已根据画面内容更新名字。");
-    } catch (err) {
-      console.error("Failed to save AI naming results:", err);
-      setIsAiNamingActive(false);
-    }
+    });
   };
 
   const triggerLocalUploadForGroup = (idx: number) => {
@@ -537,15 +578,20 @@ export default function StickerSettings({
                                 className="w-full h-full object-contain hover:scale-105 transition-all"
                                 referrerPolicy="no-referrer"
                               />
-                              {/* Delete hovering icon button */}
-                              <button
-                                onClick={() => handleDeleteSticker(sticker.id)}
-                                className="absolute -top-1 -right-1 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-1 shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
-                                title="删除表情"
-                              >
-                                <X className="w-2.5 h-2.5" />
-                              </button>
                             </div>
+
+                            {/* Delete hovering icon button - placed on the relative parent card to avoid clipping and support mobile touch */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                handleDeleteSticker(sticker.id);
+                              }}
+                              className="absolute -top-1 -right-1 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white rounded-full w-5 h-5 shadow-md flex items-center justify-center transition-all z-20 md:opacity-0 md:group-hover:opacity-100 opacity-100 cursor-pointer"
+                              title="删除表情"
+                            >
+                              <X className="w-3 h-3 text-white" />
+                            </button>
 
                             {/* Direct name edit text field */}
                             <input
@@ -681,6 +727,46 @@ export default function StickerSettings({
                 className="px-4 py-1.5 text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl shadow-sm hover:shadow transition-all"
               >
                 创建
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reusable Iframe-Safe Custom Confirm & Alert Modal */}
+      {modalConfig && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-fade-in text-slate-800">
+          <div className="bg-white rounded-[24px] w-full max-w-xs overflow-hidden shadow-2xl border border-slate-100 animate-scale-up p-5 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 bg-amber-50 rounded-full flex items-center justify-center text-amber-500 shrink-0 mt-0.5">
+                <Smile className="w-5 h-5" />
+              </div>
+              <div className="text-left flex-1">
+                <h3 className="text-xs font-bold text-slate-800">{modalConfig.title}</h3>
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{modalConfig.message}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              {modalConfig.showCancel && (
+                <button
+                  type="button"
+                  onClick={() => setModalConfig(null)}
+                  className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
+                >
+                  取消
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  const cb = modalConfig.onConfirm;
+                  setModalConfig(null);
+                  await cb();
+                }}
+                className="px-4 py-1.5 text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl shadow-sm hover:shadow transition-all"
+              >
+                {modalConfig.confirmText || "确定"}
               </button>
             </div>
           </div>

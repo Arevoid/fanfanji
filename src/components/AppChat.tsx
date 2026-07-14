@@ -50,8 +50,13 @@ import {
   Wallet,
   ChevronRight,
   Sparkles,
-  CreditCard
+  CreditCard,
+  Play,
+  Pause,
+  Loader2
 } from "lucide-react";
+
+import { getSpeechForText, MINIMAX_DEFAULT_VOICES } from "../utils/minimaxTts";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -412,7 +417,7 @@ export default function AppChat({
   settings,
   messages,
   moments,
-  onSendMessage,
+  onSendMessage: onSendMessageRaw,
   onSaveCharacter,
   onAddMoment,
   onAddCommentToMoment,
@@ -436,6 +441,179 @@ export default function AppChat({
   onDeleteCharacter,
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
+
+  // MiniMax Real-time TTS Playback States
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [audioLoadingMessageId, setAudioLoadingMessageId] = useState<string | null>(null);
+  const [activeTtsAudio, setActiveTtsAudio] = useState<HTMLAudioElement | null>(null);
+
+  // Serial Playback Queue Manager
+  const playNextMessageInQueue = (currentId: string) => {
+    const activeChatMsgs = messages.filter(
+      (m) => m.characterId === activeChatCharId && !m.isOffline
+    );
+    const currentIndex = activeChatMsgs.findIndex(m => m.id === currentId);
+    if (currentIndex === -1 || currentIndex >= activeChatMsgs.length - 1) {
+      setPlayingMessageId(null);
+      setActiveTtsAudio(null);
+      return;
+    }
+
+    for (let i = currentIndex + 1; i < activeChatMsgs.length; i++) {
+      const nextMsg = activeChatMsgs[i];
+      if (nextMsg.content && !nextMsg.content.startsWith("[红包]") && !nextMsg.content.startsWith("[系统]")) {
+        triggerMessageSpeech(nextMsg);
+        return;
+      }
+    }
+
+    setPlayingMessageId(null);
+    setActiveTtsAudio(null);
+  };
+
+  // TTS Trigger Speech Function
+  const triggerMessageSpeech = async (msg: Message) => {
+    if (playingMessageId === msg.id) {
+      if (activeTtsAudio) {
+        try {
+          activeTtsAudio.pause();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      setPlayingMessageId(null);
+      return;
+    }
+
+    if (activeTtsAudio) {
+      try {
+        activeTtsAudio.pause();
+      } catch (e) {
+        console.error(e);
+      }
+      setActiveTtsAudio(null);
+    }
+
+    setPlayingMessageId(msg.id);
+    setAudioLoadingMessageId(msg.id);
+
+    try {
+      let userSettings: any = {};
+      try {
+        const saved = localStorage.getItem("phone_settings");
+        if (saved) userSettings = JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+
+      const msgChar = characters.find(c => c.id === msg.characterId || c.id === msg.senderId);
+      const voiceId = msgChar?.minimaxVoiceId || "female-shaonv";
+      const speed = msgChar?.minimaxSpeed !== undefined ? msgChar.minimaxSpeed : (userSettings.minimaxSpeed !== undefined ? userSettings.minimaxSpeed : 1.0);
+
+      const ttsOptions = {
+        apiKey: userSettings.minimaxApiKey || undefined,
+        groupId: userSettings.minimaxGroupId || undefined,
+        model: userSettings.minimaxModel || "speech-2.8-hd",
+        speed,
+        pitch: userSettings.minimaxPitch !== undefined ? userSettings.minimaxPitch : 0,
+        vol: userSettings.minimaxVol !== undefined ? userSettings.minimaxVol : 1.0,
+        voiceId,
+        proxyUrl: userSettings.minimaxProxyUrl || undefined,
+      };
+
+      let cleanText = msg.content;
+      if (cleanText.startsWith("[语音]|")) {
+        const parts = cleanText.split("|");
+        cleanText = parts.slice(2).join("|") || "";
+      }
+      cleanText = cleanText
+        .replace(/\([^\)]*\)/g, "")
+        .replace(/（[^）]*）/g, "")
+        .trim();
+
+      if (!cleanText) {
+        setPlayingMessageId(null);
+        setAudioLoadingMessageId(null);
+        playNextMessageInQueue(msg.id);
+        return;
+      }
+
+      const blob = await getSpeechForText(cleanText, ttsOptions);
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      
+      setActiveTtsAudio(audio);
+      setAudioLoadingMessageId(null);
+
+      audio.onended = () => {
+        playNextMessageInQueue(msg.id);
+      };
+
+      audio.onerror = (e) => {
+        console.warn("Audio playback error:", e);
+        setPlayingMessageId(null);
+        setAudioLoadingMessageId(null);
+      };
+
+      audio.play();
+    } catch (err: any) {
+      console.warn("TTS generation failed:", err);
+      setPlayingMessageId(null);
+      setAudioLoadingMessageId(null);
+      showToast("语音合成失败，请确认 MiniMax 设置正确！");
+    }
+  };
+
+  // Visibility and Cleanup Effects
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (activeTtsAudio) {
+          try {
+            activeTtsAudio.pause();
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (activeTtsAudio) {
+        try {
+          activeTtsAudio.pause();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+  }, [activeTtsAudio]);
+
+  // Intercepting Wrapper for onSendMessage
+  const onSendMessage = (msg: Message) => {
+    onSendMessageRaw(msg);
+    
+    let userSettings: any = {};
+    try {
+      const saved = localStorage.getItem("phone_settings");
+      if (saved) userSettings = JSON.parse(saved);
+    } catch (e) {}
+
+    if (
+      userSettings.enableMiniMaxTts &&
+      msg.sender === "character" &&
+      msg.content &&
+      !msg.content.startsWith("[红包]") &&
+      !msg.content.startsWith("[系统]")
+    ) {
+      // Trigger synthesis auto-play with small delay to allow message render
+      setTimeout(() => {
+        triggerMessageSpeech(msg);
+      }, 500);
+    }
+  };
 
   // Sticker groups state
   const [stickerGroups, setStickerGroups] = useState<StickerGroup[]>([]);
@@ -796,19 +974,102 @@ export default function AppChat({
   const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
   const [draftEnableTimeAwareness, setDraftEnableTimeAwareness] = useState(false);
   const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
+  const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
+  const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState<number>(1.0);
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
   const [activeAttachModal, setActiveAttachModal] = useState<"redpacket" | "music" | "location" | "file" | "calling" | "voice" | null>(null);
   const [callingType, setCallingType] = useState<"voice" | "video">("voice");
   const [voiceDuration, setVoiceDuration] = useState("5");
+  const [voiceText, setVoiceText] = useState("");
   const [callingStatus, setCallingStatus] = useState<"ringing" | "connected" | "ended">("ringing");
   const [callingDuration, setCallingDuration] = useState(0);
   const [redPacketAmount, setRedPacketAmount] = useState("8.88");
   const [redPacketGreeting, setRedPacketGreeting] = useState("恭喜发财，万事如意");
-  const [redPacketSender, setRedPacketSender] = useState<"user" | "character">("user");
   const [showRedPacketOpenModal, setShowRedPacketOpenModal] = useState<boolean>(false);
-  const [openRedPacketDetail, setOpenRedPacketDetail] = useState<{ amount: string; greeting: string } | null>(null);
+  const [openRedPacketDetail, setOpenRedPacketDetail] = useState<{
+    id: string;
+    amount: string;
+    greeting: string;
+    senderName: string;
+    senderAvatar: string;
+    sender: "user" | "character";
+    timestamp: number;
+  } | null>(null);
+  const [isOpeningRedPacket, setIsOpeningRedPacket] = useState<boolean>(false);
+  const [redPacketStatuses, setRedPacketStatuses] = useState<Record<string, "claimed" | "expired" | "refunded">>((() => {
+    try {
+      const stored = localStorage.getItem("wechat_redpacket_statuses");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  })());
+
+  const updateRedPacketStatus = (msgId: string, status: "claimed" | "expired" | "refunded") => {
+    setRedPacketStatuses(prev => {
+      const next = { ...prev, [msgId]: status };
+      localStorage.setItem("wechat_redpacket_statuses", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const getRedPacketActualStatus = (msgId: string, timestamp: number, sender: string) => {
+    const savedStatus = redPacketStatuses[msgId];
+    if (savedStatus === "claimed" || savedStatus === "refunded") {
+      return savedStatus;
+    }
+    // Check if 24 hours (86400000 ms) have passed since timestamp
+    const hours24 = 24 * 3600 * 1000;
+    if (Date.now() - timestamp > hours24) {
+      return "expired";
+    }
+    return savedStatus || "unclaimed";
+  };
+
+  // Dynamically auto-expire and refund user-sent red packets if they are expired and unclaimed
+  useEffect(() => {
+    let changed = false;
+    const updatedStatuses = { ...redPacketStatuses };
+    let refundAmountTotal = 0;
+
+    messages.forEach((msg) => {
+      if (msg.content.startsWith("[红包]")) {
+        const currentStatus = redPacketStatuses[msg.id] || "unclaimed";
+        const isExpired = Date.now() - msg.timestamp > 24 * 3600 * 1000;
+        
+        if (isExpired && currentStatus === "unclaimed") {
+          updatedStatuses[msg.id] = "expired";
+          changed = true;
+
+          // If the user sent it, refund the money to user's wallet
+          if (msg.sender === "user") {
+            const [_, amountStr] = msg.content.split("|");
+            const amt = parseFloat(amountStr || "0");
+            if (!isNaN(amt) && amt > 0) {
+              refundAmountTotal += amt;
+              updatedStatuses[msg.id] = "refunded";
+            }
+          }
+        }
+      }
+    });
+
+    if (changed) {
+      setRedPacketStatuses(updatedStatuses);
+      localStorage.setItem("wechat_redpacket_statuses", JSON.stringify(updatedStatuses));
+      if (refundAmountTotal > 0) {
+        setWalletBalance(prev => {
+          const next = prev + refundAmountTotal;
+          localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
+          return next;
+        });
+        showToast(`检测到有红包逾期未领，已自动退回 ¥${refundAmountTotal.toFixed(2)} 至您的零钱！🧧`);
+      }
+    }
+  }, [messages, redPacketStatuses]);
+
   const [openTransferDetail, setOpenTransferDetail] = useState<{ amount: string; memo: string; isConfirmed: boolean } | null>(null);
   const [showTransferDetailModal, setShowTransferDetailModal] = useState<boolean>(false);
   const [openVoiceId, setOpenVoiceId] = useState<string | null>(null);
@@ -1278,6 +1539,26 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
     setIsTyping(true);
 
+    const isRedPacket = userMsg && userMsg.content.startsWith("[红包]");
+    if (isRedPacket) {
+      const rpId = userMsg!.id;
+      // Simulate partner claiming after 3 seconds
+      setTimeout(() => {
+        updateRedPacketStatus(rpId, "claimed");
+        
+        const partnerName = activeCharacter.remark || activeCharacter.name;
+        const claimNotification: Message = {
+          id: `claim-notification-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          characterId: activeChatCharId,
+          sender: "character",
+          content: `${partnerName}已拆开并领受了你的红包`,
+          timestamp: Date.now(),
+          isNarration: true,
+        };
+        onSendMessage(claimNotification);
+      }, 3000);
+    }
+
     try {
       // Collect message history of this specific character to pass to backend
       const sourceMsgs = customHistoryOverride || (userMsg ? [...currentChatMessages, userMsg] : [...currentChatMessages]);
@@ -1297,9 +1578,16 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
       const slicedMsgs = msgsForHistory.slice(-limit);
 
       const history = slicedMsgs.map((m) => {
+        let contentText = m.content;
+        if (contentText.startsWith("[语音]|")) {
+          const parts = contentText.split("|");
+          const secs = parts[1] || "5";
+          const voiceText = parts.slice(2).join("|") || "";
+          contentText = voiceText ? `[语音: "${voiceText}" (${secs}秒)]` : `[语音: ${secs}秒]`;
+        }
         return {
           role: m.sender === "user" ? "user" : "model",
-          text: m.content,
+          text: contentText,
         };
       });
 
@@ -1389,6 +1677,22 @@ ${activeCharacter.disableBracketActions
 
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
+
+      // 1.2 Red Packet Reaction Prompt
+      if (isRedPacket && userMsg) {
+        const [_, amountStr, greetingStr] = userMsg.content.split("|");
+        const amount = amountStr || "8.88";
+        const greeting = greetingStr || "恭喜发财，万事如意";
+        assembledInstructions.push(`[🚨 特别行为指令：你刚刚收到了一个来自用户的微信红包！ 🚨]
+你作为扮演的角色，刚刚在微信里收到了用户给你发来的红包！
+- 红包金额：¥${amount}
+- 红包留言：“${greeting}”
+
+【行为及回复规则】：
+1. 你已经【拆开并领取】了这个红包。你感到开心、意外、被宠溺、受宠若惊、感激或者开玩笑，具体情绪取决于你的人设！
+2. 在你的本轮回复中，你必须【极其自然且生动地对此做出反应】（例如：开心地谢谢对方、调侃对方是大款、撒娇、承诺用这个钱去买你喜欢的东西、或者也想礼貌地找机会回礼等）。
+3. 请用你完全符合人设的角色口吻和微信聊天风格来回复。绝对不要说“系统”、“格式”或“指令”等AI字眼。`);
+      }
 
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
       if (activeCharacter.enableTimeAwareness !== false) {
@@ -1534,7 +1838,12 @@ ${stickerListStr}
       } else if (promptMessage.startsWith("[语音]|")) {
         const parts = promptMessage.split("|");
         const secs = parts[1] || "5";
-        promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒）。由于微信语音默认无法直接识别文字，请假设 you 听到了我用温暖/俏皮的声音发给你的语音（内容可以由你自行结合之前的话题进行脑补/想象，或者是日常可爱的闲聊）。请对此做出一个非常符合你人设、温暖、极其简短像真人在微信回语音或文字一样的回复。`;
+        const voiceText = parts.slice(2).join("|") || "";
+        if (voiceText) {
+          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒），语音对应的文字内容是：“${voiceText}”。请针对我语音里所说的话，做出非常符合你人设、极富情感、微信风格的简短且温暖的回复。`;
+        } else {
+          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒）。由于微信语音默认无法直接识别文字，请假设 you 听到了我用温暖/俏皮的声音发给你的语音（内容可以由你自行结合之前的话题进行脑补/想象，或者是日常可爱的闲聊）。请对此做出一个非常符合你人设、温暖、极其简短像真人在微信回语音或文字一样的回复。`;
+        }
       } else if (promptMessage.startsWith("[表情]|")) {
         const parts = promptMessage.split("|");
         const stickerName = parts[1] || "表情";
@@ -2404,6 +2713,8 @@ ${stickerListStr}
         historyMemoryLimit: draftHistoryMemoryLimit,
         enableTimeAwareness: draftEnableTimeAwareness,
         enableAutoTranslate: draftEnableAutoTranslate,
+        minimaxVoiceId: draftMinimaxVoiceId.trim() || undefined,
+        minimaxSpeed: draftMinimaxSpeed,
       });
 
       // Automatically translate existing non-Chinese messages in current chat
@@ -3689,6 +4000,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftHistoryMemoryLimit(activeCharacter.historyMemoryLimit || 150);
                   setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness || false);
                   setDraftEnableAutoTranslate(activeCharacter.enableAutoTranslate || false);
+                  setDraftMinimaxVoiceId(activeCharacter.minimaxVoiceId || "");
+                  setDraftMinimaxSpeed(activeCharacter.minimaxSpeed !== undefined ? activeCharacter.minimaxSpeed : 1.0);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
@@ -4012,6 +4325,50 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         <span>500条</span>
                         <span>750条</span>
                         <span>1000条</span>
+                      </div>
+                    </div>
+
+                    {/* MiniMax Character-specific Voice Settings */}
+                    <div className="py-3.5 space-y-3 border-t border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#52525b] font-bold text-xs">MiniMax 专属语音声线</span>
+                        <span className="text-[9px] text-indigo-600 font-medium bg-indigo-50 px-1.5 py-0.5 rounded-full">当前角色</span>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        {/* Manual Text Input */}
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-semibold mb-1">填入 VOICE ID</label>
+                          <input
+                            type="text"
+                            value={draftMinimaxVoiceId}
+                            onChange={(e) => setDraftMinimaxVoiceId(e.target.value)}
+                            placeholder="请输入 MiniMax Voice ID"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-semibold placeholder-slate-400 focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Speed Tuning Slider */}
+                        <div className="space-y-1.5 pt-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-slate-400 font-semibold">专属语速调节</span>
+                            <span className="text-xs font-bold text-indigo-600 font-mono">{draftMinimaxSpeed}x</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="2.0"
+                            step="0.1"
+                            value={draftMinimaxSpeed}
+                            onChange={(e) => setDraftMinimaxSpeed(Number(e.target.value))}
+                            className="w-full accent-indigo-600 h-1 bg-slate-100 rounded-[16px] appearance-none cursor-pointer"
+                          />
+                          <div className="flex justify-between text-[8px] text-slate-400 font-semibold">
+                            <span>极慢 (0.5)</span>
+                            <span>正常 (1.0)</span>
+                            <span>极快 (2.0)</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -4460,7 +4817,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   return (
                     <div 
                       key={msg.id}
-                      className="w-full text-left my-4 px-1 py-1 group relative select-text transition-all duration-200 hover:bg-slate-50/10 dark:hover:bg-stone-800/20 rounded-lg cursor-pointer"
+                      className="w-full text-left my-4 px-1 py-1 group/novel relative select-text transition-all duration-200 hover:bg-slate-50/10 dark:hover:bg-stone-800/20 rounded-lg cursor-pointer pr-10"
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setActiveMenuMsg(msg);
@@ -4470,6 +4827,30 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       <p className="text-[14px] leading-loose text-stone-800 dark:text-stone-200 font-sans tracking-wide text-justify whitespace-pre-wrap">
                         {msg.content}
                       </p>
+
+                      {/* MiniMax TTS play/pause/loading button for Offline Novel Layout */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          triggerMessageSpeech(msg);
+                        }}
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-slate-50 dark:bg-stone-850 border border-slate-200/60 hover:bg-white shadow-sm flex items-center justify-center transition-all ${
+                          playingMessageId === msg.id 
+                            ? "opacity-100 scale-105 ring-1 ring-indigo-400" 
+                            : "opacity-0 group-hover/novel:opacity-100 focus:opacity-100"
+                        }`}
+                        style={{ width: "24px", height: "24px" }}
+                        title="语音合成播放/暂停"
+                      >
+                        {audioLoadingMessageId === msg.id ? (
+                          <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin" />
+                        ) : playingMessageId === msg.id ? (
+                          <Pause className="w-3 h-3 text-indigo-500 fill-indigo-500" />
+                        ) : (
+                          <Volume2 className="w-3.5 h-3.5 text-indigo-500" />
+                        )}
+                      </button>
                     </div>
                   );
                 }
@@ -4572,10 +4953,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         />
                       ) : msg.content.startsWith("[表情]|") ? (() => {
                         const [_, stickerName, stickerUrl] = msg.content.split("|");
+                        // Resolve fresh hydrated URL from local sticker groups
+                        const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s => s.name === stickerName);
+                        const displayUrl = foundSticker ? foundSticker.url : stickerUrl;
                         return (
                           <div className="max-w-[130px] rounded-xl overflow-hidden relative select-none">
                             <img
-                              src={stickerUrl}
+                              src={displayUrl}
                               alt={stickerName}
                               className="w-full h-auto max-h-[130px] object-contain"
                               referrerPolicy="no-referrer"
@@ -4585,39 +4969,65 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         );
                       })() : msg.content.startsWith("[红包]") ? (() => {
                         const [_, amount, greeting] = msg.content.split("|");
+                        const status = getRedPacketActualStatus(msg.id, msg.timestamp, msg.sender);
+                        
+                        let cardBg = "bg-[#fa9d3b] hover:brightness-[1.03] text-white";
+                        let ribbonBg = "bg-[#f4932d] text-[#ffeada]/75 border-t border-[#fa9d3b]";
+                        let iconBg = "bg-[#f35543] text-yellow-300";
+                        let titleColor = "text-white font-bold";
+                        let actionText = "查看红包";
+                        let ribbonText = "微信红包";
+
+                        if (status === "claimed") {
+                          cardBg = "bg-[#fa9d3b]/55 text-white/70";
+                          ribbonBg = "bg-[#e18b2b]/40 text-[#ffeada]/50 border-t border-[#fa9d3b]/20";
+                          iconBg = "bg-[#f35543]/40 text-yellow-300/40";
+                          titleColor = "text-white/60 font-semibold";
+                          actionText = isSelf ? "红包已被领完" : "已领入零钱";
+                          ribbonText = "微信红包 · 已拆开";
+                        } else if (status === "expired" || status === "refunded") {
+                          cardBg = "bg-slate-200 text-slate-500 hover:bg-slate-200/90";
+                          ribbonBg = "bg-slate-300/60 text-slate-400 border-t border-slate-200";
+                          iconBg = "bg-slate-300 text-slate-400";
+                          titleColor = "text-slate-400 font-normal";
+                          actionText = "红包已过期";
+                          ribbonText = "微信红包 · 已失效";
+                        } else {
+                          actionText = isSelf ? "等待对方拆开" : "点击拆红包";
+                        }
+
                         return (
                           <div 
                             onClick={() => {
                               const packetAmount = amount || "8.88";
-                              setOpenRedPacketDetail({ amount: packetAmount, greeting: greeting || "恭喜发财" });
+                              const char = characters.find(c => c.id === msg.characterId);
+                              const senderName = char?.remark || char?.name || "未知好友";
+                              const senderAvatar = char?.avatar || "🧧";
+                              
+                              setOpenRedPacketDetail({
+                                id: msg.id,
+                                amount: packetAmount,
+                                greeting: greeting || "恭喜发财",
+                                senderName,
+                                senderAvatar,
+                                sender: msg.sender as "user" | "character",
+                                timestamp: msg.timestamp
+                              });
                               setShowRedPacketOpenModal(true);
-                              if (!isSelf) {
-                                const parsed = parseFloat(packetAmount);
-                                if (!isNaN(parsed)) {
-                                  setWalletBalance(prev => {
-                                    const next = prev + parsed;
-                                    localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
-                                    return next;
-                                  });
-                                }
-                              }
                             }}
-                            className={`bg-[#fff6f5] border border-[#fecdd3]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#fff0ef] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
-                              isSelf ? "transfer-card" : "received-transfer-card"
-                            }`}
+                            className={`${cardBg} rounded-2xl w-56 overflow-hidden cursor-pointer shadow-md transition-all flex flex-col active:scale-[0.99] select-none cv-transfer`}
                           >
-                            <div className="p-3.5 flex items-center gap-3 cv-transfer-body transfer-body">
-                              <div className="w-9 h-9 bg-[#e15241]/10 rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold text-[#e15241] shadow-inner cv-transfer-status transfer-icon confirm-icon">
+                            <div className="p-3.5 flex items-center gap-3">
+                              <div className={`w-9 h-9 ${iconBg} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner`}>
                                 🧧
                               </div>
                               <div className="flex-1 min-w-0 text-left">
-                                <p className="text-xs font-bold text-stone-800 truncate">{greeting || "恭喜发财，万事如意"}</p>
-                                <p className="text-[10px] text-[#e15241] font-bold mt-0.5 cv-transfer-amount transfer-amount">查看红包</p>
+                                <p className={`text-xs ${titleColor} truncate`}>{greeting || "恭喜发财，万事如意"}</p>
+                                <p className="text-[10px] mt-1 font-bold tracking-wide">{actionText}</p>
                               </div>
                             </div>
-                            <div className="px-3.5 py-2 bg-stone-50 text-stone-400 text-[9px] font-bold flex items-center justify-between border-t border-rose-100/50 cv-transfer-ribbon transfer-status select-none">
-                              <span className="font-semibold text-stone-400">微信红包</span>
-                              <span className="font-mono text-stone-400/80">金额 ¥{amount || "8.88"}</span>
+                            <div className={`px-3.5 py-1.5 ${ribbonBg} text-[9px] font-bold flex items-center justify-between select-none`}>
+                              <span>{ribbonText}</span>
                             </div>
                           </div>
                         );
@@ -4658,6 +5068,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         return (
                           <div 
                             onClick={() => {
+                              triggerMessageSpeech(msg);
                               if (isPlaying) {
                                 setOpenVoiceId(null);
                                 if (voiceTimer) clearInterval(voiceTimer);
@@ -4689,10 +5100,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         );
                       })() : (
                         <div
-                          className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble ${
+                          className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                             isSelf
-                              ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
-                              : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
+                              ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
+                              : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
                           }`}
                         >
                           <div className="text-left">{msg.content}</div>
@@ -4704,6 +5115,31 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               </div>
                             </>
                           )}
+
+                          {/* MiniMax TTS play/pause/loading button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              triggerMessageSpeech(msg);
+                            }}
+                            className={`absolute right-1 bottom-1 p-0.5 rounded-full bg-white/70 dark:bg-black/30 border border-slate-200/50 hover:bg-white shadow-sm flex items-center justify-center transition-all ${
+                              playingMessageId === msg.id 
+                                ? "opacity-100 scale-105 ring-1 ring-indigo-400" 
+                                : "opacity-0 group-hover/bubble:opacity-100 focus:opacity-100"
+                            }`}
+                            style={{ width: "16px", height: "16px" }}
+                            title="语音合成播放/暂停"
+                          >
+                            {audioLoadingMessageId === msg.id ? (
+                              <Loader2 className="w-2.5 h-2.5 text-indigo-500 animate-spin" />
+                            ) : playingMessageId === msg.id ? (
+                              <Pause className="w-2 h-2 text-indigo-500 fill-indigo-500" />
+                            ) : (
+                              <Volume2 className={`w-2.5 h-2.5 ${isSelf ? "text-slate-500" : "text-indigo-500"}`} />
+                            )}
+                          </button>
+
                           <div className="cv-bubble-tail hidden" />
                         </div>
                       )}
@@ -5020,19 +5456,20 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
                 </button>
 
-                {/* 3. 音乐 (Music) */}
+                {/* 3. 语音 (Voice) */}
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveAttachModal("music");
+                    setVoiceText("");
+                    setActiveAttachModal("voice");
                     setShowAttachPanel(false);
                   }}
                   className="flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <Music className="w-4 h-4 text-slate-700" />
+                    <Mic className="w-4 h-4 text-slate-700" />
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">音乐</span>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
                 </button>
 
                 {/* 5. 电话 (Phone) */}
@@ -5214,14 +5651,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             )}
           </div>
 
-          {/* Voice Duration Picker Modal Overlay */}
+          {/* Voice Text Input Modal Overlay */}
           {activeAttachModal === "voice" && (
             <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
               <div className="bg-white rounded-[32px] w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-slate-100 animate-scale-up text-stone-800">
                 <div className="px-5 py-4 bg-stone-50 border-b border-stone-100 flex items-center justify-between shrink-0">
                   <h3 className="text-xs font-bold text-stone-800">发送语音消息</h3>
                   <button 
-                    onClick={() => setActiveAttachModal(null)}
+                    onClick={() => {
+                      setVoiceText("");
+                      setActiveAttachModal(null);
+                    }}
                     className="p-1 hover:bg-stone-200/50 rounded-full transition-colors text-stone-500"
                   >
                     <X className="w-4 h-4" />
@@ -5230,35 +5670,50 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
                 <div className="p-5 space-y-4 flex-1">
                   <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-3 focus-within:ring-1 focus-within:ring-emerald-500/30 focus-within:border-emerald-500/50 transition-all">
-                    <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">语音时长 (秒)</label>
-                    <div className="flex items-center">
-                      <span className="text-lg font-bold text-emerald-500 mr-1.5 font-mono">⏱</span>
-                      <input 
-                        type="number"
-                        min="1"
-                        max="60"
-                        value={voiceDuration}
-                        onChange={(e) => setVoiceDuration(e.target.value)}
-                        className="bg-transparent text-stone-800 font-bold text-base focus:outline-none flex-1 w-full font-mono placeholder-stone-300"
-                      />
+                    <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">输入语音对应的文字内容</label>
+                    <textarea
+                      rows={3}
+                      value={voiceText}
+                      onChange={(e) => setVoiceText(e.target.value)}
+                      placeholder="请输入文字内容..."
+                      className="bg-transparent text-stone-800 font-semibold text-xs focus:outline-none w-full placeholder-stone-300 resize-none"
+                    />
+                    <div className="mt-2 text-[10px] text-slate-400 font-medium text-right">
+                      {voiceText.trim() ? (
+                        <span>
+                          预计语音时长:{" "}
+                          <strong className="text-emerald-500 font-mono">
+                            {Math.max(1, Math.min(60, Math.ceil(voiceText.trim().length * 0.35 + 1.2)))}
+                          </strong>{" "}
+                          秒
+                        </span>
+                      ) : (
+                        <span>请输入文字内容</span>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="p-4 bg-stone-50 border-t border-stone-100 flex gap-2 shrink-0">
                   <button 
-                    onClick={() => setActiveAttachModal(null)}
+                    onClick={() => {
+                      setVoiceText("");
+                      setActiveAttachModal(null);
+                    }}
                     className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs transition-colors"
                   >
                     取消
                   </button>
                   <button 
+                    disabled={!voiceText.trim()}
                     onClick={() => {
-                      const secs = parseInt(voiceDuration) || 5;
-                      sendCustomMessage(`[语音]|${secs}`);
+                      if (!voiceText.trim()) return;
+                      const secs = Math.max(1, Math.min(60, Math.ceil(voiceText.trim().length * 0.35 + 1.2)));
+                      sendCustomMessage(`[语音]|${secs}|${voiceText.trim()}`);
+                      setVoiceText("");
                       setActiveAttachModal(null);
                     }}
-                    className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-650 text-white font-bold rounded-xl text-xs transition-all shadow-sm"
+                    className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-650 disabled:opacity-50 disabled:pointer-events-none text-white font-bold rounded-xl text-xs transition-all shadow-sm"
                   >
                     发送
                   </button>
@@ -5282,32 +5737,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 </div>
 
                 <div className="p-5 space-y-4 flex-1">
-                  {/* Sender Selection */}
-                  <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setRedPacketSender("user")}
-                      className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
-                        redPacketSender === "user" 
-                          ? "bg-white text-stone-900 shadow-sm" 
-                          : "text-stone-500 hover:text-stone-800"
-                      }`}
-                    >
-                      我发送给Ta
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRedPacketSender("character")}
-                      className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
-                        redPacketSender === "character" 
-                          ? "bg-white text-stone-900 shadow-sm" 
-                          : "text-stone-500 hover:text-stone-800"
-                      }`}
-                    >
-                      让Ta发给我
-                    </button>
-                  </div>
-
                   {/* Amount Field */}
                   <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-3 focus-within:ring-1 focus-within:ring-[#e15241]/30 focus-within:border-[#e15241]/50 transition-all">
                     <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">红包金额 (元)</label>
@@ -5349,61 +5778,171 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     ))}
                   </div>
 
-                  <button 
+                   <button 
                     onClick={() => {
                       const finalAmount = parseFloat(redPacketAmount) > 0 ? redPacketAmount : "8.88";
                       const finalGreeting = redPacketGreeting.trim() || "恭喜发财，万事如意";
-                      if (redPacketSender === "character") {
-                        sendPartnerRedPacket(finalAmount, finalGreeting);
-                      } else {
-                        sendCustomMessage(`[红包]|${finalAmount}|${finalGreeting}`);
+                      const amt = parseFloat(finalAmount);
+                      if (walletBalance < amt) {
+                        showToast("❌ 零钱余额不足，请在“我” -> “钱包”中充值后再发送红包！");
+                        return;
                       }
+                      // Deduct wallet balance
+                      setWalletBalance(prev => {
+                        const next = prev - amt;
+                        localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
+                        return next;
+                      });
+                      sendCustomMessage(`[红包]|${finalAmount}|${finalGreeting}`);
+                      showToast(`已成功塞钱进红包并发送 ¥${amt.toFixed(2)}！🧧`);
                       setActiveAttachModal(null);
                     }}
                     className="w-full py-2.5 bg-[#e15241] hover:bg-[#c94334] text-white font-extrabold text-xs rounded-xl shadow-sm transition-all active:scale-[0.98]"
                   >
-                    {redPacketSender === "character" ? "让对方发送红包" : "塞钱进红包"}
+                    塞钱进红包
                   </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Red Envelope Opened Modal Overlay */}
-          {showRedPacketOpenModal && openRedPacketDetail && (
-            <div className="absolute inset-0 bg-black/75 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
-              <div className="bg-white text-stone-800 rounded-[32px] w-full max-w-xs overflow-hidden shadow-2xl relative flex flex-col border border-stone-100 animate-scale-up text-center p-6 space-y-5">
-                <button 
-                  onClick={() => setShowRedPacketOpenModal(false)}
-                  className="absolute top-4 right-4 text-stone-400 hover:text-stone-600 p-1 hover:bg-stone-100 rounded-full transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-                <div className="flex flex-col items-center mt-2">
-                  <div className="w-14 h-14 bg-[#e15241]/10 text-[#e15241] rounded-full flex items-center justify-center text-2xl font-bold shadow-sm border border-[#e15241]/20">
-                    🧧
-                  </div>
-                  <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mt-3.5">已成功开启红包！</h3>
-                  <p className="text-sm font-bold text-stone-800 mt-1 leading-relaxed">"{openRedPacketDetail.greeting}"</p>
-                </div>
+           {/* Red Envelope Opened Modal Overlay */}
+          {showRedPacketOpenModal && openRedPacketDetail && (() => {
+            const status = getRedPacketActualStatus(openRedPacketDetail.id, openRedPacketDetail.timestamp, openRedPacketDetail.sender);
+            const isSelf = openRedPacketDetail.sender === "user";
 
-                <div className="bg-[#fff8f8] rounded-2xl p-4 border border-[#fee2e0] text-center">
-                  <span className="text-[10px] text-stone-400 font-bold tracking-wide uppercase">获得金额</span>
-                  <div className="text-2xl font-black text-[#e15241] mt-1.5 font-mono">
-                    ¥{openRedPacketDetail.amount}
+            return (
+              <div className="absolute inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 animate-fade-in text-slate-800 select-none">
+                {/* WeChat Red Packet Envelope Container */}
+                <div className="relative w-full max-w-xs bg-[#cf4838] text-white rounded-[24px] overflow-hidden shadow-2xl flex flex-col border border-red-500/20 animate-scale-up min-h-[420px] justify-between">
+                  
+                  {/* Top arc & Close button */}
+                  <div className="relative p-6 pb-2 shrink-0">
+                    <button 
+                      onClick={() => {
+                        if (!isOpeningRedPacket) {
+                          setShowRedPacketOpenModal(false);
+                        }
+                      }}
+                      className="absolute top-4 left-4 text-white/50 hover:text-white p-1 hover:bg-white/10 rounded-full transition-colors z-20"
+                      disabled={isOpeningRedPacket}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
-                  <span className="text-[9px] text-stone-400 block mt-1">已自动存入钱包零钱</span>
-                </div>
 
-                <button 
-                  onClick={() => setShowRedPacketOpenModal(false)}
-                  className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all active:scale-95"
-                >
-                  好的，谢谢
-                </button>
+                  {/* Envelope Body Content */}
+                  <div className="flex-1 flex flex-col justify-between p-6 pt-2">
+                    
+                    {/* Header info */}
+                    <div className="flex flex-col items-center text-center space-y-3 mt-4">
+                      <div className="relative">
+                        <img 
+                          src={openRedPacketDetail.senderAvatar} 
+                          alt="" 
+                          className="w-12 h-12 rounded-full object-cover border-2 border-yellow-400/50 shadow-md"
+                          onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                        />
+                        <span className="absolute -bottom-1.5 -right-1.5 bg-[#fa9d3b] text-white rounded-full p-0.5 text-[10px] leading-none border border-red-500">🧧</span>
+                      </div>
+                      
+                      <div>
+                        <h4 className="text-sm font-bold text-yellow-100 tracking-wide">
+                          {isSelf ? "我发送的红包" : openRedPacketDetail.senderName}
+                        </h4>
+                        <p className="text-[11px] text-white/70 mt-0.5">
+                          {isSelf 
+                            ? (status === "claimed" ? "对方已领收红包" : "等待对方拆开中") 
+                            : (status === "claimed" ? "给您发了一个红包" : "给你塞钱进红包啦")}
+                        </p>
+                      </div>
+
+                      {/* Displaying state-specific header message */}
+                      {status === "claimed" ? (
+                        <div className="pt-2 animate-fade-in">
+                          <p className="text-[11px] text-yellow-100/80 italic font-mono">“{openRedPacketDetail.greeting}”</p>
+                          <div className="mt-4 bg-white/10 border border-white/5 rounded-2xl py-4 px-6 text-center shadow-inner min-w-[200px]">
+                            <span className="text-[10px] text-yellow-200/90 font-bold uppercase tracking-wider block">
+                              {isSelf ? "已被对方领取金额" : "已领到零钱金额"}
+                            </span>
+                            <div className="text-3xl font-black text-yellow-300 mt-1.5 font-mono drop-shadow">
+                              ¥ {openRedPacketDetail.amount}
+                            </div>
+                            <span className="text-[9px] text-white/60 block mt-1">
+                              {isSelf ? "红包金额已成功存入对方的钱包零钱" : "已自动存入钱包余额，可直接使用"}
+                            </span>
+                          </div>
+                        </div>
+                      ) : status === "expired" || status === "refunded" ? (
+                        <div className="pt-4 space-y-2 animate-fade-in">
+                          <p className="text-xs text-white/50 italic line-through">“{openRedPacketDetail.greeting}”</p>
+                          <div className="bg-black/10 border border-white/5 rounded-2xl p-4 text-center">
+                            <p className="text-xs font-bold text-red-200">该红包已过期超过 24 小时</p>
+                            <p className="text-[10px] text-white/60 mt-1">
+                              {isSelf ? "未领取的资金已退回至您的钱包零钱。" : "未被领取，无法继续拆开。"}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        // UNCLAIMED UI (Large Text Greeting)
+                        <div className="pt-4 space-y-1 animate-fade-in">
+                          <p className="text-base font-extrabold text-yellow-200 leading-snug drop-shadow-sm px-2">
+                            “{openRedPacketDetail.greeting}”
+                          </p>
+                          {isSelf && (
+                            <p className="text-[10px] text-white/60 mt-2 font-semibold">红包金额 ¥{openRedPacketDetail.amount}，等待对方拆开中...</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Footer / Golden Open Button block */}
+                    <div className="flex flex-col items-center justify-center shrink-0 mt-6 relative h-28">
+                      {status === "unclaimed" && !isSelf ? (
+                        // THE LEGENDARY CHINESE "KAI" (OPEN) SPINNING BUTTON WITH BOUNCE SHADOW
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isOpeningRedPacket) return;
+                            setIsOpeningRedPacket(true);
+                            setTimeout(() => {
+                              setIsOpeningRedPacket(false);
+                              // Mark as claimed
+                              updateRedPacketStatus(openRedPacketDetail.id, "claimed");
+                              // Deposit money
+                              const parsed = parseFloat(openRedPacketDetail.amount);
+                              if (!isNaN(parsed)) {
+                                setWalletBalance(prev => {
+                                  const next = prev + parsed;
+                                  localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
+                                  return next;
+                                });
+                              }
+                              showToast(`成功拆开红包，获得 ¥${parsed.toFixed(2)}！🎉`);
+                            }, 1200);
+                          }}
+                          className={`w-20 h-20 bg-gradient-to-b from-[#fcd34d] to-[#f59e0b] hover:from-[#fef08a] hover:to-[#fbbf24] text-[#cf4838] rounded-full flex items-center justify-center text-3xl font-black shadow-xl border-4 border-[#e18b2b] transition-all hover:scale-105 active:scale-95 cursor-pointer select-none ${
+                            isOpeningRedPacket ? "animate-spin" : "animate-bounce"
+                          }`}
+                          style={{ animationDuration: isOpeningRedPacket ? "0.4s" : "2s" }}
+                        >
+                          開
+                        </button>
+                      ) : (
+                        // Standard Close action for already-opened / expired cases
+                        <button 
+                          onClick={() => setShowRedPacketOpenModal(false)}
+                          className="w-full max-w-[180px] py-2 bg-yellow-400 hover:bg-yellow-500 text-stone-900 text-xs font-bold rounded-full shadow-md transition-all active:scale-95 uppercase tracking-wider"
+                        >
+                          返回聊天
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Music Selector Modal Overlay */}
           {activeAttachModal === "music" && (
@@ -6427,42 +6966,100 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </button>
                   </div>
 
-                  {/* Transaction History (收支明细) - pulling dynamically from database history! */}
+                   {/* Transaction History (收支明细) - pulling dynamically from database history! */}
                   <div className="m-4">
                     <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">收支账单明细 (实时同步)</h4>
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden divide-y divide-slate-100">
                       
                       {/* Filter real messages for red envelope transactions! */}
                       {(() => {
-                        // Gather received red envelopes that user didn't send
-                        const receivedRedPackets = messages.filter(m => m.content.startsWith("[红包]") && m.sender !== "user");
-                        
-                        if (receivedRedPackets.length === 0) {
+                        const transactions = messages.flatMap((m) => {
+                          if (m.content.startsWith("[红包]")) {
+                            const [_, amountStr, greetingStr] = m.content.split("|");
+                            const amount = parseFloat(amountStr || "8.88");
+                            const status = getRedPacketActualStatus(m.id, m.timestamp, m.sender);
+                            const char = characters.find(c => c.id === m.characterId);
+                            const friendName = char?.remark || char?.name || "未知好友";
+                            const avatarUrl = char?.avatar || "🧧";
+                            const formattedTime = new Date(m.timestamp).toLocaleDateString() + " " + new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+                            const items = [];
+
+                            if (m.sender !== "user") {
+                              // Received red packet - show only if claimed
+                              if (status === "claimed") {
+                                items.push({
+                                  id: `${m.id}-received`,
+                                  type: "received",
+                                  title: `收到 [${friendName}] 的红包`,
+                                  subtitle: `“${greetingStr || "恭喜发财"}” · ${formattedTime}`,
+                                  amount: `+ ¥${amount.toFixed(2)}`,
+                                  isPositive: true,
+                                  avatar: avatarUrl,
+                                  timestamp: m.timestamp
+                                });
+                              }
+                            } else {
+                              // Sent red packet - always show as deduction
+                              items.push({
+                                  id: `${m.id}-sent`,
+                                  type: "sent",
+                                  title: `发送给 [${friendName}] 的红包`,
+                                  subtitle: `“${greetingStr || "恭喜发财"}” · ${formattedTime}`,
+                                  amount: `- ¥${amount.toFixed(2)}`,
+                                  isPositive: false,
+                                  avatar: avatarUrl,
+                                  timestamp: m.timestamp
+                              });
+
+                              // If also refunded, show the refund item
+                              if (status === "refunded") {
+                                items.push({
+                                  id: `${m.id}-refund`,
+                                  type: "refund",
+                                  title: `红包过期退回`,
+                                  subtitle: `发给 [${friendName}] 的红包逾期未领退回 · ${formattedTime}`,
+                                  amount: `+ ¥${amount.toFixed(2)}`,
+                                  isPositive: true,
+                                  avatar: "🧧",
+                                  timestamp: m.timestamp + 24 * 3600 * 1000 // estimate 24h refund time
+                                });
+                              }
+                            }
+
+                            return items;
+                          }
+                          return [];
+                        });
+
+                        // Sort transactions by timestamp descending
+                        transactions.sort((a, b) => b.timestamp - a.timestamp);
+
+                        if (transactions.length === 0) {
                           return (
                             <div className="p-5 text-center text-[10px] text-slate-400 bg-slate-50/50">
-                              暂无收到其他红包记录。聊天中让对方给你发红包，点击拆开后会自动结算到这里！
+                              暂无任何消费、收支记录。发红包、收红包等动作会自动结算到这里！
                             </div>
                           );
                         }
 
-                        return receivedRedPackets.map((m) => {
-                          const [_, amountStr, greetingStr] = m.content.split("|");
-                          const amount = parseFloat(amountStr || "8.88");
-                          const char = characters.find(c => c.id === m.characterId);
-                          const senderName = char?.remark || char?.name || "未知好友";
-                          const senderAvatar = char?.avatar || "🧧";
-                          const formattedTime = new Date(m.timestamp).toLocaleDateString() + " " + new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-
+                        return transactions.map((t) => {
                           return (
-                            <div key={m.id} className="p-3.5 flex items-center justify-between text-xs">
+                            <div key={t.id} className="p-3.5 flex items-center justify-between text-xs">
                               <div className="flex items-center gap-3">
-                                <img src={senderAvatar} alt="" className="w-8 h-8 rounded-full object-cover border" onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
-                                <div>
-                                  <p className="font-bold text-slate-800">收到 [{senderName}] 的红包</p>
-                                  <p className="text-[9px] text-stone-400 mt-0.5">“{greetingStr || "恭喜发财"}” · {formattedTime}</p>
+                                {t.avatar.startsWith("http") || t.avatar.startsWith("data") || t.avatar.startsWith("blob") ? (
+                                  <img src={t.avatar} alt="" className="w-8 h-8 rounded-full object-cover border" onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center text-sm">{t.avatar}</div>
+                                )}
+                                <div className="text-left">
+                                  <p className="font-bold text-slate-800">{t.title}</p>
+                                  <p className="text-[9px] text-stone-400 mt-0.5">{t.subtitle}</p>
                                 </div>
                               </div>
-                              <span className="font-extrabold text-emerald-600">+ ¥{amount.toFixed(2)}</span>
+                              <span className={`font-extrabold ${t.isPositive ? "text-emerald-600" : "text-rose-500"}`}>
+                                {t.amount}
+                              </span>
                             </div>
                           );
                         });

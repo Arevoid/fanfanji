@@ -19,10 +19,13 @@ import {
   Eye,
   EyeOff,
   Download,
-  Upload
+  Upload,
+  Volume2,
+  VolumeX
 } from "lucide-react";
 
 import { compressImage } from "../utils/pngParser";
+import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -84,7 +87,7 @@ export default function AppSettings({
   onDeletePreset,
   onClose,
 }: AppSettingsProps) {
-  const [activeTab, setActiveTab] = useState<"profile" | "api" | "beauty" | "system_config" | "system" | null>(null);
+  const [activeTab, setActiveTab] = useState<"profile" | "api" | "beauty" | "system_config" | "system" | "minimax" | null>(null);
 
   // PWA states
   const [isPwaInstallable, setIsPwaInstallable] = useState(false);
@@ -229,6 +232,94 @@ export default function AppSettings({
   const [showPassword, setShowPassword] = useState(false);
   const [modelSuggestions, setModelSuggestions] = useState<string[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+
+  // MiniMax TTS configurations states
+  const [enableMiniMaxTts, setEnableMiniMaxTts] = useState(!!settings.enableMiniMaxTts);
+  const [minimaxApiKey, setMinimaxApiKey] = useState(settings.minimaxApiKey || "");
+  const [minimaxGroupId, setMinimaxGroupId] = useState(settings.minimaxGroupId || "");
+  const [minimaxModel, setMinimaxModel] = useState(settings.minimaxModel || "speech-2.8-hd");
+  const [minimaxSpeed, setMinimaxSpeed] = useState(settings.minimaxSpeed !== undefined ? settings.minimaxSpeed : 1.0);
+  const [minimaxPitch, setMinimaxPitch] = useState(settings.minimaxPitch !== undefined ? settings.minimaxPitch : 0);
+  const [minimaxVol, setMinimaxVol] = useState(settings.minimaxVol !== undefined ? settings.minimaxVol : 1.0);
+  const [minimaxProxyUrl, setMinimaxProxyUrl] = useState(settings.minimaxProxyUrl || "");
+
+  // MiniMax Audition Trial States
+  const [previewVoiceId, setPreviewVoiceId] = useState("female-shaonv");
+  const [isAuditioning, setIsAuditioning] = useState(false);
+  const [auditionAudio, setAuditionAudio] = useState<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (auditionAudio) {
+        try {
+          auditionAudio.pause();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+  }, [activeTab, auditionAudio]);
+
+  const handleAuditionTrial = async () => {
+    if (isAuditioning) {
+      if (auditionAudio) {
+        auditionAudio.pause();
+        setAuditionAudio(null);
+      }
+      setIsAuditioning(false);
+      return;
+    }
+
+    try {
+      setIsAuditioning(true);
+      const ttsOptions = {
+        apiKey: minimaxApiKey.trim() || undefined,
+        groupId: minimaxGroupId.trim() || undefined,
+        model: minimaxModel.trim(),
+        speed: Number(minimaxSpeed),
+        pitch: Number(minimaxPitch),
+        vol: Number(minimaxVol),
+        voiceId: previewVoiceId,
+        proxyUrl: minimaxProxyUrl.trim() || undefined,
+      };
+
+      const trialText = "你好！我是您的 MiniMax 语音伴侣。今天天气真好，我们一起去散步吧！";
+      const blob = await getSpeechForText(trialText, ttsOptions);
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      setAuditionAudio(audio);
+      audio.onended = () => {
+        setIsAuditioning(false);
+        setAuditionAudio(null);
+      };
+      audio.onerror = (e) => {
+        console.error("Trial playback failed:", e);
+        alert("试听播放失败，请检查您的 API Key、Group ID 或网络是否正常。");
+        setIsAuditioning(false);
+        setAuditionAudio(null);
+      };
+      audio.play();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "试听生成失败，请确认 Key、Group ID、或反向代理是否填写正确。");
+      setIsAuditioning(false);
+    }
+  };
+
+  const handleSaveMiniMaxSettings = () => {
+    onSaveSettings({
+      ...settings,
+      enableMiniMaxTts,
+      minimaxApiKey: minimaxApiKey.trim(),
+      minimaxGroupId: minimaxGroupId.trim(),
+      minimaxModel: minimaxModel.trim(),
+      minimaxSpeed: Number(minimaxSpeed),
+      minimaxPitch: Number(minimaxPitch),
+      minimaxVol: Number(minimaxVol),
+      minimaxProxyUrl: minimaxProxyUrl.trim(),
+    });
+    alert("MiniMax 语音设置保存成功！");
+  };
 
   const handleSelectPreset = (presetId: string, currentPresets: ApiPreset[] = apiPresets) => {
     const preset = currentPresets.find(p => p.id === presetId);
@@ -499,6 +590,8 @@ export default function AppSettings({
         return "系统设置";
       case "system":
         return "系统备份";
+      case "minimax":
+        return "MiniMax 语音设置";
       default:
         return "设置";
     }
@@ -633,6 +726,23 @@ export default function AppSettings({
                   <div>
                     <span className="text-sm font-bold text-slate-800">系统设置</span>
                     <p className="text-[10px] text-slate-400 mt-0.5">控制一键回到桌面悬浮按钮的开启状态</p>
+                  </div>
+                </div>
+                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
+              </button>
+
+              {/* MiniMax Settings */}
+              <button
+                onClick={() => setActiveTab("minimax")}
+                className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
+                    <Volume2 className="w-5 h-5 text-indigo-500" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-slate-800">MiniMax 语音设置</span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">配置 MiniMax TTS API、语音开关及试听音色</p>
                   </div>
                 </div>
                 <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
@@ -2352,7 +2462,7 @@ export default function AppSettings({
                   onClick={() => {
                     if (confirm("⚠️ 确定要清除所有缓存并恢复为默认设置吗？这会清空全部对话和角色数据且无法恢复！")) {
                       localStorage.clear();
-                      alert("所有数据和缓存已成功清除，应用将刷新重置为出厂状态。");
+                      alert("所有数据 and 缓存已成功清除，应用将刷新重置为出厂状态。");
                       window.location.reload();
                     }
                   }}
@@ -2362,6 +2472,168 @@ export default function AppSettings({
                   <span>清除缓存并恢复为默认</span>
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* MINIMAX TTS SETTINGS TAB */}
+          {activeTab === "minimax" && (
+            <div className="space-y-4 text-left pb-20 overflow-y-auto h-full pr-1 w-full max-w-md mx-auto">
+              {/* General Toggle Switch */}
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-bold text-slate-800 block">语音合成总开关</span>
+                  <span className="text-[10px] text-slate-400">开启后，角色发言会根据人设和音色自动合成语音</span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableMiniMaxTts}
+                    onChange={(e) => setEnableMiniMaxTts(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+              </div>
+
+              {/* API Credentials */}
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">MiniMax 开发者密钥</h3>
+                
+                <div className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">
+                      API KEY
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        value={minimaxApiKey}
+                        onChange={(e) => setMinimaxApiKey(e.target.value)}
+                        placeholder="请输入 MiniMax API Key"
+                        className="w-full pl-3 pr-10 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-semibold"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">
+                      Group ID (企业或个人 ID)
+                    </label>
+                    <input
+                      type="text"
+                      value={minimaxGroupId}
+                      onChange={(e) => setMinimaxGroupId(e.target.value)}
+                      placeholder="请输入 MiniMax Group ID"
+                      className="w-full px-3 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-semibold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">
+                      合成模型 (TTS Model)
+                    </label>
+                    <select
+                      value={minimaxModel}
+                      onChange={(e) => setMinimaxModel(e.target.value)}
+                      className="w-full px-3 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-bold"
+                    >
+                      <option value="speech-2.8-hd">speech-2.8-hd (超高解析度精品推荐)</option>
+                      <option value="speech-2">speech-2 (高性价比第二代)</option>
+                      <option value="speech-01-24h">speech-01-24h (24小时稳定流式)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* TTS Tuning Sliders */}
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">声线与朗读微调</h3>
+                
+                <div className="space-y-4">
+                  {/* Speed */}
+                  <div>
+                    <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1">
+                      <span>语速 (Speed)</span>
+                      <span className="text-indigo-600 font-bold">{minimaxSpeed}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="2.0"
+                      step="0.1"
+                      value={minimaxSpeed}
+                      onChange={(e) => setMinimaxSpeed(Number(e.target.value))}
+                      className="w-full accent-indigo-600 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-400">
+                      <span>极慢 (0.5)</span>
+                      <span>正常 (1.0)</span>
+                      <span>极快 (2.0)</span>
+                    </div>
+                  </div>
+
+                  {/* Pitch */}
+                  <div>
+                    <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1">
+                      <span>音调 (Pitch)</span>
+                      <span className="text-indigo-600 font-bold">{minimaxPitch > 0 ? `+${minimaxPitch}` : minimaxPitch}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-12"
+                      max="12"
+                      step="1"
+                      value={minimaxPitch}
+                      onChange={(e) => setMinimaxPitch(Number(e.target.value))}
+                      className="w-full accent-indigo-600 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-400">
+                      <span>浑厚低沉 (-12)</span>
+                      <span>正常 (0)</span>
+                      <span>高亢清脆 (12)</span>
+                    </div>
+                  </div>
+
+                  {/* Volume */}
+                  <div>
+                    <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1">
+                      <span>音量 (Volume)</span>
+                      <span className="text-indigo-600 font-bold">{minimaxVol}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="2.0"
+                      step="0.1"
+                      value={minimaxVol}
+                      onChange={(e) => setMinimaxVol(Number(e.target.value))}
+                      className="w-full accent-indigo-600 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-400">
+                      <span>极轻 (0.1)</span>
+                      <span>正常 (1.0)</span>
+                      <span>极响 (2.0)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Save Button */}
+              <button
+                type="button"
+                onClick={handleSaveMiniMaxSettings}
+                className="w-full py-3.5 bg-neutral-950 hover:bg-neutral-900 text-white rounded-[16px] font-bold text-sm transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
+              >
+                <Save className="w-4 h-4 text-indigo-400" />
+                <span>保存 MiniMax 语音设置</span>
+              </button>
             </div>
           )}
         </div>
