@@ -716,6 +716,13 @@ export default function AppChat({
     }
 
     onSendMessageRaw(msg);
+
+    // Auto-play the synthetic voice for incoming character voice messages if general switch is enabled
+    if (msg.sender === "character" && msg.content && msg.content.startsWith("[语音") && settings.enableMiniMaxTts) {
+      setTimeout(() => {
+        triggerMessageSpeech(msg);
+      }, 500);
+    }
   };
 
   // Sticker groups state
@@ -1079,6 +1086,7 @@ export default function AppChat({
   const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
   const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
   const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState<number>(1.0);
+  const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("medium");
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
@@ -1329,6 +1337,45 @@ export default function AppChat({
     }
   }, [activeChatCharId, activeCharacter, messages, onSendMessage, sentGreetings]);
 
+  // Proactive contact catch-up on load (supports background clear / offline delivery)
+  useEffect(() => {
+    if (friends.length === 0) return;
+
+    friends.forEach((friend) => {
+      if (!friend.enableProactiveChat) return;
+
+      // Only execute catch-up once per character per app session to avoid duplicates
+      if (processedCatchupsRef.current[friend.id]) return;
+      processedCatchupsRef.current[friend.id] = true;
+
+      const sched = friend.scheduledProactiveTime;
+      const now = Date.now();
+
+      if (!sched) {
+        // No scheduled time yet, calculate and save a new one!
+        const nextTime = scheduleNextProactiveMessage(friend);
+        onSaveCharacter({
+          ...friend,
+          scheduledProactiveTime: nextTime,
+        });
+      } else if (sched < now) {
+        // Scheduled proactive time was missed while offline/cleared background!
+        const nextTime = scheduleNextProactiveMessage(friend);
+        onSaveCharacter({
+          ...friend,
+          scheduledProactiveTime: nextTime,
+          lastActiveTime: now,
+        });
+
+        // Trigger the missed proactive message, backdated to the scheduled timestamp
+        const missedTimeStr = new Date(sched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const catchupPrompt = `This is a catchup/missed message that was scheduled to be sent to the user at exactly ${missedTimeStr} today while they were offline/away. You are proactively initiating contact to check in on them, share something interesting about your day/life, or show your warmth. Keep it perfectly natural, spontaneous, and matching your character profile.`;
+        
+        triggerProactiveFor(friend.id, catchupPrompt, sched);
+      }
+    });
+  }, [friends, onSaveCharacter]);
+
   // Background proactive check (every minute)
   useEffect(() => {
     const checkProactive = setInterval(() => {
@@ -1340,6 +1387,18 @@ export default function AppChat({
       friends.forEach((friend) => {
         if (!friend.enableProactiveChat) return;
 
+        // 0. Guaranteed scheduled proactive contact check
+        if (friend.scheduledProactiveTime && Date.now() >= friend.scheduledProactiveTime) {
+          const nextTime = scheduleNextProactiveMessage(friend);
+          onSaveCharacter({
+            ...friend,
+            scheduledProactiveTime: nextTime,
+            lastActiveTime: Date.now(),
+          });
+          triggerProactiveFor(friend.id);
+          return; // Skip other checks
+        }
+
         // 1. Check for agreed scheduled contact time FIRST
         const charMsgs = messagesRef.current.filter((m) => m.characterId === friend.id);
         const schedule = getScheduledContactTime(charMsgs, settings.name);
@@ -1350,8 +1409,10 @@ export default function AppChat({
 
           // If the scheduled time has arrived AND no messages have been sent after the scheduled time, AND the user/character has been quiet for 2 minutes
           if (Date.now() >= schedule.triggerTime && (!lastMsg || lastMsg.timestamp < schedule.triggerTime) && isSilent) {
+            const nextTime = scheduleNextProactiveMessage(friend);
             onSaveCharacter({
               ...friend,
+              scheduledProactiveTime: nextTime,
               lastActiveTime: Date.now(),
             });
 
@@ -1386,8 +1447,10 @@ export default function AppChat({
 
         if (Date.now() - lastActive >= cooldownMs && isRandomTrigger) {
           // Reset timer/lastActiveTime first to avoid flooding
+          const nextTime = scheduleNextProactiveMessage(friend);
           onSaveCharacter({
             ...friend,
+            scheduledProactiveTime: nextTime,
             lastActiveTime: Date.now(),
           });
           triggerProactiveFor(friend.id);
@@ -1651,6 +1714,128 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
         setTypingCharacterOverride(null);
       }
     }
+  };
+
+  const getCharacterBaseVoiceProbability = (character: Character): number => {
+    const freq = character.voiceFrequency || "medium";
+    if (freq === "none") return 0;
+    if (freq === "low") return 0.15;
+    if (freq === "high") return 0.65;
+    
+    // For "medium" (default), we analyze character's profile
+    const profileText = ((character.personality || "") + " " + (character.backstory || "")).toLowerCase();
+    
+    const introvertedKeywords = [
+      "内向", "稳重", "安静", "沉默", "高冷", "冷酷", "话少", "严肃", "不苟言笑", 
+      "社恐", "淡漠", "孤僻", "深沉", "稳健", "reserved", "introvert", "quiet", "cold", 
+      "serious", "shy", "mature"
+    ];
+    
+    const outgoingKeywords = [
+      "活泼", "外放", "热情", "开朗", "俏皮", "傲娇", "话唠", "沙雕", "主动", "话多", 
+      "社交达人", "自来熟", "e人", "lively", "outgoing", "active", "playful", 
+      "extrovert", "talkative"
+    ];
+    
+    const isIntroverted = introvertedKeywords.some(keyword => profileText.includes(keyword));
+    const isOutgoing = outgoingKeywords.some(keyword => profileText.includes(keyword));
+    
+    if (isIntroverted && !isOutgoing) return 0.15;
+    if (isOutgoing && !isIntroverted) return 0.55;
+    return 0.30; // Default medium
+  };
+
+  const shouldConvertBubbleToVoice = (
+    character: Character,
+    lastUserMsg: Message | null,
+    recentMsgs: Message[],
+    bubbleIndex: number,
+    bubbleText: string
+  ): boolean => {
+    const baseProb = getCharacterBaseVoiceProbability(character);
+    if (baseProb === 0) return false;
+    
+    // Exclude non-voice formats
+    if (
+      !bubbleText ||
+      bubbleText.startsWith("[红包]") ||
+      bubbleText.startsWith("[转账]") ||
+      bubbleText.startsWith("[系统]") ||
+      bubbleText.startsWith("data:image/") ||
+      bubbleText.startsWith("[表情]|") ||
+      bubbleText.startsWith("[位置]") ||
+      bubbleText.startsWith("[音乐]") ||
+      bubbleText.startsWith("[文件]") ||
+      bubbleText.startsWith("[视频通话]") ||
+      bubbleText.startsWith("[语音通话]")
+    ) {
+      return false;
+    }
+    
+    // Rule: Long time gap (> 5 mins) -> First reply bubble must be text
+    if (recentMsgs.length >= 2) {
+      const lastMsg = recentMsgs[recentMsgs.length - 1]; // current user message
+      const prevMsg = recentMsgs[recentMsgs.length - 2]; // previous message
+      if (lastMsg && prevMsg) {
+        const timeGap = lastMsg.timestamp - prevMsg.timestamp;
+        if (timeGap > 5 * 60 * 1000) {
+          if (bubbleIndex === 0) {
+            return false; // Force text to re-establish atmosphere
+          }
+        }
+      }
+    }
+    
+    let modifier = 0;
+    
+    // Late night casual chat (+20%)
+    const hour = new Date().getHours();
+    const isLateNight = hour >= 22 || hour < 5;
+    if (isLateNight) {
+      modifier += 0.20;
+    }
+    
+    // Intimate / cute context (+25%)
+    const intimateKeywords = [
+      "撒娇", "抱抱", "亲亲", "宝贝", "乖", "么么", "喜欢你", "粘人", "可爱", "哼", "喵", 
+      "嘿嘿", "哈", "想你", "心疼", "贴贴", "贴", "老婆", "老公", "猪猪", "笨蛋"
+    ];
+    const textToAnalyze = (bubbleText + " " + (lastUserMsg?.content || "")).toLowerCase();
+    const isIntimate = intimateKeywords.some(keyword => textToAnalyze.includes(keyword));
+    if (isIntimate) {
+      modifier += 0.25;
+    }
+    
+    // Serious / Formal / Narrative context (-30%)
+    const seriousKeywords = [
+      "工作", "合同", "商量", "正事", "严肃", "汇报", "剧情", "线索", "计划", "汇报", 
+      "商谈", "会议", "报告", "正式", "合作", "方案", "分析", "研究"
+    ];
+    const isSerious = seriousKeywords.some(keyword => textToAnalyze.includes(keyword)) || bubbleText.length > 60;
+    if (isSerious) {
+      modifier -= 0.30;
+    }
+    
+    // User's recent message habits: if user has sent mostly text, AI prefers text. If voice, AI prefers voice.
+    const userRecentMessages = recentMsgs
+      .filter(m => m.sender === "user")
+      .slice(-5);
+    if (userRecentMessages.length > 0) {
+      const userVoiceCount = userRecentMessages.filter(m => m.content.startsWith("[语音")).length;
+      const userVoiceRatio = userVoiceCount / userRecentMessages.length;
+      if (userVoiceRatio >= 0.6) {
+        modifier += 0.30; // Boost if user is voice-heavy
+      } else if (userVoiceRatio === 0) {
+        modifier -= 0.20; // Reduce if user is text-only
+      }
+    }
+    
+    // Slight random fluctuation (-6% to +6%)
+    const fluctuation = (Math.random() * 0.12) - 0.06;
+    
+    const finalProb = Math.max(0, Math.min(0.95, baseProb + modifier + fluctuation));
+    
+    return Math.random() < finalProb;
   };
 
   const generateResponseForUserMessage = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
@@ -2065,11 +2250,20 @@ ${stickerListStr}
           
           for (let idx = 0; idx < bubbles.length; idx++) {
             const bubbleText = bubbles[idx];
+            
+            // Dynamically decide if this bubble should be a voice message or a text message
+            let finalContent = bubbleText;
+            const isVoice = shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
+            if (isVoice) {
+              const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
+              finalContent = `[语音]|${secs}|${bubbleText}`;
+            }
+
             const charMsg: Message = {
               id: `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
               characterId: activeChatCharId,
               sender: "character",
-              content: bubbleText,
+              content: finalContent,
               timestamp: Date.now(),
             };
             
@@ -2391,6 +2585,7 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
   const lastMsgCountRef = useRef<number>(0);
 
   const messagesRef = useRef<Message[]>(messages);
+  const processedCatchupsRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -2819,6 +3014,19 @@ ${stickerListStr}
     if (activeCharacter) {
       const isEnablingAutoTranslate = draftEnableAutoTranslate && !activeCharacter.enableAutoTranslate;
 
+      let nextScheduledTime = activeCharacter.scheduledProactiveTime;
+      if (draftEnableProactiveChat && (!activeCharacter.enableProactiveChat || !nextScheduledTime)) {
+        const draftFriend: Character = {
+          ...activeCharacter,
+          proactiveStartTime: draftProactiveStartTime,
+          proactiveEndTime: draftProactiveEndTime,
+          enableProactiveChat: draftEnableProactiveChat,
+        };
+        nextScheduledTime = scheduleNextProactiveMessage(draftFriend);
+      } else if (!draftEnableProactiveChat) {
+        nextScheduledTime = undefined;
+      }
+
       onSaveCharacter({
         ...activeCharacter,
         name: activeCharacter.isGroupChat ? (draftRemark.trim() || activeCharacter.name) : activeCharacter.name,
@@ -2832,12 +3040,14 @@ ${stickerListStr}
         proactiveChatInterval: draftProactiveChatInterval,
         proactiveStartTime: draftProactiveStartTime,
         proactiveEndTime: draftProactiveEndTime,
+        scheduledProactiveTime: nextScheduledTime,
         disableBracketActions: draftDisableBracketActions,
         historyMemoryLimit: draftHistoryMemoryLimit,
         enableTimeAwareness: draftEnableTimeAwareness,
         enableAutoTranslate: draftEnableAutoTranslate,
         minimaxVoiceId: draftMinimaxVoiceId.trim() || undefined,
         minimaxSpeed: draftMinimaxSpeed,
+        voiceFrequency: draftVoiceFrequency,
       });
 
       // Automatically translate existing non-Chinese messages in current chat
@@ -3099,8 +3309,50 @@ ${proactivePrompt}`;
     }
   };
 
+  const scheduleNextProactiveMessage = (friend: Character): number => {
+    const startTime = friend.proactiveStartTime || "09:00";
+    const endTime = friend.proactiveEndTime || "22:00";
+    const now = new Date();
+    
+    const [startH, startM] = startTime.split(":").map(Number);
+    const [endH, endM] = endTime.split(":").map(Number);
+    
+    const startMinutes = startH * 60 + startM;
+    let endMinutes = endH * 60 + endM;
+    
+    const isOvernight = endMinutes < startMinutes;
+    if (isOvernight) {
+      endMinutes += 24 * 60;
+    }
+
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const windowStartMs = todayStart.getTime() + startMinutes * 60000;
+    const windowEndMs = todayStart.getTime() + endMinutes * 60000;
+
+    let possibleStartMs = windowStartMs;
+    const currentTimeMs = now.getTime();
+
+    if (currentTimeMs >= windowEndMs) {
+      // Today's window is in the past. Schedule in tomorrow's window.
+      const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      const tomorrowStartMs = tomorrowStart.getTime() + startMinutes * 60000;
+      const tomorrowEndMs = tomorrowStart.getTime() + endMinutes * 60000;
+      const randomOffset = Math.random() * (tomorrowEndMs - tomorrowStartMs);
+      return Math.floor(tomorrowStartMs + randomOffset);
+    } else if (currentTimeMs > windowStartMs) {
+      // Currently inside today's window. Schedule between now and the end of the window.
+      possibleStartMs = currentTimeMs;
+      const randomOffset = Math.random() * (windowEndMs - possibleStartMs);
+      return Math.floor(possibleStartMs + randomOffset);
+    } else {
+      // Before today's window. Schedule between today's start and today's end.
+      const randomOffset = Math.random() * (windowEndMs - windowStartMs);
+      return Math.floor(windowStartMs + randomOffset);
+    }
+  };
+
   // Automated background proactive message generator for any character
-  const triggerProactiveFor = async (charId: string, customTaskText?: string) => {
+  const triggerProactiveFor = async (charId: string, customTaskText?: string, backdateTimestamp?: number) => {
     const friend = characters.find((c) => c.id === charId);
     if (!friend) return;
 
@@ -3162,12 +3414,19 @@ ${instructionsPrompt}`;
         const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
         const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
         bubbles.forEach((bubbleText, idx) => {
+          let finalContent = bubbleText;
+          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText);
+          if (isVoice) {
+            const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
+            finalContent = `[语音]|${secs}|${bubbleText}`;
+          }
+
           const proactiveMsg: Message = {
             id: `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
             characterId: charId,
             sender: "character",
-            content: bubbleText,
-            timestamp: Date.now() + idx,
+            content: finalContent,
+            timestamp: backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
           };
           onSendMessage(proactiveMsg);
         });
@@ -4125,6 +4384,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftEnableAutoTranslate(activeCharacter.enableAutoTranslate || false);
                   setDraftMinimaxVoiceId(activeCharacter.minimaxVoiceId || "");
                   setDraftMinimaxSpeed(activeCharacter.minimaxSpeed !== undefined ? activeCharacter.minimaxSpeed : 1.0);
+                  setDraftVoiceFrequency(activeCharacter.voiceFrequency || "medium");
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
@@ -4491,6 +4751,40 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             <span>正常 (1.0)</span>
                             <span>极快 (2.0)</span>
                           </div>
+                        </div>
+
+                        {/* Voice Frequency Selector */}
+                        <div className="space-y-1.5 pt-2 border-t border-slate-100/50">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-slate-400 font-semibold">动态语音发送频率</span>
+                            <span className="text-[9px] text-indigo-600 font-medium">智能多维度切换</span>
+                          </div>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {[
+                              { label: "无 (文字)", value: "none" },
+                              { label: "低频", value: "low" },
+                              { label: "中频 (默认)", value: "medium" },
+                              { label: "高频", value: "high" },
+                            ].map((opt) => (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => setDraftVoiceFrequency(opt.value as any)}
+                                className={`py-1.5 rounded-[8px] text-[10px] font-bold transition-all border ${
+                                  draftVoiceFrequency === opt.value
+                                    ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-[8px] text-slate-400 leading-normal">
+                            智能判断消息形式。内向稳重角色低频、活泼外放角色高频。
+                            深夜闲聊、亲密撒娇提升几率；严肃正事、长篇叙事降低几率。
+                            自动跟随用户近期发语音/文字的习惯并附带真人随机浮动。
+                          </p>
                         </div>
                       </div>
                     </div>

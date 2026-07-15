@@ -28,6 +28,7 @@ export interface Character {
   proactiveStartTime?: string;
   proactiveEndTime?: string;
   lastActiveTime?: number;
+  scheduledProactiveTime?: number;
   customCss?: string;
   chatStylePreset?: "default" | "floating-cute" | "liquid-glass";
   greeting?: string;
@@ -39,6 +40,7 @@ export interface Character {
   memberIds?: string[];
   minimaxVoiceId?: string;
   minimaxSpeed?: number;
+  voiceFrequency?: "low" | "medium" | "high" | "none";
 }
 
 export interface Message {

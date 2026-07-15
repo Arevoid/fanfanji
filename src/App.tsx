@@ -1014,37 +1014,6 @@ export default function App() {
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const pageSwitchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const [viewportHeight, setViewportHeight] = useState<string>("100%");
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const updateHeight = () => {
-      if (window.visualViewport && window.innerWidth < 768) {
-        const isKeyboardOpen = (window.innerHeight - window.visualViewport.height) > 120;
-        setViewportHeight(isKeyboardOpen ? `${window.visualViewport.height}px` : "100dvh");
-        const activeEl = document.activeElement;
-        if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) {
-          setTimeout(() => {
-            activeEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
-          }, 80);
-        }
-      } else {
-        setViewportHeight("100%");
-      }
-    };
-
-    window.visualViewport?.addEventListener("resize", updateHeight);
-    window.visualViewport?.addEventListener("scroll", updateHeight);
-    window.addEventListener("resize", updateHeight);
-    updateHeight();
-
-    return () => {
-      window.visualViewport?.removeEventListener("resize", updateHeight);
-      window.visualViewport?.removeEventListener("scroll", updateHeight);
-      window.removeEventListener("resize", updateHeight);
-    };
-  }, []);
-
   useEffect(() => {
     localStorage.setItem("phone_homescreen_items", JSON.stringify(homeScreenItems));
   }, [homeScreenItems]);
@@ -1991,8 +1960,8 @@ export default function App() {
       className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
       style={{
         position: (typeof window !== "undefined" && window.innerWidth < 768) ? "fixed" : "relative",
-        top: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
-        left: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
+        top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvTop}px` : undefined,
+        left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvLeft}px` : undefined,
         width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvWidth}px` : "100%",
         height: (typeof window !== "undefined" && window.innerWidth < 768) ? (isMobileKeyboardActive ? `${visualViewportHeight}px` : "100dvh") : "100vh",
       }}
@@ -2389,7 +2358,7 @@ export default function App() {
             ? settings.wallpaper
             : `url(${settings.wallpaper}) center/cover no-repeat`,
           position: "relative",
-          height: (typeof window !== "undefined" && window.innerWidth < 768) ? viewportHeight : undefined,
+          height: (typeof window !== "undefined" && window.innerWidth < 768) ? "100%" : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
         }}
       >
