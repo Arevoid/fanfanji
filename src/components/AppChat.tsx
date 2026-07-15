@@ -481,6 +481,10 @@ export default function AppChat({
           console.error(e);
         }
       }
+      if (voiceTimer) {
+        clearInterval(voiceTimer);
+        setVoiceTimer(null);
+      }
       setPlayingMessageId(null);
       return;
     }
@@ -492,6 +496,32 @@ export default function AppChat({
         console.error(e);
       }
       setActiveTtsAudio(null);
+    }
+    if (voiceTimer) {
+      clearInterval(voiceTimer);
+      setVoiceTimer(null);
+    }
+
+    // "我" (user) 发送的语音不需要语音合成 (no TTS/MiniMax API calls for user voice messages)
+    if (msg.sender === "user" && msg.content && msg.content.startsWith("[语音]|")) {
+      setPlayingMessageId(msg.id);
+      setAudioLoadingMessageId(null);
+      
+      const parts = msg.content.split("|");
+      const duration = parseInt(parts[1] || "3", 10);
+      let countdown = duration;
+      
+      const interval = setInterval(() => {
+        countdown -= 1;
+        if (countdown <= 0) {
+          setPlayingMessageId(null);
+          clearInterval(interval);
+          setVoiceTimer(null);
+        }
+      }, 1000);
+      
+      setVoiceTimer(interval);
+      return;
     }
 
     setPlayingMessageId(msg.id);
@@ -593,34 +623,62 @@ export default function AppChat({
 
   // Intercepting Wrapper for onSendMessage
   const onSendMessage = (msg: Message) => {
-    const isCallActive = activeAttachModal === "calling" && callingStatus === "connected";
-    if (msg.sender === "character" && isCallActive && msg.content && !msg.content.startsWith("[语音]") && !msg.content.startsWith("[系统]") && !msg.content.startsWith("[红包]")) {
-      const text = msg.content;
-      const secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
-      msg.content = `[语音]|${secs}|${text}`;
-    }
-
-    onSendMessageRaw(msg);
-    
     let userSettings: any = {};
     try {
       const saved = localStorage.getItem("phone_settings");
       if (saved) userSettings = JSON.parse(saved);
     } catch (e) {}
 
-    if (
-      userSettings.enableMiniMaxTts &&
-      msg.sender === "character" &&
-      msg.content &&
-      !msg.content.startsWith("[红包]") &&
-      !msg.content.startsWith("[系统]") &&
-      (!msg.content.startsWith("[语音]") || isCallActive)
-    ) {
-      // Trigger synthesis auto-play with small delay to allow message render
-      setTimeout(() => {
-        triggerMessageSpeech(msg);
-      }, 500);
+    let content = msg.content || "";
+    // Normalize [语音: "text" (X秒)] or [语音: text] to standard [语音]|secs|text
+    if (content.startsWith("[语音") && !content.startsWith("[语音]|")) {
+      let text = "";
+      let secs = 5;
+      
+      const match1 = content.match(/^\[语音:\s*"([^"]+)"\s*\((\d+)(?:秒|s)\)\]/i);
+      const match2 = content.match(/^\[语音:\s*(.+?)\s*\((\d+)(?:秒|s)\)\]/i);
+      const match3 = content.match(/^\[语音:\s*(\d+)(?:秒|s)\]/i);
+      const match4 = content.match(/^\[语音:\s*"([^"]+)"\]/i) || content.match(/^\[语音:\s*(.+?)\]/i);
+
+      if (match1) {
+        text = match1[1];
+        secs = parseInt(match1[2], 10) || 5;
+      } else if (match2) {
+        text = match2[1];
+        secs = parseInt(match2[2], 10) || 5;
+      } else if (match3) {
+        text = "";
+        secs = parseInt(match3[1], 10) || 5;
+      } else if (match4) {
+        text = match4[1];
+        secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
+      } else {
+        const clean = content.replace(/^\[语音\]\s*/, "").replace(/^\[语音:\s*/, "").replace(/\]$/, "").trim();
+        text = clean;
+        secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
+      }
+      msg.content = `[语音]|${secs}|${text}`;
     }
+
+    const isCallActive = activeAttachModal === "calling" && callingStatus === "connected";
+    const shouldBeVoice = isCallActive && msg.sender === "character";
+
+    if (
+      shouldBeVoice && 
+      msg.content && 
+      !msg.content.startsWith("[语音]") && 
+      !msg.content.startsWith("[系统]") && 
+      !msg.content.startsWith("[红包]") && 
+      !msg.content.startsWith("[转账]") && 
+      !msg.content.startsWith("data:image/") && 
+      !msg.content.startsWith("[表情]|")
+    ) {
+      const text = msg.content;
+      const secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
+      msg.content = `[语音]|${secs}|${text}`;
+    }
+
+    onSendMessageRaw(msg);
   };
 
   // Sticker groups state
@@ -5089,79 +5147,158 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             </div>
                           </div>
                         );
-                      })() : msg.content.startsWith("[语音]") ? (() => {
-                        const [_, durationStr] = msg.content.split("|");
-                        const duration = parseInt(durationStr || "3", 10);
-                        const isPlaying = openVoiceId === msg.id;
+                      })() : msg.content.startsWith("[语音") ? (() => {
+                        let content = msg.content;
+                        let durationStr = "3";
+                        let voiceText = "";
 
-                        // Beautiful animated or static wave representation
-                        const VoiceWaveIcon = ({ active, self }: { active: boolean; self: boolean }) => {
-                          return (
-                            <div className={`flex items-center gap-0.5 ${self ? "flex-row-reverse" : "flex-row"}`}>
-                              <span className={`w-0.5 h-2.5 rounded-full transition-all bg-current ${active ? "animate-[bounce_0.8s_infinite_100ms]" : "opacity-80"}`} />
-                              <span className={`w-0.5 h-3.5 rounded-full transition-all bg-current ${active ? "animate-[bounce_0.8s_infinite_200ms]" : "opacity-80"}`} />
-                              <span className={`w-0.5 h-1.5 rounded-full transition-all bg-current ${active ? "animate-[bounce_0.8s_infinite_300ms]" : "opacity-80"}`} />
-                            </div>
-                          );
+                        if (content.startsWith("[语音]|")) {
+                          const parts = content.split("|");
+                          durationStr = parts[1] || "3";
+                          voiceText = parts.slice(2).join("|") || "";
+                        } else {
+                          // e.g. [语音: "晚安，要听话" (5秒)]
+                          let text = "";
+                          let secs = 5;
+                          
+                          const match1 = content.match(/^\[语音:\s*"([^"]+)"\s*\((\d+)(?:秒|s)\)\]/i);
+                          const match2 = content.match(/^\[语音:\s*(.+?)\s*\((\d+)(?:秒|s)\)\]/i);
+                          const match3 = content.match(/^\[语音:\s*(\d+)(?:秒|s)\]/i);
+                          const match4 = content.match(/^\[语音:\s*"([^"]+)"\]/i) || content.match(/^\[语音:\s*(.+?)\]/i);
+
+                          if (match1) {
+                            text = match1[1];
+                            secs = parseInt(match1[2], 10) || 5;
+                          } else if (match2) {
+                            text = match2[1];
+                            secs = parseInt(match2[2], 10) || 5;
+                          } else if (match3) {
+                            text = "";
+                            secs = parseInt(match3[1], 10) || 5;
+                          } else if (match4) {
+                            text = match4[1];
+                            secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
+                          } else {
+                            const clean = content.replace(/^\[语音\]\s*/, "").replace(/^\[语音:\s*/, "").replace(/\]$/, "").trim();
+                            text = clean;
+                            secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
+                          }
+                          durationStr = secs.toString();
+                          voiceText = text;
+                        }
+
+                        // Determine the duration dynamically based on the text length for authentic feel (approx 3.5 characters per second)
+                        const duration = voiceText 
+                          ? Math.max(1, Math.min(60, Math.round(voiceText.length / 3.5) || 1)) 
+                          : parseInt(durationStr || "3", 10);
+                        
+                        const isPlaying = playingMessageId === msg.id;
+                        const formattedDuration = `${duration}"`;
+
+                        // Generate deterministic dynamic wave bar heights based on msg.id to make each bubble wave look unique but stable
+                        const generateWaveBars = (seed: string, count: number = 10) => {
+                          let h = 0;
+                          for (let i = 0; i < seed.length; i++) {
+                            h = (h << 5) - h + seed.charCodeAt(i);
+                            h |= 0;
+                          }
+                          const bars = [];
+                          for (let i = 0; i < count; i++) {
+                            const val = Math.abs(Math.sin(h + i * 1.7));
+                            const height = Math.round(5 + val * 15); // height between 5px and 20px
+                            bars.push(height);
+                          }
+                          return bars;
                         };
+                        const waveBars = generateWaveBars(msg.id, 10);
+
+                        const bubbleBgAndShape = isSelf
+                          ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-[#95ec69] text-[#191919] chat-bubble-self rounded-tr-sm")
+                          : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100");
 
                         return (
-                          <div className="flex flex-col items-stretch">
-                            <div 
-                              onClick={() => {
-                                triggerMessageSpeech(msg);
-                                setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
-                                if (isPlaying) {
-                                  setOpenVoiceId(null);
-                                  if (voiceTimer) clearInterval(voiceTimer);
-                                } else {
-                                  setOpenVoiceId(msg.id);
-                                  let countdown = duration;
-                                  if (voiceTimer) clearInterval(voiceTimer);
-                                  const interval = setInterval(() => {
-                                    countdown -= 1;
-                                    if (countdown <= 0) {
-                                      setOpenVoiceId(null);
-                                      clearInterval(interval);
-                                    }
-                                  }, 1000);
-                                  setVoiceTimer(interval);
-                                }
-                              }}
-                              className={`px-3 py-2 text-xs font-semibold rounded-[16px] shadow-sm cursor-pointer select-none transition-all flex items-center gap-2 border border-slate-100/10 relative voice-message-bar ${
-                                isSelf 
-                                  ? "bg-[#95ec69] text-[#191919] hover:bg-[#82d658] self-end rounded-tr-sm" 
-                                  : "bg-white text-[#191919] hover:bg-slate-50 self-start rounded-tl-sm border border-slate-100"
-                              }`}
-                              style={{ width: `${70 + duration * 6}px`, minWidth: "80px", maxWidth: "210px" }}
-                            >
-                              {!isSelf && (
-                                <div className="flex items-center gap-2 w-full">
-                                  <VoiceWaveIcon active={isPlaying} self={false} />
-                                  <span className="font-sans text-[11px] font-bold text-slate-500/90 ml-auto">{duration}"</span>
+                          <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} space-y-1`}>
+                            {/* Voice capsule pill wrapper */}
+                            <div className={`flex items-center gap-2 ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
+                              <div 
+                                onClick={() => {
+                                  // Click to play/pause
+                                  triggerMessageSpeech(msg);
+                                  setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
+                                }}
+                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape}`}
+                                style={{ width: `${80 + duration * 6.5}px`, minWidth: "95px", maxWidth: "220px" }}
+                              >
+                                {/* Left element: Play/Pause/Speaker icon */}
+                                <div className="flex items-center justify-center shrink-0 text-current">
+                                  {isPlaying ? (
+                                    <Pause className="w-3.5 h-3.5 fill-current animate-pulse text-current" />
+                                  ) : (
+                                    <Volume2 className="w-3.5 h-3.5 text-current" />
+                                  )}
                                 </div>
-                              )}
-                              
-                              {isSelf && (
-                                <div className="flex items-center gap-2 w-full justify-between">
-                                  <span className="font-sans text-[11px] font-bold text-slate-500/90">{duration}"</span>
-                                  <VoiceWaveIcon active={isPlaying} self={true} />
-                                </div>
-                              )}
 
-                              {/* WeChat unplayed red dot */}
-                              {!isSelf && !voicePlayed[msg.id] && (
-                                <span className="absolute -right-3 top-3.5 w-2 h-2 bg-red-500 rounded-full animate-pulse shadow" />
-                              )}
+                                {/* Middle element: Sound Wave Pattern */}
+                                <div className="flex-1 flex items-end justify-center gap-[2px] h-5 px-1 overflow-hidden pb-[1px]">
+                                  {waveBars.map((barHeight, idx) => {
+                                    const delay = idx * 80;
+                                    const scaledHeight = Math.max(3, Math.round(barHeight * 0.7));
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={`w-[2px] rounded-full transition-all duration-200 ${
+                                          isPlaying 
+                                            ? "animate-[pulse_0.8s_infinite]"
+                                            : "opacity-40"
+                                        }`}
+                                        style={{ 
+                                          height: `${scaledHeight}px`,
+                                          animationDelay: isPlaying ? `${delay}ms` : undefined,
+                                          backgroundColor: "currentColor"
+                                        }}
+                                      />
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Duration display */}
+                                <span className="font-sans text-[11px] font-bold text-current opacity-70 shrink-0">
+                                  {formattedDuration}
+                                </span>
+
+                                {/* WeChat unplayed red dot at the top-right corner of the capsule */}
+                                {!isSelf && !voicePlayed[msg.id] && (
+                                  <span className="absolute -right-1 -top-1 w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-sm" />
+                                )}
+                              </div>
+
+                              {/* "转" (Transcribe) Button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation(); // prevent playing the audio
+                                  setVoiceTranscribed((prev) => ({ ...prev, [msg.id]: !prev[msg.id] }));
+                                }}
+                                className={`w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold border transition-all shrink-0 active:scale-90 shadow-sm ${
+                                  voiceTranscribed[msg.id]
+                                    ? "bg-stone-200/80 border-stone-300 text-stone-700"
+                                    : "bg-white hover:bg-stone-50 border-stone-200 text-stone-500"
+                                }`}
+                                title="语音转文字"
+                              >
+                                转
+                              </button>
                             </div>
 
-                            {/* Transcription Box */}
+                            {/* Transcription Display - Rendered exactly like a regular text bubble below matching Image 2 */}
                             {voiceTranscribed[msg.id] && (
-                              <div className={`mt-1.5 bg-slate-50 border border-slate-100/50 rounded-xl p-2.5 text-[11px] text-slate-600 max-w-[240px] text-left leading-relaxed shadow-inner animate-fade-in relative ${
-                                isSelf ? "self-end" : "self-start"
-                              }`}>
-                                <div className="absolute top-1 right-2 text-[8px] text-slate-400 font-extrabold tracking-wider">语音转文字</div>
-                                <p className="pt-2 font-medium">{msg.content.split("|").slice(2).join("|") || "语音内容"}</p>
+                              <div 
+                                className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble mt-0.5 max-w-[240px] ${
+                                  isSelf
+                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
+                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
+                                } ${isSelf ? "self-end" : "self-start"}`}
+                              >
+                                <div className="text-left">{voiceText || "（空白语音内容）"}</div>
                               </div>
                             )}
                           </div>
@@ -5183,30 +5320,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               </div>
                             </>
                           )}
-
-                          {/* MiniMax TTS play/pause/loading button */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              triggerMessageSpeech(msg);
-                            }}
-                            className={`absolute right-1 bottom-1 p-0.5 rounded-full bg-white/70 dark:bg-black/30 border border-slate-200/50 hover:bg-white shadow-sm flex items-center justify-center transition-all ${
-                              playingMessageId === msg.id 
-                                ? "opacity-100 scale-105 ring-1 ring-indigo-400" 
-                                : "opacity-0 group-hover/bubble:opacity-100 focus:opacity-100"
-                            }`}
-                            style={{ width: "16px", height: "16px" }}
-                            title="语音合成播放/暂停"
-                          >
-                            {audioLoadingMessageId === msg.id ? (
-                              <Loader2 className="w-2.5 h-2.5 text-indigo-500 animate-spin" />
-                            ) : playingMessageId === msg.id ? (
-                              <Pause className="w-2 h-2 text-indigo-500 fill-indigo-500" />
-                            ) : (
-                              <Volume2 className={`w-2.5 h-2.5 ${isSelf ? "text-slate-500" : "text-indigo-500"}`} />
-                            )}
-                          </button>
 
                           <div className="cv-bubble-tail hidden" />
                         </div>
