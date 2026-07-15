@@ -440,8 +440,15 @@ export function splitIntoWeChatBubbles(text: string, keepPeriods: boolean = fals
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
     
-    // Do not split red packet lines
-    if (trimmedLine.startsWith("[红包]")) {
+    // Do not split special lines like red packets, voice, transfers, stickers, etc.
+    if (
+      trimmedLine.startsWith("[红包]") ||
+      trimmedLine.startsWith("[转账]") ||
+      trimmedLine.startsWith("[系统]") ||
+      trimmedLine.startsWith("[语音") ||
+      trimmedLine.startsWith("[表情]|") ||
+      trimmedLine.startsWith("[语音通话]")
+    ) {
       results.push(trimmedLine);
       continue;
     }

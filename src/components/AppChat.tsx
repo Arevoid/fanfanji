@@ -154,6 +154,43 @@ const getScheduledContactTime = (charMsgs: any[], settingsName: string) => {
   return null;
 };
 
+const formatWeChatTimestamp = (timestamp: number): string => {
+  const now = new Date();
+  const date = new Date(timestamp);
+  
+  const currentYear = now.getFullYear();
+  const msgYear = date.getFullYear();
+  
+  // Hours and minutes formatted with leading zero
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const timeStr = `${hours}:${minutes}`;
+  
+  // Calculate midnights for today and yesterday
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterdayMidnight = todayMidnight - 24 * 60 * 60 * 1000;
+  const sevenDaysAgoMidnight = todayMidnight - 7 * 24 * 60 * 60 * 1000;
+  
+  if (timestamp >= todayMidnight) {
+    // Today: only HH:mm
+    return timeStr;
+  } else if (timestamp >= yesterdayMidnight) {
+    // Yesterday: 昨天 HH:mm
+    return `昨天 ${timeStr}`;
+  } else if (timestamp >= sevenDaysAgoMidnight) {
+    // 1~7 days: 星期X HH:mm
+    const days = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+    const dayOfWeek = days[date.getDay()];
+    return `${dayOfWeek} ${timeStr}`;
+  } else if (msgYear === currentYear) {
+    // Same year, more than 7 days: X月X日 HH:mm
+    return `${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`;
+  } else {
+    // Cross year: YYYY年X月X日 HH:mm
+    return `${msgYear}年${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`;
+  }
+};
+
 const RenderAvatar = ({ 
   src, 
   alt, 
@@ -666,7 +703,7 @@ export default function AppChat({
     if (
       shouldBeVoice && 
       msg.content && 
-      !msg.content.startsWith("[语音]") && 
+      !msg.content.startsWith("[语音") && 
       !msg.content.startsWith("[系统]") && 
       !msg.content.startsWith("[红包]") && 
       !msg.content.startsWith("[转账]") && 
@@ -4878,6 +4915,45 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
 
             {currentChatMessages.map((msg, idx) => {
+              // Calculate WeChat timestamp divider
+              let showWeChatDivider = false;
+              let dividerText = "";
+              if (!isOfflineModeActive) {
+                if (idx === 0) {
+                  showWeChatDivider = true;
+                  dividerText = formatWeChatTimestamp(msg.timestamp);
+                } else {
+                  const prevMsg = currentChatMessages[idx - 1];
+                  if (prevMsg) {
+                    const prevDate = new Date(prevMsg.timestamp);
+                    const currDate = new Date(msg.timestamp);
+                    const isCrossDay = prevDate.getFullYear() !== currDate.getFullYear() ||
+                                       prevDate.getMonth() !== currDate.getMonth() ||
+                                       prevDate.getDate() !== currDate.getDate();
+                    const hasTimeGap = (msg.timestamp - prevMsg.timestamp) > 5 * 60 * 1000;
+                    
+                    if (isCrossDay || hasTimeGap) {
+                      showWeChatDivider = true;
+                      dividerText = formatWeChatTimestamp(msg.timestamp);
+                    }
+                  }
+                }
+              }
+
+              const wrapMessageWithDivider = (messageElement: React.ReactElement) => {
+                if (!showWeChatDivider) return messageElement;
+                return (
+                  <React.Fragment key={`msg-group-${msg.id}`}>
+                    <div className="w-full flex justify-center my-3.5 select-none animate-fade-in" id={`timestamp-divider-${msg.id}`}>
+                      <div className="bg-black/5 dark:bg-white/10 text-[#888888] dark:text-stone-400 text-[11.5px] px-2.5 py-0.5 rounded-[4px] tracking-wide font-normal">
+                        {dividerText}
+                      </div>
+                    </div>
+                    {messageElement}
+                  </React.Fragment>
+                );
+              };
+
               if (isOfflineModeActive) {
                 // 1. Narration (centered divider with grey text and dashed line)
                 if (msg.isNarration) {
@@ -4962,7 +5038,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               }
 
               if (msg.isNarration) {
-                return (
+                return wrapMessageWithDivider(
                   <div 
                     key={msg.id}
                     className="w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed text-[#a1a3a8] border-b border-dashed border-slate-100/60 dark:border-slate-800/60 transition-all cursor-pointer"
@@ -5330,7 +5406,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               };
 
               if (settings.bubblePosition === "above" || settings.bubblePosition === "below") {
-                return (
+                return wrapMessageWithDivider(
                   <div
                     key={msg.id}
                     className={`w-full flex flex-col ${
@@ -5364,13 +5440,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               <span>{msgName}</span>
                             </div>
                           )}
-                          {isSelf && (
-                            <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
-                              <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
-                              <span>•</span>
-                              <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
-                            </div>
-                          )}
                         </div>
                       </div>
                     )}
@@ -5382,7 +5451,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   </div>
                 );
               } else {
-                return (
+                return wrapMessageWithDivider(
                   <div
                     key={msg.id}
                     className={`w-full flex gap-2.5 ${
@@ -5418,13 +5487,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
                               <span>🖤</span>
                               <span>{msgName}</span>
-                            </div>
-                          )}
-                          {isSelf && (
-                            <div className="flex items-center gap-1 text-[9.5px] text-slate-400 font-mono tracking-wide msg-meta-time-row">
-                              <span className="msg-meta-date">{new Date(msg.timestamp || Date.now()).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
-                              <span>•</span>
-                              <span className="msg-meta-time">{new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
                             </div>
                           )}
                         </div>
@@ -8534,7 +8596,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               </button>
             )}
 
-            {activeMenuMsg.content.startsWith("[语音]") && (
+            {activeMenuMsg.content.startsWith("[语音") && (
               <button
                 onClick={() => {
                   const msgId = activeMenuMsg.id;
