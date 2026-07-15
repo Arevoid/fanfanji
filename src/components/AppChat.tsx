@@ -593,6 +593,13 @@ export default function AppChat({
 
   // Intercepting Wrapper for onSendMessage
   const onSendMessage = (msg: Message) => {
+    const isCallActive = activeAttachModal === "calling" && callingStatus === "connected";
+    if (msg.sender === "character" && isCallActive && msg.content && !msg.content.startsWith("[语音]") && !msg.content.startsWith("[系统]") && !msg.content.startsWith("[红包]")) {
+      const text = msg.content;
+      const secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
+      msg.content = `[语音]|${secs}|${text}`;
+    }
+
     onSendMessageRaw(msg);
     
     let userSettings: any = {};
@@ -606,7 +613,8 @@ export default function AppChat({
       msg.sender === "character" &&
       msg.content &&
       !msg.content.startsWith("[红包]") &&
-      !msg.content.startsWith("[系统]")
+      !msg.content.startsWith("[系统]") &&
+      (!msg.content.startsWith("[语音]") || isCallActive)
     ) {
       // Trigger synthesis auto-play with small delay to allow message render
       setTimeout(() => {
@@ -985,6 +993,10 @@ export default function AppChat({
   const [voiceText, setVoiceText] = useState("");
   const [callingStatus, setCallingStatus] = useState<"ringing" | "connected" | "ended">("ringing");
   const [callingDuration, setCallingDuration] = useState(0);
+  const [isIncomingCall, setIsIncomingCall] = useState(false);
+  const [showCallingDirectionModal, setShowCallingDirectionModal] = useState(false);
+  const [callStartTime, setCallStartTime] = useState<number>(0);
+  const [callingInputText, setCallingInputText] = useState("");
   const [redPacketAmount, setRedPacketAmount] = useState("8.88");
   const [redPacketGreeting, setRedPacketGreeting] = useState("恭喜发财，万事如意");
   const [showRedPacketOpenModal, setShowRedPacketOpenModal] = useState<boolean>(false);
@@ -1087,6 +1099,8 @@ export default function AppChat({
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
   const [activeMenuMsg, setActiveMenuMsg] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [voicePlayed, setVoicePlayed] = useState<Record<string, boolean>>({});
+  const [voiceTranscribed, setVoiceTranscribed] = useState<Record<string, boolean>>({});
 
   const [selectedFileNote, setSelectedFileNote] = useState<{ title: string; content: string } | null>(null);
   const [showOocCommentModal, setShowOocCommentModal] = useState<Message | null>(null);
@@ -1311,6 +1325,20 @@ export default function AppChat({
     }
     return () => clearInterval(timer);
   }, [activeAttachModal, callingStatus]);
+
+  // Auto connect timer for user-initiated call
+  useEffect(() => {
+    let autoConnectTimer: any = null;
+    if (activeAttachModal === "calling" && callingStatus === "ringing" && !isIncomingCall) {
+      autoConnectTimer = setTimeout(() => {
+        setCallingStatus("connected");
+        setCallStartTime(Date.now());
+      }, 3000);
+    }
+    return () => {
+      if (autoConnectTimer) clearTimeout(autoConnectTimer);
+    };
+  }, [activeAttachModal, callingStatus, isIncomingCall]);
 
   const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return;
@@ -5065,37 +5093,77 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         const [_, durationStr] = msg.content.split("|");
                         const duration = parseInt(durationStr || "3", 10);
                         const isPlaying = openVoiceId === msg.id;
+
+                        // Beautiful animated or static wave representation
+                        const VoiceWaveIcon = ({ active, self }: { active: boolean; self: boolean }) => {
+                          return (
+                            <div className={`flex items-center gap-0.5 ${self ? "flex-row-reverse" : "flex-row"}`}>
+                              <span className={`w-0.5 h-2.5 rounded-full transition-all bg-current ${active ? "animate-[bounce_0.8s_infinite_100ms]" : "opacity-80"}`} />
+                              <span className={`w-0.5 h-3.5 rounded-full transition-all bg-current ${active ? "animate-[bounce_0.8s_infinite_200ms]" : "opacity-80"}`} />
+                              <span className={`w-0.5 h-1.5 rounded-full transition-all bg-current ${active ? "animate-[bounce_0.8s_infinite_300ms]" : "opacity-80"}`} />
+                            </div>
+                          );
+                        };
+
                         return (
-                          <div 
-                            onClick={() => {
-                              triggerMessageSpeech(msg);
-                              if (isPlaying) {
-                                setOpenVoiceId(null);
-                                if (voiceTimer) clearInterval(voiceTimer);
-                              } else {
-                                setOpenVoiceId(msg.id);
-                                let countdown = duration;
-                                if (voiceTimer) clearInterval(voiceTimer);
-                                const interval = setInterval(() => {
-                                  countdown -= 1;
-                                  if (countdown <= 0) {
-                                    setOpenVoiceId(null);
-                                    clearInterval(interval);
-                                  }
-                                }, 1000);
-                                setVoiceTimer(interval);
-                              }
-                            }}
-                            className={`px-3 py-2 text-xs font-semibold rounded-2xl shadow-sm cursor-pointer select-none transition-all flex items-center gap-1.5 border border-slate-100/40 voice-message-bar ${
-                              isSelf 
-                                ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self") 
-                                : (isFloatingCute ? "bg-white text-[#222] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other")
-                            }`}
-                            style={{ width: `${60 + duration * 12}px`, minWidth: "70px", maxWidth: "180px" }}
-                          >
-                            <span className="text-[13px] leading-none">{isPlaying ? "🔊" : "🔉"}</span>
-                            <span className="font-mono text-[10px] ml-auto opacity-70">{duration}"</span>
-                            <div className="cv-bubble-tail hidden" />
+                          <div className="flex flex-col items-stretch">
+                            <div 
+                              onClick={() => {
+                                triggerMessageSpeech(msg);
+                                setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
+                                if (isPlaying) {
+                                  setOpenVoiceId(null);
+                                  if (voiceTimer) clearInterval(voiceTimer);
+                                } else {
+                                  setOpenVoiceId(msg.id);
+                                  let countdown = duration;
+                                  if (voiceTimer) clearInterval(voiceTimer);
+                                  const interval = setInterval(() => {
+                                    countdown -= 1;
+                                    if (countdown <= 0) {
+                                      setOpenVoiceId(null);
+                                      clearInterval(interval);
+                                    }
+                                  }, 1000);
+                                  setVoiceTimer(interval);
+                                }
+                              }}
+                              className={`px-3 py-2 text-xs font-semibold rounded-[16px] shadow-sm cursor-pointer select-none transition-all flex items-center gap-2 border border-slate-100/10 relative voice-message-bar ${
+                                isSelf 
+                                  ? "bg-[#95ec69] text-[#191919] hover:bg-[#82d658] self-end rounded-tr-sm" 
+                                  : "bg-white text-[#191919] hover:bg-slate-50 self-start rounded-tl-sm border border-slate-100"
+                              }`}
+                              style={{ width: `${70 + duration * 6}px`, minWidth: "80px", maxWidth: "210px" }}
+                            >
+                              {!isSelf && (
+                                <div className="flex items-center gap-2 w-full">
+                                  <VoiceWaveIcon active={isPlaying} self={false} />
+                                  <span className="font-sans text-[11px] font-bold text-slate-500/90 ml-auto">{duration}"</span>
+                                </div>
+                              )}
+                              
+                              {isSelf && (
+                                <div className="flex items-center gap-2 w-full justify-between">
+                                  <span className="font-sans text-[11px] font-bold text-slate-500/90">{duration}"</span>
+                                  <VoiceWaveIcon active={isPlaying} self={true} />
+                                </div>
+                              )}
+
+                              {/* WeChat unplayed red dot */}
+                              {!isSelf && !voicePlayed[msg.id] && (
+                                <span className="absolute -right-3 top-3.5 w-2 h-2 bg-red-500 rounded-full animate-pulse shadow" />
+                              )}
+                            </div>
+
+                            {/* Transcription Box */}
+                            {voiceTranscribed[msg.id] && (
+                              <div className={`mt-1.5 bg-slate-50 border border-slate-100/50 rounded-xl p-2.5 text-[11px] text-slate-600 max-w-[240px] text-left leading-relaxed shadow-inner animate-fade-in relative ${
+                                isSelf ? "self-end" : "self-start"
+                              }`}>
+                                <div className="absolute top-1 right-2 text-[8px] text-slate-400 font-extrabold tracking-wider">语音转文字</div>
+                                <p className="pt-2 font-medium">{msg.content.split("|").slice(2).join("|") || "语音内容"}</p>
+                              </div>
+                            )}
                           </div>
                         );
                       })() : (
@@ -5476,9 +5544,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 <button
                   type="button"
                   onClick={() => {
-                    setCallingType("voice");
-                    setCallingStatus("ringing");
-                    setActiveAttachModal("calling");
+                    setShowCallingDirectionModal(true);
                     setShowAttachPanel(false);
                   }}
                   className="flex-1 flex flex-col items-center justify-center group min-w-10"
@@ -6124,17 +6190,21 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
           {/* Calling Screen Modal Overlay */}
           {activeAttachModal === "calling" && (
-            <div className="absolute inset-0 bg-stone-950 z-50 flex flex-col justify-between p-10 animate-fade-in text-white text-center">
-              <div className="space-y-4 mt-16 shrink-0">
+            <div className="absolute inset-0 bg-stone-950 z-50 flex flex-col justify-between p-6 animate-fade-in text-white text-center">
+              <div className="space-y-4 mt-8 shrink-0">
                 <img 
                   src={activeCharacter.avatar} 
                   alt="" 
-                  className="w-24 h-24 rounded-full mx-auto border-2 border-white/25 object-cover shadow-2xl" 
+                  className="w-20 h-20 rounded-full mx-auto border-2 border-white/25 object-cover shadow-2xl animate-pulse" 
                 />
                 <div>
-                  <h3 className="text-lg font-black">{activeCharacter.remark || activeCharacter.name}</h3>
+                  <h3 className="text-md font-black">{activeCharacter.remark || activeCharacter.name}</h3>
                   <p className="text-xs text-white/50 mt-1">
-                    {callingStatus === "connected" ? "通话中" : (callingType === "video" ? "正在发起视频通话..." : "正在发起语音通话...")}
+                    {callingStatus === "connected" 
+                      ? "语音通话中..." 
+                      : isIncomingCall 
+                        ? "邀请你进行语音通话..." 
+                        : "等待对方接通..."}
                   </p>
                 </div>
 
@@ -6146,56 +6216,254 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 )}
               </div>
 
-              {/* Action controls */}
-              <div className="space-y-12 mb-10 shrink-0">
-                {callingStatus === "ringing" ? (
-                  <div className="flex justify-around items-center px-4">
-                    {/* Decline */}
-                    <button
-                      onClick={() => {
-                        sendCustomMessage(`[${callingType === "video" ? "视频通话" : "语音通话"}]|已取消`);
-                        setActiveAttachModal(null);
-                      }}
-                      className="flex flex-col items-center gap-2"
-                    >
-                      <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all">
-                        <X className="w-6 h-6 text-white" />
-                      </div>
-                      <span className="text-[10px] text-white/70">挂断</span>
-                    </button>
+              {/* Connected Chat Area or Ringing screen */}
+              {callingStatus === "connected" ? (
+                <div className="flex-1 my-4 bg-white/5 rounded-[20px] p-3 flex flex-col overflow-hidden border border-white/5">
+                  <div className="text-[10px] text-white/30 mb-2 font-semibold">通话实时字幕</div>
+                  
+                  {/* Messages list inside the call */}
+                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-left scrollbar-thin">
+                    {currentChatMessages
+                      .filter(m => m.timestamp >= callStartTime)
+                      .map((msg) => {
+                        const isSelfMsg = msg.sender === "user";
+                        const isVoice = msg.content.startsWith("[语音]|");
+                        let contentToDisplay = msg.content;
+                        if (isVoice) {
+                          contentToDisplay = msg.content.split("|").slice(2).join("|") || "[语音]";
+                        }
+                        
+                        return (
+                          <div 
+                            key={msg.id} 
+                            className={`flex ${isSelfMsg ? "justify-end" : "justify-start"} animate-fade-in`}
+                          >
+                            <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
+                              isSelfMsg 
+                                ? "bg-emerald-600/80 text-white" 
+                                : "bg-white/10 text-white border border-white/5"
+                            }`}>
+                              {isVoice && <span className="mr-1">🎙️</span>}
+                              <span>{contentToDisplay}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
 
-                    {/* Accept (Simulate reply) */}
-                    <button
-                      onClick={() => {
-                        setCallingStatus("connected");
-                      }}
-                      className="flex flex-col items-center gap-2 animate-bounce"
-                    >
-                      <div className="w-14 h-14 bg-emerald-500 hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg transition-all">
-                        <Phone className="w-6 h-6 text-white" />
-                      </div>
-                      <span className="text-[10px] text-white/70">接听</span>
-                    </button>
+                  {/* Connected bottom inputs */}
+                  <div className="mt-2 border-t border-white/10 pt-3 space-y-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <input 
+                        type="text"
+                        value={callingInputText}
+                        onChange={(e) => setCallingInputText(e.target.value)}
+                        placeholder="在此输入文字，可转为文字或语音发送..."
+                        className="flex-1 bg-white/10 hover:bg-white/15 focus:bg-white/20 text-white placeholder-white/30 border border-white/10 rounded-[14px] px-3 py-2 text-xs outline-none transition-all"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && callingInputText.trim()) {
+                            const text = callingInputText.trim();
+                            const userMsg: Message = {
+                              id: Date.now().toString(),
+                              characterId: activeChatCharId,
+                              sender: "user",
+                              content: text,
+                              timestamp: Date.now(),
+                            };
+                            onSendMessage(userMsg);
+                            generateResponseForUserMessage(userMsg);
+                            setCallingInputText("");
+                          }
+                        }}
+                      />
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      {/* Hang up (red circular button) */}
+                      <button
+                        onClick={() => {
+                          const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
+                          const secs = (callingDuration % 60).toString().padStart(2, "0");
+                          sendCustomMessage(`[语音通话]|通话已结束 ${mins}:${secs}`);
+                          setActiveAttachModal(null);
+                        }}
+                        className="w-10 h-10 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 shrink-0"
+                        title="挂断"
+                      >
+                        <X className="w-5 h-5 text-white" />
+                      </button>
+                      
+                      {/* Button 1: 发送文字 */}
+                      <button
+                        onClick={() => {
+                          if (!callingInputText.trim()) return;
+                          const text = callingInputText.trim();
+                          const userMsg: Message = {
+                            id: Date.now().toString(),
+                            characterId: activeChatCharId,
+                            sender: "user",
+                            content: text,
+                            timestamp: Date.now(),
+                          };
+                          onSendMessage(userMsg);
+                          generateResponseForUserMessage(userMsg);
+                          setCallingInputText("");
+                        }}
+                        disabled={!callingInputText.trim()}
+                        className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold rounded-[14px] text-xs transition-all disabled:opacity-40"
+                      >
+                        发送文字
+                      </button>
+                      
+                      {/* Button 2: 发送语音 */}
+                      <button
+                        onClick={() => {
+                          if (!callingInputText.trim()) return;
+                          const text = callingInputText.trim();
+                          const secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
+                          const userMsg: Message = {
+                            id: Date.now().toString(),
+                            characterId: activeChatCharId,
+                            sender: "user",
+                            content: `[语音]|${secs}|${text}`,
+                            timestamp: Date.now(),
+                          };
+                          onSendMessage(userMsg);
+                          generateResponseForUserMessage(userMsg);
+                          setCallingInputText("");
+                        }}
+                        disabled={!callingInputText.trim()}
+                        className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-[14px] text-xs transition-all disabled:opacity-40 flex items-center justify-center gap-1"
+                      >
+                        <Mic className="w-3 h-3" />
+                        <span>发送语音</span>
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  <div className="flex justify-center">
-                    {/* Decline */}
-                    <button
-                      onClick={() => {
-                        const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
-                        const secs = (callingDuration % 60).toString().padStart(2, "0");
-                        sendCustomMessage(`[${callingType === "video" ? "视频通话" : "语音通话"}]|通话已结束 ${mins}:${secs}`);
-                        setActiveAttachModal(null);
-                      }}
-                      className="flex flex-col items-center gap-2"
-                    >
-                      <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all">
-                        <X className="w-6 h-6 text-white" />
-                      </div>
-                      <span className="text-[10px] text-white/70">挂断</span>
-                    </button>
+                </div>
+              ) : (
+                /* Ringing Screen middle spacer */
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="space-y-2">
+                    <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto border border-emerald-500/20 animate-ping absolute opacity-40" style={{ animationDuration: "2s" }} />
+                    <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto border border-emerald-500/30">
+                      <Phone className="w-6 h-6 text-emerald-400 animate-pulse" />
+                    </div>
                   </div>
-                )}
+                </div>
+              )}
+
+              {/* Ringing Action Controls */}
+              {callingStatus === "ringing" && (
+                <div className="space-y-12 mb-8 shrink-0">
+                  {isIncomingCall ? (
+                    <div className="flex justify-around items-center px-6">
+                      {/* Decline (Incoming Call) */}
+                      <button
+                        onClick={() => {
+                          sendCustomMessage(`[语音通话]|已拒绝`);
+                          setActiveAttachModal(null);
+                        }}
+                        className="flex flex-col items-center gap-2"
+                      >
+                        <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
+                          <X className="w-6 h-6 text-white" />
+                        </div>
+                        <span className="text-[10px] text-white/70">挂断</span>
+                      </button>
+
+                      {/* Accept (Incoming Call) */}
+                      <button
+                        onClick={() => {
+                          setCallingStatus("connected");
+                          setCallStartTime(Date.now());
+                        }}
+                        className="flex flex-col items-center gap-2"
+                      >
+                        <div className="w-14 h-14 bg-emerald-500 hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg transition-all animate-bounce active:scale-95">
+                          <Phone className="w-6 h-6 text-white" />
+                        </div>
+                        <span className="text-[10px] text-white/70">接听</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex justify-center">
+                      {/* Cancel (User Outgoing Call) */}
+                      <button
+                        onClick={() => {
+                          sendCustomMessage(`[语音通话]|已取消`);
+                          setActiveAttachModal(null);
+                        }}
+                        className="flex flex-col items-center gap-2"
+                      >
+                        <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
+                          <X className="w-6 h-6 text-white" />
+                        </div>
+                        <span className="text-[10px] text-white/70">取消</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Calling Direction Choose Modal */}
+          {showCallingDirectionModal && (
+            <div className="absolute inset-0 bg-black/60 z-50 flex items-end justify-center animate-fade-in" onClick={() => setShowCallingDirectionModal(false)}>
+              <div 
+                className="bg-white rounded-t-[28px] w-full max-w-md p-6 pb-8 space-y-4 animate-slide-up text-slate-800"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-xs font-black text-slate-400 uppercase tracking-wider">选择通话类型</span>
+                  <button 
+                    onClick={() => setShowCallingDirectionModal(false)}
+                    className="p-1 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {/* Option 1: Active Call */}
+                  <button
+                    onClick={() => {
+                      setIsIncomingCall(false);
+                      setCallingStatus("ringing");
+                      setActiveAttachModal("calling");
+                      setShowCallingDirectionModal(false);
+                    }}
+                    className="w-full p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 active:scale-99 transition-all text-left flex items-center gap-3 border border-slate-100"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
+                      <Phone className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800">拨打语音电话</h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5">向对方发起通话，等待对方接听（3秒后自动模拟接通）</p>
+                    </div>
+                  </button>
+
+                  {/* Option 2: Passive Incoming Call */}
+                  <button
+                    onClick={() => {
+                      setIsIncomingCall(true);
+                      setCallingStatus("ringing");
+                      setActiveAttachModal("calling");
+                      setShowCallingDirectionModal(false);
+                    }}
+                    className="w-full p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 active:scale-99 transition-all text-left flex items-center gap-3 border border-slate-100"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center shrink-0">
+                      <Phone className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800">模拟对方来电</h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5">立即产生一个对方拨打给你的来电，可选择接听或挂断</p>
+                    </div>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -8152,6 +8420,20 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 <span>翻译</span>
               </button>
             )}
+
+            {activeMenuMsg.content.startsWith("[语音]") && (
+              <button
+                onClick={() => {
+                  const msgId = activeMenuMsg.id;
+                  setVoiceTranscribed((prev) => ({ ...prev, [msgId]: !prev[msgId] }));
+                  setActiveMenuMsg(null);
+                }}
+                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-indigo-600 transition-colors"
+              >
+                <Languages className="w-3.5 h-3.5 text-indigo-500" />
+                <span>{voiceTranscribed[activeMenuMsg.id] ? "收起文字" : "语音转文字"}</span>
+              </button>
+            )}
           </motion.div>
         </div>
       )}
@@ -8312,7 +8594,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
       {/* Visual Toast Notification Overlay */}
       {toastMessage && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9999] bg-stone-900/90 text-white px-4 py-2 rounded-full text-xs font-semibold shadow-lg backdrop-blur-sm transition-all duration-300">
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9999] bg-white text-slate-800 border border-slate-200 px-5 py-3 rounded-2xl text-xs font-bold shadow-[0_10px_30px_rgba(0,0,0,0.15)] flex items-center justify-center text-center animate-scale-up max-w-[85%]">
           {toastMessage}
         </div>
       )}

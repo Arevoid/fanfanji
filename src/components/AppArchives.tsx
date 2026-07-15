@@ -725,21 +725,16 @@ export default function AppArchives({
             {/* MiniMax Voice ID Binding */}
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1.5">
               <label className="block text-xs font-semibold text-slate-500">
-                绑定 MiniMax 专属音色 (选填)
+                绑定 MiniMax 专属音色 ID (选填)
               </label>
               <div className="flex gap-2">
-                <select
+                <input
+                  type="text"
                   value={minimaxVoiceId}
                   onChange={(e) => setMinimaxVoiceId(e.target.value)}
+                  placeholder="请输入 MiniMax Voice ID"
                   className="flex-1 px-3 py-2 rounded-[8px] bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
-                >
-                  <option value="">未绑定语音 (不自动合成)</option>
-                  {MINIMAX_DEFAULT_VOICES.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-                </select>
+                />
                 <button
                   type="button"
                   disabled={!minimaxVoiceId}

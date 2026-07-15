@@ -108,30 +108,55 @@ async function fetchSingleTtsSegment(
   const pitch = options.pitch !== undefined ? options.pitch : 0;
   const model = options.model || "speech-2.8-hd";
 
-  // Use Custom Cloudflare Worker Proxy or Local backend proxy or direct URL
+  const isDirectCall = !!(options.forceDirectTts || (options.apiKey && options.groupId));
+  
   let url = "/api/minimax-tts";
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
-  if (options.proxyUrl && options.proxyUrl.trim() !== "") {
-    url = options.proxyUrl.trim();
-  } else if (options.forceDirectTts) {
-    // If testing or directly requested without backend, use direct MiniMax URL
-    url = `https://api.minimax.chat/v1/t2a_v2?GroupId=${options.groupId || ""}`;
-    headers["Authorization"] = `Bearer ${options.apiKey || ""}`;
-  }
+  let payload: any;
 
-  const payload = {
-    text,
-    apiKey: options.apiKey,
-    groupId: options.groupId,
-    model,
-    voiceId,
-    speed,
-    pitch,
-    vol,
-  };
+  if (isDirectCall) {
+    // Call MiniMax API directly as requested: "不需要用 worker 中转 API 密钥，直接填入就行"
+    const finalGroupId = (options.groupId || "").trim();
+    const finalApiKey = (options.apiKey || "").trim();
+    
+    url = `https://api.minimax.chat/v1/t2a_v2?GroupId=${finalGroupId}`;
+    headers["Authorization"] = `Bearer ${finalApiKey}`;
+    
+    payload = {
+      model,
+      text,
+      stream: false,
+      voice_setting: {
+        voice_id: voiceId,
+        speed: Number(speed),
+        vol: Number(vol),
+        pitch: Number(pitch),
+      },
+      audio_setting: {
+        sample_rate: 32000,
+        bitrate: 128000,
+        format: "mp3",
+      },
+    };
+  } else {
+    // Proxy through server
+    if (options.proxyUrl && options.proxyUrl.trim() !== "") {
+      url = options.proxyUrl.trim();
+    }
+    payload = {
+      text,
+      apiKey: options.apiKey,
+      groupId: options.groupId,
+      model,
+      voiceId,
+      speed,
+      pitch,
+      vol,
+    };
+  }
 
   const response = await fetch(url, {
     method: "POST",
@@ -144,8 +169,35 @@ async function fetchSingleTtsSegment(
     throw new Error(`MiniMax合成失败 (${response.status}): ${textErr}`);
   }
 
-  // The endpoint returns binary audio (audio/mpeg)
-  return await response.blob();
+  if (isDirectCall) {
+    const data = await response.json();
+    if (!data || !data.data || !data.data.audio) {
+      const errMsg = data?.base_resp?.status_msg || "未收到有效的语音合成数据";
+      throw new Error(`MiniMax合成失败: ${errMsg}`);
+    }
+
+    const audioHexOrBase64 = data.data.audio;
+    let audioBytes: Uint8Array;
+    const isHex = /^[0-9a-fA-F]+$/.test(audioHexOrBase64);
+    if (isHex) {
+      const len = audioHexOrBase64.length;
+      audioBytes = new Uint8Array(len / 2);
+      for (let i = 0; i < len; i += 2) {
+        audioBytes[i / 2] = parseInt(audioHexOrBase64.substring(i, i + 2), 16);
+      }
+    } else {
+      const binaryString = atob(audioHexOrBase64);
+      const len = binaryString.length;
+      audioBytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        audioBytes[i] = binaryString.charCodeAt(i);
+      }
+    }
+    return new Blob([audioBytes], { type: "audio/mpeg" });
+  } else {
+    // The proxy endpoint returns binary audio (audio/mpeg)
+    return await response.blob();
+  }
 }
 
 /**
