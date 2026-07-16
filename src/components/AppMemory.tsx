@@ -58,6 +58,7 @@ export default function AppMemory({
   const [editingItem, setEditingItem] = useState<MemoryItem | null>(null);
   const [showApiPoolModal, setShowApiPoolModal] = useState(false);
   const [showRecallModal, setShowRecallModal] = useState(false);
+  const [modalArchiveTemplateType, setModalArchiveTemplateType] = useState<"refined" | "delicate">("refined");
 
   // States for automatic summary settings
   const [selectedCharForAutoSummary, setSelectedCharForAutoSummary] = useState<string>("");
@@ -70,6 +71,7 @@ export default function AppMemory({
     if (char) {
       setModalEnableAutoSummary(char.enableAutoSummary === true); // Default to false
       setModalSummaryTriggerRound(char.summaryTriggerRound || 15); // Default to 15
+      setModalArchiveTemplateType(char.archiveTemplateType || "refined");
     }
   };
 
@@ -79,10 +81,12 @@ export default function AppMemory({
       setSelectedCharForAutoSummary(firstChar.id);
       setModalEnableAutoSummary(firstChar.enableAutoSummary === true);
       setModalSummaryTriggerRound(firstChar.summaryTriggerRound || 15);
+      setModalArchiveTemplateType(firstChar.archiveTemplateType || "refined");
     } else {
       setSelectedCharForAutoSummary("");
       setModalEnableAutoSummary(false);
       setModalSummaryTriggerRound(15);
+      setModalArchiveTemplateType("refined");
     }
     setShowRecallModal(true);
     setShowMenu(false);
@@ -780,6 +784,43 @@ export default function AppMemory({
                     </div>
                   )}
 
+                  {/* Archive Template Selection - stacked vertically */}
+                  <div className="space-y-2 border-t border-slate-100 pt-3.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
+                      长期归档精炼记忆模板
+                    </label>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setModalArchiveTemplateType("refined")}
+                        className={`w-full flex flex-col items-start p-3 rounded-[16px] border text-left transition-all ${
+                          modalArchiveTemplateType === "refined"
+                            ? "border-neutral-950 bg-neutral-950 text-white shadow-sm"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">精炼版 (低Token)</span>
+                        <span className={`text-[10px] mt-0.5 block ${modalArchiveTemplateType === "refined" ? "text-slate-300" : "text-slate-400"}`}>
+                          生成条理清晰的客观事件日志
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setModalArchiveTemplateType("delicate")}
+                        className={`w-full flex flex-col items-start p-3 rounded-[16px] border text-left transition-all ${
+                          modalArchiveTemplateType === "delicate"
+                            ? "border-neutral-950 bg-neutral-950 text-white shadow-sm"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">细腻版 (重情感)</span>
+                        <span className={`text-[10px] mt-0.5 block ${modalArchiveTemplateType === "delicate" ? "text-slate-300" : "text-slate-400"}`}>
+                          提炼第一人称的心境角色日记
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
                   <button
                     onClick={() => {
                       const char = characters.find(c => c.id === selectedCharForAutoSummary);
@@ -788,6 +829,7 @@ export default function AppMemory({
                           ...char,
                           enableAutoSummary: modalEnableAutoSummary,
                           summaryTriggerRound: modalSummaryTriggerRound,
+                          archiveTemplateType: modalArchiveTemplateType,
                         });
                       }
                       setShowRecallModal(false);
