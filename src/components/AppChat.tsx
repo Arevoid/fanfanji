@@ -2123,31 +2123,36 @@ ${formattedSchedules || "（暂无独处记录）"}`;
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
       if (activeCharacter.enableTimeAwareness !== false) {
         const now = new Date();
-        const timeStr = now.toLocaleString("zh-CN", { 
-          year: "numeric", 
-          month: "long", 
-          day: "numeric", 
-          hour: "2-digit", 
-          minute: "2-digit", 
-          second: "2-digit",
-          weekday: "long" 
-        });
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const day = now.getDate();
+        const hour = now.getHours();
+        const minute = now.getMinutes();
+        const second = now.getSeconds();
+        const weekday = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][now.getDay()];
+        const period = hour < 6 ? "凌晨" : hour < 12 ? "上午" : hour < 13 ? "中午" : hour < 18 ? "下午" : "晚上";
+        const hour12 = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+        const timeStr = `${year}年${month}月${day}日 ${weekday} ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} (24小时制, 当前是${period}${hour12}点${minute}分)`;
+
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
 以下是最近几条聊天消息的精确发送时间记录，请作为你判断时间流逝的客观依据：
 ${timeLogString}
 
-【重要时间感知规则】：
-1. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
+【重要时间感知与实时强一致规则】：
+1. 【实时时间强一致】：你当前作为扮演角色，所经历的时间、日常作息状态、问候语和对话背景，必须与上方的“当前现实物理世界的时间”完全保持强一致（包括具体的时段：凌晨、上午、中午、下午、晚上、深夜）。
+   - 你【绝对不可】无视或违背当前的物理时间！例如：当前物理时间是“下午 5点28分”，你绝不能在对话中对用户说“快十二点了”或“晚安，我要睡了”等完全不符合当前下午时段的话！
+   - 【如果用户发出的对话内容与当前物理时间相矛盾】（例如当前是下午或傍晚，用户却说“睡不着/失眠了/晚安”等深夜话题），你作为智商正常的真人微信好友，应该感到疑惑并直接调侃、询问对方（如：“这才下午五点多，你怎么就睡不着了？”或“大下午的，你怎么就要睡啦？”），绝对不能顺着用户的深夜设定假装现在已经是深夜或跨越到其他时间！你必须坚守和清醒地认识到当前就是下午！
+2. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
    - 对比任何两条消息时，必须同时校验：年、月、日、时、分，不能只对比时分。
    - 两条消息不在同一天（跨天了）：必须判定为“长时间间隔”，视作很久以前的消息，你绝对不能说“刚才给你发了/刚发过”！
    - 两条消息同一天、间隔小于 5 分钟：判定为近期/短时间连续。
    - 两条消息同一天、间隔超过 5 分钟：判定为有一段时间没发（不属于短时间连续）。
    - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”！
    - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
-2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
-3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
+3. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
+4. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
       }
 
       // Calculate character voice interval constraints to inject into instructions
@@ -3055,27 +3060,32 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // 1.5 Time awareness prompt if enabled
       if (activeCharacter.enableTimeAwareness !== false) {
         const now = new Date();
-        const timeStr = now.toLocaleString("zh-CN", { 
-          year: "numeric", 
-          month: "long", 
-          day: "numeric", 
-          hour: "2-digit", 
-          minute: "2-digit", 
-          second: "2-digit",
-          weekday: "long" 
-        });
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const day = now.getDate();
+        const hour = now.getHours();
+        const minute = now.getMinutes();
+        const second = now.getSeconds();
+        const weekday = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][now.getDay()];
+        const period = hour < 6 ? "凌晨" : hour < 12 ? "上午" : hour < 13 ? "中午" : hour < 18 ? "下午" : "晚上";
+        const hour12 = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+        const timeStr = `${year}年${month}月${day}日 ${weekday} ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} (24小时制, 当前是${period}${hour12}点${minute}分)`;
+
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
 以下是最近几条聊天消息的精确发送时间记录，请作为你判断时间流逝的客观依据：
 ${timeLogString}
 
-【重要时间感知规则】：
-1. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
+【重要时间感知与实时强一致规则】：
+1. 【实时时间强一致】：你当前作为扮演角色，所经历的时间、日常作息状态、问候语和对话背景，必须与上方的“当前现实物理世界的时间”完全保持强一致（包括具体的时段：凌晨、上午、中午、下午、晚上、深夜）。
+   - 你【绝对不可】无视或违背当前的物理时间！例如：当前物理时间是“下午 5点28分”，你绝不能在对话中对用户说“快十二点了”或“晚安，我要睡了”等完全不符合当前下午时段的话！
+   - 【如果用户发出的对话内容与当前物理时间相矛盾】（例如当前是下午或傍晚，用户却说“睡不着/失眠了/晚安”等深夜话题），你作为智商正常的真人微信好友，应该感到疑惑并直接调侃、询问对方（如：“这才下午五点多，你怎么就睡不着了？”或“大下午的，你怎么就要睡啦？”），绝对不能顺着用户的深夜设定假装现在已经是深夜或跨越到其他时间！你必须坚守 and 清醒地认识到当前就是下午！
+2. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
    - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”！
    - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
-2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
-3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
+3. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
+4. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
       }
 
       // 2. After Main Prompt entries
@@ -4702,7 +4712,7 @@ ${previousMomentsText}
                   setDraftArchiveTemplateType(activeCharacter.archiveTemplateType || "refined");
                   setDraftAutoArchiveInterval(activeCharacter.autoArchiveInterval || 50);
                   setDraftEnableAutoArchive(activeCharacter.enableAutoArchive !== undefined ? activeCharacter.enableAutoArchive : (activeCharacter.enableAutoSummary || false));
-                  setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness || false);
+                  setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness !== false);
                   setDraftEnableAutoTranslate(activeCharacter.enableAutoTranslate || false);
                   setDraftEnableProactiveMoments(activeCharacter.enableProactiveMoments || false);
                   setDraftMinimaxVoiceId(activeCharacter.minimaxVoiceId || "");
