@@ -521,13 +521,8 @@ export default function App() {
 
     // Auto-scroll input to center when focused to make sure it is fully visible above keyboard
     const handleFocusIn = (e: FocusEvent) => {
-      if (window.innerWidth >= 768) return;
-      const target = e.target as HTMLElement;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.getAttribute("contenteditable") === "true")) {
-        setTimeout(() => {
-          target.scrollIntoView({ block: "center", behavior: "smooth" });
-        }, 150);
-      }
+      // Disabled to prevent browser from scrolling the layout viewport out of view.
+      // Since container height is visualViewportHeight, the input is naturally positioned above the keyboard.
     };
 
     window.visualViewport.addEventListener("resize", handleViewportChange);
@@ -905,7 +900,8 @@ export default function App() {
         return;
       }
 
-      const charMsgs = messages.filter(m => m.characterId === characterId);
+      const retrievalLimit = char.retrievalHistoryLimit || 100;
+      const charMsgs = messages.filter(m => m.characterId === characterId).slice(-retrievalLimit);
       if (charMsgs.length === 0) {
         setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "暂无与该角色的聊天记录，无法进行总结" }));
         return;
@@ -926,6 +922,7 @@ export default function App() {
           ? (settings.selectedModel || "gemini-3.5-flash")
           : recallSettings.extractModel,
         apiEndpoint: settings.apiEndpoint,
+        templateType: char.archiveTemplateType,
       });
 
       if (data && data.items && Array.isArray(data.items)) {
@@ -937,7 +934,9 @@ export default function App() {
         if (validItems.length > 0) {
           // Format as requested: "总结格式，设置的轮数，总结为一条，多项内容前面加-号然后换行下一项内容"
           const bulletPoints = validItems.map((item: string) => `- ${item}`).join("\n");
-          const singleSummaryContent = `【最近 ${rounds} 轮对话总结】\n${bulletPoints}`;
+          const isDelicate = char.archiveTemplateType === "delicate";
+          const headerLabel = isDelicate ? `【心境日记一键归档 (细腻版 - 最近 ${rounds} 轮)】` : `【精炼事件日志一键归档 (精炼版 - 最近 ${rounds} 轮)】`;
+          const singleSummaryContent = `${headerLabel}\n${bulletPoints}`;
 
           const isDup = memories.some(
             (m) =>
@@ -1959,11 +1958,11 @@ export default function App() {
     <div
       className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
       style={{
-        position: (typeof window !== "undefined" && window.innerWidth < 768) ? "fixed" : "relative",
+        position: (typeof window !== "undefined" && window.innerWidth < 768) ? "absolute" : "relative",
         top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvTop}px` : undefined,
         left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvLeft}px` : undefined,
         width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvWidth}px` : "100%",
-        height: (typeof window !== "undefined" && window.innerWidth < 768) ? (isMobileKeyboardActive ? `${visualViewportHeight}px` : "100dvh") : "100vh",
+        height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : "100vh",
       }}
     >
       

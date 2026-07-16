@@ -361,6 +361,7 @@ export async function apiExtractMemories(params: {
   apiKey: string;
   model: string;
   apiEndpoint?: string;
+  templateType?: "refined" | "delicate";
 }): Promise<{ text: string; items: string[] }> {
   try {
     const res = await fetch("/api/extract-memories", {
@@ -382,15 +383,28 @@ export async function apiExtractMemories(params: {
         .map((h: any) => `${h.role === "user" ? "用户" : params.characterName}: ${h.text || h.content}`)
         .join("\n");
 
-      const prompt = `你是一个高超的记忆提取和整理助手。你的任务是从角色“${params.characterName}”与用户的对话历史中，提取出值得长期记住的事情。
-请阅读下面的对话记录，并将其拆解提取为多条【独立、简短、核心】的记忆条目。
+      let prompt = "";
+      if (params.templateType === "delicate") {
+        prompt = `你现在是“${params.characterName}”，请以第一人称（我）的心境和视角，阅读你与用户的对话历史，写下符合你人设、带有丰富情感色彩和代入感的心境日记（细腻版）。
+
+【对话记录】：
+${historyText}
+
+【提取与整理要求】：
+1. 记录你对用户的真实心理活动、情感变化、细微的触动或私密日记。
+2. 用第一人称（我）写，文字要富有沉浸感、细腻生动、具有你原本性格特质的口吻。例如：“今天听说他工作很累，我心里有些说不出的心疼，真想立刻飞过去抱抱他，叮嘱他多喝点热水。下次一定要亲自给他买杯咖啡。”
+3. 丢弃无意义闲聊，每一次提取最多生成 3 条心境日记/随笔，每条 30-80 字左右，展现出你内心的温存或波动。
+4. 请直接输出每一条日记，每行一条，以星号 * 开头。不要加任何多余的说明、字数统计或 markdown 格式。`;
+      } else {
+        prompt = `你是一个高超的记忆提取和整理助手。你的任务是从角色“${params.characterName}”与用户的对话历史中，提取出值得长期记住的事情。
+请阅读下面的对话记录，并将其拆解提取为多条【独立、简短、核心】的事件日志（精炼版）。
 
 【对话记录】：
 ${historyText}
 
 【提取与整理要求】：
 1. 提取出双方透露的核心事实、兴趣爱好、重要约定、对彼此的态度或关系进展。
-2. 每一条记忆必须是独立的、简短的一句话，不要包含口头禅或修饰词，语言精炼，概括性强。
+2. 每一条记忆必须是独立的、简短的一句话，不要包含口头禅或修饰词，语言精炼，概括性强，极低 token 消耗。
 3. 保持第三人称客观描述。例如：
    * 用户喜欢喝热美式，${params.characterName}承诺下次做设计图时会帮其带咖啡。
    * 两人约定周末一起散步。
@@ -398,6 +412,7 @@ ${historyText}
 4. 丢弃一切无意义的闲聊、问候和没有长远价值的信息。
 5. 每次提取最多生成 5 条最核心的记忆，最少生成 1 条（如果没有核心信息则不用生成任何条目）。
 6. 请直接输出每一条记忆，每行一条，以星号 * 开头。不要有任何多余的寒暄、解释或 markdown 格式，也不要加标题。`;
+      }
 
       let targetModel = params.model;
       if (params.apiEndpoint && params.apiEndpoint.trim()) {
@@ -555,4 +570,13 @@ ${params.text}
       throw new Error(fallbackErr.message || "直连翻译失败");
     }
   }
+}
+
+// Estimates the prompt token size in client-side real-time preview
+export function estimateTokenCount(text: string): number {
+  if (!text) return 0;
+  // Estimate: Chinese character is ~1.5 to 2 tokens. English word is ~1.3 tokens.
+  const chineseChars = text.match(/[\u4e00-\u9fa5]/g)?.length || 0;
+  const remaining = text.length - chineseChars;
+  return Math.round(chineseChars * 1.5 + remaining * 0.4);
 }

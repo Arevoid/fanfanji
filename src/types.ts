@@ -35,6 +35,11 @@ export interface Character {
   lastImmediateSummaryMsgId?: string;
   disableBracketActions?: boolean;
   historyMemoryLimit?: number;
+  contextMemoryLimit?: number; // 10~50, default 20
+  retrievalHistoryLimit?: number; // 10~200, default 100
+  archiveTemplateType?: "refined" | "delicate"; // "refined" (event log) | "delicate" (first person diary)
+  autoArchiveInterval?: number; // 10~100, default 50 rounds
+  enableAutoArchive?: boolean;
   enableTimeAwareness?: boolean;
   isGroupChat?: boolean;
   memberIds?: string[];

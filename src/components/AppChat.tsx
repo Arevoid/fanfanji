@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
+import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup } from "../types";
 import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles, compressImage } from "../utils/pngParser";
@@ -53,7 +53,8 @@ import {
   CreditCard,
   Play,
   Pause,
-  Loader2
+  Loader2,
+  Database
 } from "lucide-react";
 
 import { getSpeechForText, MINIMAX_DEFAULT_VOICES } from "../utils/minimaxTts";
@@ -486,30 +487,20 @@ export default function AppChat({
 
   // Serial Playback Queue Manager
   const playNextMessageInQueue = (currentId: string) => {
-    const activeChatMsgs = messages.filter(
-      (m) => m.characterId === activeChatCharId && !m.isOffline
-    );
-    const currentIndex = activeChatMsgs.findIndex(m => m.id === currentId);
-    if (currentIndex === -1 || currentIndex >= activeChatMsgs.length - 1) {
-      setPlayingMessageId(null);
-      setActiveTtsAudio(null);
-      return;
-    }
-
-    for (let i = currentIndex + 1; i < activeChatMsgs.length; i++) {
-      const nextMsg = activeChatMsgs[i];
-      if (nextMsg.content && !nextMsg.content.startsWith("[红包]") && !nextMsg.content.startsWith("[系统]")) {
-        triggerMessageSpeech(nextMsg);
-        return;
-      }
-    }
-
+    // Cancel consecutive/chained auto-playback completely
     setPlayingMessageId(null);
     setActiveTtsAudio(null);
   };
 
   // TTS Trigger Speech Function
   const triggerMessageSpeech = async (msg: Message) => {
+    // Guard: Prevent non-voice messages from being synthesized/played in standard chat layout
+    const isVoice = msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage);
+    if (!isOfflineModeActive && !isVoice) {
+      console.warn("Speech synthesis blocked: Message is not a voice message in chat layout");
+      return;
+    }
+
     if (playingMessageId === msg.id) {
       if (activeTtsAudio) {
         try {
@@ -717,12 +708,15 @@ export default function AppChat({
 
     onSendMessageRaw(msg);
 
-    // Auto-play the synthetic voice for incoming character voice messages if general switch is enabled
+    // Auto-play the synthetic voice for incoming character voice messages has been disabled per user request
+    // (requires user to manually click the voice bubble to play)
+    /*
     if (msg.sender === "character" && msg.content && msg.content.startsWith("[语音") && settings.enableMiniMaxTts) {
       setTimeout(() => {
         triggerMessageSpeech(msg);
       }, 500);
     }
+    */
   };
 
   // Sticker groups state
@@ -1082,6 +1076,11 @@ export default function AppChat({
   const [draftProactiveEndTime, setDraftProactiveEndTime] = useState("22:00");
   const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
   const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
+  const [draftContextMemoryLimit, setDraftContextMemoryLimit] = useState(20);
+  const [draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit] = useState(100);
+  const [draftArchiveTemplateType, setDraftArchiveTemplateType] = useState<"refined" | "delicate">("refined");
+  const [draftAutoArchiveInterval, setDraftAutoArchiveInterval] = useState(50);
+  const [draftEnableAutoArchive, setDraftEnableAutoArchive] = useState(false);
   const [draftEnableTimeAwareness, setDraftEnableTimeAwareness] = useState(false);
   const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
   const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
@@ -1113,6 +1112,45 @@ export default function AppChat({
     timestamp: number;
   } | null>(null);
   const [isOpeningRedPacket, setIsOpeningRedPacket] = useState<boolean>(false);
+  const [isManualArchiving, setIsManualArchiving] = useState<boolean>(false);
+
+  const estimatedTokens = React.useMemo(() => {
+    if (!activeCharacter) return { total: 0, context: 0, retrieval: 0, persona: 0 };
+    // 1. System instructions & prompt rules
+    const sysInstructionsLength = 1200;
+    
+    // 2. Persona definition
+    const personaLength = (activeCharacter.name || "").length + 
+                          (activeCharacter.backstory || "").length + 
+                          (activeCharacter.personality || "").length +
+                          (activeCharacter.compressedMemory || "").length;
+    
+    // 3. Short term context (using current settings draft state for real-time update!)
+    const slicedMsgsForPreview = currentChatMessages.slice(-draftContextMemoryLimit);
+    const historyTextLength = slicedMsgsForPreview.reduce((sum, m) => sum + m.content.length, 0);
+    
+    // 4. Memory Vault items
+    const activeMemories = (memories || []).filter(m => m.characterId === activeCharacter.id);
+    const topK = recallSettings?.recallCount || 5;
+    const memoryCount = Math.min(topK, activeMemories.length);
+    const memoryLength = activeMemories.slice(0, memoryCount).reduce((sum, m) => sum + m.content.length, 0);
+    
+    // Total character length
+    const totalChars = sysInstructionsLength + personaLength + historyTextLength + memoryLength;
+    
+    // Convert to estimate
+    const rawText = (activeCharacter.backstory || "") + (activeCharacter.personality || "");
+    const chineseCharsCount = rawText.match(/[\u4e00-\u9fa5]/g)?.length || 0;
+    const remainingCount = totalChars - chineseCharsCount;
+    const tokenEstimate = Math.round(chineseCharsCount * 1.6 + remainingCount * 0.5);
+    
+    return {
+      total: Math.max(250, tokenEstimate),
+      context: Math.round(historyTextLength * 1.6),
+      retrieval: Math.round(memoryLength * 1.6),
+      persona: Math.round(personaLength * 1.6)
+    };
+  }, [draftContextMemoryLimit, activeCharacter, currentChatMessages, memories, recallSettings]);
   const [redPacketStatuses, setRedPacketStatuses] = useState<Record<string, "claimed" | "expired" | "refunded">>((() => {
     try {
       const stored = localStorage.getItem("wechat_redpacket_statuses");
@@ -1522,8 +1560,8 @@ export default function AppChat({
       });
       const finalMsgs = Array.from(uniqueMsgsMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 
-      // Limit history
-      const limit = activeCharacter.historyMemoryLimit || 150;
+      // Short-term real-time context limit: contextMemoryLimit (range 10~50, default 20), capped globally at 50
+      const limit = Math.min(50, activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20);
       const slicedMsgs = finalMsgs.slice(-limit);
 
       // Create a readable history for the AI, showing the user's name or character names as senders
@@ -1876,8 +1914,8 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
       });
       const finalMsgs = Array.from(uniqueMsgsMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 
-      // Limit history to active character's historyMemoryLimit (default 150 messages / 75 turns)
-      const limit = activeCharacter.historyMemoryLimit || 150;
+      // Short-term real-time context limit: contextMemoryLimit (range 10~50, default 20), capped globally at 50
+      const limit = Math.min(50, activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20);
       
       // If userMsg is provided and is the last message in finalMsgs, exclude it from history because it will be passed as the separate 'message' parameter.
       const msgsForHistory = (userMsg && finalMsgs.length > 0 && finalMsgs[finalMsgs.length - 1].id === userMsg.id)
@@ -1901,18 +1939,38 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
       let timeLogString = "";
       if (activeCharacter.enableTimeAwareness !== false) {
-        timeLogString = slicedMsgs.map((m) => {
-          const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
-            month: "long",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false
-          });
+        const timeLogLines: string[] = [];
+        let lastDayStr = "";
+        
+        slicedMsgs.forEach((m) => {
+          const date = new Date(m.timestamp);
+          const y = date.getFullYear();
+          const mo = (date.getMonth() + 1).toString().padStart(2, '0');
+          const d = date.getDate().toString().padStart(2, '0');
+          const dayStr = `${y}-${mo}-${d}`;
+          
+          if (dayStr !== lastDayStr) {
+            const wechatLabel = formatWeChatTimestamp(m.timestamp);
+            timeLogLines.push(`\n=== 居中分割时间标签: 【${wechatLabel}】 ===`);
+            lastDayStr = dayStr;
+          }
+          
+          const fullTimeStr = `${y}-${mo}-${d} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
           const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
-          const snippet = m.content.length > 20 ? m.content.slice(0, 20) + "..." : m.content;
-          return `- ${senderName}: "${snippet}" (发送于: ${timeStr})`;
-        }).join("\n");
+          let contentSnippet = m.content;
+          if (contentSnippet.startsWith("[语音]|")) {
+            const parts = contentSnippet.split("|");
+            const secs = parts[1] || "5";
+            const voiceText = parts.slice(2).join("|") || "";
+            contentSnippet = voiceText ? `[语音消息: "${voiceText}" (${secs}秒)]` : `[语音消息: ${secs}秒]`;
+          } else if (contentSnippet.length > 25) {
+            contentSnippet = contentSnippet.slice(0, 25) + "...";
+          }
+          
+          timeLogLines.push(`- ${senderName}: "${contentSnippet}" (发送于: ${fullTimeStr})`);
+        });
+        
+        timeLogString = timeLogLines.join("\n");
       }
 
       // Construct system instructions based on multi-block SillyTavern positioning rules
@@ -1952,15 +2010,19 @@ ${activeCharacter.disableBracketActions
 - Personality & Behavior: ${activeCharacter.personality}
 - Background Story: ${activeCharacter.backstory}`;
 
+      charDefText += `\n\n[🚨 记忆与上下文关联优先级规则]:
+1. 归档精炼总结优先：以下“先前背景与归档总结”及“召回深度记忆”为历史最高优先级真实记忆，你必须绝对优先根据它们来保持角色认同、长久羁绊和态度。
+2. 历史检索及短期上下文：你的短期上下文聊天记录已按照用户的限制进行了智能截断，以节省 Token 开销。请勿认为你忘记了先前对话，一切先前细节请完全基于归档精炼总结中包含的信息。`;
+
       if (activeCharacter.compressedMemory) {
-        charDefText += `\n- Previous Background: ${activeCharacter.compressedMemory}`;
+        charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeCharacter.compressedMemory}`;
       }
 
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", userMsg ? userMsg.content : "", topK);
       if (relevantMemories.length > 0) {
-        charDefText += `\n- Reclaimed Memories from previous conversations (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+        charDefText += `\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
       }
 
       const userProfileText = `User Profile (interacting with you):
@@ -2022,11 +2084,69 @@ ${timeLogString}
 
 【重要时间感知规则】：
 1. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
+   - 对比任何两条消息时，必须同时校验：年、月、日、时、分，不能只对比时分。
+   - 两条消息不在同一天（跨天了）：必须判定为“长时间间隔”，视作很久以前的消息，你绝对不能说“刚才给你发了/刚发过”！
+   - 两条消息同一天、间隔小于 5 分钟：判定为近期/短时间连续。
+   - 两条消息同一天、间隔超过 5 分钟：判定为有一段时间没发（不属于短时间连续）。
    - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”！
    - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
 2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
 3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
       }
+
+      // Calculate character voice interval constraints to inject into instructions
+      let voiceIntervalPrompt = "";
+      const lastCharVoiceMsg = [...slicedMsgs]
+        .reverse()
+        .find(m => m.sender === "character" && (m.content.startsWith("[语音]") || m.isVoiceMessage));
+
+      if (lastCharVoiceMsg) {
+        const nowMs = Date.now();
+        const lastVoiceMs = lastCharVoiceMsg.timestamp;
+        const lastVoiceDate = new Date(lastVoiceMs);
+        const nowDate = new Date(nowMs);
+        
+        const isSameDay = lastVoiceDate.getFullYear() === nowDate.getFullYear() &&
+                          lastVoiceDate.getMonth() === nowDate.getMonth() &&
+                          lastVoiceDate.getDate() === nowDate.getDate();
+        
+        const diffMinutes = (nowMs - lastVoiceMs) / (60 * 1000);
+        
+        let voiceIntervalLabel = "";
+        let isLastVoiceOld = false;
+        
+        if (!isSameDay) {
+          voiceIntervalLabel = "上一条语音消息是昨天或更早以前发送的（跨天长间隔，很久以前的消息）。";
+          isLastVoiceOld = true;
+        } else if (diffMinutes < 5) {
+          voiceIntervalLabel = `上一条语音消息是在同一天内发送的，并且仅间隔了 ${Math.round(diffMinutes)} 分钟（同一天、间隔小于 5 分钟，判定为近期/短时间内连续）。`;
+          isLastVoiceOld = false;
+        } else {
+          voiceIntervalLabel = `上一条语音消息是在同一天内发送的，但已间隔了 ${Math.round(diffMinutes)} 分钟（同一天、间隔超过 5 分钟，判定为有一段时间没发）。`;
+          isLastVoiceOld = true;
+        }
+
+        const lastVoiceTextPart = lastCharVoiceMsg.content.startsWith("[语音]|")
+          ? lastCharVoiceMsg.content.split("|").slice(2).join("|")
+          : lastCharVoiceMsg.content;
+
+        voiceIntervalPrompt = `[🚨 语音发送间隔及剧情记忆规则]
+- 你（${activeCharacter.name}）上一次给用户发语音消息是在: ${new Date(lastVoiceMs).toLocaleString("zh-CN", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+- 上一条语音消息的内容是: "${lastVoiceTextPart.length > 30 ? lastVoiceTextPart.slice(0, 30) + "..." : lastVoiceTextPart}"
+- **当前计算的时间关系**: ${voiceIntervalLabel}
+
+【AI 剧情记忆判定及语音回复行为规则（最高执行优先级）】:
+${isLastVoiceOld 
+  ? `1. 【跨天长间隔/长间隔判定】: 由于你上一条语音是昨天或更早日期（或同一天超过5分钟前）发送的，属于长时间间隔，视作很久以前。用户今天再次索要语音时，你【绝对不能】以“刚发过一条”、“怎么又想要”、“刚刚才发过”等理由回绝或推脱！如果想要表现迟疑，只能是因为害羞、当前场合不便等性格特征，决不能说“刚发过/刚刚才发过”！请自然正常地配合发送语音。`
+  : `1. 【同一天短时间连续索要】: 由于你上一条语音和当前时间在【同一天且间隔小于 5 分钟】。此时，判定为短时间内连续索要语音，你才可以自然、娇嗔或傲娇地说出“刚给你发过一条语音”、“不是刚发过一条吗”这类台词来傲娇拒绝或调侃。`
+}
+2. 聊天历史中带有“居中分割时间标签”的分割条是视觉上的日期和时间断层标识，请通过它们辅助区分跨天长间隔。`;
+      } else {
+        voiceIntervalPrompt = `[🚨 语音发送间隔及剧情记忆规则]
+- 你（${activeCharacter.name}）在当前的历史聊天中还没有给用户发送过语音消息。
+- 当用户向你索要语音时，请极其自然、温柔或傲娇地配合（或者因害羞、场合不便等原因迟疑，但绝对不能说“刚给你发过”等自相矛盾的话）。`;
+      }
+      assembledInstructions.push(voiceIntervalPrompt);
 
       // 2. After Main Prompt entries
       if (wbBlocks.after_main_prompt.length > 0) {
@@ -2772,8 +2892,8 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     setIsTyping(true);
 
     try {
-      // Limit history to active character's historyMemoryLimit (default 150 messages / 75 turns)
-      const limit = activeCharacter.historyMemoryLimit || 150;
+      // Short-term real-time context limit: contextMemoryLimit (range 10~50, default 20), capped globally at 50
+      const limit = Math.min(50, activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20);
       
       // Exclude lastUserMsg from the history parameter since it is sent as the main message parameter.
       const msgsForHistory = previousMessages.filter(m => m.id !== lastUserMsg.id);
@@ -2829,8 +2949,12 @@ ${activeCharacter.disableBracketActions
 - Personality & Behavior: ${activeCharacter.personality}
 - Background Story: ${activeCharacter.backstory}`;
 
+      charDefText += `\n\n[🚨 记忆与上下文关联优先级规则]:
+1. 归档精炼总结优先：以下“先前背景与归档总结”及“召回深度记忆”为历史最高优先级真实记忆，你必须绝对优先根据它们来保持角色认同、长久羁绊和态度。
+2. 历史检索及短期上下文：你的短期上下文聊天记录已按照用户的限制进行了智能截断，以节省 Token 开销。请勿认为你忘记了先前对话，一切先前细节请完全基于归档精炼总结中包含的信息。`;
+
       if (activeCharacter.compressedMemory) {
-        charDefText += `\n- Previous Background: ${activeCharacter.compressedMemory}`;
+        charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeCharacter.compressedMemory}`;
       }
 
       // Add OOC comment correction as high priority instruction
@@ -2843,7 +2967,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", lastUserMsg.content, topK);
       if (relevantMemories.length > 0) {
-        charDefText += `\n- Reclaimed Memories:\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+        charDefText += `\n- Reclaimed Memories / 召回深度记忆:\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
       }
 
       const userProfileText = `User Profile:
@@ -3043,6 +3167,13 @@ ${stickerListStr}
         scheduledProactiveTime: nextScheduledTime,
         disableBracketActions: draftDisableBracketActions,
         historyMemoryLimit: draftHistoryMemoryLimit,
+        contextMemoryLimit: draftContextMemoryLimit,
+        retrievalHistoryLimit: draftRetrievalHistoryLimit,
+        archiveTemplateType: draftArchiveTemplateType,
+        autoArchiveInterval: draftAutoArchiveInterval,
+        enableAutoArchive: draftEnableAutoArchive,
+        enableAutoSummary: draftEnableAutoArchive, // synced with enableAutoArchive
+        summaryTriggerRound: draftAutoArchiveInterval, // synced with autoArchiveInterval
         enableTimeAwareness: draftEnableTimeAwareness,
         enableAutoTranslate: draftEnableAutoTranslate,
         minimaxVoiceId: draftMinimaxVoiceId.trim() || undefined,
@@ -3166,7 +3297,8 @@ ${stickerListStr}
 
     setIsCompressingMemory(true);
     try {
-      const messagesToCompress = manualMessagesOverride || currentChatMessages;
+      const limitToSearch = activeCharacter.retrievalHistoryLimit || 100;
+      const messagesToCompress = (manualMessagesOverride || currentChatMessages).slice(-limitToSearch);
       if (messagesToCompress.length === 0) {
         return 0;
       }
@@ -3184,6 +3316,7 @@ ${stickerListStr}
           ? (settings.selectedModel || "gemini-3.5-flash")
           : recallSettings.extractModel,
         apiEndpoint: settings.apiEndpoint,
+        templateType: activeCharacter.archiveTemplateType,
       });
 
       if (data && data.items && Array.isArray(data.items)) {
@@ -3193,7 +3326,9 @@ ${stickerListStr}
 
         if (validItems.length > 0) {
           const bulletPoints = validItems.map((item: string) => `- ${item}`).join("\n");
-          const singleSummaryContent = `【自动对话记忆总结】\n${bulletPoints}`;
+          const isDelicate = activeCharacter.archiveTemplateType === "delicate";
+          const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
+          const singleSummaryContent = `${headerLabel}\n${bulletPoints}`;
 
           const isDup = (memories || []).some(
             (m) =>
@@ -3717,8 +3852,19 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
         onAddMoment(newMo);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
+      const errMsgStr = err?.message || String(err);
+      const isAuthError = errMsgStr.toLowerCase().includes("401") ||
+                          errMsgStr.toLowerCase().includes("api_key") ||
+                          errMsgStr.toLowerCase().includes("key") ||
+                          errMsgStr.toLowerCase().includes("invalid") ||
+                          errMsgStr.toLowerCase().includes("authentication fails");
+      if (isAuthError) {
+        showToast(`⚠️ [动态生成失败] 「${friend.name}」发布朋友圈时 API 验证失败，请在设置中检查您的 API Key 是否正确。`);
+      } else {
+        showToast(`⚠️ [动态生成失败] 「${friend.name}」：${errMsgStr}`);
+      }
     }
   };
 
@@ -4380,6 +4526,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftProactiveEndTime(activeCharacter.proactiveEndTime || "22:00");
                   setDraftDisableBracketActions(activeCharacter.disableBracketActions || false);
                   setDraftHistoryMemoryLimit(activeCharacter.historyMemoryLimit || 150);
+                  setDraftContextMemoryLimit(activeCharacter.contextMemoryLimit || 20);
+                  setDraftRetrievalHistoryLimit(activeCharacter.retrievalHistoryLimit || 100);
+                  setDraftArchiveTemplateType(activeCharacter.archiveTemplateType || "refined");
+                  setDraftAutoArchiveInterval(activeCharacter.autoArchiveInterval || 50);
+                  setDraftEnableAutoArchive(activeCharacter.enableAutoArchive !== undefined ? activeCharacter.enableAutoArchive : (activeCharacter.enableAutoSummary || false));
                   setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness || false);
                   setDraftEnableAutoTranslate(activeCharacter.enableAutoTranslate || false);
                   setDraftMinimaxVoiceId(activeCharacter.minimaxVoiceId || "");
@@ -4682,32 +4833,218 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       )}
                     </div>
 
-                    {/* History Memory Limit Customizer */}
-                    <div className="py-3.5 space-y-2.5 border-t border-slate-100">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <span className="text-[#52525b] font-bold text-xs block">历史记忆（携带对话轮数）</span>
-                          <span className="text-[10px] text-slate-400 block">设置发送至 AI 的最近消息条数限制</span>
-                        </div>
-                        <span className="text-xs font-bold text-slate-700 font-mono">
-                          {draftHistoryMemoryLimit} 条 / {Math.round(draftHistoryMemoryLimit / 2)} 轮
-                        </span>
+                     {/* Three-Layer Memory Optimization System Panel */}
+                    <div className="py-4 space-y-4 border-t border-slate-100">
+                      <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
+                        <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse" />
+                        <span className="text-[#3f3f46] font-bold text-sm">三层记忆隔离与优化配置</span>
                       </div>
-                      <input
-                        type="range"
-                        min={50}
-                        max={1000}
-                        step={50}
-                        value={draftHistoryMemoryLimit}
-                        onChange={(e) => setDraftHistoryMemoryLimit(parseInt(e.target.value))}
-                        className="w-full accent-neutral-950 h-1 bg-slate-100 rounded-[16px] appearance-none cursor-pointer"
-                      />
-                      <div className="flex justify-between text-[9px] text-slate-400 font-mono">
-                        <span>50条</span>
-                        <span>250条</span>
-                        <span>500条</span>
-                        <span>750条</span>
-                        <span>1000条</span>
+
+                      {/* Token Preview Badge Container */}
+                      <div className="bg-gradient-to-br from-indigo-50/60 to-purple-50/40 border border-indigo-100/40 p-3 rounded-[16px] space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-indigo-950 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
+                            🎯 单次 Prompt 预估消耗预览
+                          </span>
+                          <span className="text-xs font-black text-indigo-700 font-mono bg-indigo-100/50 px-2 py-0.5 rounded-full">
+                            ~{estimatedTokens.total} Tokens
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5 text-[9px] text-indigo-900/70 font-semibold font-mono">
+                          <div className="bg-white/60 p-1.5 rounded-[8px] border border-indigo-100/10">
+                            <span className="block text-indigo-500/80 text-[8px]">短期上下文</span>
+                            <span>~{estimatedTokens.context} t</span>
+                          </div>
+                          <div className="bg-white/60 p-1.5 rounded-[8px] border border-indigo-100/10">
+                            <span className="block text-indigo-500/80 text-[8px]">深度记忆库</span>
+                            <span>~{estimatedTokens.retrieval} t</span>
+                          </div>
+                          <div className="bg-white/60 p-1.5 rounded-[8px] border border-indigo-100/10">
+                            <span className="block text-indigo-500/80 text-[8px]">人设与常驻</span>
+                            <span>~{estimatedTokens.persona} t</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Layer 1: Short-term Context */}
+                      <div className="space-y-1.5 p-3 bg-slate-50/50 rounded-[16px] border border-slate-100">
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <span className="text-[#52525b] font-bold text-xs block">1. 短期实时上下文（记忆轮数）</span>
+                            <span className="text-[10px] text-slate-400 block">系统硬上限50轮，超出将自动丢弃旧对话</span>
+                          </div>
+                          <span className="text-xs font-bold text-slate-700 font-mono bg-white px-2 py-0.5 rounded-full border border-slate-100">
+                            {draftContextMemoryLimit} 轮 / {draftContextMemoryLimit} 条消息
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={10}
+                          max={50}
+                          step={1}
+                          value={draftContextMemoryLimit}
+                          onChange={(e) => setDraftContextMemoryLimit(parseInt(e.target.value))}
+                          className="w-full accent-neutral-950 h-1 bg-slate-100 rounded-[16px] appearance-none cursor-pointer"
+                        />
+                        <div className="flex justify-between text-[8px] text-slate-400 font-mono">
+                          <span>10轮</span>
+                          <span>20轮(默认)</span>
+                          <span>35轮</span>
+                          <span>50轮(全局上限)</span>
+                        </div>
+                      </div>
+
+                      {/* Layer 2: Long-term History Retrieval Pool */}
+                      <div className="space-y-1.5 p-3 bg-slate-50/50 rounded-[16px] border border-slate-100">
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <span className="text-[#52525b] font-bold text-xs block">2. 长期历史检索池（参考消息条数）</span>
+                            <span className="text-[10px] text-slate-400 block">AI召回记忆或后台归档时检索的消息范围</span>
+                          </div>
+                          <span className="text-xs font-bold text-slate-700 font-mono bg-white px-2 py-0.5 rounded-full border border-slate-100">
+                            {draftRetrievalHistoryLimit} 条
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={10}
+                          max={200}
+                          step={10}
+                          value={draftRetrievalHistoryLimit}
+                          onChange={(e) => setDraftRetrievalHistoryLimit(parseInt(e.target.value))}
+                          className="w-full accent-neutral-950 h-1 bg-slate-100 rounded-[16px] appearance-none cursor-pointer"
+                        />
+                        <div className="flex justify-between text-[8px] text-slate-400 font-mono">
+                          <span>10条</span>
+                          <span>50条</span>
+                          <span>100条(默认)</span>
+                          <span>150条</span>
+                          <span>200条</span>
+                        </div>
+                      </div>
+
+                      {/* Layer 3: Long-term Archived Memory */}
+                      <div className="space-y-3.5 p-3 bg-slate-50/50 rounded-[16px] border border-slate-100">
+                        <div className="space-y-0.5">
+                          <span className="text-[#52525b] font-bold text-xs block">3. 长期归档精炼记忆（归档模板与提炼）</span>
+                          <span className="text-[10px] text-slate-400 block">通过深度提炼久远对话并存入记忆库，压缩Token开销</span>
+                        </div>
+
+                        {/* Template Type Choice */}
+                        <div className="space-y-1.5">
+                          <span className="text-[10px] font-bold text-slate-500 block">归档提炼模板</span>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setDraftArchiveTemplateType("refined")}
+                              className={`flex flex-col items-start p-2.5 rounded-[12px] border text-left transition-all ${
+                                draftArchiveTemplateType === "refined"
+                                  ? "border-neutral-950 bg-neutral-950 text-white shadow-sm"
+                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                            >
+                              <span className="text-xs font-bold">精炼版 (低Token)</span>
+                              <span className={`text-[8px] mt-0.5 block ${draftArchiveTemplateType === "refined" ? "text-slate-300" : "text-slate-400"}`}>
+                                生成条理清晰的客观事件日志
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDraftArchiveTemplateType("delicate")}
+                              className={`flex flex-col items-start p-2.5 rounded-[12px] border text-left transition-all ${
+                                draftArchiveTemplateType === "delicate"
+                                  ? "border-neutral-950 bg-neutral-950 text-white shadow-sm"
+                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                            >
+                              <span className="text-xs font-bold">细腻版 (重情感)</span>
+                              <span className={`text-[8px] mt-0.5 block ${draftArchiveTemplateType === "delicate" ? "text-slate-300" : "text-slate-400"}`}>
+                                提炼第一人称的心境角色日记
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Auto Archive Interval */}
+                        <div className="space-y-2 pt-1 border-t border-slate-100">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-slate-500">对话后台自动归档</span>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={draftEnableAutoArchive}
+                                onChange={(e) => setDraftEnableAutoArchive(e.target.checked)}
+                                className="rounded border-slate-300 text-neutral-900 focus:ring-neutral-950 w-3.5 h-3.5"
+                              />
+                            </label>
+                          </div>
+                          
+                          {draftEnableAutoArchive && (
+                            <div className="space-y-1.5 bg-white p-2 rounded-[12px] border border-slate-100">
+                              <div className="flex justify-between text-[10px] font-semibold text-slate-600">
+                                <span>自动归档间隔</span>
+                                <span className="font-bold text-neutral-900">{draftAutoArchiveInterval} 轮</span>
+                              </div>
+                              <input
+                                type="range"
+                                min={10}
+                                max={100}
+                                step={10}
+                                value={draftAutoArchiveInterval}
+                                onChange={(e) => setDraftAutoArchiveInterval(parseInt(e.target.value))}
+                                className="w-full accent-neutral-950 h-1 bg-slate-100 rounded-[16px] appearance-none cursor-pointer"
+                              />
+                              <div className="flex justify-between text-[7px] text-slate-400 font-mono">
+                                <span>10轮</span>
+                                <span>30轮</span>
+                                <span>50轮(默认)</span>
+                                <span>80轮</span>
+                                <span>100轮</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* One-click manual archive button */}
+                        <div className="pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            disabled={isManualArchiving || currentChatMessages.length === 0}
+                            onClick={async () => {
+                              try {
+                                setIsManualArchiving(true);
+                                const count = await handleExtractMemories();
+                                if (count > 0) {
+                                  showToast(`🎉 手动归档并提炼成功！已存入“${activeCharacter.name}”的记忆档案馆`);
+                                } else {
+                                  showToast("当前没有需要归档提炼的新深度对话！");
+                                }
+                              } catch (err) {
+                                showToast("一键归档时发生未知错误，请重试");
+                              } finally {
+                                setIsManualArchiving(false);
+                              }
+                            }}
+                            className={`w-full py-2.5 rounded-[16px] text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 ${
+                              isManualArchiving || currentChatMessages.length === 0
+                                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                                : "bg-neutral-900 hover:bg-neutral-800 text-white"
+                            }`}
+                          >
+                            {isManualArchiving ? (
+                              <>
+                                <span className="w-3 h-3 rounded-full border-2 border-slate-400 border-t-transparent animate-spin" />
+                                正在进行深度记忆归档...
+                              </>
+                            ) : (
+                              <>
+                                <Database className="w-3.5 h-3.5" />
+                                一键手动提炼归档当前对话
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
 
