@@ -291,12 +291,8 @@ const cleanAndExtractMoment = (content: string) => {
   let cleanContent = content.trim();
   const selfComments: string[] = [];
 
-  // 1. Remove starting "(xx发了朋友圈)" or "(xx发了条朋友圈)" or similar
-  const startPostRegex = /^[（\(]\s*[^）\)]*?发了[^）\)]*?朋友圈\s*[）\)]\s*\n*/i;
-  cleanContent = cleanContent.replace(startPostRegex, "");
-
-  // 2. Extract and remove self-comments from the content
-  const selfCommentRegex = /[（\(](?:评论区(?:自己)?补了一?条|评论区(?:自己)?补了一?句|评论区自己补了|自己(?:在评论区)?补了一?条|自己(?:在评论区)?补了一?句|自评)\s*[：:]\s*(.*?)[）\)]/g;
+  // 1. First, let's extract and remove comments so we don't mess up with main content cleaning
+  const selfCommentRegex = /[（\(\[]\s*(?:评论区(?:自己)?补了一?条|评论区(?:自己)?补了一?句|评论区自己补了|自己(?:在评论区)?补了一?条|自己(?:在评论区)?补了一?句|自评|评论)\s*[：:]\s*(.*?)\s*[）\)\]]/g;
   cleanContent = cleanContent.replace(selfCommentRegex, (fullMatch, commentText) => {
     if (commentText && commentText.trim()) {
       selfComments.push(commentText.trim());
@@ -312,7 +308,37 @@ const cleanAndExtractMoment = (content: string) => {
     return "";
   });
 
+  // 2. Clean system headers and auto-notifications
+  // Replace starting unparenthesized markers like "发了条朋友圈：", "发了朋友圈:", "沈妄发布了朋友圈动态:", etc.
+  const prefixMarkers = [
+    /^(?:系统提示\s*[:：]\s*)?[^：\n]*?(?:发布|发)了(?:条)?朋友圈(?:动态)?\s*[:：]?\s*/gi,
+    /^(?:系统提示\s*[:：]\s*)/gi,
+  ];
+  prefixMarkers.forEach(regex => {
+    cleanContent = cleanContent.replace(regex, "");
+  });
+
+  // Replace parenthesized/bracketed system prompts or OOC descriptions anywhere or at the beginning
+  // E.g., （系统提示：沈妄 发布了朋友圈动态）
+  // E.g., (配图：一本书...)
+  // E.g., [系统提示：...]
+  const braceRegexes = [
+    /[（\(\[]\s*(?:系统提示|配图|ooc|OOC|提示|描述)[：:][^）\)\]]*?[）\)\]]\s*\n*/g,
+    /[（\(\[]\s*[^）\(\]]*?(?:发布|发)了(?:条)?朋友圈(?:动态)?\s*[）\)\]]\s*\n*/gi,
+    /[（\(\[]\s*配图\s*[^）\)\]]*?[）\)\]]\s*\n*/g, // Match any parenthesized description starting with 配图
+  ];
+  braceRegexes.forEach(regex => {
+    cleanContent = cleanContent.replace(regex, "");
+  });
+
+  // If there's any standalone line that is purely "(配图: ...)" or "配图: ..."
+  cleanContent = cleanContent.replace(/(?:^|\n)\s*(?:配图|画面|场景描述)\s*[:：].*?(?=\n|$)/gi, "");
+
+  // Remove duplicate leading/trailing quotes if the model wrapped the whole post in quotation marks
   cleanContent = cleanContent.trim();
+  cleanContent = cleanContent.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+
+  // Strip any remaining starting/ending spaces/newlines
   cleanContent = cleanContent.replace(/^\n+|\n+$/g, "").trim();
 
   return {
@@ -4037,18 +4063,7 @@ ${previousMomentsText}
         onSendMessage(systemActionMsg);
       }
     } catch (err: any) {
-      console.error(`Failed to generate Moment for character ${friend.name}:`, err);
-      const errMsgStr = err?.message || String(err);
-      const isAuthError = errMsgStr.toLowerCase().includes("401") ||
-                          errMsgStr.toLowerCase().includes("api_key") ||
-                          errMsgStr.toLowerCase().includes("key") ||
-                          errMsgStr.toLowerCase().includes("invalid") ||
-                          errMsgStr.toLowerCase().includes("authentication fails");
-      if (isAuthError) {
-        showToast(`⚠️ [动态生成失败] 「${friend.name}」发布朋友圈时 API 验证失败，请在设置中检查您的 API Key 是否正确。`);
-      } else {
-        showToast(`⚠️ [动态生成失败] 「${friend.name}」：${errMsgStr}`);
-      }
+      console.warn(`Failed to generate Moment for character ${friend.name} (silenced background alert):`, err);
     }
   };
 
