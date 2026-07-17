@@ -2764,8 +2764,6 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
   };
 
-  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
-
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastActiveCharIdRef = useRef<string | null>(null);
@@ -2809,12 +2807,13 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
   }, [messages.length, activeChatCharId, isTyping]);
 
-  // Scroll to bottom and track viewport height when visual viewport changes (mobile keyboard pops up/down)
+  // Keep the latest message visible when the mobile keyboard changes the viewport.
+  // The app shell owns the visual viewport height. Sizing this nested overlay separately
+  // causes Edge to occasionally use a stale, shorter height during the IME transition.
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
 
     const handleViewportChange = () => {
-      setViewportHeight(window.visualViewport.height);
       if (!activeChatCharId) return;
       // Scroll to bottom when height changes (e.g., keyboard pops up or dismisses)
       setTimeout(() => {
@@ -2826,8 +2825,6 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
         }
       }, 120);
     };
-
-    setViewportHeight(window.visualViewport.height);
 
     const vv = window.visualViewport;
     vv.addEventListener("resize", handleViewportChange);
@@ -4199,9 +4196,8 @@ ${previousMomentsText}
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
         <div 
-          className={`absolute inset-x-0 top-0 z-40 bg-slate-50 flex flex-col animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} 
+          className={`absolute inset-0 z-40 bg-slate-50 flex flex-col animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`}
           id="conv-screen"
-          style={viewportHeight ? { height: `${viewportHeight}px`, bottom: "auto" } : { height: "100%", bottom: "0" }}
         >
           <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content">
             {activeCharacter.customCss && (
