@@ -365,6 +365,10 @@ ${momentLines.join("\n")}`;
 };
 
 const getOfflineStoriesContextString = (offlineStories: OfflineStory[] | undefined, activeCharId: string, charName: string) => {
+  // Original offline dialogue must never leak into the online context. A user
+  // can explicitly archive a concise summary into the normal memory vault.
+  return "";
+  /*
   if (!offlineStories || offlineStories.length === 0) return "";
   const charStories = offlineStories.filter(s => s.characterId === activeCharId);
   if (charStories.length === 0) return "";
@@ -387,6 +391,7 @@ ${msgContent || "  (暂无剧情)"}`;
 以下是你们在线下剧本/平行时空剧情模式（Offline Mode）中共同创造的小说故事线与经历，你对这些线下剧情细节拥有清晰的记忆。
 当线上聊天涉及相关话题时，你可以在不破坏线上微信身份的前提下，极为自然地将这些经历作为你们两人“发生过的默契、回忆、平行宇宙经历”来进行互动：
 ${storyLines.join("\n\n")}`;
+  */
 };
 
 const getGroupChatMemories = (

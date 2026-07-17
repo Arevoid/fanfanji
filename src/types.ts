@@ -271,6 +271,15 @@ export interface OfflineStory {
   stylePromptContent?: string;
   showAvatars?: boolean;
   customCss?: string;
+  /** Frozen at the moment an online chat is explicitly imported into this story. */
+  importedContext?: {
+    messages: Message[];
+    memories: string[];
+    worldBook: string[];
+    importedAt: number;
+  };
+  archivedAt?: number;
+  archivedMemoryIds?: string[];
 }
 
 export interface Sticker {
