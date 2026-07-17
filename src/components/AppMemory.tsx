@@ -58,12 +58,12 @@ export default function AppMemory({
   const [editingItem, setEditingItem] = useState<MemoryItem | null>(null);
   const [showApiPoolModal, setShowApiPoolModal] = useState(false);
   const [showRecallModal, setShowRecallModal] = useState(false);
-  const [modalArchiveTemplateType, setModalArchiveTemplateType] = useState<"refined" | "delicate">("refined");
 
   // States for automatic summary settings
   const [selectedCharForAutoSummary, setSelectedCharForAutoSummary] = useState<string>("");
   const [modalEnableAutoSummary, setModalEnableAutoSummary] = useState<boolean>(false);
   const [modalSummaryTriggerRound, setModalSummaryTriggerRound] = useState<number>(15);
+  const [modalArchiveTemplateType, setModalArchiveTemplateType] = useState<"refined" | "delicate">("refined");
 
   const handleSelectCharForAutoSummary = (charId: string) => {
     setSelectedCharForAutoSummary(charId);
@@ -784,18 +784,16 @@ export default function AppMemory({
                     </div>
                   )}
 
-                  {/* Archive Template Selection - stacked vertically */}
+                  {/* Template Type Choice */}
                   <div className="space-y-2 border-t border-slate-100 pt-3.5">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
-                      长期归档精炼记忆模板
-                    </label>
-                    <div className="space-y-2">
+                    <span className="text-xs font-bold text-slate-800 block">长期归档精炼记忆模板</span>
+                    <div className="flex flex-col gap-2">
                       <button
                         type="button"
                         onClick={() => setModalArchiveTemplateType("refined")}
-                        className={`w-full flex flex-col items-start p-3 rounded-[16px] border text-left transition-all ${
+                        className={`flex flex-col items-start p-3 rounded-[16px] border text-left transition-all ${
                           modalArchiveTemplateType === "refined"
-                            ? "border-neutral-950 bg-neutral-950 text-white shadow-sm"
+                            ? "border-neutral-950 bg-neutral-950 text-white shadow-sm font-bold"
                             : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                         }`}
                       >
@@ -807,9 +805,9 @@ export default function AppMemory({
                       <button
                         type="button"
                         onClick={() => setModalArchiveTemplateType("delicate")}
-                        className={`w-full flex flex-col items-start p-3 rounded-[16px] border text-left transition-all ${
+                        className={`flex flex-col items-start p-3 rounded-[16px] border text-left transition-all ${
                           modalArchiveTemplateType === "delicate"
-                            ? "border-neutral-950 bg-neutral-950 text-white shadow-sm"
+                            ? "border-neutral-950 bg-neutral-950 text-white shadow-sm font-bold"
                             : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                         }`}
                       >

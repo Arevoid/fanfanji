@@ -738,7 +738,7 @@ export default function AppSettings({
               >
                 <div className="flex items-center gap-3.5">
                   <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
-                    <Volume2 className="w-5 h-5 text-slate-700" />
+                    <Volume2 className="w-5 h-5" />
                   </div>
                   <div>
                     <span className="text-sm font-bold text-slate-800">MiniMax 语音设置</span>
@@ -2052,7 +2052,7 @@ export default function AppSettings({
 
                     {/* 对方气泡 */}
                     <div className="space-y-3 p-3 bg-slate-50/50 rounded-[24px] border border-slate-100">
-                      <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">对方（角色）气泡</div>
+                      <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">对方（角色）气泡</div>
                       
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2">
@@ -2492,7 +2492,7 @@ export default function AppSettings({
                     className="sr-only"
                   />
                   <div className={`w-11 h-6 rounded-full transition-colors duration-200 relative ${
-                    enableMiniMaxTts ? "bg-neutral-950" : "bg-slate-200"
+                    enableMiniMaxTts ? "bg-indigo-600" : "bg-slate-200"
                   }`}>
                     <div className={`absolute top-[2px] left-[2px] bg-white border border-slate-300 rounded-full h-5 w-5 transition-transform duration-200 ${
                       enableMiniMaxTts ? "translate-x-5 border-white" : "translate-x-0"
@@ -2516,7 +2516,7 @@ export default function AppSettings({
                         value={minimaxApiKey}
                         onChange={(e) => setMinimaxApiKey(e.target.value)}
                         placeholder="请输入 MiniMax API Key"
-                        className="w-full pl-3 pr-10 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
+                        className="w-full pl-3 pr-10 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-semibold"
                       />
                       <button
                         type="button"
@@ -2537,7 +2537,7 @@ export default function AppSettings({
                       value={minimaxGroupId}
                       onChange={(e) => setMinimaxGroupId(e.target.value)}
                       placeholder="请输入 MiniMax Group ID"
-                      className="w-full px-3 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
+                      className="w-full px-3 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-semibold"
                     />
                   </div>
 
@@ -2548,7 +2548,7 @@ export default function AppSettings({
                     <select
                       value={minimaxModel}
                       onChange={(e) => setMinimaxModel(e.target.value)}
-                      className="w-full px-3 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-bold"
+                      className="w-full px-3 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-bold"
                     >
                       <option value="speech-2.8-hd">speech-2.8-hd (超高解析度精品推荐)</option>
                       <option value="speech-2">speech-2 (高性价比第二代)</option>
@@ -2567,7 +2567,7 @@ export default function AppSettings({
                   <div>
                     <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1">
                       <span>语速 (Speed)</span>
-                      <span className="text-slate-700 font-bold">{minimaxSpeed}x</span>
+                      <span className="text-indigo-600 font-bold">{minimaxSpeed}x</span>
                     </div>
                     <input
                       type="range"
@@ -2576,7 +2576,7 @@ export default function AppSettings({
                       step="0.1"
                       value={minimaxSpeed}
                       onChange={(e) => setMinimaxSpeed(Number(e.target.value))}
-                      className="w-full accent-black cursor-pointer"
+                      className="w-full accent-indigo-600 cursor-pointer"
                     />
                     <div className="flex justify-between text-[8px] text-slate-400">
                       <span>极慢 (0.5)</span>
@@ -2589,7 +2589,7 @@ export default function AppSettings({
                   <div>
                     <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1">
                       <span>音调 (Pitch)</span>
-                      <span className="text-slate-700 font-bold">{minimaxPitch > 0 ? `+${minimaxPitch}` : minimaxPitch}</span>
+                      <span className="text-indigo-600 font-bold">{minimaxPitch > 0 ? `+${minimaxPitch}` : minimaxPitch}</span>
                     </div>
                     <input
                       type="range"
@@ -2598,7 +2598,7 @@ export default function AppSettings({
                       step="1"
                       value={minimaxPitch}
                       onChange={(e) => setMinimaxPitch(Number(e.target.value))}
-                      className="w-full accent-black cursor-pointer"
+                      className="w-full accent-indigo-600 cursor-pointer"
                     />
                     <div className="flex justify-between text-[8px] text-slate-400">
                       <span>浑厚低沉 (-12)</span>
@@ -2611,7 +2611,7 @@ export default function AppSettings({
                   <div>
                     <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1">
                       <span>音量 (Volume)</span>
-                      <span className="text-slate-700 font-bold">{minimaxVol}x</span>
+                      <span className="text-indigo-600 font-bold">{minimaxVol}x</span>
                     </div>
                     <input
                       type="range"
@@ -2620,7 +2620,7 @@ export default function AppSettings({
                       step="0.1"
                       value={minimaxVol}
                       onChange={(e) => setMinimaxVol(Number(e.target.value))}
-                      className="w-full accent-black cursor-pointer"
+                      className="w-full accent-indigo-600 cursor-pointer"
                     />
                     <div className="flex justify-between text-[8px] text-slate-400">
                       <span>极轻 (0.1)</span>
@@ -2637,7 +2637,7 @@ export default function AppSettings({
                 onClick={handleSaveMiniMaxSettings}
                 className="w-full py-3.5 bg-neutral-950 hover:bg-neutral-900 text-white rounded-[16px] font-bold text-sm transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
               >
-                <Save className="w-4 h-4 text-slate-400" />
+                <Save className="w-4 h-4 text-indigo-400" />
                 <span>保存 MiniMax 语音设置</span>
               </button>
             </div>

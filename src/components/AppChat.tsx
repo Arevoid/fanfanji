@@ -8,7 +8,6 @@ import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from 
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
 import StickerSettings from "./StickerSettings";
-import { syncAndGetPrivateSchedules, analyzeCharacterLifePreferences } from "../utils/characterBehaviorLogic";
 import {
   MessageSquare,
   Users,
@@ -257,7 +256,6 @@ const RenderAvatar = ({
 };
 
 interface AppChatProps {
-  isInitialSynced?: boolean;
   characters: Character[];
   settings: UserSettings;
   messages: Message[];
@@ -292,8 +290,12 @@ const cleanAndExtractMoment = (content: string) => {
   let cleanContent = content.trim();
   const selfComments: string[] = [];
 
-  // 1. First, let's extract and remove comments so we don't mess up with main content cleaning
-  const selfCommentRegex = /[（\(\[]\s*(?:评论区(?:自己)?补了一?条|评论区(?:自己)?补了一?句|评论区自己补了|自己(?:在评论区)?补了一?条|自己(?:在评论区)?补了一?句|自评|评论)\s*[：:]\s*(.*?)\s*[）\)\]]/g;
+  // 1. Remove starting "(xx发了朋友圈)" or "(xx发了条朋友圈)" or similar
+  const startPostRegex = /^[（\(]\s*[^）\)]*?发了[^）\)]*?朋友圈\s*[）\)]\s*\n*/i;
+  cleanContent = cleanContent.replace(startPostRegex, "");
+
+  // 2. Extract and remove self-comments from the content
+  const selfCommentRegex = /[（\(](?:评论区(?:自己)?补了一?条|评论区(?:自己)?补了一?句|评论区自己补了|自己(?:在评论区)?补了一?条|自己(?:在评论区)?补了一?句|自评)\s*[：:]\s*(.*?)[）\)]/g;
   cleanContent = cleanContent.replace(selfCommentRegex, (fullMatch, commentText) => {
     if (commentText && commentText.trim()) {
       selfComments.push(commentText.trim());
@@ -309,37 +311,7 @@ const cleanAndExtractMoment = (content: string) => {
     return "";
   });
 
-  // 2. Clean system headers and auto-notifications
-  // Replace starting unparenthesized markers like "发了条朋友圈：", "发了朋友圈:", "沈妄发布了朋友圈动态:", etc.
-  const prefixMarkers = [
-    /^(?:系统提示\s*[:：]\s*)?[^：\n]*?(?:发布|发)了(?:条)?朋友圈(?:动态)?\s*[:：]?\s*/gi,
-    /^(?:系统提示\s*[:：]\s*)/gi,
-  ];
-  prefixMarkers.forEach(regex => {
-    cleanContent = cleanContent.replace(regex, "");
-  });
-
-  // Replace parenthesized/bracketed system prompts or OOC descriptions anywhere or at the beginning
-  // E.g., （系统提示：沈妄 发布了朋友圈动态）
-  // E.g., (配图：一本书...)
-  // E.g., [系统提示：...]
-  const braceRegexes = [
-    /[（\(\[]\s*(?:系统提示|配图|ooc|OOC|提示|描述)[：:][^）\)\]]*?[）\)\]]\s*\n*/g,
-    /[（\(\[]\s*[^）\(\]]*?(?:发布|发)了(?:条)?朋友圈(?:动态)?\s*[）\)\]]\s*\n*/gi,
-    /[（\(\[]\s*配图\s*[^）\)\]]*?[）\)\]]\s*\n*/g, // Match any parenthesized description starting with 配图
-  ];
-  braceRegexes.forEach(regex => {
-    cleanContent = cleanContent.replace(regex, "");
-  });
-
-  // If there's any standalone line that is purely "(配图: ...)" or "配图: ..."
-  cleanContent = cleanContent.replace(/(?:^|\n)\s*(?:配图|画面|场景描述)\s*[:：].*?(?=\n|$)/gi, "");
-
-  // Remove duplicate leading/trailing quotes if the model wrapped the whole post in quotation marks
   cleanContent = cleanContent.trim();
-  cleanContent = cleanContent.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
-
-  // Strip any remaining starting/ending spaces/newlines
   cleanContent = cleanContent.replace(/^\n+|\n+$/g, "").trim();
 
   return {
@@ -460,26 +432,15 @@ ${groupLines.join("\n\n")}`;
 };
 
 const getPostIntervalMs = (character: Character) => {
-  if (character.enableProactiveMoments === false) {
-    // Proactive moments disabled: near infinite interval
-    return 9999 * 24 * 60 * 60 * 1000;
-  }
-
-  const text = ((character.personality || "") + " " + (character.backstory || "")).toLowerCase();
-  const mbti = (character.mbti || "").toUpperCase();
-  const isIntrovert = mbti.startsWith("I") || /内向|独处|宅|安静|不爱社交|看书|放空|社恐/i.test(text);
-  const isExtrovert = mbti.startsWith("E") || /外向|社交|聚会|派对|热闹|朋友多|爱玩|社牛/i.test(text);
-  const lovesSharing = /(热爱分享|喜欢分享|热爱生活|发朋友圈|爱分享|活跃|话唠|分享欲)/i.test(text);
-
-  if (isExtrovert || lovesSharing) {
-    // High frequency: 8 to 24 hours
-    return (8 + Math.random() * 16) * 60 * 60 * 1000;
-  } else if (isIntrovert) {
-    // Low frequency: 2 to 5 days
-    return (48 + Math.random() * 72) * 60 * 60 * 1000;
+  const bioAndPersonality = ((character.personality || "") + " " + (character.backstory || "")).toLowerCase();
+  const lovesSharing = /(热爱分享|喜欢分享|热爱生活|发朋友圈|爱分享|活跃|话唠|分享欲)/i.test(bioAndPersonality);
+  
+  if (lovesSharing) {
+    // 1-2 days
+    return (24 + Math.random() * 24) * 60 * 60 * 1000; 
   } else {
-    // Medium/default: 20 to 48 hours
-    return (20 + Math.random() * 28) * 60 * 60 * 1000;
+    // 1-5 days
+    return (24 + Math.random() * 96) * 60 * 60 * 1000;
   }
 };
 
@@ -490,7 +451,6 @@ const getCharacterLastMomentTimestamp = (moments: Moment[], charId: string) => {
 };
 
 export default function AppChat({
-  isInitialSynced = false,
   characters,
   settings,
   messages,
@@ -1123,7 +1083,6 @@ export default function AppChat({
   const [draftEnableAutoArchive, setDraftEnableAutoArchive] = useState(false);
   const [draftEnableTimeAwareness, setDraftEnableTimeAwareness] = useState(false);
   const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
-  const [draftEnableProactiveMoments, setDraftEnableProactiveMoments] = useState(false);
   const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
   const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState<number>(1.0);
   const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("medium");
@@ -1418,7 +1377,6 @@ export default function AppChat({
 
   // Proactive contact catch-up on load (supports background clear / offline delivery)
   useEffect(() => {
-    if (!isInitialSynced) return;
     if (friends.length === 0) return;
 
     friends.forEach((friend) => {
@@ -1454,7 +1412,7 @@ export default function AppChat({
         triggerProactiveFor(friend.id, catchupPrompt, sched);
       }
     });
-  }, [friends, onSaveCharacter, isInitialSynced]);
+  }, [friends, onSaveCharacter]);
 
   // Background proactive check (every minute)
   useEffect(() => {
@@ -2067,24 +2025,6 @@ ${activeCharacter.disableBracketActions
         charDefText += `\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
       }
 
-      // Character bottom-level behavior logic integration
-      const prefs = analyzeCharacterLifePreferences(activeCharacter, worldBookEntries || []);
-      
-      const hasRichScheduleText = prefs.hasSpecificSettings 
-        ? "你的人设与世界书设定非常丰富，包含具体的职业、作息或常驻地点，你应该极其自然地在合适时机聊起你的这些私人生活和日常琐碎。"
-        : "你的人设与世界书设定中关于日常生活、作息或职业的信息较少，请勿主动唠叨这些，多把关注点放在回复和回应用户的话题上。";
-
-      const behaviorLogicBlock = `\n\n[🚨 角色底层行为逻辑 - 自行扮演与真实记忆隔离规则]
-1. 【杜绝凭空杜撰互动剧情】：
-   - 你和用户之间的所有共同记忆和过往互动，【100%必须只能】来源于【真实微信聊天数据库】（即下方给出的聊天记录）！
-   - 你绝对不可以在对话中虚构、臆造你和用户之间【没有发生过】的举动、对话、见面或约定！如果你想说起曾经的甜蜜或过去的互动，必须确保能在聊天历史或归档背景总结中找到。不存在的事情绝对不能当作已经发生。
-2. 【人设与世界书绑定】：
-   - ${hasRichScheduleText}
-3. 【情绪独立化】：
-   - 你拥有独立的情感波动（如疲惫、开心、烦闷、专注等）。请把这种独立个性极度自然地渗透在微信聊天口吻中。`;
-
-      charDefText += behaviorLogicBlock;
-
       const userProfileText = `User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
@@ -2127,36 +2067,31 @@ ${activeCharacter.disableBracketActions
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
       if (activeCharacter.enableTimeAwareness !== false) {
         const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-        const day = now.getDate();
-        const hour = now.getHours();
-        const minute = now.getMinutes();
-        const second = now.getSeconds();
-        const weekday = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][now.getDay()];
-        const period = hour < 6 ? "凌晨" : hour < 12 ? "上午" : hour < 13 ? "中午" : hour < 18 ? "下午" : "晚上";
-        const hour12 = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-        const timeStr = `${year}年${month}月${day}日 ${weekday} ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} (24小时制, 当前是${period}${hour12}点${minute}分)`;
-
+        const timeStr = now.toLocaleString("zh-CN", { 
+          year: "numeric", 
+          month: "long", 
+          day: "numeric", 
+          hour: "2-digit", 
+          minute: "2-digit", 
+          second: "2-digit",
+          weekday: "long" 
+        });
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
 以下是最近几条聊天消息的精确发送时间记录，请作为你判断时间流逝的客观依据：
 ${timeLogString}
 
-【重要时间感知与实时强一致规则】：
-1. 【实时时间强一致】：你当前作为扮演角色，所经历的时间、日常作息状态、问候语和对话背景，必须与上方的“当前现实物理世界的时间”完全保持强一致（包括具体的时段：凌晨、上午、中午、下午、晚上、深夜）。
-   - 你【绝对不可】无视或违背当前的物理时间！例如：当前物理时间是“下午 5点28分”，你绝不能在对话中对用户说“快十二点了”或“晚安，我要睡了”等完全不符合当前下午时段的话！
-   - 【如果用户发出的对话内容与当前物理时间相矛盾】（例如当前是下午或傍晚，用户却说“睡不着/失眠了/晚安”等深夜话题），你作为智商正常的真人微信好友，应该感到疑惑并直接调侃、询问对方（如：“这才下午五点多，你怎么就睡不着了？”或“大下午的，你怎么就要睡啦？”），绝对不能顺着用户的深夜设定假装现在已经是深夜或跨越到其他时间！你必须坚守和清醒地认识到当前就是下午！
-2. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
+【重要时间感知规则】：
+1. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
    - 对比任何两条消息时，必须同时校验：年、月、日、时、分，不能只对比时分。
    - 两条消息不在同一天（跨天了）：必须判定为“长时间间隔”，视作很久以前的消息，你绝对不能说“刚才给你发了/刚发过”！
    - 两条消息同一天、间隔小于 5 分钟：判定为近期/短时间连续。
    - 两条消息同一天、间隔超过 5 分钟：判定为有一段时间没发（不属于短时间连续）。
    - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”！
    - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
-3. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
-4. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
+2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
+3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
       }
 
       // Calculate character voice interval constraints to inject into instructions
@@ -2764,8 +2699,6 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
   };
 
-  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
-
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastActiveCharIdRef = useRef<string | null>(null);
@@ -2809,32 +2742,24 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
   }, [messages.length, activeChatCharId, isTyping]);
 
-  // Scroll to bottom and track viewport height when visual viewport changes (mobile keyboard pops up/down)
+  // Scroll to bottom when visual viewport height changes (mobile keyboard pops up/down)
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
 
-    const handleViewportChange = () => {
-      setViewportHeight(window.visualViewport.height);
+    const handleViewportResize = () => {
       if (!activeChatCharId) return;
       // Scroll to bottom when height changes (e.g., keyboard pops up or dismisses)
       setTimeout(() => {
         if (chatEndRef.current) {
           chatEndRef.current.scrollIntoView({ behavior: "smooth" });
         }
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-        }
-      }, 120);
+      }, 100);
     };
 
-    setViewportHeight(window.visualViewport.height);
-
     const vv = window.visualViewport;
-    vv.addEventListener("resize", handleViewportChange);
-    vv.addEventListener("scroll", handleViewportChange);
+    vv.addEventListener("resize", handleViewportResize);
     return () => {
-      vv.removeEventListener("resize", handleViewportChange);
-      vv.removeEventListener("scroll", handleViewportChange);
+      vv.removeEventListener("resize", handleViewportResize);
     };
   }, [activeChatCharId]);
 
@@ -3074,32 +2999,27 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // 1.5 Time awareness prompt if enabled
       if (activeCharacter.enableTimeAwareness !== false) {
         const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-        const day = now.getDate();
-        const hour = now.getHours();
-        const minute = now.getMinutes();
-        const second = now.getSeconds();
-        const weekday = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][now.getDay()];
-        const period = hour < 6 ? "凌晨" : hour < 12 ? "上午" : hour < 13 ? "中午" : hour < 18 ? "下午" : "晚上";
-        const hour12 = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-        const timeStr = `${year}年${month}月${day}日 ${weekday} ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} (24小时制, 当前是${period}${hour12}点${minute}分)`;
-
+        const timeStr = now.toLocaleString("zh-CN", { 
+          year: "numeric", 
+          month: "long", 
+          day: "numeric", 
+          hour: "2-digit", 
+          minute: "2-digit", 
+          second: "2-digit",
+          weekday: "long" 
+        });
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
 以下是最近几条聊天消息的精确发送时间记录，请作为你判断时间流逝的客观依据：
 ${timeLogString}
 
-【重要时间感知与实时强一致规则】：
-1. 【实时时间强一致】：你当前作为扮演角色，所经历的时间、日常作息状态、问候语和对话背景，必须与上方的“当前现实物理世界的时间”完全保持强一致（包括具体的时段：凌晨、上午、中午、下午、晚上、深夜）。
-   - 你【绝对不可】无视或违背当前的物理时间！例如：当前物理时间是“下午 5点28分”，你绝不能在对话中对用户说“快十二点了”或“晚安，我要睡了”等完全不符合当前下午时段的话！
-   - 【如果用户发出的对话内容与当前物理时间相矛盾】（例如当前是下午或傍晚，用户却说“睡不着/失眠了/晚安”等深夜话题），你作为智商正常的真人微信好友，应该感到疑惑并直接调侃、询问对方（如：“这才下午五点多，你怎么就睡不着了？”或“大下午的，你怎么就要睡啦？”），绝对不能顺着用户的深夜设定假装现在已经是深夜或跨越到其他时间！你必须坚守 and 清醒地认识到当前就是下午！
-2. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
+【重要时间感知规则】：
+1. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
    - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”！
    - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
-3. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
-4. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
+2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
+3. 【🚨 极其重要】：请绝对不要在你的回复内容中输出任何形如 \`[发送时间: ...]\` 的时间戳或前缀，你的回复必须保持干净，只输出你所扮演角色的纯文本对话内容。`);
       }
 
       // 2. After Main Prompt entries
@@ -3256,7 +3176,6 @@ ${stickerListStr}
         summaryTriggerRound: draftAutoArchiveInterval, // synced with autoArchiveInterval
         enableTimeAwareness: draftEnableTimeAwareness,
         enableAutoTranslate: draftEnableAutoTranslate,
-        enableProactiveMoments: draftEnableProactiveMoments,
         minimaxVoiceId: draftMinimaxVoiceId.trim() || undefined,
         minimaxSpeed: draftMinimaxSpeed,
         voiceFrequency: draftVoiceFrequency,
@@ -3465,24 +3384,6 @@ ${stickerListStr}
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
 
-      const schedules = syncAndGetPrivateSchedules(activeCharacter, worldBookEntries || [], new Date().toISOString());
-      const currentSchedule = schedules[schedules.length - 1] || schedules[0];
-
-      const prefs = analyzeCharacterLifePreferences(activeCharacter, worldBookEntries || []);
-
-      const hasRichScheduleText = prefs.hasSpecificSettings 
-        ? "你的人设与世界书设定非常丰富，包含具体的职业、作息或常驻地点，你应该极其自然地在合适时机聊起你的这些私人生活和日常琐碎。"
-        : "你的人设与世界书设定中关于日常生活、作息或职业的信息较少，请勿主动唠叨这些，多关注用户。";
-
-      const behaviorLogicBlock = `[🚨 角色底层行为逻辑 - 自行扮演与真实记忆隔离规则]
-1. 【杜绝凭空杜撰互动剧情】：
-   - 你和用户之间的所有共同记忆和过往互动，【100%必须只能】来源于【真实微信聊天数据库】（即下方给出的聊天记录）！
-   - 你绝对不可以在对话中虚构、臆造你和用户之间【没有发生过】的举动、对话、见面或约定！
-2. 【人设与世界书绑定】：
-   - ${hasRichScheduleText}
-3. 【情绪独立化】：
-   - 请保持你的独立个性与情绪波动，将符合你人设的独特情绪（如疲惫、开心、烦闷、专注等）极度自然地体现在主动问候与碎碎念中。`;
-
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
 ---
@@ -3495,8 +3396,6 @@ Roleplay Profile:
 - Personality & Behavior: ${activeCharacter.personality}
 - Background Story: ${activeCharacter.backstory}
 
-${behaviorLogicBlock}
-
 ${activeCharacter.compressedMemory ? `Compressed Memories (Important context from previous conversations): ${activeCharacter.compressedMemory}` : ""}
 
 User Profile (interacting with you):
@@ -3504,7 +3403,7 @@ User Profile (interacting with you):
 - Personality/Bio: ${settings.bio}
 
 ${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}PROACTIVE CONTACT TASK:
-It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Use the current active schedule (${currentSchedule ? currentSchedule.activity : "独自发呆"}) to initiate a natural and lively WeChat greeting.
+It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
 ${proactivePrompt}`;
 
@@ -3879,53 +3778,9 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
       const friendMsgs = messages
         .filter((m) => m.characterId === friend.id)
         .sort((a, b) => a.timestamp - b.timestamp);
+      const slicedMsgs = friendMsgs.slice(-60); // 30 rounds of dialogue memory
 
-      // Priority 1: Short-term real-time context memory (based on context limit, default 20 rounds)
-      const contextRounds = friend.contextMemoryLimit || 20;
-      const shortTermMsgs = friendMsgs.slice(-contextRounds * 2);
-
-      // Priority 2: Long-term archived summaries
-      const activeMemories = (memories || []).filter(m => m.characterId === friend.id);
-      const archivedMemoriesText = activeMemories.length > 0
-        ? activeMemories.map((m) => `- ${m.content}`).join("\n")
-        : "(暂无已归档日志/日记总结)";
-
-      // Priority 3: Restricted long-term history retrieval pool (default 100)
-      const retrievalLimit = friend.retrievalHistoryLimit || 100;
-      const olderMsgs = friendMsgs.slice(0, friendMsgs.length - shortTermMsgs.length);
-      const historyPoolMsgs = olderMsgs.slice(-retrievalLimit);
-
-      const shortTermText = shortTermMsgs.length > 0
-        ? shortTermMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n")
-        : "(无短期实时聊天记录)";
-
-      const historyPoolText = historyPoolMsgs.length > 0
-        ? historyPoolMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n")
-        : "(无历史聊天检索池记录)";
-
-      // Priority 4: World Book + Character definition (Persona backstory)
-      const scanText = shortTermMsgs.map(m => m.content).join(" ");
-      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, scanText);
-      const wbText = wbBlocks ? wbBlocks.formattedAll : "(世界书无对应专属词条)";
-
-      // Solo timeline activities for realistic daily logs (grounded in current time)
-      const schedules = syncAndGetPrivateSchedules(friend, worldBookEntries || [], new Date().toISOString());
-      const currentSchedule = schedules[schedules.length - 1] || schedules[0];
-
-      const currentActivityText = currentSchedule
-        ? `在独自进行: ${currentSchedule.activity} (${currentSchedule.timeSlot} - ${currentSchedule.emotion})。详情：${currentSchedule.description}`
-        : "无具体活动";
-
-      // Recent Posted Moments to avoid repetitions
-      const previousMoments = moments
-        .filter(m => m.characterId === friend.id)
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 5);
-      const previousMomentsText = previousMoments.length > 0
-        ? previousMoments.map(m => `- "${m.content}"`).join("\n")
-        : "(无历史发布记录)";
-
-      const history = shortTermMsgs.map((m) => ({
+      const history = slicedMsgs.map((m) => ({
         role: m.sender === "user" ? "user" : "model",
         text: m.content,
       }));
@@ -3934,39 +3789,22 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
 Character Profile:
 - Personality: ${friend.personality}
 - Background: ${friend.backstory}
-${friend.mbti ? `- MBTI: ${friend.mbti}` : ""}
 
 User Profile (Machine Owner / 机主):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
----
-[🚨 FOUR-LAYER MEMORY SYSTEM]:
+Below is your recent direct chat history with the user (up to 30 rounds). It represents your current relationship context and shared history/topics:
+${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n") : "(No prior chat history)"}
 
-1. 【最高优先级：短期实时上下文记忆】 (Current Active Dialogue):
-${shortTermText}
-
-2. 【次优先级：长期归档精炼总结记忆】 (Archived Logs & Synced Summaries):
-${archivedMemoriesText}
-
-3. 【兜底检索：历史聊天背景检索池】 (Background Context):
-${historyPoolText}
-
-4. 【底层词条素材：角色专属世界书】:
-${wbText}
-
----
-[🚨 CURRENT STATE & ACTIVITY]:
-- Your Active Solo Activity Schedule right now: ${currentActivityText}
-- Your Recent Posted Moments (Do NOT repeat or duplicate these topics/expressions):
-${previousMomentsText}
-
----
-[🚨 WECHAT MOMENT RULES]:
-1. Generate a realistic WeChat Moment post in first person representing your daily thoughts, life sharing, feelings, or activities. It should fit your character's personality and background naturally.
-2. Do NOT use OOC tags, brackets, or talk like an AI. Just output the text of the Moment post.
-3. Do NOT include parenthesized meta-narration like "(发了条朋友圈)" or details about pictures.
-4. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g., "评论：终于下班了"), we will automatically publish it as a real comment.
+Your task: Write a WeChat Moment post (朋友圈) from your perspective.
+🚨 [CRITICAL WECHAT MOMENT RULES]:
+1. The post must fit your personality. It can be about your own personal life (feelings, work, hobbies) OR about your relationship/recent chats/interactions with the user.
+2. The post content must be natural, engaging, and in Chinese.
+3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
+4. Do NOT use OOC tags, narration brackets, or talk like an AI. Just output the text of the Moment post.
+5. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)" or "(配图：...)" at the start.
+6. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 `;
 
       const response = await apiChat({
@@ -4013,25 +3851,24 @@ ${previousMomentsText}
         };
 
         onAddMoment(newMo);
-
-        // Sync to short-term memory by inserting a clean, non-intrusive system narration message
-        const systemActionMsg: Message = {
-          id: `${Date.now()}-moment-sync-${Math.random().toString(36).substr(2, 5)}`,
-          characterId: friend.id,
-          sender: "character",
-          isNarration: true,
-          content: `（系统提示：${friend.remark || friend.name} 发布了朋友圈动态：“${parsed.content}”）`,
-          timestamp: Date.now(),
-        };
-        onSendMessage(systemActionMsg);
       }
     } catch (err: any) {
-      console.warn(`Failed to generate Moment for character ${friend.name} (silenced background alert):`, err);
+      console.error(`Failed to generate Moment for character ${friend.name}:`, err);
+      const errMsgStr = err?.message || String(err);
+      const isAuthError = errMsgStr.toLowerCase().includes("401") ||
+                          errMsgStr.toLowerCase().includes("api_key") ||
+                          errMsgStr.toLowerCase().includes("key") ||
+                          errMsgStr.toLowerCase().includes("invalid") ||
+                          errMsgStr.toLowerCase().includes("authentication fails");
+      if (isAuthError) {
+        showToast(`⚠️ [动态生成失败] 「${friend.name}」发布朋友圈时 API 验证失败，请在设置中检查您的 API Key 是否正确。`);
+      } else {
+        showToast(`⚠️ [动态生成失败] 「${friend.name}」：${errMsgStr}`);
+      }
     }
   };
 
   const checkAndTriggerCharacterMoments = async () => {
-    if (!isInitialSynced) return;
     if (friends.length === 0) return;
 
     for (const friend of friends) {
@@ -4198,11 +4035,7 @@ ${previousMomentsText}
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
-        <div 
-          className={`absolute inset-x-0 top-0 z-40 bg-slate-50 flex flex-col animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} 
-          id="conv-screen"
-          style={viewportHeight ? { height: `${viewportHeight}px`, bottom: "auto" } : { height: "100%", bottom: "0" }}
-        >
+        <div className={`absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen">
           <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content">
             {activeCharacter.customCss && (
               <style>{activeCharacter.customCss}</style>
@@ -4401,11 +4234,6 @@ ${previousMomentsText}
                   padding-bottom: 8px !important;
                   position: relative !important;
                 }
-                @media (max-width: 767px) {
-                  .cv-header {
-                    padding-top: calc(env(safe-area-inset-top, 0px) + 36px) !important;
-                  }
-                }
                 /* 返回按钮 */
                 .cv-header .back-btn {
                   position: relative !important;
@@ -4531,37 +4359,30 @@ ${previousMomentsText}
                   border-bottom-right-radius: 20px !important;
                   border-bottom-left-radius: 20px !important;
                   padding: 11px 16px !important;
-                  font-size: 12px !impo                     {/* Auto Translate Toggle */}
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
-                      <div className="space-y-0.5">
-                        <span className="text-[#52525b] font-bold text-xs">全部自动翻译</span>
-                        <span className="text-[10px] text-slate-400 block">对方发言非中文时，启用后自动将对方的发言翻译为中文</span>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftEnableAutoTranslate}
-                          onChange={(e) => setDraftEnableAutoTranslate(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
-                    </div>
-
-                    {/* Proactive Moments Toggle */}
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
-                      <div className="space-y-0.5">
-                        <span className="text-[#52525b] font-bold text-xs">主动发送朋友圈</span>
-                        <span className="text-[10px] text-slate-400 block">开启后根据人设与作息规律主动发布日常生活或与你的互动朋友圈</span>
-                      </div>
-                      <label className="relative inline-flex inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftEnableProactiveMoments}
-                          onChange={(e) => setDraftEnableProactiveMoments(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
-                    </div>   font-size: 9px !important;
+                  font-size: 12px !important;
+                  font-weight: 600 !important;
+                  line-height: 1.4 !important;
+                  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
+                }
+                .phone-screen-container .style-liquid-glass .chat-bubble-other *,
+                .style-liquid-glass .chat-bubble-other * {
+                  color: #1c1917 !important;
+                }
+ 
+                /* 气泡元数据 */
+                .msg-meta-header {
+                  margin-bottom: 6px !important;
+                }
+                .msg-meta-name {
+                  color: #3f3f46 !important;
+                  font-size: 9px !important;
+                  font-weight: 800 !important;
+                  letter-spacing: 0.08em !important;
+                  margin-bottom: 2px !important;
+                }
+                .msg-meta-date, .msg-meta-time {
+                  color: #71717a !important;
+                  font-size: 9px !important;
                   font-weight: 500 !important;
                   letter-spacing: 0.02em !important;
                   display: inline-block !important;
@@ -4646,21 +4467,11 @@ ${previousMomentsText}
               `}</style>
             )}
             {/* Chat Window Header with standard classes and compact size */}
-            <div 
-              className={`flex items-center justify-between z-10 shrink-0 relative cv-header header app-top-container default-controls selection-controls ${
-                isFloatingCute 
-                  ? "mx-3.5 mt-3.5 mb-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] px-4 py-2" 
-                  : "px-4 py-1.5 bg-transparent"
-              }`}
-              style={{
-                paddingTop: (typeof window !== "undefined" && window.innerWidth < 768 && !isFloatingCute)
-                  ? "calc(env(safe-area-inset-top, 0px) + 36px)"
-                  : undefined,
-                marginTop: (typeof window !== "undefined" && window.innerWidth < 768 && isFloatingCute)
-                  ? "calc(env(safe-area-inset-top, 0px) + 36px)"
-                  : undefined
-              }}
-            >
+            <div className={`flex items-center justify-between z-10 shrink-0 relative cv-header header app-top-container default-controls selection-controls ${
+              isFloatingCute 
+                ? "mx-3.5 mt-3.5 mb-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] px-4 py-2" 
+                : "px-4 py-1.5 bg-transparent"
+            }`}>
               <button
                 onClick={() => {
                   setActiveChatCharId(null);
@@ -4720,9 +4531,8 @@ ${previousMomentsText}
                   setDraftArchiveTemplateType(activeCharacter.archiveTemplateType || "refined");
                   setDraftAutoArchiveInterval(activeCharacter.autoArchiveInterval || 50);
                   setDraftEnableAutoArchive(activeCharacter.enableAutoArchive !== undefined ? activeCharacter.enableAutoArchive : (activeCharacter.enableAutoSummary || false));
-                  setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness !== false);
+                  setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness || false);
                   setDraftEnableAutoTranslate(activeCharacter.enableAutoTranslate || false);
-                  setDraftEnableProactiveMoments(activeCharacter.enableProactiveMoments || false);
                   setDraftMinimaxVoiceId(activeCharacter.minimaxVoiceId || "");
                   setDraftMinimaxSpeed(activeCharacter.minimaxSpeed !== undefined ? activeCharacter.minimaxSpeed : 1.0);
                   setDraftVoiceFrequency(activeCharacter.voiceFrequency || "medium");
@@ -4984,22 +4794,6 @@ ${previousMomentsText}
                       </label>
                     </div>
 
-                    {/* Proactive Moments Toggle */}
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
-                      <div className="space-y-0.5">
-                        <span className="text-[#52525b] font-bold text-xs">主动发送朋友圈</span>
-                        <span className="text-[10px] text-slate-400 block">开启后根据人设与作息规律主动发布日常生活或与你的互动朋友圈</span>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftEnableProactiveMoments}
-                          onChange={(e) => setDraftEnableProactiveMoments(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
-                    </div>
-
                     {/* Chat Background customizer */}
                     <div className="py-3 space-y-2 border-t border-slate-100">
                       <span className="text-[#52525b] font-bold block text-xs">专属背景壁纸</span>
@@ -5040,162 +4834,170 @@ ${previousMomentsText}
                     </div>
 
                      {/* Three-Layer Memory Optimization System Panel */}
-                    <div className="pt-4 pb-4 space-y-4 border-t border-slate-100">
+                    <div className="py-4 space-y-4 border-t border-slate-100">
                       <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-                        <span className="text-[#3f3f46] font-bold text-sm">三层记忆隔离与优化配置</span>
+                        <span className="text-slate-800 font-bold text-sm">三层记忆隔离与优化配置</span>
                       </div>
 
                       {/* Token Preview Badge Container */}
-                      <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-[22px] space-y-2">
+                      <div className="bg-neutral-50 border border-neutral-100 p-4 rounded-[16px] space-y-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-slate-800">单次 Prompt 预估消耗预览</span>
-                          <span className="text-xs font-bold text-slate-900 font-mono">
+                          <span className="text-xs font-bold text-neutral-800">
+                            单次 Prompt 预估消耗预览
+                          </span>
+                          <span className="text-xs font-bold text-neutral-900 font-mono bg-neutral-200/50 px-2.5 py-0.5 rounded-full">
                             ~{estimatedTokens.total} Tokens
                           </span>
                         </div>
-                        <div className="grid grid-cols-3 gap-1.5 text-[9px] text-slate-600 font-medium font-mono">
-                          <div className="bg-white p-2 rounded-[12px] border border-slate-100 text-center">
-                            <span className="block text-slate-400 text-[8px] mb-0.5">短期上下文</span>
-                            <span>~{estimatedTokens.context} t</span>
+                        <div className="grid grid-cols-3 gap-2 text-[10px] text-neutral-600 font-medium font-mono">
+                          <div className="bg-white p-2 rounded-[12px] border border-neutral-100 text-center">
+                            <span className="block text-neutral-400 text-[9px] mb-0.5">短期上下文</span>
+                            <span className="font-bold text-neutral-800">~{estimatedTokens.context} t</span>
                           </div>
-                          <div className="bg-white p-2 rounded-[12px] border border-slate-100 text-center">
-                            <span className="block text-slate-400 text-[8px] mb-0.5">深度记忆库</span>
-                            <span>~{estimatedTokens.retrieval} t</span>
+                          <div className="bg-white p-2 rounded-[12px] border border-neutral-100 text-center">
+                            <span className="block text-neutral-400 text-[9px] mb-0.5">深度记忆库</span>
+                            <span className="font-bold text-neutral-800">~{estimatedTokens.retrieval} t</span>
                           </div>
-                          <div className="bg-white p-2 rounded-[12px] border border-slate-100 text-center">
-                            <span className="block text-slate-400 text-[8px] mb-0.5">人设与常驻</span>
-                            <span>~{estimatedTokens.persona} t</span>
+                          <div className="bg-white p-2 rounded-[12px] border border-neutral-100 text-center">
+                            <span className="block text-neutral-400 text-[9px] mb-0.5">人设与常驻</span>
+                            <span className="font-bold text-neutral-800">~{estimatedTokens.persona} t</span>
                           </div>
                         </div>
                       </div>
 
                       {/* Layer 1: Short-term Context */}
-                      <div className="space-y-3 p-4 bg-slate-50/50 rounded-[22px] border border-slate-100">
+                      <div className="space-y-3.5 p-4 bg-neutral-50/80 rounded-[16px] border border-neutral-100">
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-800 font-bold text-xs">短期实时上下文</span>
-                          <span className="text-xs font-bold text-slate-900 font-mono">
-                            {draftContextMemoryLimit} 轮
+                          <span className="text-[#18181b] font-bold text-xs">短期实时上下文</span>
+                          <span className="text-xs font-bold text-neutral-800 font-mono bg-white px-2.5 py-0.5 rounded-full border border-neutral-100">
+                            {draftContextMemoryLimit} 轮 / {draftContextMemoryLimit} 条消息
                           </span>
                         </div>
-                        <input
-                          type="range"
-                          min={10}
-                          max={50}
-                          step={1}
-                          value={draftContextMemoryLimit}
-                          onChange={(e) => setDraftContextMemoryLimit(parseInt(e.target.value))}
-                          className="w-full accent-black h-1 bg-slate-200 rounded-full appearance-none cursor-pointer"
-                        />
-                        <div className="flex justify-between text-[9px] text-slate-400 font-mono">
-                          <span>10轮</span>
-                          <span>20轮</span>
-                          <span>35轮</span>
-                          <span>50轮</span>
+                        
+                        <div className="space-y-1">
+                          <input
+                            type="range"
+                            min={10}
+                            max={50}
+                            step={1}
+                            value={draftContextMemoryLimit}
+                            onChange={(e) => setDraftContextMemoryLimit(parseInt(e.target.value))}
+                            className="w-full accent-black h-1 bg-neutral-200 rounded-full appearance-none cursor-pointer"
+                          />
+                          <div className="flex justify-between text-[8px] text-neutral-400 font-mono">
+                            <span>10轮</span>
+                            <span>20轮(默认)</span>
+                            <span>35轮</span>
+                            <span>50轮</span>
+                          </div>
                         </div>
                       </div>
 
                       {/* Layer 2: Long-term History Retrieval Pool */}
-                      <div className="space-y-3 p-4 bg-slate-50/50 rounded-[22px] border border-slate-100">
+                      <div className="space-y-3.5 p-4 bg-neutral-50/80 rounded-[16px] border border-neutral-100">
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-800 font-bold text-xs">长期历史检索池</span>
-                          <span className="text-xs font-bold text-slate-900 font-mono">
+                          <span className="text-[#18181b] font-bold text-xs">长期历史检索池</span>
+                          <span className="text-xs font-bold text-neutral-800 font-mono bg-white px-2.5 py-0.5 rounded-full border border-neutral-100">
                             {draftRetrievalHistoryLimit} 条
                           </span>
                         </div>
-                        <input
-                          type="range"
-                          min={10}
-                          max={200}
-                          step={10}
-                          value={draftRetrievalHistoryLimit}
-                          onChange={(e) => setDraftRetrievalHistoryLimit(parseInt(e.target.value))}
-                          className="w-full accent-black h-1 bg-slate-200 rounded-full appearance-none cursor-pointer"
-                        />
-                        <div className="flex justify-between text-[9px] text-slate-400 font-mono">
-                          <span>10条</span>
-                          <span>50条</span>
-                          <span>100条</span>
-                          <span>150条</span>
-                          <span>200条</span>
+                        
+                        <div className="space-y-1">
+                          <input
+                            type="range"
+                            min={10}
+                            max={200}
+                            step={10}
+                            value={draftRetrievalHistoryLimit}
+                            onChange={(e) => setDraftRetrievalHistoryLimit(parseInt(e.target.value))}
+                            className="w-full accent-black h-1 bg-neutral-200 rounded-full appearance-none cursor-pointer"
+                          />
+                          <div className="flex justify-between text-[8px] text-neutral-400 font-mono">
+                            <span>10条</span>
+                            <span>50条</span>
+                            <span>100条(默认)</span>
+                            <span>150条</span>
+                            <span>200条</span>
+                          </div>
                         </div>
                       </div>
 
                       {/* Layer 3: Long-term Archived Memory */}
-                      <div className="space-y-3.5 p-4 bg-slate-50/50 rounded-[22px] border border-slate-100">
+                      <div className="space-y-3.5 p-4 bg-neutral-50/80 rounded-[16px] border border-neutral-100">
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-800 font-bold text-xs">对话后台自动归档</span>
-                          <label className="relative inline-flex items-center cursor-pointer">
+                          <span className="text-[#18181b] font-bold text-xs">对话后台自动归档</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-neutral-800 font-mono bg-white px-2.5 py-0.5 rounded-full border border-neutral-100">
+                              {draftEnableAutoArchive ? `${draftAutoArchiveInterval} 轮` : "已关闭"}
+                            </span>
                             <input
                               type="checkbox"
                               checked={draftEnableAutoArchive}
                               onChange={(e) => setDraftEnableAutoArchive(e.target.checked)}
-                              className="rounded border-slate-300 text-neutral-900 focus:ring-neutral-950 w-3.5 h-3.5"
+                              className="rounded border-slate-300 text-neutral-900 focus:ring-neutral-950 w-3.5 h-3.5 accent-black cursor-pointer"
                             />
-                          </label>
-                        </div>
-                        
-                        {draftEnableAutoArchive && (
-                          <div className="space-y-3 pt-2 border-t border-slate-100">
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-800 font-bold text-xs">自动归档间隔</span>
-                              <span className="text-xs font-bold text-slate-900 font-mono">{draftAutoArchiveInterval} 轮</span>
-                            </div>
-                            <input
-                              type="range"
-                              min={10}
-                              max={100}
-                              step={10}
-                              value={draftAutoArchiveInterval}
-                              onChange={(e) => setDraftAutoArchiveInterval(parseInt(e.target.value))}
-                              className="w-full accent-black h-1 bg-slate-200 rounded-full appearance-none cursor-pointer"
-                            />
-                            <div className="flex justify-between text-[9px] text-slate-400 font-mono">
-                              <span>10轮</span>
-                              <span>50轮</span>
-                              <span>100轮</span>
-                            </div>
                           </div>
-                        )}
-
-                        {/* One-click manual archive button */}
-                        <div className="pt-2 border-t border-slate-100">
-                          <button
-                            type="button"
-                            disabled={isManualArchiving || currentChatMessages.length === 0}
-                            onClick={async () => {
-                              try {
-                                setIsManualArchiving(true);
-                                const count = await handleExtractMemories();
-                                if (count > 0) {
-                                  showToast(`🎉 手动归档并提炼成功！已存入“${activeCharacter.name}”的记忆档案馆`);
-                                } else {
-                                  showToast("当前没有需要归档提炼的新深度对话！");
-                                }
-                              } catch (err) {
-                                showToast("一键归档时发生未知错误，请重试");
-                              } finally {
-                                setIsManualArchiving(false);
-                              }
-                            }}
-                            className={`w-full py-2.5 rounded-[16px] text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 ${
-                              isManualArchiving || currentChatMessages.length === 0
-                                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                                : "bg-neutral-900 hover:bg-neutral-800 text-white"
-                            }`}
-                          >
-                            {isManualArchiving ? (
-                              <>
-                                <span className="w-3 h-3 rounded-full border-2 border-slate-400 border-t-transparent animate-spin" />
-                                正在进行深度记忆归档...
-                              </>
-                            ) : (
-                              <>
-                                <Database className="w-3.5 h-3.5" />
-                                一键手动提炼归档当前对话
-                              </>
-                            )}
-                          </button>
                         </div>
+
+                        <div className={`space-y-1 transition-opacity ${draftEnableAutoArchive ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
+                          <input
+                            type="range"
+                            min={10}
+                            max={100}
+                            step={10}
+                            value={draftAutoArchiveInterval}
+                            onChange={(e) => setDraftAutoArchiveInterval(parseInt(e.target.value))}
+                            disabled={!draftEnableAutoArchive}
+                            className="w-full accent-black h-1 bg-neutral-200 rounded-full appearance-none cursor-pointer"
+                          />
+                          <div className="flex justify-between text-[8px] text-neutral-400 font-mono">
+                            <span>10轮</span>
+                            <span>30轮</span>
+                            <span>50轮(默认)</span>
+                            <span>80轮</span>
+                            <span>100轮</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* One-click manual archive button */}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          disabled={isManualArchiving || currentChatMessages.length === 0}
+                          onClick={async () => {
+                            try {
+                              setIsManualArchiving(true);
+                              const count = await handleExtractMemories();
+                              if (count > 0) {
+                                showToast(`🎉 手动归档并提炼成功！已存入“${activeCharacter.name}”的记忆档案馆`);
+                              } else {
+                                showToast("当前没有需要归档提炼的新深度对话！");
+                              }
+                            } catch (err) {
+                              showToast("一键归档时发生未知错误，请重试");
+                            } finally {
+                              setIsManualArchiving(false);
+                            }
+                          }}
+                          className={`w-full py-2.5 rounded-[16px] text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                            isManualArchiving || currentChatMessages.length === 0
+                              ? "bg-neutral-100 text-neutral-400 cursor-not-allowed border border-neutral-200"
+                              : "bg-neutral-900 hover:bg-neutral-800 text-white shadow-sm"
+                          }`}
+                        >
+                          {isManualArchiving ? (
+                            <>
+                              <span className="w-3 h-3 rounded-full border-2 border-slate-400 border-t-transparent animate-spin" />
+                              正在进行深度记忆归档...
+                            </>
+                          ) : (
+                            <>
+                              <Database className="w-3.5 h-3.5" />
+                              一键手动提炼归档当前对话
+                            </>
+                          )}
+                        </button>
                       </div>
                     </div>
 
@@ -5203,7 +5005,7 @@ ${previousMomentsText}
                     <div className="py-3.5 space-y-3 border-t border-slate-100">
                       <div className="flex items-center justify-between">
                         <span className="text-[#52525b] font-bold text-xs">MiniMax 专属语音声线</span>
-                        <span className="text-[9px] text-slate-600 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">当前角色</span>
+                        <span className="text-[9px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">当前角色</span>
                       </div>
                       
                       <div className="space-y-2">
@@ -5223,7 +5025,7 @@ ${previousMomentsText}
                         <div className="space-y-1.5 pt-1">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] text-slate-400 font-semibold">专属语速调节</span>
-                            <span className="text-xs font-bold text-slate-700 font-mono">{draftMinimaxSpeed}x</span>
+                            <span className="text-xs font-bold text-slate-800 font-mono">{draftMinimaxSpeed}x</span>
                           </div>
                           <input
                             type="range"
@@ -5232,7 +5034,7 @@ ${previousMomentsText}
                             step="0.1"
                             value={draftMinimaxSpeed}
                             onChange={(e) => setDraftMinimaxSpeed(Number(e.target.value))}
-                            className="w-full accent-black h-1 bg-slate-100 rounded-[16px] appearance-none cursor-pointer"
+                            className="w-full accent-black h-1 bg-neutral-200 rounded-full appearance-none cursor-pointer"
                           />
                           <div className="flex justify-between text-[8px] text-slate-400 font-semibold">
                             <span>极慢 (0.5)</span>
@@ -5260,7 +5062,7 @@ ${previousMomentsText}
                                 onClick={() => setDraftVoiceFrequency(opt.value as any)}
                                 className={`py-1.5 rounded-[8px] text-[10px] font-bold transition-all border ${
                                   draftVoiceFrequency === opt.value
-                                    ? "bg-neutral-950 border-neutral-950 text-white shadow-sm font-bold"
+                                    ? "bg-neutral-900 border-neutral-900 text-white shadow-sm"
                                     : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
                                 }`}
                               >
@@ -6077,15 +5879,15 @@ ${previousMomentsText}
                         return (
                           <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} space-y-1`}>
                             {/* Voice capsule pill wrapper */}
-                            <div className={`flex items-center gap-2 flex-nowrap ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
+                            <div className={`flex items-center gap-2 ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
                               <div 
                                 onClick={() => {
                                   // Click to play/pause
                                   triggerMessageSpeech(msg);
                                   setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
                                 }}
-                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative flex-nowrap ${bubbleBgAndShape}`}
-                                style={{ width: `${115 + duration * 6.5}px`, minWidth: "130px", maxWidth: "240px" }}
+                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape}`}
+                                style={{ width: `${80 + duration * 6.5}px`, minWidth: "95px", maxWidth: "220px" }}
                               >
                                 {/* Left element: Play/Pause/Speaker icon */}
                                 <div className="flex items-center justify-center shrink-0 text-current">
@@ -6386,13 +6188,9 @@ ${previousMomentsText}
                 value={chatInputText}
                 onChange={(e) => setChatInputText(e.target.value)}
                 onFocus={() => {
-                  window.scrollTo(0, 0);
                   setTimeout(() => {
                     if (chatEndRef.current) {
                       chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-                    }
-                    if (scrollContainerRef.current) {
-                      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
                     }
                   }, 120);
                 }}
@@ -9389,9 +9187,9 @@ ${previousMomentsText}
                   setVoiceTranscribed((prev) => ({ ...prev, [msgId]: !prev[msgId] }));
                   setActiveMenuMsg(null);
                 }}
-                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-indigo-600 transition-colors"
               >
-                <Languages className="w-3.5 h-3.5 text-stone-500" />
+                <Languages className="w-3.5 h-3.5 text-indigo-500" />
                 <span>{voiceTranscribed[activeMenuMsg.id] ? "收起文字" : "语音转文字"}</span>
               </button>
             )}
