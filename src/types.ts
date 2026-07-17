@@ -24,6 +24,8 @@ export interface Character {
   summaryTriggerRound?: number;
   compressedMemory?: string;
   enableProactiveChat?: boolean;
+  /** Whether this contact may occasionally start an incoming voice call. */
+  enableProactiveCall?: boolean;
   proactiveChatInterval?: number;
   proactiveStartTime?: string;
   proactiveEndTime?: string;

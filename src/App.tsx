@@ -2823,6 +2823,7 @@ export default function App() {
                     setActiveChatCharId={setActiveChatCharId}
                     offlineStories={offlineStories}
                     onSaveOfflineStory={handleSaveOfflineStory}
+                    onDeleteOfflineStory={handleDeleteOfflineStory}
                     onDeleteCharacter={handleDeleteCharacter}
                   />
                 </div>

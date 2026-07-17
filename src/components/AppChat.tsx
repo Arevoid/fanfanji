@@ -281,6 +281,7 @@ interface AppChatProps {
   setActiveChatCharId: (id: string | null) => void;
   offlineStories?: OfflineStory[];
   onSaveOfflineStory?: (story: OfflineStory) => void;
+  onDeleteOfflineStory?: (storyId: string) => void;
   onDeleteCharacter?: (id: string, skipConfirm?: boolean) => void;
 }
 
@@ -297,6 +298,7 @@ const normalizePaymentMarkup = (content: string) => content
 
 const isRedPacketMarkup = (content: string) => /^\[(?:红包|微信红包)\]/.test(content);
 const isTransferMarkup = (content: string) => /^\[(?:转账|微信转账)\]/.test(content);
+const isCallRecordMarkup = (content: string) => /^\[通话记录\]\|/.test(content);
 
 const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: string) =>
   getLatestWorldBookEntries(entries)
@@ -512,6 +514,7 @@ export default function AppChat({
   setActiveChatCharId,
   offlineStories = [],
   onSaveOfflineStory,
+  onDeleteOfflineStory,
   onDeleteCharacter,
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
@@ -744,15 +747,13 @@ export default function AppChat({
 
     onSendMessageRaw(msg);
 
-    // Auto-play the synthetic voice for incoming character voice messages has been disabled per user request
-    // (requires user to manually click the voice bubble to play)
-    /*
-    if (msg.sender === "character" && msg.content && msg.content.startsWith("[语音") && settings.enableMiniMaxTts) {
+    // Calls should sound like calls: every incoming reply is automatically read
+    // aloud while connected. Normal chat remains manual-play only.
+    if (isCallActive && msg.sender === "character" && msg.content && msg.content.startsWith("[语音")) {
       setTimeout(() => {
         triggerMessageSpeech(msg);
-      }, 500);
+      }, 120);
     }
-    */
   };
 
   // Sticker groups state
@@ -884,6 +885,34 @@ export default function AppChat({
   const friends = characters.filter((c) =>
     friendIds.includes(c.id) && !c.isGroupChat && belongsToActiveIdentity(c.ownerIdentityId)
   );
+
+  const handleDeleteFriend = () => {
+    if (!activeCharacter || activeCharacter.isGroupChat || !onDeleteCharacter) return;
+
+    const friendName = activeCharacter.remark || activeCharacter.name;
+    if (!window.confirm(`确定删除好友“${friendName}”吗？与该好友的聊天、朋友圈、记忆和线下剧本将一并删除，且无法恢复。`)) {
+      return;
+    }
+
+    const friendId = activeCharacter.id;
+    setFriendIds((prev) => prev.filter((id) => id !== friendId));
+    onSaveMemories(memories.filter((memory) => memory.characterId !== friendId));
+    offlineStories
+      .filter((story) => story.characterId === friendId || story.characterIds?.includes(friendId))
+      .forEach((story) => onDeleteOfflineStory?.(story.id));
+    characters
+      .filter((character) => character.isGroupChat && character.memberIds?.includes(friendId))
+      .forEach((group) => onSaveCharacter({
+        ...group,
+        memberIds: group.memberIds?.filter((memberId) => memberId !== friendId),
+      }));
+
+    localStorage.removeItem(`offline_mode_active_${friendId}`);
+    localStorage.removeItem(`offline_story_id_${friendId}`);
+    onDeleteCharacter(friendId, true);
+    setIsShowingCardModal(false);
+    setActiveChatCharId(null);
+  };
 
   // Never leave an old identity's private thread open after switching profiles.
   useEffect(() => {
@@ -1156,6 +1185,7 @@ export default function AppChat({
   const [draftCustomCss, setDraftCustomCss] = useState("");
   const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
+  const [draftEnableProactiveCall, setDraftEnableProactiveCall] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
   const [draftProactiveStartTime, setDraftProactiveStartTime] = useState("09:00");
   const [draftProactiveEndTime, setDraftProactiveEndTime] = useState("22:00");
@@ -1175,13 +1205,11 @@ export default function AppChat({
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
   const [activeAttachModal, setActiveAttachModal] = useState<"redpacket" | "music" | "location" | "file" | "calling" | "voice" | null>(null);
-  const [callingType, setCallingType] = useState<"voice" | "video">("voice");
   const [voiceDuration, setVoiceDuration] = useState("5");
   const [voiceText, setVoiceText] = useState("");
   const [callingStatus, setCallingStatus] = useState<"ringing" | "connected" | "ended">("ringing");
   const [callingDuration, setCallingDuration] = useState(0);
   const [isIncomingCall, setIsIncomingCall] = useState(false);
-  const [showCallingDirectionModal, setShowCallingDirectionModal] = useState(false);
   const [callStartTime, setCallStartTime] = useState<number>(0);
   const [callingInputText, setCallingInputText] = useState("");
   const [redPacketAmount, setRedPacketAmount] = useState("8.88");
@@ -1624,6 +1652,68 @@ export default function AppChat({
     };
   }, [activeAttachModal, callingStatus, isIncomingCall]);
 
+  const beginVoiceCall = (incoming: boolean) => {
+    if (!activeCharacter || activeCharacter.isGroupChat) return;
+    setIsIncomingCall(incoming);
+    setCallingStatus("ringing");
+    setCallingDuration(0);
+    setCallStartTime(0);
+    setCallingInputText("");
+    setActiveAttachModal("calling");
+    setShowAttachPanel(false);
+  };
+
+  const endVoiceCall = () => {
+    if (!activeChatCharId || callingStatus !== "connected") {
+      setActiveAttachModal(null);
+      return;
+    }
+    const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
+    const secs = (callingDuration % 60).toString().padStart(2, "0");
+    onSendMessage({
+      id: `call-record-${Date.now()}`,
+      characterId: activeChatCharId,
+      sender: "user",
+      content: `[通话记录]|语音通话|${mins}:${secs}`,
+      timestamp: Date.now(),
+    });
+    if (activeTtsAudio) activeTtsAudio.pause();
+    setCallingStatus("ended");
+    setCallingInputText("");
+    setActiveAttachModal(null);
+  };
+
+  const sendVoiceCallMessage = () => {
+    const text = callingInputText.trim();
+    if (!activeChatCharId || !text) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      characterId: activeChatCharId,
+      sender: "user",
+      content: text,
+      timestamp: Date.now(),
+    };
+    onSendMessage(userMsg);
+    generateResponseForUserMessage(userMsg);
+    setCallingInputText("");
+  };
+
+  // Enabled contacts occasionally call the user while their chat is open.
+  // The cooldown keeps this feeling spontaneous rather than intrusive.
+  const proactiveCallCooldownRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!activeChatCharId || !activeCharacter || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
+    const timer = setInterval(() => {
+      if (activeAttachModal || isOfflineStoryActiveFor(activeChatCharId)) return;
+      const lastCallAt = proactiveCallCooldownRef.current[activeChatCharId] || 0;
+      if (Date.now() - lastCallAt < 5 * 60 * 1000 || Math.random() >= 0.18) return;
+      proactiveCallCooldownRef.current[activeChatCharId] = Date.now();
+      beginVoiceCall(true);
+    }, 60 * 1000);
+    return () => clearInterval(timer);
+  }, [activeChatCharId, activeCharacter, activeAttachModal]);
+
   const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return;
     setIsTyping(true);
@@ -1885,6 +1975,7 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     // Exclude non-voice formats
     if (
       !bubbleText ||
+      isCallRecordMarkup(bubbleText) ||
       isRedPacketMarkup(bubbleText) ||
       isTransferMarkup(bubbleText) ||
       bubbleText.startsWith("[系统]") ||
@@ -3274,6 +3365,7 @@ ${stickerListStr}
         customCss: draftCustomCss,
         chatStylePreset: draftChatStylePreset,
         enableProactiveChat: draftEnableProactiveChat,
+        enableProactiveCall: draftEnableProactiveCall,
         proactiveChatInterval: draftProactiveChatInterval,
         proactiveStartTime: draftProactiveStartTime,
         proactiveEndTime: draftProactiveEndTime,
@@ -4677,6 +4769,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftCustomCss(activeCharacter.customCss || "");
                   setDraftChatStylePreset(activeCharacter.chatStylePreset || "default");
                   setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
+                  setDraftEnableProactiveCall(activeCharacter.enableProactiveCall || false);
                   setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
                   setDraftProactiveStartTime(activeCharacter.proactiveStartTime || "09:00");
                   setDraftProactiveEndTime(activeCharacter.proactiveEndTime || "22:00");
@@ -5302,6 +5395,21 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         </label>
                       </div>
 
+                      <div className="flex items-center justify-between rounded-[14px] bg-slate-50 px-3 py-2.5 border border-slate-100">
+                        <div className="space-y-0.5 pr-3">
+                          <span className="text-[#52525b] font-bold text-xs block">对方主动来电</span>
+                          <span className="text-[10px] text-slate-400 block">开启后，对方会偶尔主动拨打语音电话；关闭后不会出现来电。</span>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={draftEnableProactiveCall}
+                            onChange={(e) => setDraftEnableProactiveCall(e.target.checked)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                          />
+                        </label>
+                      </div>
+
                       {draftEnableProactiveChat && (
                         <div className="space-y-3 pt-2.5 border-t border-slate-100">
                           <div className="flex items-center justify-between">
@@ -5385,6 +5493,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       >
                         清空对话记录
                       </button>
+
+                      {!activeCharacter.isGroupChat && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteFriend}
+                          className="text-xs text-red-600 hover:text-red-700 font-bold py-1 px-4 rounded-[16px] hover:bg-red-50/80 transition-colors flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          删除好友
+                        </button>
+                      )}
 
                       {activeCharacter.isGroupChat && (
                         <button
@@ -5870,6 +5989,24 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               referrerPolicy="no-referrer"
                             />
                             <span className="sr-only">[{stickerName}]</span>
+                          </div>
+                        );
+                      })() : isCallRecordMarkup(msg.content) ? (() => {
+                        const [, callType = "语音通话", duration = "00:00"] = msg.content.split("|");
+                        return (
+                          <div className="w-52 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 text-slate-700 shadow-sm select-none">
+                            <div className="flex items-center gap-3 px-4 py-3">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                                <Phone className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0 text-left">
+                                <p className="text-xs font-bold">{callType}</p>
+                                <p className="mt-0.5 text-[10px] text-slate-400">通话时长 {duration}</p>
+                              </div>
+                            </div>
+                            <div className="border-t border-slate-200 bg-white px-4 py-1.5 text-left text-[9px] font-medium text-slate-400">
+                              语音通话已结束
+                            </div>
                           </div>
                         );
                       })() : isRedPacketMarkup(msg.content) ? (() => {
@@ -6462,8 +6599,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 <button
                   type="button"
                   onClick={() => {
-                    setShowCallingDirectionModal(true);
-                    setShowAttachPanel(false);
+                    beginVoiceCall(false);
                   }}
                   className="flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
@@ -7136,127 +7272,35 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               {/* Connected Chat Area or Ringing screen */}
               {callingStatus === "connected" ? (
-                <div className="flex-1 my-4 bg-white/5 rounded-[20px] p-3 flex flex-col overflow-hidden border border-white/5">
-                  <div className="text-[10px] text-white/30 mb-2 font-semibold">通话实时字幕</div>
-                  
-                  {/* Messages list inside the call */}
-                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-left scrollbar-thin">
-                    {currentChatMessages
-                      .filter(m => m.timestamp >= callStartTime)
-                      .map((msg) => {
-                        const isSelfMsg = msg.sender === "user";
-                        const isVoice = msg.content.startsWith("[语音]|");
-                        let contentToDisplay = msg.content;
-                        if (isVoice) {
-                          contentToDisplay = msg.content.split("|").slice(2).join("|") || "[语音]";
-                        }
-                        
-                        return (
-                          <div 
-                            key={msg.id} 
-                            className={`flex ${isSelfMsg ? "justify-end" : "justify-start"} animate-fade-in`}
-                          >
-                            <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
-                              isSelfMsg 
-                                ? "bg-emerald-600/80 text-white" 
-                                : "bg-white/10 text-white border border-white/5"
-                            }`}>
-                              {isVoice && <span className="mr-1">🎙️</span>}
-                              <span>{contentToDisplay}</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-
-                  {/* Connected bottom inputs */}
-                  <div className="mt-2 border-t border-white/10 pt-3 space-y-2.5">
-                    <div className="flex items-center gap-1.5">
-                      <input 
-                        type="text"
-                        value={callingInputText}
-                        onChange={(e) => setCallingInputText(e.target.value)}
-                        placeholder="在此输入文字，可转为文字或语音发送..."
-                        className="flex-1 bg-white/10 hover:bg-white/15 focus:bg-white/20 text-white placeholder-white/30 border border-white/10 rounded-[14px] px-3 py-2 text-xs outline-none transition-all"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && callingInputText.trim()) {
-                            const text = callingInputText.trim();
-                            const userMsg: Message = {
-                              id: Date.now().toString(),
-                              characterId: activeChatCharId,
-                              sender: "user",
-                              content: text,
-                              timestamp: Date.now(),
-                            };
-                            onSendMessage(userMsg);
-                            generateResponseForUserMessage(userMsg);
-                            setCallingInputText("");
-                          }
-                        }}
-                      />
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      {/* Hang up (red circular button) */}
-                      <button
-                        onClick={() => {
-                          const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
-                          const secs = (callingDuration % 60).toString().padStart(2, "0");
-                          sendCustomMessage(`[语音通话]|通话已结束 ${mins}:${secs}`);
-                          setActiveAttachModal(null);
-                        }}
-                        className="w-10 h-10 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 shrink-0"
-                        title="挂断"
-                      >
-                        <X className="w-5 h-5 text-white" />
-                      </button>
-                      
-                      {/* Button 1: 发送文字 */}
-                      <button
-                        onClick={() => {
-                          if (!callingInputText.trim()) return;
-                          const text = callingInputText.trim();
-                          const userMsg: Message = {
-                            id: Date.now().toString(),
-                            characterId: activeChatCharId,
-                            sender: "user",
-                            content: text,
-                            timestamp: Date.now(),
-                          };
-                          onSendMessage(userMsg);
-                          generateResponseForUserMessage(userMsg);
-                          setCallingInputText("");
-                        }}
-                        disabled={!callingInputText.trim()}
-                        className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold rounded-[14px] text-xs transition-all disabled:opacity-40"
-                      >
-                        发送文字
-                      </button>
-                      
-                      {/* Button 2: 发送语音 */}
-                      <button
-                        onClick={() => {
-                          if (!callingInputText.trim()) return;
-                          const text = callingInputText.trim();
-                          const secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
-                          const userMsg: Message = {
-                            id: Date.now().toString(),
-                            characterId: activeChatCharId,
-                            sender: "user",
-                            content: `[语音]|${secs}|${text}`,
-                            timestamp: Date.now(),
-                          };
-                          onSendMessage(userMsg);
-                          generateResponseForUserMessage(userMsg);
-                          setCallingInputText("");
-                        }}
-                        disabled={!callingInputText.trim()}
-                        className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-[14px] text-xs transition-all disabled:opacity-40 flex items-center justify-center gap-1"
-                      >
-                        <Mic className="w-3 h-3" />
-                        <span>发送语音</span>
-                      </button>
-                    </div>
+                <div className="flex-1 my-4 flex flex-col justify-end">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={callingInputText}
+                      onChange={(e) => setCallingInputText(e.target.value)}
+                      placeholder="输入消息..."
+                      className="flex-1 bg-white/10 hover:bg-white/15 focus:bg-white/20 text-white placeholder-white/30 border border-white/10 rounded-[14px] px-3 py-3 text-sm outline-none transition-all"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") sendVoiceCallMessage();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={sendVoiceCallMessage}
+                      disabled={!callingInputText.trim()}
+                      className="w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-white/10 disabled:text-white/30 flex items-center justify-center transition-all active:scale-95"
+                      title="发送"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={endVoiceCall}
+                      className="w-11 h-11 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center shadow-lg transition-all active:scale-95"
+                      title="挂断"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -7279,7 +7323,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       {/* Decline (Incoming Call) */}
                       <button
                         onClick={() => {
-                          sendCustomMessage(`[语音通话]|已拒绝`);
                           setActiveAttachModal(null);
                         }}
                         className="flex flex-col items-center gap-2"
@@ -7309,7 +7352,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       {/* Cancel (User Outgoing Call) */}
                       <button
                         onClick={() => {
-                          sendCustomMessage(`[语音通话]|已取消`);
                           setActiveAttachModal(null);
                         }}
                         className="flex flex-col items-center gap-2"
@@ -7326,65 +7368,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             </div>
           )}
 
-          {/* Calling Direction Choose Modal */}
-          {showCallingDirectionModal && (
-            <div className="absolute inset-0 bg-black/60 z-50 flex items-end justify-center animate-fade-in" onClick={() => setShowCallingDirectionModal(false)}>
-              <div 
-                className="bg-white rounded-t-[28px] w-full max-w-md p-6 pb-8 space-y-4 animate-slide-up text-slate-800"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between pb-1">
-                  <span className="text-xs font-black text-slate-400 uppercase tracking-wider">选择通话类型</span>
-                  <button 
-                    onClick={() => setShowCallingDirectionModal(false)}
-                    className="p-1 text-slate-400 hover:text-slate-600 transition-colors"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {/* Option 1: Active Call */}
-                  <button
-                    onClick={() => {
-                      setIsIncomingCall(false);
-                      setCallingStatus("ringing");
-                      setActiveAttachModal("calling");
-                      setShowCallingDirectionModal(false);
-                    }}
-                    className="w-full p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 active:scale-99 transition-all text-left flex items-center gap-3 border border-slate-100"
-                  >
-                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
-                      <Phone className="w-5 h-5 text-emerald-600" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800">拨打语音电话</h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5">向对方发起通话，等待对方接听（3秒后自动模拟接通）</p>
-                    </div>
-                  </button>
-
-                  {/* Option 2: Passive Incoming Call */}
-                  <button
-                    onClick={() => {
-                      setIsIncomingCall(true);
-                      setCallingStatus("ringing");
-                      setActiveAttachModal("calling");
-                      setShowCallingDirectionModal(false);
-                    }}
-                    className="w-full p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 active:scale-99 transition-all text-left flex items-center gap-3 border border-slate-100"
-                  >
-                    <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center shrink-0">
-                      <Phone className="w-5 h-5 text-indigo-600" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800">模拟对方来电</h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5">立即产生一个对方拨打给你的来电，可选择接听或挂断</p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
           </div>
         </div>
       ) : null}
