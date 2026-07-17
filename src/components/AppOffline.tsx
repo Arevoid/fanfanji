@@ -251,18 +251,27 @@ export default function AppOffline({
     localStorage.setItem(`offline_story_id_${story.characterId}`, story.id);
   };
 
+  const getSyncedMessageCount = (story: OfflineStory) =>
+    story.lastSyncedMessageCount ?? (story.archivedAt ? story.messages.length : 0);
+
+  const hasUnsyncedOnlineProgress = (story: OfflineStory) =>
+    story.messages.length > getSyncedMessageCount(story);
+
+  const clearOfflineSession = (story: OfflineStory) => {
+    localStorage.removeItem(`offline_story_id_${story.characterId}`);
+    localStorage.setItem(`offline_mode_active_${story.characterId}`, "false");
+  };
+
   // Exit story workspace back to list
   const handleExitStoryWorkspace = () => {
-    // Imported continuations are the only mode that returns a concise plot
-    // archive to online memory on exit. Director/IF stories require the user
-    // to choose the archive button in settings.
-    if (activeStory?.sourceChatId && activeStory.messages.length > 0 && !activeStory.archivedAt) {
+    // Online continuations always archive their newly-written plot immediately
+    // on exit, so the next online reply can continue the same topic.
+    if (activeStory?.sourceChatId && hasUnsyncedOnlineProgress(activeStory)) {
       handleSyncMemoryToBrain(activeStory);
     }
+    if (activeStory) clearOfflineSession(activeStory);
     setActiveStory(null);
     setIsSettingsOpen(false);
-    localStorage.removeItem(`offline_story_id_${selectedCharId}`);
-    localStorage.setItem(`offline_mode_active_${selectedCharId}`, "false");
   };
 
   // Create new offline story
@@ -361,10 +370,14 @@ export default function AppOffline({
 
   // Sync memory manually
   const handleSyncMemoryToBrain = (story: OfflineStory) => {
-    if (!story.messages.length) return;
+    const syncStart = getSyncedMessageCount(story);
+    const messagesToSync = story.messages.slice(syncStart);
+    if (!messagesToSync.length) return;
     
     // Create a summarized memory of this offline development
-    const lastMsgs = story.messages.slice(-5);
+    // Keep the archive concise but include the full newly-written segment when
+    // it is short. Long segments retain their latest 12 beats for continuity.
+    const lastMsgs = messagesToSync.slice(-12);
     const storyCharsList = story.characterIds && story.characterIds.length > 0 
       ? characters.filter(c => story.characterIds?.includes(c.id))
       : [selectedChar];
@@ -374,13 +387,14 @@ export default function AppOffline({
       .map(m => m.isNarration ? `[旁白描述] ${m.content}` : `[对话] ${m.sender === "user" ? "我" : "角色"}: ${m.content}`)
       .join(" \n");
 
-    const newMemoryContent = `[线下剧本《${story.title}》（参与者: ${formattedCharsList}）记忆同步]: 在离线虚构走向中发生：\n${summaryText}`;
+    const syncMarker = `offline-story:${story.id}:${syncStart}-${story.messages.length}`;
+    const newMemoryContent = `[线下剧本《${story.title}》新增剧情总结（参与者: ${formattedCharsList}）| ${syncMarker}]\n${summaryText}`;
 
     // Sync to all participating characters
     const newMems = [...memories];
     let syncedCount = 0;
     storyCharsList.forEach(char => {
-      const isDup = memories.some(m => m.characterId === char.id && m.content.includes(`《${story.title}》`));
+      const isDup = memories.some(m => m.characterId === char.id && m.content.includes(syncMarker));
       if (!isDup) {
         const memoryItem: MemoryItem = {
           id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -400,7 +414,8 @@ export default function AppOffline({
       const archivedStory = {
         ...story,
         archivedAt: Date.now(),
-        archivedMemoryIds: newMems.slice(0, syncedCount).map(memory => memory.id),
+        archivedMemoryIds: [...(story.archivedMemoryIds || []), ...newMems.slice(0, syncedCount).map(memory => memory.id)],
+        lastSyncedMessageCount: story.messages.length,
         updatedAt: Date.now()
       };
       onSaveOfflineStory(archivedStory);
@@ -1154,9 +1169,12 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                 {onNavigateToChat && (
                   <button 
                     onClick={() => {
-                      if (activeStory.messages.length > 0 && !activeStory.archivedAt) {
+                      if (hasUnsyncedOnlineProgress(activeStory)) {
                         handleSyncMemoryToBrain(activeStory);
                       }
+                      clearOfflineSession(activeStory);
+                      setActiveStory(null);
+                      setIsSettingsOpen(false);
                       onNavigateToChat(activeStory.characterId);
                     }}
                     className="text-[10px] underline font-bold hover:text-indigo-700"

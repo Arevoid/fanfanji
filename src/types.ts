@@ -297,6 +297,8 @@ export interface OfflineStory {
   };
   archivedAt?: number;
   archivedMemoryIds?: string[];
+  /** Number of story messages already condensed into online memory. */
+  lastSyncedMessageCount?: number;
 }
 
 export interface Sticker {

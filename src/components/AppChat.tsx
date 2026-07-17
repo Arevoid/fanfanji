@@ -289,6 +289,15 @@ const PRESEED_MOMENTS: Moment[] = [];
 const isOfflineStoryActiveFor = (characterId: string) =>
   localStorage.getItem(`offline_mode_active_${characterId}`) === "true";
 
+// Models sometimes return the human-readable WeChat labels instead of the
+// canonical app markup. Normalize new output and recognize old saved messages.
+const normalizePaymentMarkup = (content: string) => content
+  .replace(/^\[微信红包\]/, "[红包]")
+  .replace(/^\[微信转账\]/, "[转账]");
+
+const isRedPacketMarkup = (content: string) => /^\[(?:红包|微信红包)\]/.test(content);
+const isTransferMarkup = (content: string) => /^\[(?:转账|微信转账)\]/.test(content);
+
 const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: string) =>
   getLatestWorldBookEntries(entries)
     .filter((entry) => entry.isActive !== false && (!entry.characterId || entry.characterId === "global" || entry.characterId === characterId))
@@ -1264,7 +1273,7 @@ export default function AppChat({
     let refundAmountTotal = 0;
 
     messages.forEach((msg) => {
-      if (msg.content.startsWith("[红包]")) {
+      if (isRedPacketMarkup(msg.content)) {
         const currentStatus = redPacketStatuses[msg.id] || "unclaimed";
         const isExpired = Date.now() - msg.timestamp > 24 * 3600 * 1000;
         
@@ -1685,6 +1694,7 @@ ${member.compressedMemory ? `- 过去的互动记忆: ${member.compressedMemory}
 ${membersDefText}
 
 【群聊互动核心原则】：
+0. [CURRENT-SCENE CONTINUITY — CRITICAL]: Messages in the recent group history establish the current scene facts. Do not silently replace a member's just-stated activity, location, physical condition, possession, or relationship fact with a contradictory one. If a member changes from one activity to another, explicitly establish a believable transition and time passage first; otherwise continue the existing situation or avoid inventing a new concrete activity.
 1. 【人设绝对统一与高恢复度】：每个群成员发言必须 100% 贴合其人设、性格、背景故事以及各自的专属世界书设定/日常日程/时间线。对于那些设置了特殊语气词、口癖（如每句话都加“喵”等）的角色，他们在群里发言时也必须【绝对强制、无一例外地完全忠实执行该句式/口癖设定】。
 2. 🚨【回复概率与不回复机制】：并非每个成员在每次互动时都必须发言！在真实的微信群聊中，人物是否回复信息要参考对方人设、自己的世界书日常时间线和日程、当前话题的兴趣度以及与发言人的关系等。
    - 例如：高冷、傲娇、忙碌、或正在执行专属世界书日程时间线上其他任务的角色（比如世界书设定某个角色此时应该在睡觉、在上班、或生病等），应该保持沉默，不返回任何回复，或者仅在极度契合的话题下简单插一句；而热情、空闲、爱凑热闹、或与发言人关系特别亲密的角色，则应该高频且积极地在群里接话。
@@ -1875,8 +1885,8 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     // Exclude non-voice formats
     if (
       !bubbleText ||
-      bubbleText.startsWith("[红包]") ||
-      bubbleText.startsWith("[转账]") ||
+      isRedPacketMarkup(bubbleText) ||
+      isTransferMarkup(bubbleText) ||
       bubbleText.startsWith("[系统]") ||
       bubbleText.startsWith("data:image/") ||
       bubbleText.startsWith("[表情]|") ||
@@ -1964,7 +1974,7 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
     setIsTyping(true);
 
-    const isRedPacket = userMsg && userMsg.content.startsWith("[红包]");
+    const isRedPacket = userMsg && isRedPacketMarkup(userMsg.content);
     if (isRedPacket) {
       const rpId = userMsg!.id;
       // Simulate partner claiming after 3 seconds
@@ -2252,6 +2262,23 @@ ${isLastVoiceOld
       // 6. User Profile
       assembledInstructions.push(userProfileText);
 
+      // Treat the immediate chat state as a continuity anchor, not merely optional style context.
+      // This prevents the model from casually replacing a just-established activity (such as
+      // running) with an unrelated one (such as cycling) in the next reply.
+      const sceneAnchorTranscript = finalMsgs.slice(-8).map((message) => {
+        const sender = message.sender === "user" ? settings.name : activeCharacter.name;
+        return `- ${sender}: ${message.content}`;
+      }).join("\n");
+      assembledInstructions.push(`[CRITICAL CURRENT-SCENE CONTINUITY]
+The recent conversation below contains the current, established facts of the scene. Treat a recently stated activity, location, physical condition, possession, promise, or relationship fact as true and still in effect.
+- Never silently replace one activity with another. For example, if you just said you were sweaty from running, do not later say you just returned from cycling.
+- If the activity, location, or situation really changes, first make the transition explicit and plausible (including time passing where needed). Do not call the new activity "just now" unless the transition has been established.
+- When the history is unclear, avoid inventing a new concrete activity. Continue the existing topic or ask naturally instead.
+- This continuity rule applies to every message in a multi-bubble reply as well.
+
+Recent scene facts:
+${sceneAnchorTranscript || "(No prior scene facts.)"}`);
+
       // 7. Before Chat History entries
       if (wbBlocks.before_chat_history.length > 0) {
         assembledInstructions.push(`[World Book Background: Story Anchor]\n` + wbBlocks.before_chat_history.join("\n\n"));
@@ -2445,7 +2472,7 @@ ${stickerListStr}
             }
           }
         } else {
-          const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
+          const cleanedText = normalizePaymentMarkup(cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false));
           const textToSplit = cleanedText || data.text;
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
           const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
@@ -2584,8 +2611,9 @@ ${stickerListStr}
       content: contentString,
       timestamp: Date.now(),
     };
-    onSendMessage(userMsg);
-    generateResponseForUserMessage(userMsg);
+    const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
+    onSendMessage(normalizedUserMsg);
+    generateResponseForUserMessage(normalizedUserMsg);
   };
 
   const sendPartnerRedPacket = async (amount: string, greeting: string) => {
@@ -5769,7 +5797,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               const isSelf = msg.sender === "user";
               const prevMsg = idx > 0 ? currentChatMessages[idx - 1] : null;
-              const shouldCollapse = settings.collapseConsecutiveAvatars !== false;
+              // While an offline story is active, online messages remain a separate
+              // live channel. Keep their avatars visible instead of treating them as
+              // one collapsed story paragraph.
+              const shouldCollapse = settings.collapseConsecutiveAvatars !== false && !isOfflineStoryActiveFor(activeChatCharId);
               const isConsecutivePrev = !!(
                 prevMsg &&
                 !prevMsg.isNarration &&
@@ -5841,7 +5872,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             <span className="sr-only">[{stickerName}]</span>
                           </div>
                         );
-                      })() : msg.content.startsWith("[红包]") ? (() => {
+                      })() : isRedPacketMarkup(msg.content) ? (() => {
                         const [_, amount, greeting] = msg.content.split("|");
                         const status = getRedPacketActualStatus(msg.id, msg.timestamp, msg.sender);
                         
@@ -5905,7 +5936,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             </div>
                           </div>
                         );
-                      })() : msg.content.startsWith("[转账]") ? (() => {
+                      })() : isTransferMarkup(msg.content) ? (() => {
                         const [_, amount, memo, isConfirmedStr] = msg.content.split("|");
                         const isConfirmed = isConfirmedStr === "true";
                         return (
