@@ -1963,6 +1963,11 @@ export default function App() {
         left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvLeft}px` : undefined,
         width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvWidth}px` : "100%",
         height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : "100vh",
+        // `min-h-[100dvh]` is useful before the app mounts, but on Android Edge it can
+        // retain the layout viewport height after the IME opens. Override it with the
+        // visual viewport height so the flex layout keeps the chat composer above the
+        // keyboard instead of leaving an empty area below the messages.
+        minHeight: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : undefined,
       }}
     >
       

@@ -2742,7 +2742,8 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
   }, [messages.length, activeChatCharId, isTyping]);
 
-  // Scroll to bottom when visual viewport height changes (mobile keyboard pops up/down)
+  // The app shell owns the visual viewport height. Keep the latest message visible
+  // without sizing this nested overlay independently during keyboard transitions.
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
 
