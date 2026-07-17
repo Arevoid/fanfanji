@@ -2760,6 +2760,8 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
   };
 
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
+
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastActiveCharIdRef = useRef<string | null>(null);
@@ -2803,24 +2805,32 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
   }, [messages.length, activeChatCharId, isTyping]);
 
-  // Scroll to bottom when visual viewport height changes (mobile keyboard pops up/down)
+  // Scroll to bottom and track viewport height when visual viewport changes (mobile keyboard pops up/down)
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
 
-    const handleViewportResize = () => {
+    const handleViewportChange = () => {
+      setViewportHeight(window.visualViewport.height);
       if (!activeChatCharId) return;
       // Scroll to bottom when height changes (e.g., keyboard pops up or dismisses)
       setTimeout(() => {
         if (chatEndRef.current) {
           chatEndRef.current.scrollIntoView({ behavior: "smooth" });
         }
-      }, 100);
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      }, 120);
     };
 
+    setViewportHeight(window.visualViewport.height);
+
     const vv = window.visualViewport;
-    vv.addEventListener("resize", handleViewportResize);
+    vv.addEventListener("resize", handleViewportChange);
+    vv.addEventListener("scroll", handleViewportChange);
     return () => {
-      vv.removeEventListener("resize", handleViewportResize);
+      vv.removeEventListener("resize", handleViewportChange);
+      vv.removeEventListener("scroll", handleViewportChange);
     };
   }, [activeChatCharId]);
 
@@ -4209,7 +4219,11 @@ ${previousMomentsText}
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
-        <div className={`absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen">
+        <div 
+          className={`absolute inset-x-0 top-0 z-40 bg-slate-50 flex flex-col animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} 
+          id="conv-screen"
+          style={viewportHeight ? { height: `${viewportHeight}px`, bottom: "auto" } : { height: "100%", bottom: "0" }}
+        >
           <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content">
             {activeCharacter.customCss && (
               <style>{activeCharacter.customCss}</style>
@@ -6069,15 +6083,15 @@ ${previousMomentsText}
                         return (
                           <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} space-y-1`}>
                             {/* Voice capsule pill wrapper */}
-                            <div className={`flex items-center gap-2 ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
+                            <div className={`flex items-center gap-2 flex-nowrap ${isSelf ? "flex-row-reverse" : "flex-row"}`}>
                               <div 
                                 onClick={() => {
                                   // Click to play/pause
                                   triggerMessageSpeech(msg);
                                   setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
                                 }}
-                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape}`}
-                                style={{ width: `${80 + duration * 6.5}px`, minWidth: "95px", maxWidth: "220px" }}
+                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative flex-nowrap ${bubbleBgAndShape}`}
+                                style={{ width: `${115 + duration * 6.5}px`, minWidth: "130px", maxWidth: "240px" }}
                               >
                                 {/* Left element: Play/Pause/Speaker icon */}
                                 <div className="flex items-center justify-center shrink-0 text-current">
@@ -6378,9 +6392,13 @@ ${previousMomentsText}
                 value={chatInputText}
                 onChange={(e) => setChatInputText(e.target.value)}
                 onFocus={() => {
+                  window.scrollTo(0, 0);
                   setTimeout(() => {
                     if (chatEndRef.current) {
                       chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+                    }
+                    if (scrollContainerRef.current) {
+                      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
                     }
                   }, 120);
                 }}
