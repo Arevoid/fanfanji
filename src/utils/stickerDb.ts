@@ -255,7 +255,7 @@ export async function aiNameSticker(
   }
 
   // Fallback to direct Gemini API multimodal call
-  const cleanModel = model || "gemini-1.5-flash";
+  const cleanModel = model || "gemini-3.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
 
   const payload = {

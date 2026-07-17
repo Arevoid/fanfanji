@@ -646,6 +646,7 @@ export default function App() {
 
   const phoneScreenRef = useRef<HTMLDivElement>(null);
   const lastSyncTimeRef = useRef<number>(0);
+  const [isInitialSynced, setIsInitialSynced] = useState<boolean>(false);
 
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
     const raw = localStorage.getItem("phone_installed_apps");
@@ -1679,6 +1680,7 @@ export default function App() {
             if (changed) {
               lastSyncTimeRef.current = Date.now();
             }
+            setIsInitialSynced(true);
           }
         }
       } catch (err) {
@@ -2883,6 +2885,7 @@ export default function App() {
               <div className="w-full flex-1 min-h-0 relative">
                 <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
                   <AppChat
+                    isInitialSynced={isInitialSynced}
                     characters={characters}
                     settings={settings}
                     messages={messages}

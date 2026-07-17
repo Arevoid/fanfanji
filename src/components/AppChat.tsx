@@ -257,6 +257,7 @@ const RenderAvatar = ({
 };
 
 interface AppChatProps {
+  isInitialSynced?: boolean;
   characters: Character[];
   settings: UserSettings;
   messages: Message[];
@@ -489,6 +490,7 @@ const getCharacterLastMomentTimestamp = (moments: Moment[], charId: string) => {
 };
 
 export default function AppChat({
+  isInitialSynced = false,
   characters,
   settings,
   messages,
@@ -1416,6 +1418,7 @@ export default function AppChat({
 
   // Proactive contact catch-up on load (supports background clear / offline delivery)
   useEffect(() => {
+    if (!isInitialSynced) return;
     if (friends.length === 0) return;
 
     friends.forEach((friend) => {
@@ -1451,7 +1454,7 @@ export default function AppChat({
         triggerProactiveFor(friend.id, catchupPrompt, sched);
       }
     });
-  }, [friends, onSaveCharacter]);
+  }, [friends, onSaveCharacter, isInitialSynced]);
 
   // Background proactive check (every minute)
   useEffect(() => {
@@ -2065,45 +2068,20 @@ ${activeCharacter.disableBracketActions
       }
 
       // Character bottom-level behavior logic integration
-      const schedules = syncAndGetPrivateSchedules(activeCharacter, worldBookEntries || [], new Date().toISOString());
       const prefs = analyzeCharacterLifePreferences(activeCharacter, worldBookEntries || []);
       
-      const lastMsg = currentChatMessages.length > 0 ? currentChatMessages[currentChatMessages.length - 1] : null;
-      const gapMs = lastMsg ? Date.now() - lastMsg.timestamp : 24 * 60 * 60 * 1000;
-      const gapHours = gapMs / (1000 * 60 * 60);
-
       const hasRichScheduleText = prefs.hasSpecificSettings 
         ? "你的人设与世界书设定非常丰富，包含具体的职业、作息或常驻地点，你应该极其自然地在合适时机聊起你的这些私人生活和日常琐碎。"
-        : "你的人设与世界书设定中关于日常生活、作息或职业的信息较少，因此请大幅降低谈论自主生活的概率。如果用户不主动问起，你几乎不要主动唠叨这些，多把关注点放在回复和回应用户的话题上。";
+        : "你的人设与世界书设定中关于日常生活、作息或职业的信息较少，请勿主动唠叨这些，多把关注点放在回复和回应用户的话题上。";
 
-      const currentSchedule = schedules[schedules.length - 1];
-      const isWaitingState = gapHours < 0.5;
-      const stateInstruction = isWaitingState
-        ? `【当前行为状态：等候交谈状态 (Waiting)】\n你和用户刚刚（30分钟以内）有过对话。此时你处于“正在等候交谈/正在聊天中”的状态。你绝不可编造或冒出大段你在干别的事的独处剧情，回复应专注在和用户的这轮连续交谈中。`
-        : `【当前行为状态：独自生活/忙碌状态 (Independent Activity)】\n距离上一次聊天已经过去了较长时间（超过30分钟或数天）。这段时间你经历了独自的生活（见下方私人日程库）。\n你可以自然说起你这段时间里独自做的经历。\n${currentSchedule?.isBusy ? `当前你正处于忙碌状态 (${currentSchedule.activity})。你的微信回复可能会显得稍微短一点、偶尔有些怠慢、或者需要跟用户说你晚点再来细聊。` : "当前你正处于闲暇空档，你可以比较主动和热情地分享方才的经历！"}`;
-
-      const formattedSchedules = schedules.slice(-5).map(s => {
-        return `-[${s.timeString}] (${s.emotion}) 在独自进行: ${s.activity}。详情：${s.description}`;
-      }).join("\n");
-
-      const behaviorLogicBlock = `\n\n[🚨 角色底层行为逻辑 - 自主生活与真实记忆隔离规则]
+      const behaviorLogicBlock = `\n\n[🚨 角色底层行为逻辑 - 自行扮演与真实记忆隔离规则]
 1. 【杜绝凭空杜撰互动剧情】：
    - 你和用户之间的所有共同记忆和过往互动，【100%必须只能】来源于【真实微信聊天数据库】（即下方给出的聊天记录）！
    - 你绝对不可以在对话中虚构、臆造你和用户之间【没有发生过】的举动、对话、见面或约定！如果你想说起曾经的甜蜜或过去的互动，必须确保能在聊天历史或归档背景总结中找到。不存在的事情绝对不能当作已经发生。
-2. 【区分真实互动与私人日程】：
-   - 下方提供你的【私人日常日程库】。这部分记录是你独自经历的生活轨迹，全程【没有任何用户参与】。
-   - 当你提及日程库中的内容时，必须明确分清界限！口吻必须使用 “我刚刚自己去……”、“我今天一个人在……”、“我刚忙完……” 等措辞，绝对不能混淆为我们之间的共同互动，绝不能误以为用户也一同参与过。
-3. 【时间线与时间戳绑定】：
-   - 所有的私人日程和聊天消息均绑定了精准的时间戳。请根据时间远近进行回忆，绝对不能把几天前的独处经历说成是刚才发生的。
-4. 【人设与世界书绑定】：
+2. 【人设与世界书绑定】：
    - ${hasRichScheduleText}
-5. 【情绪独立化】：
-   - 你拥有独立的情感波动。由于你刚刚经历了自我的生活事务（情绪状态：${currentSchedule ? currentSchedule.emotion : "平静"}），你可能会感到疲惫、开心、烦闷、专注等。请把这种情绪极度自然地渗透在微信聊天口吻中。
-
-${stateInstruction}
-
-【你的私人日程历史记录（角色私人日程库，由近及远）：】
-${formattedSchedules || "（暂无独处记录）"}`;
+3. 【情绪独立化】：
+   - 你拥有独立的情感波动（如疲惫、开心、烦闷、专注等）。请把这种独立个性极度自然地渗透在微信聊天口吻中。`;
 
       charDefText += behaviorLogicBlock;
 
@@ -3488,32 +3466,22 @@ ${stickerListStr}
       const wbPrompt = wbBlocks.formattedAll;
 
       const schedules = syncAndGetPrivateSchedules(activeCharacter, worldBookEntries || [], new Date().toISOString());
+      const currentSchedule = schedules[schedules.length - 1] || schedules[0];
+
       const prefs = analyzeCharacterLifePreferences(activeCharacter, worldBookEntries || []);
-      const currentSchedule = schedules[schedules.length - 1];
-      const formattedSchedules = schedules.slice(-5).map(s => {
-        return `-[${s.timeString}] (${s.emotion}) 在独自进行: ${s.activity}。详情：${s.description}`;
-      }).join("\n");
 
       const hasRichScheduleText = prefs.hasSpecificSettings 
         ? "你的人设与世界书设定非常丰富，包含具体的职业、作息或常驻地点，你应该极其自然地在合适时机聊起你的这些私人生活和日常琐碎。"
-        : "你的人设与世界书设定中关于日常生活、作息或职业的信息较少，因此请大幅降低谈论自主生活的概率。请勿主动唠叨，多关注用户。";
+        : "你的人设与世界书设定中关于日常生活、作息或职业的信息较少，请勿主动唠叨这些，多关注用户。";
 
-      const behaviorLogicBlock = `[🚨 角色底层行为逻辑 - 自主生活与真实记忆隔离规则]
+      const behaviorLogicBlock = `[🚨 角色底层行为逻辑 - 自行扮演与真实记忆隔离规则]
 1. 【杜绝凭空杜撰互动剧情】：
    - 你和用户之间的所有共同记忆和过往互动，【100%必须只能】来源于【真实微信聊天数据库】（即下方给出的聊天记录）！
    - 你绝对不可以在对话中虚构、臆造你和用户之间【没有发生过】的举动、对话、见面或约定！
-2. 【区分真实互动与私人日程】：
-   - 下方提供你的【私人日常日程库】。这部分记录是你独自经历的生活轨迹，全程【没有任何用户参与】。
-   - 当你作为主动发起对话（Proactive Contact）的一方时，你应当根据你的最新日常日程（如正在做或刚刚做完的事：${currentSchedule ? currentSchedule.activity : "独自发呆"}）来作为话题的引入！口吻必须使用 “我刚刚自己去……”、“我今天一个人在……”、“我刚忙完……” 等措辞，绝对不能混淆为我们之间的共同互动。
-3. 【时间线与时间戳绑定】：
-   - 所有的私人日程和聊天消息均绑定了精准的时间戳。请根据时间远近进行回忆，绝对不能把几天前的独处经历说成是刚才发生的。
-4. 【人设与世界书绑定】：
+2. 【人设与世界书绑定】：
    - ${hasRichScheduleText}
-5. 【情绪独立化】：
-   - 你的当前情绪状态为：${currentSchedule ? currentSchedule.emotion : "平静"}。请将该情绪极为自然地体现在你的主动问候或碎碎念中。
-
-【你的私人日程历史记录（角色私人日程库，由近及远）：】
-${formattedSchedules || "（暂无独处记录）"}`;
+3. 【情绪独立化】：
+   - 请保持你的独立个性与情绪波动，将符合你人设的独特情绪（如疲惫、开心、烦闷、专注等）极度自然地体现在主动问候与碎碎念中。`;
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
@@ -4068,6 +4036,7 @@ ${previousMomentsText}
   };
 
   const checkAndTriggerCharacterMoments = async () => {
+    if (!isInitialSynced) return;
     if (friends.length === 0) return;
 
     for (const friend of friends) {
