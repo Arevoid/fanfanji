@@ -1012,16 +1012,44 @@ export default function AppChat({
     if (!activeChatCharId || !activeCharacter) return;
     
     const charName = activeCharacter.remark || activeCharacter.name;
+    // The direct menu action used to import only the clicked message. Snapshot
+    // the whole configured context window so the offline scene has a real handoff.
+    const contextLimit = activeCharacter.contextMemoryLimit || 20;
+    const recentOnlineMessages = messages
+      .filter((item) => item.characterId === activeChatCharId && !item.isOffline)
+      .slice(-contextLimit * 2);
+    const sourceMessages = recentOnlineMessages.length > 0 ? recentOnlineMessages : [msg];
+    const snapshotTimestamp = Date.now();
+    const importedMessages = sourceMessages.map((item, index) => ({
+      ...item,
+      id: `offline-import-${snapshotTimestamp}-${index}-${item.id}`,
+      isOffline: true,
+    }));
+    const importedContext: OfflineStory["importedContext"] = {
+      messages: importedMessages,
+      memories: memories
+        .filter((memory) => memory.characterId === activeChatCharId)
+        .map((memory) => memory.content),
+      worldBook: getLatestWorldBookEntries(worldBookEntries || [])
+        .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId)
+        .map((entry) => `${entry.title}: ${entry.content}`),
+      importedAt: snapshotTimestamp,
+    };
+
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: activeChatCharId,
+      characterIds: [activeChatCharId],
       title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: "continue",
       sourceChatId: activeChatCharId,
-      sourceChatMsgCount: 1,
-      messages: [{ ...msg, isOffline: true }]
+      sourceChatMsgCount: importedMessages.length,
+      importedContext,
+      enableTimeAwareness: Boolean(activeCharacter.enableTimeAwareness),
+      // Render imported messages as the script's opening, not only hidden prompt context.
+      messages: importedMessages
     };
     
     if (onSaveOfflineStory) {
