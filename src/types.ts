@@ -274,6 +274,8 @@ export interface OfflineStory {
   stylePromptContent?: string;
   showAvatars?: boolean;
   customCss?: string;
+  /** Continue-mode stories inherit this from the source chat; other modes choose it at creation. */
+  enableTimeAwareness?: boolean;
   /** Frozen at the moment an online chat is explicitly imported into this story. */
   importedContext?: {
     messages: Message[];

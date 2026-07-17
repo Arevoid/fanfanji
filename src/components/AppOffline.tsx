@@ -62,6 +62,7 @@ export default function AppOffline({
   const [newMode, setNewMode] = useState<"director" | "continue" | "if">("director");
   const [newIfPrompt, setNewIfPrompt] = useState("");
   const [newStartFromChat, setNewStartFromChat] = useState<boolean>(false);
+  const [newTimeAwareness, setNewTimeAwareness] = useState<boolean>(false);
 
   // Chat/Editor input state
   const [inputText, setInputText] = useState("");
@@ -274,14 +275,17 @@ export default function AppOffline({
 
     // Reference from current chat history (if requested)
     if (newStartFromChat) {
-      // Find normal chat messages of this character in localStorage
-      const allChatsRaw = localStorage.getItem("phone_messages_v3");
-      if (allChatsRaw) {
+      // Prefer the live app state: it includes the latest message even before a
+      // persistence effect has finished. Local storage remains a fallback.
+      const liveMessages = messages.filter(m => m.characterId === selectedCharId);
+      const allChatsRaw = liveMessages.length === 0 ? localStorage.getItem("phone_messages_v3") : null;
+      if (liveMessages.length > 0 || allChatsRaw) {
         try {
-          const parsed = JSON.parse(allChatsRaw) as Message[];
+          const parsed = liveMessages.length > 0 ? liveMessages : JSON.parse(allChatsRaw || "[]") as Message[];
+          const contextLimit = characters.find(c => c.id === selectedCharId)?.contextMemoryLimit || 20;
           const relevantMsgs = parsed
             .filter(m => m.characterId === selectedCharId)
-            .slice(-15); // Copy last 15 messages for high context continuity
+            .slice(-contextLimit * 2); // preserve the configured number of dialogue rounds
           
           const importedMessages = relevantMsgs.map(m => ({
             ...m,
@@ -314,6 +318,9 @@ export default function AppOffline({
       sourceChatId: newStartFromChat ? selectedCharId : undefined,
       sourceChatMsgCount: newStartFromChat ? importedContext?.messages.length : undefined,
       importedContext,
+      enableTimeAwareness: newStartFromChat
+        ? Boolean(characters.find(c => c.id === selectedCharId)?.enableTimeAwareness)
+        : newTimeAwareness,
       // Imported chat is context only; newly written plot remains in this independent archive.
       messages: []
     };
@@ -329,6 +336,7 @@ export default function AppOffline({
     setNewMode("director");
     setNewIfPrompt("");
     setNewStartFromChat(false);
+    setNewTimeAwareness(false);
 
     showToast("线下故事创建成功");
   };
@@ -594,6 +602,29 @@ ${chatContextParts.join("\n")}`;
       }
 
       const lastUserMsgText = text || "请继续编织并续写这幕场景。";
+
+      const importedTail = updatedStory.importedContext?.messages.slice(-6) || [];
+      if (updatedStory.importedContext && importedTail.length > 0) {
+        const lastImported = importedTail[importedTail.length - 1];
+        const handoffTime = new Date(lastImported.timestamp);
+        const handoffClock = handoffTime.toLocaleString("zh-CN", {
+          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+        });
+        sysPrompt += `\n\n【ONLINE-TO-OFFLINE CONTINUITY — ABSOLUTE RULE】
+This scene begins immediately after the imported online conversation, not as a new unrelated scene.
+The last imported message is the current canonical handoff. Continue its topic, location, activity, promises, and emotional momentum. Do not replace it with a new activity (for example, do not switch from eating to bathing) unless the user explicitly asks for a time jump or transition.
+Imported handoff transcript:\n${importedTail.map(m => `- ${m.sender === "user" ? settings.name : (selectedChar?.name || "Character")}: ${m.content}`).join("\n")}
+Canonical handoff time: ${handoffClock}. The first continuation may advance only naturally by a few minutes unless the user explicitly changes the time or scene.`;
+      }
+
+      if (updatedStory.enableTimeAwareness) {
+        const now = new Date();
+        const currentClock = now.toLocaleString("zh-CN", {
+          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+        });
+        sysPrompt += `\n\n【TIME AWARENESS — REQUIRED】
+Current real-world time is ${currentClock}. Use this as the authoritative present time. Do not state a conflicting clock time, and do not casually jump hours. If this is an imported continuation, its handoff time is authoritative for the scene and the present can only move forward naturally from it.`;
+      }
 
       const response = await apiChat({
         message: lastUserMsgText,
@@ -1561,6 +1592,27 @@ ${chatContextParts.join("\n")}`;
                     checked={newStartFromChat}
                     onChange={(e) => setNewStartFromChat(e.target.checked)}
                     className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-slate-50 cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                  <div>
+                    <span className="text-[11px] font-bold text-slate-700 block">时间感知</span>
+                    <span className="text-[8px] text-slate-400">
+                      {newStartFromChat
+                        ? "线上转线下时自动继承该角色线上聊天的时间感知设置"
+                        : "自导自演 / IF 线独立使用当前真实时间"
+                      }
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={newStartFromChat
+                      ? Boolean(characters.find(c => c.id === selectedCharId)?.enableTimeAwareness)
+                      : newTimeAwareness}
+                    disabled={newStartFromChat}
+                    onChange={(e) => setNewTimeAwareness(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-slate-50 cursor-pointer disabled:opacity-50"
                   />
                 </div>
               </div>
