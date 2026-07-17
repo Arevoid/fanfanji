@@ -32,6 +32,9 @@ export interface Character {
   customCss?: string;
   chatStylePreset?: "default" | "floating-cute" | "liquid-glass";
   greeting?: string;
+  /** First-chat setup used as hidden guidance instead of a visible greeting bubble. */
+  initialChatContext?: string;
+  initialChatMode?: "greeting" | "context";
   lastImmediateSummaryMsgId?: string;
   disableBracketActions?: boolean;
   historyMemoryLimit?: number;

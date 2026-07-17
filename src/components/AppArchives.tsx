@@ -86,6 +86,7 @@ export default function AppArchives({
   const [personality, setPersonality] = useState("");
   const [backstory, setBackstory] = useState("");
   const [greeting, setGreeting] = useState("");
+  const [initialChatMode, setInitialChatMode] = useState<"greeting" | "context">("greeting");
   const [album, setAlbum] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
   const [minimaxVoiceId, setMinimaxVoiceId] = useState("");
@@ -185,7 +186,8 @@ export default function AppArchives({
     }
     setPersonality(combined);
     setBackstory("");
-    setGreeting(char.greeting || "");
+    setGreeting(char.initialChatContext || char.greeting || "");
+    setInitialChatMode(char.initialChatMode || (char.initialChatContext ? "context" : "greeting"));
     setAlbum(char.album || []);
     setErrorMsg("");
     setIsCreating(true);
@@ -383,7 +385,9 @@ export default function AppArchives({
       avatar: finalAvatar,
       personality: finalPersonality,
       backstory: "",
-      greeting: greeting.trim(),
+      greeting: initialChatMode === "greeting" ? greeting.trim() : undefined,
+      initialChatContext: initialChatMode === "context" ? greeting.trim() : undefined,
+      initialChatMode,
       album: album,
       momentsCover: originalChar ? originalChar.momentsCover : undefined,
       isPinned: originalChar ? originalChar.isPinned : false,
@@ -706,6 +710,30 @@ export default function AppArchives({
                 placeholder="在此输入详细的人格性格设定、语气特征、来历背景、生活背景或各种设定细节..."
                 className="w-full px-5 py-4 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs resize-none leading-relaxed font-medium"
               />
+            </div>
+
+            <div className="initial-chat-setup">
+              <label className="block text-xs font-semibold text-slate-500 mb-1">初次聊天设定（选填）</label>
+              <p className="text-[10px] leading-relaxed text-slate-400 mb-2">
+                场景 / 关系只会作为 AI 首轮聊天参考，不显示为聊天消息；开场白语言则会作为角色的第一条消息发送。
+              </p>
+              <div className="flex gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setInitialChatMode("greeting")}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${initialChatMode === "greeting" ? "bg-neutral-900 text-white border-neutral-900" : "bg-white text-slate-500 border-slate-200"}`}
+                >
+                  开场白语言
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInitialChatMode("context")}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${initialChatMode === "context" ? "bg-neutral-900 text-white border-neutral-900" : "bg-white text-slate-500 border-slate-200"}`}
+                >
+                  场景 / 关系
+                </button>
+              </div>
+              <style>{`.initial-chat-setup + div > label { display: none; }`}</style>
             </div>
 
             {/* Greeting */}
