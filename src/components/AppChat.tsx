@@ -4835,7 +4835,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </div>
 
                      {/* Three-Layer Memory Optimization System Panel */}
-                    <div className="py-4 space-y-4 border-t border-slate-100">
+                    <div className="pt-4 pb-4 space-y-4 border-t border-slate-100">
                       <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
                         <span className="text-slate-800 font-bold text-sm">三层记忆隔离与优化配置</span>
                       </div>
