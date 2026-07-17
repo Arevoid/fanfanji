@@ -214,6 +214,12 @@ export default function AppOffline({
   const storyCharNamesLabel = storyChars.map(c => c.remark || c.name).join("、");
   const firstActorLabel = storyChars.length > 1 ? "角色们" : (selectedChar.remark || selectedChar.name);
 
+  // Online messages are an invisible handoff context, never part of the offline
+  // manuscript. The id check also hides snapshots created before this flag existed.
+  const visibleStoryMessages = activeStory?.messages.filter((message) =>
+    !message.isImportedContext && !message.id.startsWith("offline-import-")
+  ) || [];
+
   const workspaceEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -638,32 +644,17 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
       });
 
       if (response && response.text) {
-        // Split AI response into individual paragraphs to maintain nice formatting and allow easy deletion of single paragraphs
-        const paragraphs = response.text.split("\n").map(p => p.trim()).filter(Boolean);
-        
-        let newMsgs: Message[] = [];
-        if (paragraphs.length > 0) {
-          newMsgs = paragraphs.map((para, pIdx) => ({
-            id: `offline-reply-${Date.now()}-${pIdx}-${Math.random().toString(36).substr(2, 5)}`,
-            characterId: activeStory.characterId,
-            sender: "character",
-            content: para,
-            timestamp: Date.now() + pIdx,
-            isOffline: true,
-            isNarration: false
-          }));
-        } else {
-          // Fallback if empty
-          newMsgs = [{
-            id: `offline-reply-fallback-${Date.now()}`,
-            characterId: activeStory.characterId,
-            sender: "character",
-            content: response.text,
-            timestamp: Date.now(),
-            isOffline: true,
-            isNarration: false
-          }];
-        }
+        // A single generation is one editable script entry. Preserve its paragraphs
+        // inside the entry instead of turning every paragraph into a separate message.
+        const newMsgs: Message[] = [{
+          id: `offline-reply-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          characterId: activeStory.characterId,
+          sender: "character",
+          content: response.text.trim(),
+          timestamp: Date.now(),
+          isOffline: true,
+          isNarration: false
+        }];
 
         const finalStory = {
           ...updatedStory,
@@ -1183,7 +1174,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                 }} />
               )}
               
-              {activeStory.messages.length > 0 && (
+              {visibleStoryMessages.length > 0 && (
                 /* Elegant session metadata header */
                 <div className="flex items-center justify-between border-b border-slate-150/40 pb-3 mb-6 select-none">
                   <span className="text-[11px] font-medium tracking-wide text-slate-400 font-mono">
@@ -1195,7 +1186,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                 </div>
               )}
 
-              {activeStory.messages.length === 0 && (
+              {visibleStoryMessages.length === 0 && (
                 <div className="py-12 text-center text-slate-500 space-y-3 px-6">
                   <p className="text-xs leading-relaxed">🎬 剧本空间已就绪！可以先在输入框选择“旁白/描述”或“发言”来开个头，也可以直接点击下方的 “AI 续写” 让 {selectedChar.remark || selectedChar.name} 主动打破僵局并书写一段精美的小说开场白。</p>
                   <button
@@ -1207,7 +1198,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                 </div>
               )}
 
-              {activeStory.messages.map((msg) => {
+              {visibleStoryMessages.map((msg) => {
                 const isSelf = msg.sender === "user";
                 const isUserSpoken = isSelf && !msg.isNarration;
                 const showAvatars = activeStory.showAvatars !== false;
@@ -1233,7 +1224,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       className="offline-message-item offline-msg-user w-full flex items-start justify-end my-5 gap-3 group relative pr-7 select-text"
                     >
                       {/* Edit or Delete Action triggers */}
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10">
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-100 transition-all z-10">
                         <button
                           onClick={() => handleStartEdit(msg.id, msg.content)}
                           className="p-1 rounded bg-slate-50 hover:bg-slate-100 text-slate-500 shadow-sm border border-slate-200"
@@ -1392,7 +1383,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       </div>
 
                       {/* Edit or Delete Action triggers */}
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10">
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-100 transition-all z-10">
                         <button
                           onClick={() => handleStartEdit(msg.id, msg.content)}
                           className="p-1 rounded bg-slate-50 hover:bg-slate-100 text-slate-500 shadow-sm border border-slate-200"

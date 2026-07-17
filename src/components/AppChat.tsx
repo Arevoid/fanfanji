@@ -1024,6 +1024,7 @@ export default function AppChat({
       ...item,
       id: `offline-import-${snapshotTimestamp}-${index}-${item.id}`,
       isOffline: true,
+      isImportedContext: true,
     }));
     const importedContext: OfflineStory["importedContext"] = {
       messages: importedMessages,
@@ -1048,8 +1049,8 @@ export default function AppChat({
       sourceChatMsgCount: importedMessages.length,
       importedContext,
       enableTimeAwareness: Boolean(activeCharacter.enableTimeAwareness),
-      // Render imported messages as the script's opening, not only hidden prompt context.
-      messages: importedMessages
+      // Imported online chat is context only; the offline page starts with new story content.
+      messages: []
     };
     
     if (onSaveOfflineStory) {

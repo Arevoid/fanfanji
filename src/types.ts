@@ -57,6 +57,8 @@ export interface Message {
   timestamp: number;
   isBookmarked?: boolean;
   isOffline?: boolean;
+  /** Snapshot-only online context. It informs a story but is never rendered as story text. */
+  isImportedContext?: boolean;
   isNarration?: boolean;
   translation?: string;
   audioUrl?: string;
