@@ -2878,8 +2878,8 @@ export default function App() {
             <div 
               className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full"
               style={{
-                paddingTop: "calc(env(safe-area-inset-top, 0px) + 36px)",
-                paddingBottom: "env(safe-area-inset-bottom, 0px)"
+                paddingTop: (activeApp === "chat" && activeChatCharId) ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
+                paddingBottom: (activeApp === "chat" && activeChatCharId) ? "0px" : "env(safe-area-inset-bottom, 0px)"
               }}
             >
               <div className="w-full flex-1 min-h-0 relative">

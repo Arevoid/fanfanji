@@ -3962,16 +3962,11 @@ ${wbText}
 ${previousMomentsText}
 
 ---
-[🚨 CRITICAL WECHAT MOMENT SIMULATION RULES]:
-1. Choose ONE of the following content categories to publish:
-   - Type A: Solo daily life (独处日常动态). Share your personal schedule or feelings, such as commuting, having afternoon tea, working overtime, reading, gym, or just relaxing at home. Ground this in your active solo activity ("${currentActivityText}"). MUST write in first person, clearly solo. Strictly FORBID fabricating or mentioning any interactive events with the user in Type A.
-   - Type B: Interacting with the user (双人互动动态). Only choose this if you have real shared memories, joint trips, or active dates inside your direct chat memory above (Short-term context/summaries/history pool). Share about real recent interactions or inside jokes between you two. STICTLY FORBID fabricating any double-person events that did not happen in the chat memory.
-2. Simulate realistic human texting styles (碎片化表达):
-   - Variable lengths: randomly use short status words, longer emotional logs, text-only, or brief witty comments.
-   - Emotion Sync: Align the Moment's tone with your recent chat mood (happy, tired, playful, gentle, or frustrated).
-3. Do NOT use OOC tags, brackets, or talk like an AI. Just output the text of the Moment post.
-4. Do NOT include parenthesized meta-narration like "(下午三点发了条朋友圈)" or "(配图：...)".
-5. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g., "评论：终于下班了"), we will automatically publish it as a real comment.
+[🚨 WECHAT MOMENT RULES]:
+1. Generate a realistic WeChat Moment post in first person representing your daily thoughts, life sharing, feelings, or activities. It should fit your character's personality and background naturally.
+2. Do NOT use OOC tags, brackets, or talk like an AI. Just output the text of the Moment post.
+3. Do NOT include parenthesized meta-narration like "(发了条朋友圈)" or details about pictures.
+4. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g., "评论：终于下班了"), we will automatically publish it as a real comment.
 `;
 
       const response = await apiChat({
@@ -4406,6 +4401,11 @@ ${previousMomentsText}
                   padding-bottom: 8px !important;
                   position: relative !important;
                 }
+                @media (max-width: 767px) {
+                  .cv-header {
+                    padding-top: calc(env(safe-area-inset-top, 0px) + 36px) !important;
+                  }
+                }
                 /* 返回按钮 */
                 .cv-header .back-btn {
                   position: relative !important;
@@ -4646,11 +4646,21 @@ ${previousMomentsText}
               `}</style>
             )}
             {/* Chat Window Header with standard classes and compact size */}
-            <div className={`flex items-center justify-between z-10 shrink-0 relative cv-header header app-top-container default-controls selection-controls ${
-              isFloatingCute 
-                ? "mx-3.5 mt-3.5 mb-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] px-4 py-2" 
-                : "px-4 py-1.5 bg-transparent"
-            }`}>
+            <div 
+              className={`flex items-center justify-between z-10 shrink-0 relative cv-header header app-top-container default-controls selection-controls ${
+                isFloatingCute 
+                  ? "mx-3.5 mt-3.5 mb-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] px-4 py-2" 
+                  : "px-4 py-1.5 bg-transparent"
+              }`}
+              style={{
+                paddingTop: (typeof window !== "undefined" && window.innerWidth < 768 && !isFloatingCute)
+                  ? "calc(env(safe-area-inset-top, 0px) + 36px)"
+                  : undefined,
+                marginTop: (typeof window !== "undefined" && window.innerWidth < 768 && isFloatingCute)
+                  ? "calc(env(safe-area-inset-top, 0px) + 36px)"
+                  : undefined
+              }}
+            >
               <button
                 onClick={() => {
                   setActiveChatCharId(null);
