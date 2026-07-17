@@ -41,7 +41,6 @@ export interface Character {
   autoArchiveInterval?: number; // 10~100, default 50 rounds
   enableAutoArchive?: boolean;
   enableTimeAwareness?: boolean;
-  enableProactiveMoments?: boolean; // New setting for proactive Moments
   isGroupChat?: boolean;
   memberIds?: string[];
   minimaxVoiceId?: string;

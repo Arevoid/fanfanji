@@ -645,8 +645,6 @@ export default function App() {
   }, [messages, activeApp, activeChatCharId, characters]);
 
   const phoneScreenRef = useRef<HTMLDivElement>(null);
-  const lastSyncTimeRef = useRef<number>(0);
-  const [isInitialSynced, setIsInitialSynced] = useState<boolean>(false);
 
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
     const raw = localStorage.getItem("phone_installed_apps");
@@ -1629,96 +1627,6 @@ export default function App() {
       console.error("Failed to save worldbook entries to localStorage:", e);
     }
   }, [worldBookEntries]);
-
-  // Server-side State Syncing (Background & Clear-cache support)
-  useEffect(() => {
-    let userId = localStorage.getItem("phone_user_id");
-    if (!userId) {
-      userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-      localStorage.setItem("phone_user_id", userId);
-    }
-
-    const performSync = async () => {
-      const now = Date.now();
-      // Rate limit sync requests to at most once per 4 seconds
-      if (now - lastSyncTimeRef.current < 4000) return;
-      lastSyncTimeRef.current = now;
-
-      try {
-        const payload = {
-          userId,
-          characters,
-          messages,
-          moments,
-          settings,
-          worldBookEntries,
-        };
-
-        const response = await fetch("/api/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data.success) {
-            let changed = false;
-            // Only trigger state updates if the server content actually differs
-            if (data.characters && JSON.stringify(data.characters) !== JSON.stringify(characters)) {
-              setCharacters(data.characters);
-              changed = true;
-            }
-            if (data.messages && JSON.stringify(data.messages) !== JSON.stringify(messages)) {
-              setMessages(data.messages);
-              changed = true;
-            }
-            if (data.moments && JSON.stringify(data.moments) !== JSON.stringify(moments)) {
-              setMoments(data.moments);
-              changed = true;
-            }
-            if (changed) {
-              lastSyncTimeRef.current = Date.now();
-            }
-            setIsInitialSynced(true);
-          }
-        }
-      } catch (err) {
-        console.warn("State synchronization failed:", err);
-      }
-    };
-
-    // Run initial sync or update sync after states settle
-    const timeoutId = setTimeout(() => {
-      performSync();
-    }, 1500);
-
-    // Sync on tab closed/unload or visibility change
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        fetch("/api/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId,
-            characters,
-            messages,
-            moments,
-            settings,
-            worldBookEntries,
-          }),
-          keepalive: true,
-        }).catch(() => {});
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      clearTimeout(timeoutId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [characters, messages, moments, settings, worldBookEntries]);
 
   // Global Scroll Event Capture to handle show-on-scroll custom thin scrollbars
   useEffect(() => {
@@ -2883,14 +2791,13 @@ export default function App() {
             <div 
               className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full"
               style={{
-                paddingTop: (activeApp === "chat" && activeChatCharId) ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
-                paddingBottom: (activeApp === "chat" && activeChatCharId) ? "0px" : "env(safe-area-inset-bottom, 0px)"
+                paddingTop: "calc(env(safe-area-inset-top, 0px) + 36px)",
+                paddingBottom: "env(safe-area-inset-bottom, 0px)"
               }}
             >
               <div className="w-full flex-1 min-h-0 relative">
                 <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
                   <AppChat
-                    isInitialSynced={isInitialSynced}
                     characters={characters}
                     settings={settings}
                     messages={messages}

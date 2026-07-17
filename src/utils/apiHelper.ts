@@ -122,7 +122,7 @@ async function directClientChat(params: {
     throw new Error(`自定义 API 接口无有效响应内容: ${responseText}`);
   } else {
     // Gemini Direct client-side fetch
-    const cleanModel = model || "gemini-3.5-flash";
+    const cleanModel = model || "gemini-1.5-flash";
     const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
 
     const contents: any[] = [];
@@ -300,7 +300,7 @@ export async function apiTestKey(params: {
           message: "Hi, this is a test connection.",
           history: [],
           apiKey: params.apiKey,
-          model: params.model || "gemini-3.5-flash",
+          model: params.model || "gemini-1.5-flash",
           apiTemperature: 0.1,
         });
         if (result.text) {
@@ -341,8 +341,8 @@ export async function apiFetchModels(params: {
       return [
         "gemini-2.5-flash",
         "gemini-2.5-pro",
-        "gemini-3.5-flash",
-        "gemini-3.1-pro-preview",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
         "deepseek-chat",
         "deepseek-reasoner",
         "deepseek-v3",

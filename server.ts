@@ -3,8 +3,6 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
-import fs from "fs";
-import { mergeSyncData, startBackgroundService } from "./server-background";
 
 dotenv.config();
 
@@ -14,46 +12,6 @@ async function startServer() {
 
   // Use JSON parsing with size limits for custom base64 wallpapers or customized avatars
   app.use(express.json({ limit: "15mb" }));
-
-  // API Route: Sync local state to server with backup/background simulation support
-  app.post("/api/sync", async (req, res) => {
-    try {
-      const { userId, characters, messages, moments, settings, worldBookEntries } = req.body;
-      if (!userId) {
-        return res.status(400).json({ error: "Missing userId" });
-      }
-
-      const dataDir = path.join(process.cwd(), "data");
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-      }
-
-      const userFilePath = path.join(dataDir, `user_${userId}.json`);
-      let serverState: any = null;
-      if (fs.existsSync(userFilePath)) {
-        try {
-          serverState = JSON.parse(fs.readFileSync(userFilePath, "utf-8"));
-        } catch (readErr) {
-          console.error("Failed to read user sync file:", readErr);
-        }
-      }
-
-      const clientState = { userId, characters, messages, moments, settings, worldBookEntries };
-      const mergedState = mergeSyncData(clientState, serverState);
-
-      fs.writeFileSync(userFilePath, JSON.stringify(mergedState, null, 2), "utf-8");
-
-      return res.json({
-        success: true,
-        characters: mergedState.characters,
-        messages: mergedState.messages,
-        moments: mergedState.moments,
-      });
-    } catch (error: any) {
-      console.error("Sync API Error:", error);
-      res.status(500).json({ error: error.message || "Failed to sync" });
-    }
-  });
 
   // API Route: Role-play chat with Character (supports custom Endpoint, Temperature, etc.)
   app.post("/api/chat", async (req, res) => {
@@ -867,9 +825,6 @@ ${text}
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
-
-  // Start the background agent service
-  startBackgroundService();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[小手机] Server running on http://0.0.0.0:${PORT}`);
