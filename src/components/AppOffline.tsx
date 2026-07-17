@@ -1118,7 +1118,12 @@ ${chatContextParts.join("\n")}`;
                 </div>
                 {onNavigateToChat && (
                   <button 
-                    onClick={() => onNavigateToChat(activeStory.characterId)}
+                    onClick={() => {
+                      if (activeStory.messages.length > 0 && !activeStory.archivedAt) {
+                        handleSyncMemoryToBrain(activeStory);
+                      }
+                      onNavigateToChat(activeStory.characterId);
+                    }}
                     className="text-[10px] underline font-bold hover:text-indigo-700"
                   >
                     返回线上聊天
