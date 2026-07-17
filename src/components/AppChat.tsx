@@ -286,9 +286,28 @@ interface AppChatProps {
 
 const PRESEED_MOMENTS: Moment[] = [];
 
+const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: string) =>
+  getLatestWorldBookEntries(entries)
+    .filter((entry) => entry.isActive !== false && (!entry.characterId || entry.characterId === "global" || entry.characterId === characterId))
+    .sort((a, b) => (a.depth || 5) - (b.depth || 5))
+    .map((entry) => `【${entry.title}】\n${entry.content}`)
+    .join("\n\n");
+
 const cleanAndExtractMoment = (content: string) => {
   let cleanContent = content.trim();
   const selfComments: string[] = [];
+
+  // Keep generated metadata and mock comments out of the post body. Older data can
+  // still contain these forms, so normalize it when rendering as well as generating.
+  cleanContent = cleanContent.replace(/^\s*(?:朋友圈|动态)\s*[：:]\s*/i, "");
+  cleanContent = cleanContent.replace(/(?:^|\n)\s*[（(]\s*评论\s*[：:]\s*([^）)]+)[）)]\s*/g, (_match, text) => {
+    if (text.trim()) selfComments.push(text.trim());
+    return "\n";
+  });
+  cleanContent = cleanContent.replace(/(?:^|\n)\s*评论\s*[：:]\s*([^\n]+)/g, (_match, text) => {
+    if (text.trim()) selfComments.push(text.trim());
+    return "\n";
+  });
 
   // 1. Remove starting "(xx发了朋友圈)" or "(xx发了条朋友圈)" or similar
   const startPostRegex = /^[（\(]\s*[^）\)]*?发了[^）\)]*?朋友圈\s*[）\)]\s*\n*/i;
@@ -1052,6 +1071,9 @@ export default function AppChat({
   // Moments form state
   const [momentInputText, setMomentInputText] = useState("");
   const [momentAttachedImage, setMomentAttachedImage] = useState<string | null>(null);
+  const [momentTextImageDescription, setMomentTextImageDescription] = useState("");
+  const [showTextImageInput, setShowTextImageInput] = useState(false);
+  const [viewingImageDescription, setViewingImageDescription] = useState<string | null>(null);
   const [showMomentPublisher, setShowMomentPublisher] = useState(false);
   const [inlineCommentsTexts, setInlineCommentsTexts] = useState<Record<string, string>>({});
   const [showCommentInputMap, setShowCommentInputMap] = useState<Record<string, boolean>>({});
@@ -3784,7 +3806,14 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
       const friendMsgs = messages
         .filter((m) => m.characterId === friend.id)
         .sort((a, b) => a.timestamp - b.timestamp);
-      const slicedMsgs = friendMsgs.slice(-60); // 30 rounds of dialogue memory
+      const contextLimit = friend.contextMemoryLimit || 20;
+      const slicedMsgs = friendMsgs.slice(-contextLimit * 2);
+      const archivedMemories = (memories || [])
+        .filter((memory) => memory.characterId === friend.id)
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, recallSettings?.recallCount || 5);
+      const historicalFallback = friendMsgs.slice(-(friend.retrievalHistoryLimit || 100));
+      const fullWorldBook = getFullCharacterWorldBook(worldBookEntries || [], friend.id);
 
       const history = slicedMsgs.map((m) => ({
         role: m.sender === "user" ? "user" : "model",
@@ -3795,6 +3824,16 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
 Character Profile:
 - Personality: ${friend.personality}
 - Background: ${friend.backstory}
+
+Memory source policy, in strict order: do not make up events, dates, shared experiences, or emotions that are not supported below.
+1. Recent real-time conversation (highest priority, ${contextLimit} rounds):
+${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "User" : friend.name}: ${m.content}`).join("\n") : "(No recent chat)"}
+2. Long-term archived summaries:
+${archivedMemories.length ? archivedMemories.map(m => `* ${m.content}`).join("\n") : "(No archived summaries)"}
+3. Historical fallback (only if the above has no usable material; capped at ${friend.retrievalHistoryLimit || 100} messages):
+${historicalFallback.length > 0 ? historicalFallback.map(m => `* ${m.sender === "user" ? "User" : friend.name}: ${m.content}`).join("\n") : "(No historical chat)"}
+4. Complete active world book (always obey):
+${fullWorldBook || "(No world book entries)"}
 
 User Profile (Machine Owner / 机主):
 - Nickname: ${settings.name}
@@ -3808,7 +3847,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 1. The post must fit your personality. It can be about your own personal life (feelings, work, hobbies) OR about your relationship/recent chats/interactions with the user.
 2. The post content must be natural, engaging, and in Chinese.
 3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
-4. Do NOT use OOC tags, narration brackets, or talk like an AI. Just output the text of the Moment post.
+4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, image captions, or talk like an AI. Just output the text of the Moment post.
 5. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)" or "(配图：...)" at the start.
 6. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 `;
@@ -3854,9 +3893,18 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             timestamp: Date.now() + (idx + 1) * 1000,
           })),
           image: momentImage,
+          imageType: momentImage ? "photo" : undefined,
         };
 
         onAddMoment(newMo);
+        onSaveMemories([{
+          id: `${Date.now()}-moment-memory-${Math.random().toString(36).slice(2, 6)}`,
+          characterId: friend.id,
+          content: `【朋友圈动态】${parsed.content}${momentImage ? "（发布时附有配图）" : ""}`,
+          timestamp: Date.now(),
+          importance: 4,
+          isManual: false,
+        }, ...(memories || [])]);
       }
     } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
@@ -3905,7 +3953,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
   const handlePublishMoment = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!momentInputText.trim() && !momentAttachedImage) return;
+    if (!momentInputText.trim() && !momentAttachedImage && !momentTextImageDescription.trim()) return;
 
     const newMo: Moment = {
       id: Date.now().toString(),
@@ -3916,11 +3964,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
       likes: [],
       comments: [],
       image: momentAttachedImage || undefined,
+      imageType: momentAttachedImage ? "photo" : (momentTextImageDescription.trim() ? "text" : undefined),
+      imageDescription: momentTextImageDescription.trim() || undefined,
     };
 
     onAddMoment(newMo);
     setMomentInputText("");
     setMomentAttachedImage(null);
+    setMomentTextImageDescription("");
+    setShowTextImageInput(false);
     setShowMomentPublisher(false);
 
     // Auto-comment trigger
@@ -7514,12 +7566,34 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       </label>
 
                       <button
+                        type="button"
+                        onClick={() => setShowTextImageInput((value) => !value)}
+                        className="text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold"
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span>文字图</span>
+                      </button>
+
+                      <button
                         type="submit"
                         className="px-4 py-1.5 bg-neutral-950 hover:bg-neutral-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
                       >
                         发布动态
                       </button>
                     </div>
+
+                    {showTextImageInput && (
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 space-y-2">
+                        <p className="text-[11px] text-slate-500">填写图片描述。发布后会以文字图显示，点击可查看完整描述。</p>
+                        <textarea
+                          rows={2}
+                          value={momentTextImageDescription}
+                          onChange={(e) => setMomentTextImageDescription(e.target.value)}
+                          placeholder="例如：傍晚的操场，跑道边放着一瓶喝了一半的水"
+                          className="w-full px-2.5 py-2 rounded-lg bg-white border border-slate-200 focus:outline-none text-xs resize-none"
+                        />
+                      </div>
+                    )}
 
                     {momentAttachedImage && (
                       <div className="relative w-24 h-24 rounded-lg overflow-hidden border">
@@ -7606,6 +7680,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           )}
 
                           {/* Attached Photo */}
+                          {mom.imageType === "text" && mom.imageDescription && (
+                            <button
+                              type="button"
+                              onClick={() => setViewingImageDescription(mom.imageDescription || "")}
+                              className="mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm"
+                            >
+                              <ImageIcon className="w-4 h-4 text-slate-400 mb-4" />
+                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{mom.imageDescription}</p>
+                              <span className="block mt-2 text-[10px] text-slate-400">文字图 · 点击查看</span>
+                            </button>
+                          )}
                           {mom.image && (
                             <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
                               <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
@@ -8503,6 +8588,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           )}
 
                           {/* Photo if attached */}
+                          {mom.imageType === "text" && mom.imageDescription && (
+                            <button
+                              type="button"
+                              onClick={() => setViewingImageDescription(mom.imageDescription || "")}
+                              className="mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm"
+                            >
+                              <ImageIcon className="w-4 h-4 text-slate-400 mb-4" />
+                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{mom.imageDescription}</p>
+                              <span className="block mt-2 text-[10px] text-slate-400">文字图 · 点击查看</span>
+                            </button>
+                          )}
                           {mom.image && (
                             <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
                               <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
@@ -9354,6 +9450,21 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               <span>删除动态</span>
             </button>
           </motion.div>
+        </div>
+      )}
+
+      {viewingImageDescription && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/45 p-6 flex items-center justify-center"
+          onClick={() => setViewingImageDescription(null)}
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-bold text-slate-800">文字图描述</span>
+              <button type="button" onClick={() => setViewingImageDescription(null)} className="text-slate-400"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-600">{viewingImageDescription}</p>
+          </div>
         </div>
       )}
 

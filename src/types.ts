@@ -82,6 +82,9 @@ export interface Moment {
   likes: string[]; // List of names
   comments: MomentComment[];
   image?: string; // base64 or URL
+  /** A placeholder image rendered from text until image generation is available. */
+  imageType?: "photo" | "text";
+  imageDescription?: string;
 }
 
 export interface MusicTrack {
