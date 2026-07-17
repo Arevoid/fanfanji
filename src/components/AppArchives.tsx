@@ -28,7 +28,7 @@ export default function AppArchives({
   onClose,
   onSaveWorldBookEntries,
 }: AppArchivesProps) {
-  const visibleCharacters = characters.filter((c) => !c.isGroupChat);
+  const visibleCharacters = characters.filter((c) => !c.isGroupChat && !c.isContactInstance);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);

@@ -1487,12 +1487,12 @@ export default function AppSettings({
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    left: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    borderRadius: "0 0 0 4px",
+                                    transform: "rotate(45deg)",
+                                    left: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1527,12 +1527,12 @@ export default function AppSettings({
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    left: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    borderRadius: "0 0 0 4px",
+                                    transform: "rotate(45deg)",
+                                    left: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1576,12 +1576,12 @@ export default function AppSettings({
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    left: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    borderRadius: "0 0 0 4px",
+                                    transform: "rotate(45deg)",
+                                    left: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1623,12 +1623,12 @@ export default function AppSettings({
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    left: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    borderRadius: "0 0 0 4px",
+                                    transform: "rotate(45deg)",
+                                    left: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1670,12 +1670,12 @@ export default function AppSettings({
                               我的专属气泡！效果完全同步 ✨
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)}`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    right: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                                    borderRadius: "0 0 4px 0",
+                                    transform: "rotate(45deg)",
+                                    right: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1710,12 +1710,12 @@ export default function AppSettings({
                               我的专属气泡！效果完全同步 ✨
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)}`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    right: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                                    borderRadius: "0 0 4px 0",
+                                    transform: "rotate(45deg)",
+                                    right: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}

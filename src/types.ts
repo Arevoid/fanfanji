@@ -46,6 +46,11 @@ export interface Character {
   enableTimeAwareness?: boolean;
   isGroupChat?: boolean;
   memberIds?: string[];
+  /** Identity that owns this contact or group. Unset records belong to the legacy primary identity. */
+  ownerIdentityId?: string;
+  /** Contact copies are hidden from the archive and keep a link to their source profile. */
+  isContactInstance?: boolean;
+  profileSourceId?: string;
   minimaxVoiceId?: string;
   minimaxSpeed?: number;
   voiceFrequency?: "low" | "medium" | "high" | "none";
@@ -90,6 +95,8 @@ export interface Moment {
   /** A placeholder image rendered from text until image generation is available. */
   imageType?: "photo" | "text";
   imageDescription?: string;
+  /** The user identity whose social circle this post belongs to. */
+  ownerIdentityId?: string;
 }
 
 export interface MusicTrack {

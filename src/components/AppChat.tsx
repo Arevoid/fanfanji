@@ -286,6 +286,9 @@ interface AppChatProps {
 
 const PRESEED_MOMENTS: Moment[] = [];
 
+const isOfflineStoryActiveFor = (characterId: string) =>
+  localStorage.getItem(`offline_mode_active_${characterId}`) === "true";
+
 const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: string) =>
   getLatestWorldBookEntries(entries)
     .filter((entry) => entry.isActive !== false && (!entry.characterId || entry.characterId === "global" || entry.characterId === characterId))
@@ -846,6 +849,9 @@ export default function AppChat({
   const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
   const activeStylePreset = (activeCharacter?.chatStylePreset) || (settings.globalChatStylePreset) || "default";
   const isFloatingCute = activeStylePreset === "floating-cute";
+  const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const belongsToActiveIdentity = (ownerIdentityId?: string) =>
+    (ownerIdentityId || "identity-1") === activeIdentityId;
 
   const [momentsFilterCharId, setMomentsFilterCharId] = useState<string | null>(null);
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
@@ -866,7 +872,16 @@ export default function AppChat({
     }
   }, [friendIds]);
 
-  const friends = characters.filter((c) => friendIds.includes(c.id) && !c.isGroupChat);
+  const friends = characters.filter((c) =>
+    friendIds.includes(c.id) && !c.isGroupChat && belongsToActiveIdentity(c.ownerIdentityId)
+  );
+
+  // Never leave an old identity's private thread open after switching profiles.
+  useEffect(() => {
+    if (activeChatCharId && activeCharacter && !belongsToActiveIdentity(activeCharacter.ownerIdentityId)) {
+      setActiveChatCharId(null);
+    }
+  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId]);
 
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
@@ -1012,6 +1027,10 @@ export default function AppChat({
     if (!activeChatCharId || !activeCharacter) return;
     
     const charName = activeCharacter.remark || activeCharacter.name;
+    const offlineParticipantIds = activeCharacter.isGroupChat
+      ? (activeCharacter.memberIds || [])
+      : [activeChatCharId];
+    const offlineParticipantSet = new Set(offlineParticipantIds);
     // The direct menu action used to import only the clicked message. Snapshot
     // the whole configured context window so the offline scene has a real handoff.
     const contextLimit = activeCharacter.contextMemoryLimit || 20;
@@ -1029,10 +1048,10 @@ export default function AppChat({
     const importedContext: OfflineStory["importedContext"] = {
       messages: importedMessages,
       memories: memories
-        .filter((memory) => memory.characterId === activeChatCharId)
+        .filter((memory) => memory.characterId === activeChatCharId || offlineParticipantSet.has(memory.characterId))
         .map((memory) => memory.content),
       worldBook: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId)
+        .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId))
         .map((entry) => `${entry.title}: ${entry.content}`),
       importedAt: snapshotTimestamp,
     };
@@ -1040,7 +1059,8 @@ export default function AppChat({
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: activeChatCharId,
-      characterIds: [activeChatCharId],
+      // A group is only a container; the actual offline actors are its members.
+      characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
       title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -1398,6 +1418,7 @@ export default function AppChat({
   // Send character's custom opening speech / greeting if there are no messages in the chat history
   useEffect(() => {
     if (!activeChatCharId || !activeCharacter) return;
+    if (isOfflineStoryActiveFor(activeChatCharId)) return;
     
     const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
     if (currentChatMessages.length > 0) return;
@@ -1437,6 +1458,7 @@ export default function AppChat({
 
     friends.forEach((friend) => {
       if (!friend.enableProactiveChat) return;
+      if (isOfflineStoryActiveFor(friend.id)) return;
 
       // Only execute catch-up once per character per app session to avoid duplicates
       if (processedCatchupsRef.current[friend.id]) return;
@@ -1480,6 +1502,7 @@ export default function AppChat({
 
       friends.forEach((friend) => {
         if (!friend.enableProactiveChat) return;
+        if (isOfflineStoryActiveFor(friend.id)) return;
 
         // 0. Guaranteed scheduled proactive contact check
         if (friend.scheduledProactiveTime && Date.now() >= friend.scheduledProactiveTime) {
@@ -2235,7 +2258,7 @@ ${isLastVoiceOld
       }
 
       // 8. WeChat Moments Context memory
-      const momentsContext = getMomentsContextString(moments, activeCharacter, settings.name);
+      const momentsContext = getMomentsContextString(allMoments, activeCharacter, settings.name);
       if (momentsContext) {
         assembledInstructions.push(momentsContext);
       }
@@ -2771,7 +2794,8 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
   }, [messages]);
 
   // Pre-seed moments if state empty
-  const allMoments = moments.length === 0 ? PRESEED_MOMENTS : moments;
+  const allMoments = (moments.length === 0 ? PRESEED_MOMENTS : moments)
+    .filter((moment) => belongsToActiveIdentity(moment.ownerIdentityId));
 
   // Auto scroll in chats with smart detection
   useEffect(() => {
@@ -3035,7 +3059,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
 
-      const momentsContextRegen = getMomentsContextString(moments, activeCharacter, settings.name);
+      const momentsContextRegen = getMomentsContextString(allMoments, activeCharacter, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
 
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
@@ -3549,6 +3573,7 @@ ${proactivePrompt}`;
 
   // Automated background proactive message generator for any character
   const triggerProactiveFor = async (charId: string, customTaskText?: string, backdateTimestamp?: number) => {
+    if (isOfflineStoryActiveFor(charId)) return;
     const friend = characters.find((c) => c.id === charId);
     if (!friend) return;
 
@@ -3835,6 +3860,7 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
   };
 
   const generateCharacterMoment = async (friend: Character) => {
+    if (isOfflineStoryActiveFor(friend.id)) return;
     try {
       const friendMsgs = messages
         .filter((m) => m.characterId === friend.id)
@@ -3913,6 +3939,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         const newMo: Moment = {
           id: `${Date.now()}-char-moment-${Math.random().toString(36).substr(2, 5)}`,
           characterId: friend.id,
+          ownerIdentityId: activeIdentityId,
           authorName: friend.remark || friend.name,
           authorAvatar: friend.avatar,
           content: parsed.content,
@@ -3959,6 +3986,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
     if (friends.length === 0) return;
 
     for (const friend of friends) {
+      if (isOfflineStoryActiveFor(friend.id)) continue;
       const lastPostTime = getCharacterLastMomentTimestamp(moments, friend.id);
       const interval = getPostIntervalMs(friend);
       const timeElapsed = Date.now() - lastPostTime;
@@ -3990,6 +4018,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
     const newMo: Moment = {
       id: Date.now().toString(),
+      ownerIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
       content: momentInputText.trim(),
@@ -4061,6 +4090,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
   const chatThreads = characters
     .filter((char) => {
       if (char.isGroupChat) {
+        if (!belongsToActiveIdentity(char.ownerIdentityId)) return false;
         const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
         const hasMessages = threadMsgs.length > 0;
         const isInitiated = initiatedChatIds.includes(char.id);
@@ -4137,6 +4167,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               #conv-screen .chat-bubble-self,
               #conv-screen .chat-bubble-other {
                 position: relative !important;
+                isolation: isolate;
+                z-index: 0;
+                overflow: visible !important;
               }
 
               ${settings.avatarBorderRadius !== undefined ? `
@@ -4202,12 +4235,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   content: '' !important;
                   display: block !important;
                   position: absolute;
-                  width: 0;
-                  height: 0;
-                  border-style: solid;
-                  border-width: 6px;
-                  border-color: transparent transparent transparent ${settings.selfBubbleBg || '#18181b'};
-                  right: -11px;
+                  width: 13px;
+                  height: 13px;
+                  background: ${getBubbleBackgroundStyle(settings.selfBubbleBg || '#18181b', settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100)};
+                  border: none;
+                  border-radius: 0 0 4px 0;
+                  transform: rotate(45deg);
+                  right: -5px;
+                  z-index: -1;
                   ${settings.bubbleTailVertical === 'top' ? 'top: 8px; bottom: auto;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px; top: auto;' : 'top: calc(50% - 6px); bottom: auto;'}
                 }
 
@@ -4215,12 +4250,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   content: '' !important;
                   display: block !important;
                   position: absolute;
-                  width: 0;
-                  height: 0;
-                  border-style: solid;
-                  border-width: 6px;
-                  border-color: transparent ${settings.otherBubbleBg || '#f4f4f5'} transparent transparent;
-                  left: -11px;
+                  width: 13px;
+                  height: 13px;
+                  background: ${getBubbleBackgroundStyle(settings.otherBubbleBg || '#f4f4f5', settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100)};
+                  border: none;
+                  border-radius: 0 0 0 4px;
+                  transform: rotate(45deg);
+                  left: -5px;
+                  z-index: -1;
                   ${settings.bubbleTailVertical === 'top' ? 'top: 8px; bottom: auto;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px; top: auto;' : 'top: calc(50% - 6px); bottom: auto;'}
                 }
               ` : `
@@ -8047,6 +8084,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                 setEditMyBio(idty.bio || "");
                                 onSaveSettings({
                                   ...settings,
+                                  activeIdentityId: idty.id,
                                   name: idty.name,
                                   avatar: idty.avatar,
                                   signature: idty.signature || "",
@@ -8949,7 +8987,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
       {/* Add Friend Confirmation Overlay */}
       {isShowingAddFriendDialog && (() => {
-        const unaddedCharacters = characters.filter((c) => !friendIds.includes(c.id));
+        const addedSourceIds = new Set(friends.map((friend) => friend.profileSourceId || friend.id));
+        const unaddedCharacters = Array.from(
+          new Map(
+            characters
+              .filter((c) => !c.isGroupChat && !addedSourceIds.has(c.profileSourceId || c.id))
+              .map((c) => [c.profileSourceId || c.id, c])
+          ).values()
+        );
         return (
           <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-5 shadow-2xl max-w-[320px] w-full flex flex-col max-h-[85%] animate-slide-up border border-slate-100">
@@ -8970,6 +9015,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               {/* Modal Body */}
               <div className={`${unaddedCharacters.length === 0 ? "" : "flex-1 overflow-y-auto"} py-3 space-y-3 pr-1`}>
+                <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-3 py-2 text-[10px] text-indigo-700 font-semibold">
+                  正在以「{settings.name}」的身份添加好友；好友、群聊和朋友圈将只属于这个身份。
+                </div>
                 {unaddedCharacters.length === 0 ? (
                   <div className="text-center py-4 px-2 space-y-3">
                     <div className="w-12 h-12 bg-slate-50 text-neutral-800 rounded-full flex items-center justify-center mx-auto shadow-inner border border-slate-100">
@@ -9023,7 +9071,23 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </div>
                           <button
                             onClick={() => {
-                              setFriendIds((prev) => [...prev, char.id]);
+                              const sourceId = char.profileSourceId || char.id;
+                              const contactId = `contact-${activeIdentityId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                              // Contacts are copies bound to one user identity. This allows the
+                              // same archive profile to be independently added by another identity.
+                              onSaveCharacter({
+                                ...char,
+                                id: contactId,
+                                ownerIdentityId: activeIdentityId,
+                                isContactInstance: true,
+                                profileSourceId: sourceId,
+                                isPinned: false,
+                                isGroupChat: false,
+                                memberIds: undefined,
+                                lastActiveTime: undefined,
+                                scheduledProactiveTime: undefined,
+                              });
+                              setFriendIds((prev) => [...prev, contactId]);
                             }}
                             className="px-2.5 py-1 bg-neutral-950 hover:bg-neutral-900 text-white rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
                           >
@@ -9169,6 +9233,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     }).filter(Boolean).join("、")}。`,
                     isGroupChat: true,
                     memberIds: selectedGroupMemberIds,
+                    ownerIdentityId: activeIdentityId,
                   };
 
                   // Save

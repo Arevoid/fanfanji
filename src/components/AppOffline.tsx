@@ -492,6 +492,8 @@ export default function AppOffline({
       const storyCharsList = updatedStory.characterIds && updatedStory.characterIds.length > 0 
         ? characters.filter(c => updatedStory.characterIds?.includes(c.id))
         : [selectedChar];
+      const sourceChat = characters.find(c => c.id === updatedStory.sourceChatId);
+      const isImportedGroupStory = Boolean(sourceChat?.isGroupChat);
 
       const wbPrompts = updatedStory.importedContext?.worldBook.length
         ? `【导入时冻结的世界书设定】：\n${updatedStory.importedContext.worldBook.map(item => `- ${item}`).join("\n")}`
@@ -509,6 +511,13 @@ export default function AppOffline({
 - 互通的线上记忆：${char.compressedMemory || "暂无"}
 \n`;
       });
+
+      if (isImportedGroupStory) {
+        sysPrompt += `\n【群聊关系事实：绝对不可改写】
+这是从群聊导入的续写。以上每位角色档案中的身份、与用户的关系、以及角色彼此的关系，均为已确定的事实，必须逐字按其含义延续。
+严禁因为多人同场，就把用户擅自写成任一角色的恋人、前任、暧昧对象、家属或专属伴侣；除非对应角色档案已明确这样设定。
+用户可能只是朋友、旁观者或 CP 粉。必须保持这种定位，并保持角色之间原有的情侣或其他既定关系，不能自行替换、转移或制造新的恋爱关系。\n`;
+      }
 
       if (wbPrompts) {
         sysPrompt += `\n【相关世界书背景设定】：
@@ -594,7 +603,11 @@ ${wbPrompts}
       const chatContextParts: string[] = [];
       if (updatedStory.importedContext) storyCharsList.forEach(char => {
         const onlineMsgs = updatedStory.importedContext!.messages
-          .filter(m => m.characterId === char.id)
+          // Group messages belong to the group container, while senderId identifies
+          // the actual member. Include the user's group messages for every member.
+          .filter(m => m.characterId === char.id || m.senderId === char.id || (
+            m.sender === "user" && isImportedGroupStory && m.characterId === updatedStory.sourceChatId
+          ))
           .slice(-15);
         if (onlineMsgs.length > 0) {
           const lines = onlineMsgs.map(m => `  - ${m.sender === "user" ? "我" : char.remark || char.name}: ${m.content}`).join("\n");
