@@ -775,6 +775,16 @@ export default function AppChat({
     const isCallActive = activeAttachModal === "calling" && callingStatus === "connected";
     const shouldBeVoice = isCallActive && msg.sender === "character";
 
+    // A real voice call only carries spoken content. Drop sticker/image payloads
+    // instead of showing or reading their markup as call subtitles.
+    if (
+      isCallActive &&
+      msg.sender === "character" &&
+      (/^\[(?:表情|贴图|图片)\]/.test(msg.content || "") || msg.content?.startsWith("data:image/"))
+    ) {
+      return;
+    }
+
     if (
       shouldBeVoice && 
       msg.content && 
@@ -2455,7 +2465,11 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers1 = stickerGroups.flatMap(g => g.stickers);
-      if (allStickers1.length > 0) {
+      if (activeAttachModal === "calling") {
+        assembledInstructions.push(`[语音电话输出规则]
+你正在和用户进行实时语音电话。只输出适合直接说出口的纯文字台词。
+禁止发送表情包、贴图、图片、红包、转账、文件、位置或任何方括号附件标记；不要输出“[表情]”“[图片]”等描述。`);
+      } else if (allStickers1.length > 0) {
         const stickerListStr = allStickers1.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
         assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
 你作为扮演角色，现在可以使用我的自定义表情包来回复我！当你想要表达特定情绪、调侃、撒娇或进行有趣回应时，你可以在你发出的消息序列中【单独一行发送表情包】，或者直接把表情包作为一条独立的消息发送出来。
@@ -6060,11 +6074,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           <button
                             type="button"
                             onClick={() => setCallRecordDetail(parseCallRecord(msg.content))}
-                            className={`flex items-center gap-2.5 px-4 py-3 shadow-sm transition-transform active:scale-[0.98] cv-bubble message-bubble ${bubbleStyle}`}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 shadow-sm transition-transform active:scale-[0.98] cv-bubble message-bubble ${bubbleStyle}`}
                             title="查看通话内容"
                           >
-                            <Phone className="w-5 h-5 shrink-0" />
-                            <span className="text-base font-medium whitespace-nowrap">通话时长 {duration}</span>
+                            <Phone className="w-3.5 h-3.5 shrink-0" />
+                            <span className="text-xs font-medium whitespace-nowrap">通话时长 {duration}</span>
                             <span className="sr-only">{callType}</span>
                           </button>
                         );
@@ -7303,22 +7317,23 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
           {/* Calling Screen Modal Overlay */}
           {activeAttachModal === "calling" && (
-            <div className="absolute inset-0 bg-stone-950 z-50 flex flex-col justify-between p-6 animate-fade-in text-white text-center">
-              <div className="space-y-4 mt-8 shrink-0">
+            <div className="absolute inset-0 bg-[#171514] z-50 flex flex-col justify-between p-6 animate-fade-in text-white text-center overflow-hidden">
+              <div
+                className="absolute -inset-10 bg-cover bg-center blur-3xl scale-125 opacity-25"
+                style={{ backgroundImage: `url(${activeCharacter.avatar})` }}
+              />
+              <div className="absolute inset-0 bg-black/45" />
+              <div className={`relative z-10 space-y-3 shrink-0 ${callingStatus === "ringing" ? "mt-16" : "mt-8"}`}>
                 <img 
                   src={activeCharacter.avatar} 
                   alt="" 
-                  className="w-20 h-20 rounded-full mx-auto border-2 border-white/25 object-cover shadow-2xl animate-pulse" 
+                  className={`w-20 h-20 mx-auto border border-white/20 object-cover shadow-2xl ${callingStatus === "ringing" ? "rounded-2xl" : "rounded-full"}`}
                 />
                 <div>
-                  <h3 className="text-md font-black">{activeCharacter.remark || activeCharacter.name}</h3>
-                  <p className="text-xs text-white/50 mt-1">
-                    {callingStatus === "connected" 
-                      ? "语音通话中..." 
-                      : isIncomingCall 
-                        ? "邀请你进行语音通话..." 
-                        : "等待对方接通..."}
-                  </p>
+                  <h3 className="text-lg font-semibold">{activeCharacter.remark || activeCharacter.name}</h3>
+                  {callingStatus === "connected" && (
+                    <p className="text-xs text-white/50 mt-1">语音通话中...</p>
+                  )}
                 </div>
 
                 {callingStatus === "connected" && (
@@ -7331,7 +7346,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               {/* Connected Chat Area or Ringing screen */}
               {callingStatus === "connected" ? (
-                <div className="flex-1 my-4 flex flex-col min-h-0">
+                <div className="relative z-10 flex-1 my-4 flex flex-col min-h-0">
                   <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-left scrollbar-thin">
                     {callTranscript.map((item) => {
                       const isSelfMessage = item.sender === "user";
@@ -7378,21 +7393,18 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 </div>
               ) : (
                 /* Ringing Screen middle spacer */
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="space-y-2">
-                    <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto border border-emerald-500/20 animate-ping absolute opacity-40" style={{ animationDuration: "2s" }} />
-                    <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto border border-emerald-500/30">
-                      <Phone className="w-6 h-6 text-emerald-400 animate-pulse" />
-                    </div>
-                  </div>
+                <div className="relative z-10 flex-1 flex items-end justify-center pb-8">
+                  <p className="text-sm text-white/55 tracking-wide">
+                    {isIncomingCall ? "邀请你语音通话..." : "等待对方接受邀请..."}
+                  </p>
                 </div>
               )}
 
               {/* Ringing Action Controls */}
               {callingStatus === "ringing" && (
-                <div className="space-y-12 mb-8 shrink-0">
+                <div className="relative z-10 mb-4 shrink-0">
                   {isIncomingCall ? (
-                    <div className="flex justify-around items-center px-6">
+                    <div className="flex justify-between items-center px-2">
                       {/* Decline (Incoming Call) */}
                       <button
                         onClick={() => {
@@ -7400,10 +7412,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         }}
                         className="flex flex-col items-center gap-2"
                       >
-                        <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
-                          <X className="w-6 h-6 text-white" />
+                        <div className="w-14 h-14 bg-[#ef4b50] hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
+                          <Phone className="w-6 h-6 text-white rotate-[135deg] fill-white" />
                         </div>
-                        <span className="text-[10px] text-white/70">挂断</span>
+                        <span className="text-[11px] text-white/70">拒绝</span>
                       </button>
 
                       {/* Accept (Incoming Call) */}
@@ -7414,25 +7426,25 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         }}
                         className="flex flex-col items-center gap-2"
                       >
-                        <div className="w-14 h-14 bg-emerald-500 hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg transition-all animate-bounce active:scale-95">
-                          <Phone className="w-6 h-6 text-white" />
+                        <div className="w-14 h-14 bg-[#16c76f] hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
+                          <Phone className="w-6 h-6 text-white fill-white" />
                         </div>
-                        <span className="text-[10px] text-white/70">接听</span>
+                        <span className="text-[11px] text-white/70">接听</span>
                       </button>
                     </div>
                   ) : (
                     <div className="flex justify-center">
-                      {/* Hang up (User Outgoing Call) */}
+                      {/* Cancel (User Outgoing Call) */}
                       <button
                         onClick={() => {
                           setActiveAttachModal(null);
                         }}
                         className="flex flex-col items-center gap-2"
                       >
-                        <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
-                          <X className="w-6 h-6 text-white" />
+                        <div className="w-14 h-14 bg-[#ef4b50] hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
+                          <Phone className="w-6 h-6 text-white rotate-[135deg] fill-white" />
                         </div>
-                        <span className="text-[10px] text-white/70">挂断</span>
+                        <span className="text-[11px] text-white/70">取消</span>
                       </button>
                     </div>
                   )}
