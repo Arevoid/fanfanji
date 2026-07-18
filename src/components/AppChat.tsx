@@ -2157,7 +2157,22 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
     try {
       // Collect message history of this specific character to pass to backend
-      const sourceMsgs = customHistoryOverride || (userMsg ? [...currentChatMessages, userMsg] : [...currentChatMessages]);
+      const isConnectedVoiceCall = activeAttachModal === "calling" && callingStatus === "connected";
+      const callHistoryMessages: Message[] = isConnectedVoiceCall
+        ? callTranscript.map((item) => ({
+            id: item.id,
+            characterId: activeChatCharId,
+            sender: item.sender,
+            content: item.content,
+            timestamp: item.timestamp,
+          }))
+        : [];
+      // A call has its own live history. Keep a short online-chat lead-in for
+      // continuity, then append this call's subtitles in chronological order.
+      const baseSourceMsgs = isConnectedVoiceCall
+        ? [...currentChatMessages.slice(-Math.min(20, activeCharacter.contextMemoryLimit ?? 20)), ...callHistoryMessages]
+        : [...currentChatMessages];
+      const sourceMsgs = customHistoryOverride || (userMsg ? [...baseSourceMsgs, userMsg] : baseSourceMsgs);
       const uniqueMsgsMap = new Map<string, Message>();
       sourceMsgs.forEach(m => {
         if (m) uniqueMsgsMap.set(m.id, m);
@@ -2268,13 +2283,36 @@ ${activeCharacter.disableBracketActions
 1. 归档精炼总结优先：以下“先前背景与归档总结”及“召回深度记忆”为历史最高优先级真实记忆，你必须绝对优先根据它们来保持角色认同、长久羁绊和态度。
 2. 历史检索及短期上下文：你的短期上下文聊天记录已按照用户的限制进行了智能截断，以节省 Token 开销。请勿认为你忘记了先前对话，一切先前细节请完全基于归档精炼总结中包含的信息。`;
 
-      if (activeCharacter.compressedMemory) {
+      const normalizeTopicText = (value: string) => value
+        .replace(/\[[^\]]*\]/g, " ")
+        .replace(/[\s\p{P}\p{S}]+/gu, "")
+        .toLowerCase();
+      const currentTopicText = normalizeTopicText(userMsg?.content || "");
+      const recentCallTopicText = normalizeTopicText(
+        callTranscript.slice(-8).map((item) => item.content).join(" ")
+      );
+      const toTopicUnits = (value: string) => {
+        if (value.length < 2) return value ? [value] : [];
+        return Array.from(new Set(Array.from({ length: value.length - 1 }, (_, index) => value.slice(index, index + 2))));
+      };
+      const topicUnits = toTopicUnits(currentTopicText);
+      const sharedTopicUnits = topicUnits.filter((unit) => recentCallTopicText.includes(unit)).length;
+      const topicOverlap = topicUnits.length > 0 ? sharedTopicUnits / topicUnits.length : 1;
+      const callTopicShiftDetected = isConnectedVoiceCall
+        && callTranscript.length >= 2
+        && currentTopicText.length >= 4
+        && topicOverlap < 0.28;
+      const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
+
+      if (activeCharacter.compressedMemory && shouldLoadLongTermMemory) {
         charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeCharacter.compressedMemory}`;
       }
 
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", userMsg ? userMsg.content : "", topK);
+      const relevantMemories = shouldLoadLongTermMemory
+        ? getRelevantMemories(memories || [], activeChatCharId || "", userMsg ? userMsg.content : "", topK)
+        : [];
       if (relevantMemories.length > 0) {
         charDefText += `\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
       }
@@ -2447,19 +2485,19 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
 
       // 8. WeChat Moments Context memory
       const momentsContext = getMomentsContextString(allMoments, activeCharacter, settings.name);
-      if (momentsContext) {
+      if (momentsContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(momentsContext);
       }
 
       // 8.5 Offline stories context memory
       const offlineStoriesContext = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
-      if (offlineStoriesContext) {
+      if (offlineStoriesContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(offlineStoriesContext);
       }
 
       // 8.7 Real-time group chat memories
       const groupMemoriesContext = getGroupChatMemories(activeCharacter, characters, messages, settings.name);
-      if (groupMemoriesContext) {
+      if (groupMemoriesContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(groupMemoriesContext);
       }
 
@@ -2469,6 +2507,11 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
         assembledInstructions.push(`[语音电话输出规则]
 你正在和用户进行实时语音电话。只输出适合直接说出口的纯文字台词。
 禁止发送表情包、贴图、图片、红包、转账、文件、位置或任何方括号附件标记；不要输出“[表情]”“[图片]”等描述。`);
+        assembledInstructions.push(`[VOICE CALL MEMORY ROUTING]
+1. Highest priority: the current call transcript and the short online-chat lead-in. Answer the user's newest sentence and continue the topic already in progress.
+2. Do not repeat, paraphrase, or restart an answer already spoken during this call. Compare against your recent call lines and add only new information or a natural follow-up.
+3. Long-term archived memory is ${callTopicShiftDetected ? "available because the user shifted to a different topic; use only directly relevant facts" : "not loaded for this turn; stay with short-term live context"}.
+4. Never force an old memory into the conversation merely because it exists. If the user's meaning is unclear, ask a brief natural question instead of replaying an earlier answer.`);
       } else if (allStickers1.length > 0) {
         const stickerListStr = allStickers1.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
         assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
