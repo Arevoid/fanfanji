@@ -54,7 +54,8 @@ import {
   Play,
   Pause,
   Loader2,
-  Database
+  Database,
+  Check
 } from "lucide-react";
 
 import { getSpeechForText, MINIMAX_DEFAULT_VOICES } from "../utils/minimaxTts";
@@ -77,6 +78,33 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   if (!rgb) return hexColor;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
+
+const SettingsSwitch = ({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    onClick={() => onChange(!checked)}
+    className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+      checked ? "border-neutral-950 bg-neutral-950" : "border-slate-200 bg-slate-100"
+    }`}
+  >
+    <span
+      className={`absolute top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform ${
+        checked ? "translate-x-[20px]" : "translate-x-0.5"
+      }`}
+    />
+  </button>
+);
 
 // Parse recent messages to detect if an agreed proactive contact time exists
 const getScheduledContactTime = (charMsgs: any[], settingsName: string) => {
@@ -4956,7 +4984,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   <ChevronLeft className="w-4 h-4 text-slate-700" />
                 </button>
                 <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">设置</h2>
-                <div className="w-8 shrink-0" />
+                <button
+                  type="button"
+                  onClick={handleSaveSettings}
+                  aria-label="保存设置"
+                  title="保存设置"
+                  className="w-8 h-8 rounded-full bg-neutral-950 text-white flex items-center justify-center hover:bg-neutral-800 active:scale-95 transition-all z-10 shrink-0"
+                >
+                  <Check className="w-4 h-4" strokeWidth={2.5} />
+                </button>
               </div>
 
               {/* Body */}
@@ -5098,19 +5134,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
                 {/* Operations Group Card */}
                 <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm space-y-4 text-xs">
+                  <div className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">聊天与显示</div>
                   {/* Settings toggles */}
                   <div className="divide-y divide-slate-100 pt-1 space-y-4">
                     {/* Pin Chat */}
                     <div className="flex items-center justify-between pb-1">
                       <span className="text-[#52525b] font-bold text-xs">置顶聊天</span>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftIsPinned}
-                          onChange={(e) => setDraftIsPinned(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
+                      <SettingsSwitch checked={draftIsPinned} onChange={setDraftIsPinned} label="置顶聊天" />
                     </div>
 
                      {/* Character Specific Chat Style Preset Selector */}
@@ -5146,48 +5176,27 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     <div className="flex items-center justify-between py-3 border-t border-slate-100">
                       <div className="space-y-0.5">
                         <span className="text-[#52525b] font-bold text-xs">过滤括号动描</span>
-                        <span className="text-[10px] text-slate-400 block">开启后线上模式对话中不使用括号动作/描述，保留纯语言交流（除非人物说话特色）</span>
+                        <span className="text-[10px] text-slate-400 block">线上聊天仅保留语言交流，过滤括号动作描写。</span>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftDisableBracketActions}
-                          onChange={(e) => setDraftDisableBracketActions(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
+                      <SettingsSwitch checked={draftDisableBracketActions} onChange={setDraftDisableBracketActions} label="过滤括号动描" />
                     </div>
 
                     {/* Time Awareness */}
                     <div className="flex items-center justify-between py-3 border-t border-slate-100">
                       <div className="space-y-0.5">
                         <span className="text-[#52525b] font-bold text-xs">时间感知功能</span>
-                        <span className="text-[10px] text-slate-400 block">开启后角色在对话时能实时感知物理时间（如清晨、深夜、饭点），并动态生成贴合语境的时间对话</span>
+                        <span className="text-[10px] text-slate-400 block">角色会结合当前日期与时间回应。</span>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftEnableTimeAwareness}
-                          onChange={(e) => setDraftEnableTimeAwareness(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
+                      <SettingsSwitch checked={draftEnableTimeAwareness} onChange={setDraftEnableTimeAwareness} label="时间感知" />
                     </div>
 
                     {/* Auto Translate Toggle */}
                     <div className="flex items-center justify-between py-3 border-t border-slate-100">
                       <div className="space-y-0.5">
                         <span className="text-[#52525b] font-bold text-xs">全部自动翻译</span>
-                        <span className="text-[10px] text-slate-400 block">对方发言非中文时，启用后自动将对方的发言翻译为中文</span>
+                        <span className="text-[10px] text-slate-400 block">自动把对方的非中文发言翻译为中文。</span>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftEnableAutoTranslate}
-                          onChange={(e) => setDraftEnableAutoTranslate(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
+                      <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
 
                     {/* Chat Background customizer */}
@@ -5218,7 +5227,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       ) : (
                         <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-4 rounded-[16px] text-xs transition-colors group">
                           <span className="text-slate-500 font-medium group-hover:text-slate-700">点击上传专属背景图片</span>
-                          <span className="text-[10px] text-slate-400 mt-0.5">支持 PNG, JPG 等格式</span>
                           <input
                             type="file"
                             accept="image/*"
@@ -5232,7 +5240,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                      {/* Three-Layer Memory Optimization System Panel */}
                     <div className="py-4 space-y-4 border-t border-slate-100">
                       <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-                        <span className="text-slate-800 font-bold text-sm">三层记忆隔离与优化配置</span>
+                        <span className="text-slate-800 font-bold text-sm">记忆配置</span>
                       </div>
 
                       {/* Token Preview Badge Container */}
@@ -5326,12 +5334,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             <span className="text-xs font-bold text-neutral-800 font-mono bg-white px-2.5 py-0.5 rounded-full border border-neutral-100">
                               {draftEnableAutoArchive ? `${draftAutoArchiveInterval} 轮` : "已关闭"}
                             </span>
-                            <input
-                              type="checkbox"
-                              checked={draftEnableAutoArchive}
-                              onChange={(e) => setDraftEnableAutoArchive(e.target.checked)}
-                              className="rounded border-slate-300 text-neutral-900 focus:ring-neutral-950 w-3.5 h-3.5 accent-black cursor-pointer"
-                            />
+                            <SettingsSwitch checked={draftEnableAutoArchive} onChange={setDraftEnableAutoArchive} label="自动归档" />
                           </div>
                         </div>
 
@@ -5400,8 +5403,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     {/* MiniMax Character-specific Voice Settings */}
                     <div className="py-3.5 space-y-3 border-t border-slate-100">
                       <div className="flex items-center justify-between">
-                        <span className="text-[#52525b] font-bold text-xs">MiniMax 专属语音声线</span>
-                        <span className="text-[9px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">当前角色</span>
+                        <span className="text-slate-800 font-bold text-sm">语音设置</span>
                       </div>
                       
                       <div className="space-y-2">
@@ -5466,11 +5468,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               </button>
                             ))}
                           </div>
-                          <p className="text-[8px] text-slate-400 leading-normal">
-                            智能判断消息形式。内向稳重角色低频、活泼外放角色高频。
-                            深夜闲聊、亲密撒娇提升几率；严肃正事、长篇叙事降低几率。
-                            自动跟随用户近期发语音/文字的习惯并附带真人随机浮动。
-                          </p>
+                          <p className="text-[9px] text-slate-400 leading-normal">频率会结合角色性格、聊天情境和你的使用习惯自动调整。</p>
                         </div>
                       </div>
                     </div>
@@ -5478,8 +5476,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     {/* Character Specific CSS Customizer */}
                     <div className="py-3 space-y-1.5 border-t border-slate-100">
                       <div className="flex items-center justify-between">
-                        <span className="text-[#52525b] font-bold text-xs">单人专属聊天页 CSS 样式</span>
-                        <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">优先于全局气泡</span>
+                        <span className="text-slate-800 font-bold text-sm">个性化样式</span>
+                        <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">覆盖全局设置</span>
                       </div>
                       <textarea
                         rows={12}
@@ -5527,34 +5525,21 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
                     {/* Proactive Chat Toggles */}
                     <div className="py-3.5 space-y-2.5 border-t border-slate-100">
+                      <div className="text-slate-800 font-bold text-sm border-b border-slate-100 pb-3">主动互动</div>
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
                           <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
-                          <span className="text-[10px] text-slate-400 block">设置时间段后，对方会在时间段内随机主动发送信息（支持设置 00:00-00:00 为全天随时）</span>
+                          <span className="text-[10px] text-slate-400 block">对方会在设定时段内随机发来消息。</span>
                         </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={draftEnableProactiveChat}
-                            onChange={(e) => setDraftEnableProactiveChat(e.target.checked)}
-                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                          />
-                        </label>
+                        <SettingsSwitch checked={draftEnableProactiveChat} onChange={setDraftEnableProactiveChat} label="主动联络" />
                       </div>
 
                       <div className="flex items-center justify-between rounded-[14px] bg-slate-50 px-3 py-2.5 border border-slate-100">
                         <div className="space-y-0.5 pr-3">
                           <span className="text-[#52525b] font-bold text-xs block">对方主动来电</span>
-                          <span className="text-[10px] text-slate-400 block">开启后，对方会偶尔主动拨打语音电话；关闭后不会出现来电。</span>
+                          <span className="text-[10px] text-slate-400 block">对方有机会主动拨打语音电话。</span>
                         </div>
-                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                          <input
-                            type="checkbox"
-                            checked={draftEnableProactiveCall}
-                            onChange={(e) => setDraftEnableProactiveCall(e.target.checked)}
-                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                          />
-                        </label>
+                        <SettingsSwitch checked={draftEnableProactiveCall} onChange={setDraftEnableProactiveCall} label="主动来电" />
                       </div>
 
                       {draftEnableProactiveChat && (
@@ -5606,9 +5591,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </div>
 
                           <div className="bg-slate-50 p-2.5 rounded-[16px] border border-slate-100 flex items-center justify-between gap-2">
-                            <span className="text-[10px] text-slate-400 leading-snug">
-                              Ta 将在此时间段内随机主动给您发送消息。若设为 00:00 - 00:00 则为全天候随机发信。
-                            </span>
+                            <span className="text-[10px] text-slate-400 leading-snug">00:00 - 00:00 表示全天。</span>
                             <button
                               type="button"
                               onClick={handleTriggerProactiveMessage}
@@ -5623,14 +5606,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </div>
                   </div>
 
-                  {/* Save button and clear record buttons at bottom of the page */}
+                  {/* Data management */}
                   <div className="pt-4 space-y-3 border-t border-slate-100">
-                    <button
-                      onClick={handleSaveSettings}
-                      className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
-                    >
-                      保存设置
-                    </button>
+                    <div className="text-slate-800 font-bold text-sm">数据管理</div>
                     
                     <div className="flex flex-col items-center gap-2">
                       <button
