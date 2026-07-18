@@ -205,9 +205,13 @@ export default function AppOffline({
     s.characterId === selectedCharId || (s.characterIds && s.characterIds.includes(selectedCharId))
   );
 
+  const uniqueCharactersById = (items: Character[]) => Array.from(
+    new Map(items.map((character) => [character.id, character])).values()
+  );
+
   const storyChars = activeStory 
     ? (activeStory.characterIds && activeStory.characterIds.length > 0 
-        ? characters.filter(c => activeStory.characterIds?.includes(c.id))
+        ? uniqueCharactersById(characters.filter(c => activeStory.characterIds?.includes(c.id)))
         : [selectedChar])
     : [selectedChar];
 
@@ -284,7 +288,11 @@ export default function AppOffline({
       return;
     }
 
-    const storyCharsList = characters.filter(c => selectedCharIds.includes(c.id));
+    const normalizedSelectedCharIds: string[] = Array.from(new Set<string>(
+      (selectedCharIds.length > 0 ? selectedCharIds : [selectedCharId])
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    ));
+    const storyCharsList = uniqueCharactersById(characters.filter(c => normalizedSelectedCharIds.includes(c.id)));
     const charsLabel = storyCharsList.map(c => c.remark || c.name).join("、");
     const modeLabel = newMode === "director" ? "导演剧本" : newMode === "if" ? "IF假想线" : "续写故事";
     const titleToUse = newTitle.trim() || `「${charsLabel}」的${modeLabel} - ${new Date().toLocaleDateString()}`;
@@ -327,7 +335,7 @@ export default function AppOffline({
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: selectedCharId,
-      characterIds: selectedCharIds.length > 0 ? selectedCharIds : [selectedCharId],
+      characterIds: normalizedSelectedCharIds,
       title: titleToUse,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -382,7 +390,7 @@ export default function AppOffline({
     // it is short. Long segments retain their latest 12 beats for continuity.
     const lastMsgs = messagesToSync.slice(-12);
     const storyCharsList = story.characterIds && story.characterIds.length > 0 
-      ? characters.filter(c => story.characterIds?.includes(c.id))
+      ? uniqueCharactersById(characters.filter(c => story.characterIds?.includes(c.id)))
       : [selectedChar];
 
     const formattedCharsList = storyCharsList.map(c => c.remark || c.name).join("、");
@@ -393,10 +401,19 @@ export default function AppOffline({
     const syncMarker = `offline-story:${story.id}:${syncStart}-${story.messages.length}`;
     const newMemoryContent = `[线下剧本《${story.title}》新增剧情总结（参与者: ${formattedCharsList}）| ${syncMarker}]\n${summaryText}`;
 
-    // Sync to all participating characters
+    // For group continuations, the online chat reads memory by the group
+    // container id, so synchronize both the actors and their source chat.
+    const sourceChatCharacter = story.sourceChatId
+      ? characters.find((character) => character.id === story.sourceChatId)
+      : undefined;
+    const syncTargetCharacters = uniqueCharactersById([
+      ...storyCharsList,
+      ...(sourceChatCharacter ? [sourceChatCharacter] : []),
+    ]);
     const newMems = [...memories];
     let syncedCount = 0;
-    storyCharsList.forEach(char => {
+    const addedMemoryIds: string[] = [];
+    syncTargetCharacters.forEach(char => {
       const isDup = memories.some(m => m.characterId === char.id && m.content.includes(syncMarker));
       if (!isDup) {
         const memoryItem: MemoryItem = {
@@ -408,6 +425,7 @@ export default function AppOffline({
           isManual: true
         };
         newMems.unshift(memoryItem);
+        addedMemoryIds.push(memoryItem.id);
         syncedCount++;
       }
     });
@@ -418,10 +436,18 @@ export default function AppOffline({
       // offline-to-online handoff available immediately, even if the user leaves
       // the workspace in the same event loop turn.
       localStorage.setItem("phone_memory_vault_items", JSON.stringify(newMems));
+      syncTargetCharacters.forEach((char) => {
+        localStorage.setItem(`phone_offline_handoff_${char.id}`, JSON.stringify({
+          storyId: story.id,
+          content: newMemoryContent,
+          timestamp: Date.now(),
+          syncedMessageCount: story.messages.length,
+        }));
+      });
       const archivedStory = {
         ...story,
         archivedAt: Date.now(),
-        archivedMemoryIds: [...(story.archivedMemoryIds || []), ...newMems.slice(0, syncedCount).map(memory => memory.id)],
+        archivedMemoryIds: [...(story.archivedMemoryIds || []), ...addedMemoryIds],
         lastSyncedMessageCount: story.messages.length,
         updatedAt: Date.now()
       };
@@ -514,7 +540,7 @@ export default function AppOffline({
 
       // We can collect worldbook blocks for all story characters
       const storyCharsList = updatedStory.characterIds && updatedStory.characterIds.length > 0 
-        ? characters.filter(c => updatedStory.characterIds?.includes(c.id))
+        ? uniqueCharactersById(characters.filter(c => updatedStory.characterIds?.includes(c.id)))
         : [selectedChar];
       const sourceChat = characters.find(c => c.id === updatedStory.sourceChatId);
       const isImportedGroupStory = Boolean(sourceChat?.isGroupChat);
@@ -529,6 +555,7 @@ export default function AppOffline({
       storyCharsList.forEach((char, idx) => {
         sysPrompt += `[角色 ${idx + 1}: ${char.name}]
 - 姓名：${char.name}
+- 聊天备注/别名：${char.remark || "无"}（这只是同一人物的备注，不是第二个人物，严禁据此生成额外角色档案）
 - 年龄：${char.age || "未知"}
 - 语气/性格特点：${char.personality}
 - 背景设定：${char.backstory}
@@ -750,7 +777,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                   <h1 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                     <span>线下剧本模式</span>
                   </h1>
-                  <p className="text-[10px] text-slate-500">线下独立走向，与线上大脑记忆互通</p>
+                  <p className="text-[10px] text-slate-500">续写可自动衔接线上；导演与 IF 线需手动同步</p>
                 </div>
               </div>
 
@@ -1597,6 +1624,11 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       </button>
                     ))}
                   </div>
+                  {(newMode === "director" || newMode === "if") && (
+                    <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-relaxed text-amber-700">
+                      此模式为独立剧幕，不同步线上记忆；需要时请在线下剧本设置中手动同步记忆。
+                    </div>
+                  )}
                 </div>
 
                 {/* IF premise prompt field */}

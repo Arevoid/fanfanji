@@ -438,20 +438,36 @@ const getMomentComments = (mom: Moment) => {
 
 const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ownerName: string) => {
   if (!allMoments || allMoments.length === 0) return "";
-  
-  // Take last 8 moments
-  const sortedMoments = [...allMoments].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
-  
+
+  // A private chat only needs posts authored by the user or this character.
+  // Feeding unrelated friends' posts into every chat made likes/comments look
+  // like authorship and caused the model to claim the user posted them.
+  const sortedMoments = allMoments
+    .filter((moment) => !moment.characterId || moment.characterId === activeChar.id)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, 8);
+  if (sortedMoments.length === 0) return "";
+
   const momentLines = sortedMoments.map((m) => {
-    const author = m.characterId === activeChar.id ? "你(发布人)" : (m.characterId ? m.authorName : `${ownerName}(机主)`);
+    const isUserPost = !m.characterId;
+    const author = isUserPost
+      ? `[AUTHOR=USER] ${ownerName}（用户本人发布）`
+      : `[AUTHOR=CHARACTER] ${activeChar.remark || activeChar.name}（你本人发布）`;
     const dateStr = new Date(m.timestamp).toLocaleDateString("zh-CN");
-    const likesStr = m.likes.length > 0 ? ` [点赞人: ${m.likes.join(", ")}]` : "";
-    const commentsStr = m.comments.length > 0 ? ` [评论: ${m.comments.map(c => `${c.authorName}: ${c.content}`).join("; ")}]` : "";
-    return `- ${dateStr} | ${author} 发表朋友圈: "${m.content}"${likesStr}${commentsStr}`;
+    const likesStr = m.likes.length > 0 ? `；互动-点赞人（不是发布人）: ${m.likes.join(", ")}` : "";
+    const commentsStr = m.comments.length > 0
+      ? `；互动-评论（评论者不是发布人）: ${m.comments.map(c => `${c.authorName}: ${c.content}`).join("; ")}`
+      : "";
+    return `- ${dateStr} | ${author} | 朋友圈正文: "${m.content}"${likesStr}${commentsStr}`;
   });
 
-  return `[🚨 微信朋友圈记忆 (Moments Memory)]
-以下是最近微信朋友圈里的动态，你对这些内容拥有清晰的记忆。你不一定要主动提起它们，但它们是你们共享的日常生活背景。在交流中，你可以根据你们的亲疏关系极度自然地参考这些生活点滴，例如偶尔作为话题，或对对方最近的状态有所了解。
+  return `[🚨 微信朋友圈作者归属记忆 (Moments Memory — AUTHORSHIP IS FACTUAL)]
+以下只列出用户本人和你本人发布的动态，AUTHOR 字段是唯一有效的发布者证据。
+严格规则：
+1. 只有标记为 [AUTHOR=USER] 的内容才能说成“用户发了朋友圈”。
+2. [AUTHOR=CHARACTER] 是你自己发布的，绝不能说成用户发布。
+3. 点赞人和评论者只代表互动，绝不代表其发布了该朋友圈；用户给别人的动态点赞/评论，也不能说用户发过该动态。
+4. 如果没有 [AUTHOR=USER] 条目，就视为用户没有发布过朋友圈。不得猜测、补全或虚构用户发过动态。
 ${momentLines.join("\n")}`;
 };
 
@@ -2375,15 +2391,29 @@ ${activeCharacter.disableBracketActions
       const latestOfflineContinuationMemory = [...(memories || [])]
         .filter((memory) => memory.characterId === activeChatCharId && memory.content.includes("offline-story:"))
         .sort((a, b) => b.timestamp - a.timestamp)[0];
-      const isFreshOfflineHandoff = latestOfflineContinuationMemory
+      let persistedOfflineHandoff: { content: string; timestamp: number } | null = null;
+      try {
+        const rawHandoff = localStorage.getItem(`phone_offline_handoff_${activeChatCharId}`);
+        if (rawHandoff) persistedOfflineHandoff = JSON.parse(rawHandoff);
+      } catch (error) {
+        console.warn("Failed to read offline handoff:", error);
+      }
+      const freshestOfflineHandoff = [
+        latestOfflineContinuationMemory
+          ? { content: latestOfflineContinuationMemory.content, timestamp: latestOfflineContinuationMemory.timestamp }
+          : null,
+        persistedOfflineHandoff,
+      ].filter((item): item is { content: string; timestamp: number } => Boolean(item?.content && item?.timestamp))
+        .sort((a, b) => b.timestamp - a.timestamp)[0];
+      const isFreshOfflineHandoff = freshestOfflineHandoff
         // The handoff must be newer than the last online message. This keeps an
         // old archived story from resurfacing, while allowing an immediate return
         // to online chat to bridge naturally even when it crosses midnight.
-        && (!latestHistoryMessage || latestOfflineContinuationMemory.timestamp >= latestHistoryMessage.timestamp)
-        && Date.now() - latestOfflineContinuationMemory.timestamp < 2 * 60 * 60 * 1000;
+        && (!latestHistoryMessage || freshestOfflineHandoff.timestamp >= latestHistoryMessage.timestamp)
+        && Date.now() - freshestOfflineHandoff.timestamp < 2 * 60 * 60 * 1000;
       if (isFreshOfflineHandoff
-        && !relevantMemories.some((memory) => memory.id === latestOfflineContinuationMemory.id)) {
-        charDefText += `\n- Latest offline continuation handoff (continue this naturally if relevant):\n  * ${latestOfflineContinuationMemory.content}`;
+        && !relevantMemories.some((memory) => memory.content === freshestOfflineHandoff.content)) {
+        charDefText += `\n- Latest offline continuation handoff (this is the newest event that just happened; acknowledge and continue it naturally):\n  * ${freshestOfflineHandoff.content}`;
       }
 
       const userProfileText = `User Profile (interacting with you):
@@ -2563,6 +2593,8 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
       if (momentsContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(momentsContext);
       }
+      assembledInstructions.push(`[MOMENTS AUTHORSHIP SAFETY RULE]
+Any legacy memory labeled only “【朋友圈动态】” inside this character's memory vault means this character posted it, not the user. A like, comment, mention, or discussion of somebody else's post is never evidence that the user authored a post. Never tell the user they posted a Moment unless the current Moments context explicitly contains an [AUTHOR=USER] record.`);
 
       // 8.5 Offline stories context memory
       const offlineStoriesContext = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
@@ -3482,6 +3514,8 @@ ${timeLogString}
       if (momentsContextRegen) {
         assembledInstructions.push(momentsContextRegen);
       }
+      assembledInstructions.push(`[MOMENTS AUTHORSHIP SAFETY RULE]
+Any legacy memory labeled only “【朋友圈动态】” inside this character's memory vault means this character posted it, not the user. A like, comment, mention, or discussion of somebody else's post is never evidence that the user authored a post. Never tell the user they posted a Moment unless the current Moments context explicitly contains an [AUTHOR=USER] record.`);
 
       // 8.5 Offline stories context memory
       if (offlineStoriesContextRegen) {
@@ -3810,7 +3844,10 @@ ${stickerListStr}
         proactivePrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
-      const charMsgs = messages.filter(m => m.characterId === activeChatCharId);
+      const charMsgs = messages.filter(m => m.characterId === activeChatCharId && !m.isOffline);
+      const recentProactiveHistory = charMsgs.slice(-(activeCharacter.contextMemoryLimit || 20));
+      const lastChatTimestamp = charMsgs[charMsgs.length - 1]?.timestamp;
+      const elapsedMinutes = lastChatTimestamp ? Math.max(0, Math.round((Date.now() - lastChatTimestamp) / 60000)) : null;
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
@@ -3834,13 +3871,13 @@ User Profile (interacting with you):
 - Personality/Bio: ${settings.bio}
 
 ${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}PROACTIVE CONTACT TASK:
-It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
+Read the supplied recent chat history before writing. If the interval is short or the previous topic is unfinished, continue that exact topic and preserve every established activity, location, promise, person, and emotion. Do not invent a conflicting or unrelated activity. Only open a new topic when the previous exchange is clearly complete or enough time has passed.
 
 ${proactivePrompt}`;
 
       const data = await apiChat({
-        message: "(用户失联3小时，你主动给其发送了一条信息)",
-        history: [],
+        message: `(你在距离上一条聊天${elapsedMinutes === null ? "一段时间" : `约 ${elapsedMinutes} 分钟`}后，主动给用户发送信息)`,
+        history: recentProactiveHistory,
         systemInstruction,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
@@ -3934,12 +3971,15 @@ ${proactivePrompt}`;
         instructionsPrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
-      const charMsgs = messagesRef.current.filter(m => m.characterId === charId);
+      const charMsgs = messagesRef.current.filter(m => m.characterId === charId && !m.isOffline);
+      const recentProactiveHistory = charMsgs.slice(-(friend.contextMemoryLimit || 20));
+      const lastChatTimestamp = charMsgs[charMsgs.length - 1]?.timestamp;
+      const elapsedMinutes = lastChatTimestamp ? Math.max(0, Math.round((Date.now() - lastChatTimestamp) / 60000)) : null;
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], charId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
 
-      const taskPrompt = customTaskText || "It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.";
+      const taskPrompt = customTaskText || `You proactively send a message after ${elapsedMinutes === null ? "an unknown interval" : `${elapsedMinutes} minutes`} since the latest chat. Read the supplied recent chat history first. When the interval is short or the previous topic is unfinished, continue that exact topic and preserve its activity, location, people, promises, and emotions. Do not abruptly invent an unrelated activity or repeat a conflicting status. Only start a fresh topic when the previous exchange is clearly complete or enough time has passed. Keep it spontaneous, concise, and realistic.`;
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
@@ -3966,7 +4006,7 @@ ${instructionsPrompt}`;
 
       const data = await apiChat({
         message: "(你主动给用户发送了一条信息)",
-        history: [],
+        history: recentProactiveHistory,
         systemInstruction,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
@@ -4308,7 +4348,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         onSaveMemories([{
           id: `${Date.now()}-moment-memory-${Math.random().toString(36).slice(2, 6)}`,
           characterId: friend.id,
-          content: `【朋友圈动态】${parsed.content}${momentImage ? "（发布时附有配图）" : ""}`,
+          content: `【朋友圈作者事实】发布人是角色本人“${friend.remark || friend.name}”，不是用户“${settings.name}”。正文：${parsed.content}${momentImage ? "（角色本人发布时附有配图）" : ""}`,
           timestamp: Date.now(),
           importance: 4,
           isManual: false,
@@ -5988,7 +6028,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 !prevMsg.isNarration &&
                 !msg.isNarration &&
                 prevMsg.sender === msg.sender &&
-                (msg.sender === "user" || !activeCharacter.isGroupChat || (!!msg.senderId && !!prevMsg.senderId && prevMsg.senderId === msg.senderId))
+                (msg.sender === "user" || !activeCharacter.isGroupChat || (!!msg.senderId && !!prevMsg.senderId && prevMsg.senderId === msg.senderId)) &&
+                Math.max(0, msg.timestamp - prevMsg.timestamp) < 5 * 60 * 1000
               );
               const showAvatar = !isConsecutivePrev || !shouldCollapse;
               
