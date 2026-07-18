@@ -2376,9 +2376,12 @@ ${activeCharacter.disableBracketActions
         .filter((memory) => memory.characterId === activeChatCharId && memory.content.includes("offline-story:"))
         .sort((a, b) => b.timestamp - a.timestamp)[0];
       const isFreshOfflineHandoff = latestOfflineContinuationMemory
-        && Date.now() - latestOfflineContinuationMemory.timestamp < 24 * 60 * 60 * 1000;
+        // The handoff must be newer than the last online message. This keeps an
+        // old archived story from resurfacing, while allowing an immediate return
+        // to online chat to bridge naturally even when it crosses midnight.
+        && (!latestHistoryMessage || latestOfflineContinuationMemory.timestamp >= latestHistoryMessage.timestamp)
+        && Date.now() - latestOfflineContinuationMemory.timestamp < 2 * 60 * 60 * 1000;
       if (isFreshOfflineHandoff
-        && !isCrossDayNewSession
         && !relevantMemories.some((memory) => memory.id === latestOfflineContinuationMemory.id)) {
         charDefText += `\n- Latest offline continuation handoff (continue this naturally if relevant):\n  * ${latestOfflineContinuationMemory.content}`;
       }

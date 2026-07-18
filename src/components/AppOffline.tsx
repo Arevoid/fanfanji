@@ -266,12 +266,13 @@ export default function AppOffline({
   const handleExitStoryWorkspace = () => {
     // Online continuations always archive their newly-written plot immediately
     // on exit, so the next online reply can continue the same topic.
+    let completedStory = activeStory;
     if (activeStory
       && (activeStory.sourceChatId || activeStory.mode === "continue")
       && hasUnsyncedOnlineProgress(activeStory)) {
-      handleSyncMemoryToBrain(activeStory);
+      completedStory = handleSyncMemoryToBrain(activeStory);
     }
-    if (activeStory) clearOfflineSession(activeStory);
+    if (completedStory) clearOfflineSession(completedStory);
     setActiveStory(null);
     setIsSettingsOpen(false);
   };
@@ -371,10 +372,10 @@ export default function AppOffline({
   };
 
   // Sync memory manually
-  const handleSyncMemoryToBrain = (story: OfflineStory) => {
+  const handleSyncMemoryToBrain = (story: OfflineStory): OfflineStory => {
     const syncStart = getSyncedMessageCount(story);
     const messagesToSync = story.messages.slice(syncStart);
-    if (!messagesToSync.length) return;
+    if (!messagesToSync.length) return story;
     
     // Create a summarized memory of this offline development
     // Keep the archive concise but include the full newly-written segment when
@@ -413,6 +414,10 @@ export default function AppOffline({
 
     if (syncedCount > 0) {
       onSaveMemories(newMems);
+      // Persist before navigation as well as updating React state. This makes an
+      // offline-to-online handoff available immediately, even if the user leaves
+      // the workspace in the same event loop turn.
+      localStorage.setItem("phone_memory_vault_items", JSON.stringify(newMems));
       const archivedStory = {
         ...story,
         archivedAt: Date.now(),
@@ -423,8 +428,10 @@ export default function AppOffline({
       onSaveOfflineStory(archivedStory);
       if (activeStory?.id === story.id) setActiveStory(archivedStory);
       showToast(`剧情记忆已成功同步至 ${syncedCount} 位参与角色的主大脑！`);
+      return archivedStory;
     } else {
       showToast("所有角色的最近进展已同步，无需重复同步");
+      return story;
     }
   };
 
@@ -1171,13 +1178,14 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                 {onNavigateToChat && (
                   <button 
                     onClick={() => {
+                      let completedStory = activeStory;
                       if (hasUnsyncedOnlineProgress(activeStory)) {
-                        handleSyncMemoryToBrain(activeStory);
+                        completedStory = handleSyncMemoryToBrain(activeStory);
                       }
-                      clearOfflineSession(activeStory);
+                      clearOfflineSession(completedStory);
                       setActiveStory(null);
                       setIsSettingsOpen(false);
-                      onNavigateToChat(activeStory.characterId);
+                      onNavigateToChat(completedStory.characterId);
                     }}
                     className="text-[10px] underline font-bold hover:text-indigo-700"
                   >
