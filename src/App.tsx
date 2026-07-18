@@ -1797,6 +1797,16 @@ export default function App() {
     );
   };
 
+  const handleDeleteCommentFromMoment = (momentId: string, commentId: string) => {
+    setMoments((prev) =>
+      prev.map((mom) =>
+        mom.id === momentId
+          ? { ...mom, comments: mom.comments.filter((comment) => comment.id !== commentId) }
+          : mom
+      )
+    );
+  };
+
   // Worldbook handlers
   const handleSaveWorldBookEntry = (entry: WorldBookEntry) => {
     setWorldBookEntries((prev) => {
@@ -2806,6 +2816,7 @@ export default function App() {
                     onSaveCharacter={handleSaveCharacter}
                     onAddMoment={handleAddMoment}
                     onAddCommentToMoment={handleAddCommentToMoment}
+                    onDeleteCommentFromMoment={handleDeleteCommentFromMoment}
                     onLikeMoment={handleLikeMoment}
                     onDeleteMoment={handleDeleteMoment}
                     onToggleBookmark={handleToggleBookmark}

@@ -94,13 +94,13 @@ const SettingsSwitch = ({
     aria-checked={checked}
     aria-label={label}
     onClick={() => onChange(!checked)}
-    className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
-      checked ? "border-neutral-950 bg-neutral-950" : "border-slate-200 bg-slate-100"
+    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${
+      checked ? "bg-neutral-950" : "bg-slate-200"
     }`}
   >
     <span
-      className={`absolute top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform ${
-        checked ? "translate-x-[20px]" : "translate-x-0.5"
+      className={`absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-transform duration-200 ${
+        checked ? "translate-x-5" : "translate-x-0"
       }`}
     />
   </button>
@@ -292,6 +292,7 @@ interface AppChatProps {
   onSaveCharacter: (char: Character) => void; // Support updating character remark, pinned status, chatBg
   onAddMoment: (moment: Moment) => void;
   onAddCommentToMoment: (momentId: string, comment: MomentComment) => void;
+  onDeleteCommentFromMoment?: (momentId: string, commentId: string) => void;
   onLikeMoment: (momentId: string, userName: string) => void;
   onDeleteMoment?: (momentId: string) => void;
   onToggleBookmark: (messageId: string) => void;
@@ -357,6 +358,14 @@ const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: strin
 const cleanAndExtractMoment = (content: string) => {
   let cleanContent = content.trim();
   const selfComments: string[] = [];
+  let imageDescription: string | undefined;
+
+  // Older generated posts may have placed the image description directly in
+  // the body. Extract it so it is rendered as a tappable text-image card.
+  cleanContent = cleanContent.replace(/(?:^|\n)\s*[（(]\s*配图\s*[：:]\s*([^）)\n]+)\s*[）)]\s*/g, (_match, text) => {
+    if (!imageDescription && text.trim()) imageDescription = text.trim();
+    return "\n";
+  });
 
   // Keep generated metadata and mock comments out of the post body. Older data can
   // still contain these forms, so normalize it when rendering as well as generating.
@@ -397,6 +406,7 @@ const cleanAndExtractMoment = (content: string) => {
   return {
     content: cleanContent,
     selfComments,
+    imageDescription,
   };
 };
 
@@ -544,6 +554,7 @@ export default function AppChat({
   onSaveCharacter,
   onAddMoment,
   onAddCommentToMoment,
+  onDeleteCommentFromMoment,
   onLikeMoment,
   onDeleteMoment,
   onToggleBookmark,
@@ -1279,7 +1290,7 @@ export default function AppChat({
   const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
   const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
   const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState<number>(1.0);
-  const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("medium");
+  const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("low");
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
@@ -1453,6 +1464,9 @@ export default function AppChat({
     isOwn: boolean;
     timestamp: number;
   } | null>(null);
+  const [commentDeleteTarget, setCommentDeleteTarget] = useState<{ momentId: string; commentId: string } | null>(null);
+  const commentLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressCommentClickRef = useRef(false);
 
   const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() => {
     try {
@@ -2984,6 +2998,37 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
   };
 
+  const handleMomentCommentPointerDown = (momentId: string, commentId: string) => {
+    if (commentLongPressTimerRef.current) clearTimeout(commentLongPressTimerRef.current);
+    commentLongPressTimerRef.current = setTimeout(() => {
+      suppressCommentClickRef.current = true;
+      setCommentDeleteTarget({ momentId, commentId });
+    }, 600);
+  };
+
+  const clearMomentCommentLongPress = () => {
+    if (commentLongPressTimerRef.current) {
+      clearTimeout(commentLongPressTimerRef.current);
+      commentLongPressTimerRef.current = null;
+    }
+  };
+
+  const handleMomentCommentClick = (momentId: string, comment: MomentComment) => {
+    if (suppressCommentClickRef.current) {
+      suppressCommentClickRef.current = false;
+      return;
+    }
+    setReplyingToCommentMap(prev => ({ ...prev, [momentId]: comment }));
+    setShowCommentInputMap(prev => ({ ...prev, [momentId]: true }));
+  };
+
+  const confirmDeleteMomentComment = () => {
+    if (!commentDeleteTarget || !onDeleteCommentFromMoment) return;
+    onDeleteCommentFromMoment(commentDeleteTarget.momentId, commentDeleteTarget.commentId);
+    setCommentDeleteTarget(null);
+    showToast("评论已删除");
+  };
+
   const handleMomentTextContextMenu = (
     e: React.MouseEvent,
     momentId: string,
@@ -4201,8 +4246,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 1. The post must fit your personality. It can be about your own personal life (feelings, work, hobbies) OR about your relationship/recent chats/interactions with the user.
 2. The post content must be natural, engaging, and in Chinese.
 3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
-4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, image captions, or talk like an AI. Just output the text of the Moment post.
-5. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)" or "(配图：...)" at the start.
+4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, or talk like an AI. Just output the text of the Moment post.
+5. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)".
+6. If this post needs an image, add one final separate line in exactly this format: "(配图：图片描述)". This line will be rendered as a text-image card, never as post body text.
 6. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 `;
 
@@ -4223,7 +4269,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         const parsed = cleanAndExtractMoment(cleanedContent);
 
         let momentImage: string | undefined = undefined;
-        if (friend.album && friend.album.length > 0) {
+        if (!parsed.imageDescription && friend.album && friend.album.length > 0) {
           // 40% chance of attaching a photo from their album
           if (Math.random() < 0.4) {
             const randomIndex = Math.floor(Math.random() * friend.album.length);
@@ -4248,7 +4294,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             timestamp: Date.now() + (idx + 1) * 1000,
           })),
           image: momentImage,
-          imageType: momentImage ? "photo" : undefined,
+          imageType: momentImage ? "photo" : (parsed.imageDescription ? "text" : undefined),
+          imageDescription: parsed.imageDescription,
         };
 
         onAddMoment(newMo);
@@ -4959,7 +5006,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftEnableAutoTranslate(activeCharacter.enableAutoTranslate || false);
                   setDraftMinimaxVoiceId(activeCharacter.minimaxVoiceId || "");
                   setDraftMinimaxSpeed(activeCharacter.minimaxSpeed !== undefined ? activeCharacter.minimaxSpeed : 1.0);
-                  setDraftVoiceFrequency(activeCharacter.voiceFrequency || "medium");
+                  setDraftVoiceFrequency(activeCharacter.voiceFrequency || "low");
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
@@ -5132,44 +5179,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   </div>
                 )}
 
-                {/* Operations Group Card */}
-                <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm space-y-4 text-xs">
-                  <div className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">聊天与显示</div>
+                {/* Chat behaviour */}
+                <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
+                  <div className="text-sm font-bold text-neutral-900 border-b border-slate-100 pb-3">聊天与显示</div>
                   {/* Settings toggles */}
                   <div className="divide-y divide-slate-100 pt-1 space-y-4">
                     {/* Pin Chat */}
                     <div className="flex items-center justify-between pb-1">
                       <span className="text-[#52525b] font-bold text-xs">置顶聊天</span>
                       <SettingsSwitch checked={draftIsPinned} onChange={setDraftIsPinned} label="置顶聊天" />
-                    </div>
-
-                     {/* Character Specific Chat Style Preset Selector */}
-                    <div className="py-3 border-t border-slate-100 space-y-2">
-                      <span className="text-[#52525b] font-bold block text-xs">聊天页面预设样式</span>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setDraftChatStylePreset("default")}
-                          className={`py-1.5 px-2 rounded-[16px] border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
-                            draftChatStylePreset === "default"
-                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
-                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
-                          }`}
-                        >
-                          <span className="text-[11px]">默认经典</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDraftChatStylePreset("liquid-glass")}
-                          className={`py-1.5 px-2 rounded-[16px] border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
-                            draftChatStylePreset === "liquid-glass"
-                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
-                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
-                          }`}
-                        >
-                          <span className="text-[11px]">液态玻璃</span>
-                        </button>
-                      </div>
                     </div>
 
                     {/* Disable Bracket Actions */}
@@ -5199,8 +5217,26 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
 
+                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                      <div className="space-y-0.5 pr-3">
+                        <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
+                        <span className="text-[10px] text-slate-400 block">允许对方在设定时段内主动发来消息。</span>
+                      </div>
+                      <SettingsSwitch checked={draftEnableProactiveChat} onChange={setDraftEnableProactiveChat} label="主动联络" />
+                    </div>
+
+                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                      <div className="space-y-0.5 pr-3">
+                        <span className="text-[#52525b] font-bold text-xs block">主动来电</span>
+                        <span className="text-[10px] text-slate-400 block">允许对方有机会主动发起语音通话。</span>
+                      </div>
+                      <SettingsSwitch checked={draftEnableProactiveCall} onChange={setDraftEnableProactiveCall} label="主动来电" />
+                    </div>
+                  </div>
+                </div>
+
                     {/* Chat Background customizer */}
-                    <div className="py-3 space-y-2 border-t border-slate-100">
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                       <span className="text-[#52525b] font-bold block text-xs">专属背景壁纸</span>
                       {draftChatBg ? (
                         <div className="relative group rounded-[16px] overflow-hidden border border-slate-200 bg-slate-50 h-24 flex items-center justify-center">
@@ -5238,7 +5274,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </div>
 
                      {/* Three-Layer Memory Optimization System Panel */}
-                    <div className="py-4 space-y-4 border-t border-slate-100">
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4 text-xs">
                       <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
                         <span className="text-slate-800 font-bold text-sm">记忆配置</span>
                       </div>
@@ -5401,7 +5437,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </div>
 
                     {/* MiniMax Character-specific Voice Settings */}
-                    <div className="py-3.5 space-y-3 border-t border-slate-100">
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-800 font-bold text-sm">语音设置</span>
                       </div>
@@ -5441,40 +5477,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </div>
                         </div>
 
-                        {/* Voice Frequency Selector */}
-                        <div className="space-y-1.5 pt-2 border-t border-slate-100/50">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] text-slate-400 font-semibold">动态语音发送频率</span>
-                            <span className="text-[9px] text-slate-500 font-medium">智能多维度切换</span>
-                          </div>
-                          <div className="grid grid-cols-4 gap-1.5">
-                            {[
-                              { label: "无 (文字)", value: "none" },
-                              { label: "低频", value: "low" },
-                              { label: "中频 (默认)", value: "medium" },
-                              { label: "高频", value: "high" },
-                            ].map((opt) => (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                onClick={() => setDraftVoiceFrequency(opt.value as any)}
-                                className={`py-1.5 rounded-[8px] text-[10px] font-bold transition-all border ${
-                                  draftVoiceFrequency === opt.value
-                                    ? "bg-neutral-900 border-neutral-900 text-white shadow-sm"
-                                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                                }`}
-                              >
-                                {opt.label}
-                              </button>
-                            ))}
-                          </div>
-                          <p className="text-[9px] text-slate-400 leading-normal">频率会结合角色性格、聊天情境和你的使用习惯自动调整。</p>
-                        </div>
                       </div>
                     </div>
 
                     {/* Character Specific CSS Customizer */}
-                    <div className="py-3 space-y-1.5 border-t border-slate-100">
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-800 font-bold text-sm">个性化样式</span>
                         <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">覆盖全局设置</span>
@@ -5523,25 +5530,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       />
                     </div>
 
-                    {/* Proactive Chat Toggles */}
-                    <div className="py-3.5 space-y-2.5 border-t border-slate-100">
-                      <div className="text-slate-800 font-bold text-sm border-b border-slate-100 pb-3">主动互动</div>
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
-                          <span className="text-[10px] text-slate-400 block">对方会在设定时段内随机发来消息。</span>
-                        </div>
-                        <SettingsSwitch checked={draftEnableProactiveChat} onChange={setDraftEnableProactiveChat} label="主动联络" />
-                      </div>
-
-                      <div className="flex items-center justify-between rounded-[14px] bg-slate-50 px-3 py-2.5 border border-slate-100">
-                        <div className="space-y-0.5 pr-3">
-                          <span className="text-[#52525b] font-bold text-xs block">对方主动来电</span>
-                          <span className="text-[10px] text-slate-400 block">对方有机会主动拨打语音电话。</span>
-                        </div>
-                        <SettingsSwitch checked={draftEnableProactiveCall} onChange={setDraftEnableProactiveCall} label="主动来电" />
-                      </div>
-
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                       {draftEnableProactiveChat && (
                         <div className="space-y-3 pt-2.5 border-t border-slate-100">
                           <div className="flex items-center justify-between">
@@ -5604,10 +5593,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         </div>
                       )}
                     </div>
-                  </div>
-
                   {/* Data management */}
-                  <div className="pt-4 space-y-3 border-t border-slate-100">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                     <div className="text-slate-800 font-bold text-sm">数据管理</div>
                     
                     <div className="flex flex-col items-center gap-2">
@@ -5641,7 +5628,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       )}
                     </div>
                   </div>
-                </div>
               </div>
 
               {/* Clear History Choice Modal Overlay */}
@@ -7873,6 +7859,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     const momChar = mom.characterId ? characters.find((c) => c.id === mom.characterId) : null;
                     const momAuthorName = momChar ? (momChar.remark || momChar.name) : mom.authorName;
                     const momAuthorAvatar = momChar ? momChar.avatar : mom.authorAvatar;
+                    const textImageDescription = mom.imageDescription || cleanAndExtractMoment(mom.content).imageDescription;
                     return (
                       <div key={mom.id} className="py-5 flex gap-3">
                         
@@ -7931,14 +7918,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           )}
 
                           {/* Attached Photo */}
-                          {mom.imageType === "text" && mom.imageDescription && (
+                          {textImageDescription && (
                             <button
                               type="button"
-                              onClick={() => setViewingImageDescription(mom.imageDescription || "")}
+                              onClick={() => setViewingImageDescription(textImageDescription)}
                               className="mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm"
                             >
                               <ImageIcon className="w-4 h-4 text-slate-400 mb-4" />
-                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{mom.imageDescription}</p>
+                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{textImageDescription}</p>
                               <span className="block mt-2 text-[10px] text-slate-400">文字图 · 点击查看</span>
                             </button>
                           )}
@@ -8007,12 +7994,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                     return (
                                       <div
                                         key={comm.id}
-                                        onClick={() => {
-                                          setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
-                                          setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
-                                        }}
+                                        onClick={() => handleMomentCommentClick(mom.id, comm)}
+                                        onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
+                                        onPointerUp={clearMomentCommentLongPress}
+                                        onPointerLeave={clearMomentCommentLongPress}
+                                        onPointerMove={clearMomentCommentLongPress}
                                         className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
-                                        title={`回复 ${commAuthorName}`}
+                                        title={`点击回复；长按删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">
                                           {commAuthorName}
@@ -8782,6 +8770,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     const momChar = mom.characterId ? characters.find((c) => c.id === mom.characterId) : null;
                     const momAuthorName = momChar ? (momChar.remark || momChar.name) : mom.authorName;
                     const momAuthorAvatar = momChar ? momChar.avatar : mom.authorAvatar;
+                    const textImageDescription = mom.imageDescription || cleanAndExtractMoment(mom.content).imageDescription;
                     return (
                       <div key={mom.id} className="py-5 flex gap-3">
                         
@@ -8840,14 +8829,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           )}
 
                           {/* Photo if attached */}
-                          {mom.imageType === "text" && mom.imageDescription && (
+                          {textImageDescription && (
                             <button
                               type="button"
-                              onClick={() => setViewingImageDescription(mom.imageDescription || "")}
+                              onClick={() => setViewingImageDescription(textImageDescription)}
                               className="mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm"
                             >
                               <ImageIcon className="w-4 h-4 text-slate-400 mb-4" />
-                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{mom.imageDescription}</p>
+                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{textImageDescription}</p>
                               <span className="block mt-2 text-[10px] text-slate-400">文字图 · 点击查看</span>
                             </button>
                           )}
@@ -8916,12 +8905,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                     return (
                                       <div
                                         key={comm.id}
-                                        onClick={() => {
-                                          setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
-                                          setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
-                                        }}
+                                        onClick={() => handleMomentCommentClick(mom.id, comm)}
+                                        onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
+                                        onPointerUp={clearMomentCommentLongPress}
+                                        onPointerLeave={clearMomentCommentLongPress}
+                                        onPointerMove={clearMomentCommentLongPress}
                                         className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
-                                        title={`回复 ${commAuthorName}`}
+                                        title={`点击回复；长按删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">{commAuthorName}</span>
                                         <span className="text-slate-700">{comm.content}</span>
@@ -9667,6 +9657,29 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 我知道了
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Moment comment delete confirmation */}
+      {commentDeleteTarget && (
+        <div className="fixed inset-0 z-[70] flex items-end bg-black/30 p-4" onClick={() => setCommentDeleteTarget(null)}>
+          <div className="w-full rounded-[24px] bg-white p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <p className="px-2 pb-3 text-center text-xs text-slate-500">删除后无法恢复</p>
+            <button
+              type="button"
+              onClick={confirmDeleteMomentComment}
+              className="w-full rounded-2xl bg-red-50 py-3 text-sm font-bold text-red-600 active:bg-red-100"
+            >
+              删除评论
+            </button>
+            <button
+              type="button"
+              onClick={() => setCommentDeleteTarget(null)}
+              className="mt-2 w-full rounded-2xl bg-slate-100 py-3 text-sm font-bold text-slate-700"
+            >
+              取消
+            </button>
           </div>
         </div>
       )}
