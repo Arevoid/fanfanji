@@ -27,6 +27,203 @@ import {
 import { compressImage } from "../utils/pngParser";
 import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 
+type BackupKind = "important" | "beauty";
+
+type BackupFile = {
+  app: "xiaoshouji";
+  version: 2;
+  kind: BackupKind;
+  exportedAt: string;
+  data: Record<string, string>;
+  indexedDb?: {
+    stickerGroups?: any[];
+    stickerImages?: Record<string, string>;
+    localTracks?: Record<string, string>;
+  };
+};
+
+// Keep identity, memory and service configuration separate from visual preferences so either
+// backup type can be restored without silently overwriting the other one.
+const IMPORTANT_SETTINGS_FIELDS: Array<keyof UserSettings> = [
+  "name", "avatar", "signature", "bio", "identities", "activeIdentityId",
+  "apiKey", "selectedModel", "apiEndpoint", "apiTemperature", "streamCompatible",
+  "apiPresets", "activeApiPresetId", "enableTimeAwareness", "enableMiniMaxTts",
+  "minimaxApiKey", "minimaxGroupId", "minimaxModel", "minimaxSpeed", "minimaxPitch",
+  "minimaxVol", "minimaxProxyUrl"
+];
+
+const BEAUTY_SETTINGS_FIELDS: Array<keyof UserSettings> = [
+  "wallpaper", "customIcons", "bubbleCss", "globalCss", "globalChatStylePreset", "activePreset",
+  "momentsCover", "dockColor", "dockOpacity", "widgetOpacity", "customFontName", "customFontData",
+  "iconBorderRadius", "iconBgOpacity", "iconBorderWidth", "iconBorderOpacity", "hideAppNames",
+  "homeButtonPosition", "avatarBorderRadius", "otherBubbleBg", "otherBubbleColor", "otherBubbleRadius",
+  "otherBubbleOpacity", "selfBubbleBg", "selfBubbleColor", "selfBubbleRadius", "selfBubbleOpacity",
+  "collapseConsecutiveAvatars", "hideHomeWelcomeWidget", "dockBorderRadius", "widgetBorderRadius",
+  "iconBorderEnabled", "bubbleTailEnabled", "bubbleTailVertical", "bubblePosition", "hideNicknames",
+  "bubbleBorderEnabled", "bubbleBorderWidth", "otherBubbleBorderColor", "selfBubbleBorderColor",
+  "avatarBorderEnabled", "avatarBorderWidth", "avatarBorderColor"
+];
+
+const IMPORTANT_STORAGE_KEYS = new Set([
+  "phone_characters_v3", "phone_messages_v3", "phone_moments_v3", "phone_worldbook_entries",
+  "phone_memo_notes", "phone_memo_todos", "phone_memory_vault_items", "phone_memory_vault_settings",
+  "phone_immediate_summary_task", "phone_offline_stories", "phone_calendar_events", "phone_music_tracks",
+  "phone_music_playlists", "phone_friend_ids", "phone_initiated_chat_ids", "phone_last_read_timestamps",
+  "phone_last_viewed_moments_time", "phone_moment_favorites", "phone_moment_translations",
+  "wechat_redpacket_statuses", "wechat_wallet_balance"
+]);
+
+const BEAUTY_STORAGE_KEYS = new Set([
+  "phone_presets", "phone_homescreen_items", "phone_installed_apps", "phone_glass_screen",
+  "phone_layout_migrated_v3", "offline_custom_style_presets"
+]);
+
+const IMPORTANT_DYNAMIC_KEY_PREFIXES = ["phone_offline_handoff_", "offline_story_id_", "offline_mode_active_"];
+
+const pickSettingsFields = (fields: Array<keyof UserSettings>) => {
+  const raw = localStorage.getItem("phone_settings");
+  if (!raw) return null;
+  try {
+    const source = JSON.parse(raw) as UserSettings;
+    return JSON.stringify(fields.reduce<Record<string, unknown>>((result, key) => {
+      if (source[key] !== undefined) result[key] = source[key];
+      return result;
+    }, {}));
+  } catch {
+    return null;
+  }
+};
+
+const blobToDataUrl = (blob: Blob) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result));
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(blob);
+});
+
+const dataUrlToBlob = async (dataUrl: string) => (await fetch(dataUrl)).blob();
+
+const readStoreEntries = async (dbName: string, storeName: string): Promise<Array<[string, Blob]>> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName, 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(storeName)) { db.close(); resolve([]); return; }
+      const transaction = db.transaction(storeName, "readonly");
+      const store = transaction.objectStore(storeName);
+      const keysRequest = store.getAllKeys();
+      const valuesRequest = store.getAll();
+      transaction.oncomplete = () => { db.close(); resolve((keysRequest.result || []).map((key, index) => [String(key), valuesRequest.result[index]])); };
+      transaction.onerror = () => { db.close(); reject(transaction.error); };
+    };
+  });
+};
+
+const replaceBlobStore = async (dbName: string, storeName: string, records: Record<string, string> | undefined) => {
+  if (!records) return;
+  const blobs = await Promise.all(Object.entries(records).map(async ([key, value]) => [key, await dataUrlToBlob(value)] as const));
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open(dbName, 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = async () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(storeName)) { db.close(); resolve(); return; }
+      try {
+        const transaction = db.transaction(storeName, "readwrite");
+        transaction.objectStore(storeName).clear();
+        for (const [key, blob] of blobs) transaction.objectStore(storeName).put(blob, key);
+        transaction.oncomplete = () => { db.close(); resolve(); };
+        transaction.onerror = () => { db.close(); reject(transaction.error); };
+      } catch (error) { db.close(); reject(error); }
+    };
+  });
+};
+
+const readStickerGroups = async (): Promise<any[]> => new Promise((resolve, reject) => {
+  const request = indexedDB.open("StickerAppDB", 1);
+  request.onerror = () => reject(request.error);
+  request.onsuccess = () => {
+    const db = request.result;
+    if (!db.objectStoreNames.contains("stickerGroups")) { db.close(); resolve([]); return; }
+    const transaction = db.transaction("stickerGroups", "readonly");
+    const requestAll = transaction.objectStore("stickerGroups").getAll();
+    transaction.oncomplete = () => { db.close(); resolve(requestAll.result || []); };
+    transaction.onerror = () => { db.close(); reject(transaction.error); };
+  };
+});
+
+const buildBackup = async (kind: BackupKind): Promise<BackupFile> => {
+  const data: Record<string, string> = {};
+  const keys = kind === "important" ? IMPORTANT_STORAGE_KEYS : BEAUTY_STORAGE_KEYS;
+  keys.forEach(key => {
+    const value = localStorage.getItem(key);
+    if (value !== null) data[key] = value;
+  });
+  if (kind === "important") {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key && IMPORTANT_DYNAMIC_KEY_PREFIXES.some(prefix => key.startsWith(prefix))) {
+        const value = localStorage.getItem(key);
+        if (value !== null) data[key] = value;
+      }
+    }
+    const settings = pickSettingsFields(IMPORTANT_SETTINGS_FIELDS);
+    if (settings) data.phone_settings = settings;
+    const [stickerGroups, stickerImages, localTracks] = await Promise.all([
+      readStickerGroups(), readStoreEntries("StickerAppDB", "stickerImages"), readStoreEntries("MusicAppDB", "localTracks")
+    ]);
+    return {
+      app: "xiaoshouji", version: 2, kind, exportedAt: new Date().toISOString(), data,
+      indexedDb: {
+        stickerGroups,
+        stickerImages: Object.fromEntries(await Promise.all(stickerImages.map(async ([id, blob]) => [id, await blobToDataUrl(blob)]))),
+        localTracks: Object.fromEntries(await Promise.all(localTracks.map(async ([id, blob]) => [id, await blobToDataUrl(blob)])))
+      }
+    };
+  }
+  const settings = pickSettingsFields(BEAUTY_SETTINGS_FIELDS);
+  if (settings) data.phone_settings = settings;
+  return { app: "xiaoshouji", version: 2, kind, exportedAt: new Date().toISOString(), data };
+};
+
+const restoreBackup = async (backup: BackupFile) => {
+  Object.entries(backup.data).forEach(([key, value]) => {
+    if (key === "phone_settings") {
+      const current = JSON.parse(localStorage.getItem(key) || "{}");
+      const incoming = JSON.parse(value);
+      localStorage.setItem(key, JSON.stringify({ ...current, ...incoming }));
+    } else {
+      localStorage.setItem(key, value);
+    }
+  });
+  if (backup.kind === "important" && backup.indexedDb) {
+    await Promise.all([
+      replaceStickerGroups(backup.indexedDb.stickerGroups),
+      replaceBlobStore("StickerAppDB", "stickerImages", backup.indexedDb.stickerImages),
+      replaceBlobStore("MusicAppDB", "localTracks", backup.indexedDb.localTracks)
+    ]);
+  }
+};
+
+const replaceStickerGroups = async (groups: any[] | undefined) => {
+  if (!groups) return;
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("StickerAppDB", 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("stickerGroups")) { db.close(); resolve(); return; }
+      const transaction = db.transaction("stickerGroups", "readwrite");
+      const store = transaction.objectStore("stickerGroups");
+      store.clear();
+      groups.forEach(group => store.put(group));
+      transaction.oncomplete = () => { db.close(); resolve(); };
+      transaction.onerror = () => { db.close(); reject(transaction.error); };
+    };
+  });
+};
+
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
   const fullHex = hex.replace(shorthandRegex, (_, r, g, b) => r + r + g + g + b + b);
@@ -2352,103 +2549,79 @@ export default function AppSettings({
           {activeTab === "system" && (
             <div className="space-y-4 text-left">
               {/* Data Backup and Restore */}
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">数据备份与还原</h3>
-                
-                <p className="text-[10px] text-slate-400 leading-relaxed">
-                  您可以将本手机内的所有角色人设、对话记录、世界书词条、备忘录以及美化配置打包导出备份。未来可在任何设备上导入此文件进行100%完美还原。
-                </p>
-
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  {/* Export Button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      try {
-                        const backupData: Record<string, string | null> = {};
-                        const keysToBackup = [
-                          "phone_calendar_events",
-                          "phone_characters_v3",
-                          "phone_homescreen_items",
-                          "phone_installed_apps",
-                          "phone_messages_v3",
-                          "phone_moments_v3",
-                          "phone_music_playlists",
-                          "phone_music_tracks",
-                          "phone_presets",
-                          "phone_settings",
-                          "phone_worldbook_entries"
-                        ];
-                        keysToBackup.forEach(key => {
-                          backupData[key] = localStorage.getItem(key);
-                        });
-
-                        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
-                        const url = URL.createObjectURL(blob);
-                        const link = document.createElement("a");
-                        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-                        link.href = url;
-                        link.download = `xiaoshouji_backup_${dateStr}.json`;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        URL.revokeObjectURL(url);
-                      } catch (err: any) {
-                        alert("导出备份失败: " + err.message);
-                      }
-                    }}
-                    className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group"
-                  >
-                    <Download className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-slate-700">导出数据备份</span>
-                    <span className="text-[8px] text-slate-400 mt-1">下载备份 JSON 文件</span>
-                  </button>
-
-                  {/* Import Button */}
-                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group cursor-pointer">
-                    <Upload className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-slate-700">导入备份还原</span>
-                    <span className="text-[8px] text-slate-400 mt-1">上传备份 JSON 文件</span>
-                    <input
-                      type="file"
-                      accept="application/json"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          try {
-                            const json = JSON.parse(reader.result as string);
-                            if (typeof json !== "object" || json === null) {
-                              throw new Error("无效的备份文件格式！");
-                            }
-
-                            // Validate key signature
-                            const hasValidKey = Object.keys(json).some(k => k.startsWith("phone_"));
-                            if (!hasValidKey) {
-                              throw new Error("非有效的小手机备份文件！");
-                            }
-
-                            if (confirm("确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置 and 世界书数据且不可撤销！")) {
-                              Object.entries(json).forEach(([key, val]) => {
-                                if (val !== null && typeof val === "string") {
-                                  localStorage.setItem(key, val);
-                                }
-                              });
-                              alert("导入成功！应用即将刷新加载新数据。");
-                              window.location.reload();
-                            }
-                          } catch (err: any) {
-                            alert("导入备份失败: " + err.message);
-                          }
-                        };
-                        reader.readAsText(file);
-                      }}
-                      className="hidden"
-                    />
-                  </label>
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-5">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-700">数据备份与还原</h3>
+                  <p className="mt-1 text-[10px] text-slate-400 leading-relaxed">重要数据与美化数据可分别备份、分别还原；导入其中一类不会覆盖另一类。</p>
                 </div>
+
+                {(["important", "beauty"] as BackupKind[]).map(kind => {
+                  const isImportant = kind === "important";
+                  const title = isImportant ? "重要数据" : "美化数据";
+                  const description = isImportant
+                    ? "角色与机主人设、世界书、全部对话与电话记录、记忆库、线下剧本、备忘录/待办、朋友圈、好友关系、日程、音乐与表情包。"
+                    : "桌面布局与图标、壁纸、聊天气泡和 CSS、主题与样式预设、朋友圈封面等外观配置。";
+                  const handleExport = async () => {
+                    try {
+                      const backup = await buildBackup(kind);
+                      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement("a");
+                      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+                      link.href = url;
+                      link.download = `xiaoshouji_${kind}_backup_${dateStr}.json`;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                      URL.revokeObjectURL(url);
+                    } catch (err: any) {
+                      alert("导出备份失败：" + (err.message || "未知错误"));
+                    }
+                  };
+                  const handleImport = (file: File) => {
+                    const reader = new FileReader();
+                    reader.onload = async () => {
+                      try {
+                        const json = JSON.parse(reader.result as string) as BackupFile;
+                        if (json?.app !== "xiaoshouji" || json.version !== 2 || !json.data || (json.kind !== "important" && json.kind !== "beauty")) {
+                          throw new Error("请选择新版小手机备份文件。");
+                        }
+                        if (json.kind !== kind) {
+                          throw new Error(`这是「${json.kind === "important" ? "重要数据" : "美化数据"}」备份，请在对应区域导入。`);
+                        }
+                        if (!confirm(`确定还原${title}吗？仅会覆盖当前${title}，另一类数据会保留。`)) return;
+                        await restoreBackup(json);
+                        alert(`${title}已还原，应用将刷新加载。`);
+                        window.location.reload();
+                      } catch (err: any) {
+                        alert("导入备份失败：" + (err.message || "未知错误"));
+                      }
+                    };
+                    reader.readAsText(file);
+                  };
+                  return (
+                    <div key={kind} className="rounded-[18px] border border-slate-100 bg-slate-50/50 p-4 space-y-3">
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">{title}</h4>
+                        <p className="mt-1 text-[9px] leading-relaxed text-slate-400">{description}</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" onClick={handleExport} className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[10px] font-bold text-slate-700 transition-colors hover:bg-slate-100">
+                          <Download className="h-3.5 w-3.5" /> 导出{title}
+                        </button>
+                        <label className="flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-neutral-900 px-3 py-2.5 text-[10px] font-bold text-white transition-colors hover:bg-neutral-700">
+                          <Upload className="h-3.5 w-3.5" /> 导入还原
+                          <input type="file" accept="application/json" className="hidden" onChange={event => {
+                            const file = event.target.files?.[0];
+                            if (file) handleImport(file);
+                            event.currentTarget.value = "";
+                          }} />
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-[9px] leading-relaxed text-amber-600">重要数据备份会包含 API 与语音服务密钥，请仅保存在你信任的位置。旧版“一体化备份”仍可保留，但请在旧版本应用中恢复后再使用新版分类备份。</p>
               </div>
 
               {/* Reset Cache and Return to Default */}
