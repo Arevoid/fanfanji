@@ -93,6 +93,8 @@ export interface Moment {
   timestamp: number;
   likes: string[]; // List of names
   comments: MomentComment[];
+  /** Legacy comments parsed from older post content that the user has removed. */
+  deletedCommentIds?: string[];
   image?: string; // base64 or URL
   /** A placeholder image rendered from text until image generation is available. */
   imageType?: "photo" | "text";

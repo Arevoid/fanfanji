@@ -1801,7 +1801,13 @@ export default function App() {
     setMoments((prev) =>
       prev.map((mom) =>
         mom.id === momentId
-          ? { ...mom, comments: mom.comments.filter((comment) => comment.id !== commentId) }
+          ? {
+              ...mom,
+              comments: mom.comments.filter((comment) => comment.id !== commentId),
+              deletedCommentIds: mom.comments.some((comment) => comment.id === commentId)
+                ? mom.deletedCommentIds
+                : [...(mom.deletedCommentIds || []), commentId],
+            }
           : mom
       )
     );

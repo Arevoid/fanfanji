@@ -432,7 +432,8 @@ const getMomentComments = (mom: Moment) => {
     }
   });
 
-  return [...mom.comments, ...dynamicComments];
+  const deletedCommentIds = new Set(mom.deletedCommentIds || []);
+  return [...mom.comments, ...dynamicComments].filter((comment) => !deletedCommentIds.has(comment.id));
 };
 
 const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ownerName: string) => {
@@ -2999,11 +3000,13 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
   };
 
   const handleMomentCommentPointerDown = (momentId: string, commentId: string) => {
+    suppressCommentClickRef.current = false;
     if (commentLongPressTimerRef.current) clearTimeout(commentLongPressTimerRef.current);
     commentLongPressTimerRef.current = setTimeout(() => {
       suppressCommentClickRef.current = true;
+      commentLongPressTimerRef.current = null;
       setCommentDeleteTarget({ momentId, commentId });
-    }, 600);
+    }, 550);
   };
 
   const clearMomentCommentLongPress = () => {
@@ -5181,17 +5184,16 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
                 {/* Chat behaviour */}
                 <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
-                  <div className="text-sm font-bold text-neutral-900 border-b border-slate-100 pb-3">聊天与显示</div>
                   {/* Settings toggles */}
-                  <div className="divide-y divide-slate-100 pt-1 space-y-4">
+                  <div className="pt-1">
                     {/* Pin Chat */}
-                    <div className="flex items-center justify-between pb-1">
+                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
                       <span className="text-[#52525b] font-bold text-xs">置顶聊天</span>
                       <SettingsSwitch checked={draftIsPinned} onChange={setDraftIsPinned} label="置顶聊天" />
                     </div>
 
                     {/* Disable Bracket Actions */}
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
                       <div className="space-y-0.5">
                         <span className="text-[#52525b] font-bold text-xs">过滤括号动描</span>
                         <span className="text-[10px] text-slate-400 block">线上聊天仅保留语言交流，过滤括号动作描写。</span>
@@ -5200,7 +5202,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </div>
 
                     {/* Time Awareness */}
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
                       <div className="space-y-0.5">
                         <span className="text-[#52525b] font-bold text-xs">时间感知功能</span>
                         <span className="text-[10px] text-slate-400 block">角色会结合当前日期与时间回应。</span>
@@ -5209,7 +5211,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </div>
 
                     {/* Auto Translate Toggle */}
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
                       <div className="space-y-0.5">
                         <span className="text-[#52525b] font-bold text-xs">全部自动翻译</span>
                         <span className="text-[10px] text-slate-400 block">自动把对方的非中文发言翻译为中文。</span>
@@ -5217,15 +5219,34 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
 
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
-                      <div className="space-y-0.5 pr-3">
-                        <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
-                        <span className="text-[10px] text-slate-400 block">允许对方在设定时段内主动发来消息。</span>
+                    <div className="py-3 border-b border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5 pr-3">
+                          <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
+                          <span className="text-[10px] text-slate-400 block">允许对方在设定时段内主动发来消息。</span>
+                        </div>
+                        <SettingsSwitch checked={draftEnableProactiveChat} onChange={setDraftEnableProactiveChat} label="主动联络" />
                       </div>
-                      <SettingsSwitch checked={draftEnableProactiveChat} onChange={setDraftEnableProactiveChat} label="主动联络" />
+                      {draftEnableProactiveChat && (
+                        <div className="flex items-end gap-3 pt-3">
+                          <div className="flex flex-col flex-1">
+                            <span className="text-[9px] text-slate-400 font-bold mb-1">开始时间</span>
+                            <select value={draftProactiveStartTime} onChange={(e) => setDraftProactiveStartTime(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none">
+                              {Array.from({ length: 48 }, (_, i) => { const h = Math.floor(i / 2).toString().padStart(2, "0"); const m = i % 2 === 0 ? "00" : "30"; const t = `${h}:${m}`; return <option key={t} value={t}>{t}</option>; })}
+                            </select>
+                          </div>
+                          <span className="text-xs text-slate-400 font-bold mb-2">至</span>
+                          <div className="flex flex-col flex-1">
+                            <span className="text-[9px] text-slate-400 font-bold mb-1">结束时间</span>
+                            <select value={draftProactiveEndTime} onChange={(e) => setDraftProactiveEndTime(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none">
+                              {Array.from({ length: 48 }, (_, i) => { const h = Math.floor(i / 2).toString().padStart(2, "0"); const m = i % 2 === 0 ? "00" : "30"; const t = `${h}:${m}`; return <option key={t} value={t}>{t}</option>; })}
+                            </select>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between py-3">
                       <div className="space-y-0.5 pr-3">
                         <span className="text-[#52525b] font-bold text-xs block">主动来电</span>
                         <span className="text-[10px] text-slate-400 block">允许对方有机会主动发起语音通话。</span>
@@ -5530,104 +5551,32 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       />
                     </div>
 
-                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
-                      {draftEnableProactiveChat && (
-                        <div className="space-y-3 pt-2.5 border-t border-slate-100">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] text-[#52525b] font-medium">联络时间段设置</span>
-                            <span className="text-xs font-bold text-slate-700 font-mono">
-                              {draftProactiveStartTime} - {draftProactiveEndTime}
-                            </span>
-                          </div>
-                          
-                          {/* Time Picker Dropdowns */}
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex flex-col flex-1">
-                              <span className="text-[9px] text-slate-400 font-bold mb-1">开始时间</span>
-                              <select
-                                value={draftProactiveStartTime}
-                                onChange={(e) => setDraftProactiveStartTime(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
-                              >
-                                {Array.from({ length: 48 }, (_, i) => {
-                                  const h = Math.floor(i / 2).toString().padStart(2, "0");
-                                  const m = (i % 2 === 0 ? "00" : "30");
-                                  const t = `${h}:${m}`;
-                                  return (
-                                    <option key={t} value={t}>{t}</option>
-                                  );
-                                })}
-                              </select>
-                            </div>
-                            <span className="text-xs text-slate-400 font-bold self-end mb-2">至</span>
-                            <div className="flex flex-col flex-1">
-                              <span className="text-[9px] text-slate-400 font-bold mb-1">结束时间</span>
-                              <select
-                                value={draftProactiveEndTime}
-                                onChange={(e) => setDraftProactiveEndTime(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
-                              >
-                                {Array.from({ length: 48 }, (_, i) => {
-                                  const h = Math.floor(i / 2).toString().padStart(2, "0");
-                                  const m = (i % 2 === 0 ? "00" : "30");
-                                  const t = `${h}:${m}`;
-                                  return (
-                                    <option key={t} value={t}>{t}</option>
-                                  );
-                                })}
-                              </select>
-                            </div>
-                          </div>
+                  {/* Destructive actions */}
+                  <button
+                    type="button"
+                    onClick={() => setShowClearHistoryModal(true)}
+                    className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
+                  >
+                    清空对话记录
+                  </button>
 
-                          <div className="bg-slate-50 p-2.5 rounded-[16px] border border-slate-100 flex items-center justify-between gap-2">
-                            <span className="text-[10px] text-slate-400 leading-snug">00:00 - 00:00 表示全天。</span>
-                            <button
-                              type="button"
-                              onClick={handleTriggerProactiveMessage}
-                              disabled={isTriggeringProactive}
-                              className="shrink-0 px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white font-bold rounded-[16px] text-[9px] transition-colors shadow-sm disabled:opacity-50"
-                            >
-                              {isTriggeringProactive ? "正在发送..." : "⚡ 模拟主动发信"}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  {/* Data management */}
-                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
-                    <div className="text-slate-800 font-bold text-sm">数据管理</div>
-                    
-                    <div className="flex flex-col items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowClearHistoryModal(true)}
-                        className="text-xs text-red-500 hover:text-red-600 font-medium py-1 px-4 rounded-[16px] hover:bg-red-50/50 transition-colors"
-                      >
-                        清空对话记录
-                      </button>
-
-                      {!activeCharacter.isGroupChat && (
-                        <button
-                          type="button"
-                          onClick={handleDeleteFriend}
-                          className="text-xs text-red-600 hover:text-red-700 font-bold py-1 px-4 rounded-[16px] hover:bg-red-50/80 transition-colors flex items-center gap-1"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          删除好友
-                        </button>
-                      )}
-
-                      {activeCharacter.isGroupChat && (
-                        <button
-                          type="button"
-                          onClick={() => setShowDisbandGroupModal(true)}
-                          className="text-xs text-red-600 hover:text-red-700 font-bold py-1 px-4 rounded-[16px] hover:bg-red-50/80 transition-colors flex items-center gap-1"
-                        >
-                          解除群聊
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  {!activeCharacter.isGroupChat ? (
+                    <button
+                      type="button"
+                      onClick={handleDeleteFriend}
+                      className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
+                    >
+                      删除好友
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowDisbandGroupModal(true)}
+                      className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
+                    >
+                      解除群聊
+                    </button>
+                  )}
               </div>
 
               {/* Clear History Choice Modal Overlay */}
@@ -7998,7 +7947,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                         onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
                                         onPointerUp={clearMomentCommentLongPress}
                                         onPointerLeave={clearMomentCommentLongPress}
-                                        onPointerMove={clearMomentCommentLongPress}
+                                        onPointerCancel={clearMomentCommentLongPress}
+                                        onContextMenu={(event) => event.preventDefault()}
                                         className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
                                         title={`点击回复；长按删除评论`}
                                       >
@@ -8909,7 +8859,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                         onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
                                         onPointerUp={clearMomentCommentLongPress}
                                         onPointerLeave={clearMomentCommentLongPress}
-                                        onPointerMove={clearMomentCommentLongPress}
+                                        onPointerCancel={clearMomentCommentLongPress}
+                                        onContextMenu={(event) => event.preventDefault()}
                                         className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
                                         title={`点击回复；长按删除评论`}
                                       >
