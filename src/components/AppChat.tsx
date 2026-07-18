@@ -773,8 +773,6 @@ export default function AppChat({
     }
 
     const isCallActive = activeAttachModal === "calling" && callingStatus === "connected";
-    const shouldBeVoice = isCallActive && msg.sender === "character";
-
     // A real voice call only carries spoken content. Drop sticker/image payloads
     // instead of showing or reading their markup as call subtitles.
     if (
@@ -785,33 +783,21 @@ export default function AppChat({
       return;
     }
 
-    if (
-      shouldBeVoice && 
-      msg.content && 
-      !msg.content.startsWith("[语音") && 
-      !msg.content.startsWith("[系统]") && 
-      !msg.content.startsWith("[红包]") && 
-      !msg.content.startsWith("[转账]") && 
-      !msg.content.startsWith("data:image/") && 
-      !msg.content.startsWith("[表情]|")
-    ) {
-      const text = msg.content;
-      const secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
-      msg.content = `[语音]|${secs}|${text}`;
-    }
-
     // Call subtitles are private to the call screen. They are only persisted inside
     // the call record after hang-up, never mixed into the normal online timeline.
     if (isCallActive) {
+      const subtitleContent = getCallTranscriptText(msg.content || "");
       setCallTranscript((prev) => [...prev, {
         id: msg.id,
         sender: msg.sender,
-        content: msg.content,
+        content: subtitleContent,
         timestamp: msg.timestamp,
       }]);
 
-      if (msg.sender === "character" && msg.content && msg.content.startsWith("[语音")) {
-        enqueueCallSpeech(msg);
+      if (msg.sender === "character" && subtitleContent) {
+        // TTS remains automatic during calls, but the call UI and saved transcript
+        // always contain plain subtitles rather than voice-message markup.
+        enqueueCallSpeech({ ...msg, content: subtitleContent });
       }
       return;
     }
@@ -1278,6 +1264,7 @@ export default function AppChat({
   const [callStartTime, setCallStartTime] = useState<number>(0);
   const [callingInputText, setCallingInputText] = useState("");
   const [callTranscript, setCallTranscript] = useState<CallTranscriptItem[]>([]);
+  const callTranscriptEndRef = useRef<HTMLDivElement | null>(null);
   const [callRecordDetail, setCallRecordDetail] = useState<ReturnType<typeof parseCallRecord> | null>(null);
   const [redPacketAmount, setRedPacketAmount] = useState("8.88");
   const [redPacketGreeting, setRedPacketGreeting] = useState("恭喜发财，万事如意");
@@ -1704,6 +1691,13 @@ export default function AppChat({
     }
     return () => clearInterval(timer);
   }, [activeAttachModal, callingStatus]);
+
+  useEffect(() => {
+    if (activeAttachModal !== "calling" || callingStatus !== "connected") return;
+    requestAnimationFrame(() => {
+      callTranscriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+  }, [callTranscript.length, activeAttachModal, callingStatus]);
 
   // Auto connect timer for user-initiated call
   useEffect(() => {
@@ -2691,7 +2685,8 @@ ${stickerListStr}
             
             // Dynamically decide if this bubble should be a voice message or a text message
             let finalContent = bubbleText;
-            const isVoice = shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
+            const isVoice = activeAttachModal !== "calling"
+              && shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
             if (isVoice) {
               const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
               finalContent = `[语音]|${secs}|${bubbleText}`;
@@ -7372,8 +7367,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   alt="" 
                   className={`w-20 h-20 mx-auto border border-white/20 object-cover shadow-2xl ${callingStatus === "ringing" ? "rounded-2xl" : "rounded-full"}`}
                 />
-                <div>
-                  <h3 className="text-lg font-semibold">{activeCharacter.remark || activeCharacter.name}</h3>
+                <div className="space-y-1">
+                  <h3 className="text-lg font-semibold text-white leading-tight">{activeCharacter.remark || activeCharacter.name}</h3>
                   {callingStatus === "connected" && (
                     <p className="text-xs text-white/50 mt-1">语音通话中...</p>
                   )}
@@ -7403,6 +7398,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         </div>
                       );
                     })}
+                    <div ref={callTranscriptEndRef} aria-hidden="true" className="h-px" />
                   </div>
                   <div className="flex items-center gap-2">
                     <input
