@@ -2180,7 +2180,21 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
       const msgsForHistory = (userMsg && finalMsgs.length > 0 && finalMsgs[finalMsgs.length - 1].id === userMsg.id)
         ? finalMsgs.slice(0, -1)
         : finalMsgs;
-      const slicedMsgs = msgsForHistory.slice(-limit);
+      const isSameLocalDay = (left: number, right: number) => {
+        const leftDate = new Date(left);
+        const rightDate = new Date(right);
+        return leftDate.getFullYear() === rightDate.getFullYear()
+          && leftDate.getMonth() === rightDate.getMonth()
+          && leftDate.getDate() === rightDate.getDate();
+      };
+      const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
+      // With time awareness enabled, the first message on a new calendar day
+      // starts a fresh live session. Yesterday's tail remains stored, but it is
+      // no longer sent as the topic that the model should answer right now.
+      const isCrossDayNewSession = activeCharacter.enableTimeAwareness !== false
+        && Boolean(userMsg && latestHistoryMessage)
+        && !isSameLocalDay(userMsg!.timestamp, latestHistoryMessage.timestamp);
+      const slicedMsgs = isCrossDayNewSession ? [] : msgsForHistory.slice(-limit);
 
       const history = slicedMsgs.map((m) => {
         let contentText = m.content;
@@ -2296,7 +2310,8 @@ ${activeCharacter.disableBracketActions
         && callTranscript.length >= 2
         && currentTopicText.length >= 4
         && topicOverlap < 0.28;
-      const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
+      const shouldLoadLongTermMemory = (!isConnectedVoiceCall || callTopicShiftDetected)
+        && !isCrossDayNewSession;
 
       if (activeCharacter.compressedMemory && shouldLoadLongTermMemory) {
         charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeCharacter.compressedMemory}`;
@@ -2309,6 +2324,20 @@ ${activeCharacter.disableBracketActions
         : [];
       if (relevantMemories.length > 0) {
         charDefText += `\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+      }
+
+      // A continuation synchronized while leaving the offline app is an explicit
+      // handoff. Surface the newest one on the immediate return to online chat,
+      // even when a short greeting is too vague for semantic retrieval.
+      const latestOfflineContinuationMemory = [...(memories || [])]
+        .filter((memory) => memory.characterId === activeChatCharId && memory.content.includes("offline-story:"))
+        .sort((a, b) => b.timestamp - a.timestamp)[0];
+      const isFreshOfflineHandoff = latestOfflineContinuationMemory
+        && Date.now() - latestOfflineContinuationMemory.timestamp < 24 * 60 * 60 * 1000;
+      if (isFreshOfflineHandoff
+        && !isCrossDayNewSession
+        && !relevantMemories.some((memory) => memory.id === latestOfflineContinuationMemory.id)) {
+        charDefText += `\n- Latest offline continuation handoff (continue this naturally if relevant):\n  * ${latestOfflineContinuationMemory.content}`;
       }
 
       const userProfileText = `User Profile (interacting with you):
@@ -2348,6 +2377,12 @@ ${activeCharacter.disableBracketActions
 1. 你已经【拆开并领取】了这个红包。你感到开心、意外、被宠溺、受宠若惊、感激或者开玩笑，具体情绪取决于你的人设！
 2. 在你的本轮回复中，你必须【极其自然且生动地对此做出反应】（例如：开心地谢谢对方、调侃对方是大款、撒娇、承诺用这个钱去买你喜欢的东西、或者也想礼貌地找机会回礼等）。
 3. 请用你完全符合人设的角色口吻和微信聊天风格来回复。绝对不要说“系统”、“格式”或“指令”等AI字眼。`);
+      }
+
+      if (isCrossDayNewSession) {
+        assembledInstructions.push(`[NEW-DAY CONVERSATION BOUNDARY — HIGHEST PRIORITY]
+The user's newest message starts a fresh conversation on a different calendar day. Yesterday's unfinished exchange is closed historical context, not the topic currently being continued.
+Answer only the user's newest message as today's opening. Do not resume, answer, or elaborate on yesterday's last topic unless the user explicitly mentions it again.`);
       }
 
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)

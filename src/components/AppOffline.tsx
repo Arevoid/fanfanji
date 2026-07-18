@@ -266,7 +266,9 @@ export default function AppOffline({
   const handleExitStoryWorkspace = () => {
     // Online continuations always archive their newly-written plot immediately
     // on exit, so the next online reply can continue the same topic.
-    if (activeStory?.sourceChatId && hasUnsyncedOnlineProgress(activeStory)) {
+    if (activeStory
+      && (activeStory.sourceChatId || activeStory.mode === "continue")
+      && hasUnsyncedOnlineProgress(activeStory)) {
       handleSyncMemoryToBrain(activeStory);
     }
     if (activeStory) clearOfflineSession(activeStory);
