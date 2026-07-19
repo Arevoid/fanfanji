@@ -2,20 +2,21 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
 import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles, compressImage } from "../utils/pngParser";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
 import StickerSettings from "./StickerSettings";
+import ChatHeader from "./ChatHeader";
+import ChatComposer from "./ChatComposer";
+import MessageRow, { type MessageRowAvatar, type MessageRowData } from "./MessageRow";
+import ChatIcon from "./ChatIcon";
 import {
   MessageSquare,
   Users,
   Compass,
   User,
-  Send,
-  ArrowUp,
-  MoreHorizontal,
   Bookmark,
   Pin,
   Image as ImageIcon,
@@ -77,6 +78,28 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   if (!rgb) return hexColor;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
+
+// Presentation-only classification used as stable CSS hooks. It does not alter
+// message parsing, sending, or any special-message behavior.
+function getChatMessageVisualType(content: string): string {
+  if (content.startsWith("data:image/")) return "image";
+  if (content.startsWith("[\u8868\u60c5]|")) return "sticker";
+  if (content.startsWith("[\u7ea2\u5305]")) return "red-packet";
+  if (content.startsWith("[\u8f6c\u8d26]")) return "transfer";
+  if (content.startsWith("[\u8bed\u97f3\u901a\u8bdd]") || content.startsWith("[\u89c6\u9891\u901a\u8bdd]")) return "call";
+  if (content.startsWith("[\u8bed\u97f3")) return "voice";
+  if (content.startsWith("[\u6587\u4ef6]")) return "file";
+  if (content.startsWith("[\u4f4d\u7f6e]")) return "location";
+  return "text";
+}
+
+const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
+  { key: "image", label: "图片" }, { key: "voice", label: "语音" },
+  { key: "sticker", label: "表情" }, { key: "redPacket", label: "红包" },
+  { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
+  { key: "location", label: "位置" }, { key: "call", label: "通话" },
+  { key: "plus", label: "加号" }, { key: "send", label: "发送" },
+];
 
 // Parse recent messages to detect if an agreed proactive contact time exists
 const getScheduledContactTime = (charMsgs: any[], settingsName: string) => {
@@ -822,6 +845,11 @@ export default function AppChat({
   const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
   const activeStylePreset = (activeCharacter?.chatStylePreset) || (settings.globalChatStylePreset) || "default";
   const isFloatingCute = activeStylePreset === "floating-cute";
+  const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
+  const globalChatIcons = sanitizeChatIcons(settings.chatIcons);
+  const getChatIcon = (key: ChatIconKey): string | undefined => {
+    return characterChatIcons[key] || globalChatIcons[key];
+  };
 
   const [momentsFilterCharId, setMomentsFilterCharId] = useState<string | null>(null);
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
@@ -1069,6 +1097,7 @@ export default function AppChat({
   const [draftIsPinned, setDraftIsPinned] = useState(false);
   const [draftChatBg, setDraftChatBg] = useState<string | undefined>(undefined);
   const [draftCustomCss, setDraftCustomCss] = useState("");
+  const [draftChatIcons, setDraftChatIcons] = useState<ChatIconOverrides>({});
   const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
@@ -3134,6 +3163,16 @@ ${stickerListStr}
     }
   };
 
+  const updateDraftChatIcon = (key: ChatIconKey, value: string) => {
+    setDraftChatIcons((previous) => {
+      const next = { ...previous };
+      const url = value.trim();
+      if (url) next[key] = url;
+      else delete next[key];
+      return next;
+    });
+  };
+
   // Save settings draft
   const handleSaveSettings = () => {
     if (activeCharacter) {
@@ -3160,6 +3199,8 @@ ${stickerListStr}
         isPinned: draftIsPinned,
         chatBg: draftChatBg,
         customCss: draftCustomCss,
+        customChatCSS: draftCustomCss,
+        customChatIcons: draftChatIcons,
         chatStylePreset: draftChatStylePreset,
         enableProactiveChat: draftEnableProactiveChat,
         proactiveChatInterval: draftProactiveChatInterval,
@@ -4036,10 +4077,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
-        <div className={`absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen">
-          <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content">
-            {activeCharacter.customCss && (
-              <style>{activeCharacter.customCss}</style>
+        <div className={`absolute inset-0 z-40 bg-slate-50 flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"}>
+          <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content chat-page__background">
+            {(settings.chatGlobalCSS || activeCharacter.customChatCSS || activeCharacter.customCss) && (
+              <style>{`@scope (#conv-screen) {
+                ${settings.chatGlobalCSS || ""}
+                ${activeCharacter.customChatCSS || activeCharacter.customCss || ""}
+              }`}</style>
             )}
 
             {/* Beginner manual style adjustments */}
@@ -4467,59 +4511,26 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 }
               `}</style>
             )}
-            {/* Chat Window Header with standard classes and compact size */}
-            <div className={`flex items-center justify-between z-10 shrink-0 relative cv-header header app-top-container default-controls selection-controls ${
-              isFloatingCute 
-                ? "mx-3.5 mt-3.5 mb-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] px-4 py-2" 
-                : "px-4 py-1.5 bg-transparent"
-            }`}>
-              <button
-                onClick={() => {
-                  setActiveChatCharId(null);
-                  setIsShowingCardModal(false);
-                }}
-                className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn back-btn"
-              >
-                <span className="cv-back-icon flex items-center justify-center w-full h-full">
-                  <ChevronLeft className="w-4 h-4 text-slate-700" />
-                </span>
-              </button>
-              
-              <div className="flex items-center gap-1.5 w-max max-w-[200px] header-title">
-                {activeCharacter.isGroupChat ? (
-                  <div className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] shrink-0 header-title-avatar">
-                    👥
-                  </div>
-                ) : (
-                  <img 
-                    src={activeCharacter.avatar} 
-                    alt="" 
-                    className="w-5 h-5 rounded-full object-cover shrink-0 border border-white/50 header-title-avatar"
-                  />
-                )}
-                <h2 className="text-[13px] font-bold text-slate-800 tracking-tight truncate header-title-name">
-                  {activeCharacter.remark || activeCharacter.name}
-                  {activeCharacter.isGroupChat && (
-                    <span className="text-slate-400 font-normal ml-0.5">
-                      ({1 + (activeCharacter.memberIds?.length || 0)})
-                    </span>
-                  )}
-                </h2>
-                {!activeCharacter.isGroupChat && (
-                  <div className="flex items-center gap-0.5 character-status">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 status-indicator online animate-pulse" />
-                  </div>
-                )}
-              </div>
-
-              <button
-                onClick={() => {
+            {/* Chat Window Header */}
+            <ChatHeader
+              name={activeCharacter.name}
+              remark={activeCharacter.remark}
+              avatar={activeCharacter.avatar}
+              isGroupChat={activeCharacter.isGroupChat}
+              memberCount={activeCharacter.memberIds?.length || 0}
+              isFloatingCute={isFloatingCute}
+              onBack={() => {
+                setActiveChatCharId(null);
+                setIsShowingCardModal(false);
+              }}
+              onMore={() => {
                   setDraftRemark(activeCharacter.isGroupChat ? activeCharacter.name : (activeCharacter.remark || ""));
                   setDraftAvatar(activeCharacter.avatar);
                   setIsDeleteMemberMode(false);
                   setDraftIsPinned(activeCharacter.isPinned || false);
                   setDraftChatBg(activeCharacter.chatBg);
-                  setDraftCustomCss(activeCharacter.customCss || "");
+                  setDraftCustomCss(activeCharacter.customChatCSS || activeCharacter.customCss || "");
+                  setDraftChatIcons(sanitizeChatIcons(activeCharacter.customChatIcons));
                   setDraftChatStylePreset(activeCharacter.chatStylePreset || "default");
                   setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
                   setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
@@ -4538,14 +4549,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftMinimaxSpeed(activeCharacter.minimaxSpeed !== undefined ? activeCharacter.minimaxSpeed : 1.0);
                   setDraftVoiceFrequency(activeCharacter.voiceFrequency || "medium");
                   setIsShowingCardModal(!isShowingCardModal);
-                }}
-                className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn"
-              >
-                <span className="cv-menu-icon flex items-center justify-center w-full h-full">
-                  <MoreHorizontal className="w-4 h-4 text-slate-700" />
-                </span>
-              </button>
-            </div>
+              }}
+            />
 
 
 
@@ -5083,8 +5088,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     {/* Character Specific CSS Customizer */}
                     <div className="py-3 space-y-1.5 border-t border-slate-100">
                       <div className="flex items-center justify-between">
-                        <span className="text-[#52525b] font-bold text-xs">单人专属聊天页 CSS 样式</span>
-                        <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">优先于全局气泡</span>
+                        <span className="text-[#52525b] font-bold text-xs">聊天样式 CSS</span>
+                        <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">优先于全局聊天样式</span>
                       </div>
                       <textarea
                         rows={12}
@@ -5128,6 +5133,21 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 `}
                         className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono leading-relaxed h-48"
                       />
+                    </div>
+
+                    <div className="py-3 space-y-2.5 border-t border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#52525b] font-bold text-xs">聊天图标覆盖</span>
+                        <span className="text-[9px] text-slate-400">留空继承全局或默认图标</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {CHAT_ICON_FIELDS.map(({ key, label }) => (
+                          <label key={key} className="space-y-1">
+                            <span className="block text-[10px] text-slate-500 font-medium">{label}图标</span>
+                            <input value={draftChatIcons[key] || ""} onChange={(e) => updateDraftChatIcon(key, e.target.value)} placeholder="图片 URL" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" />
+                          </label>
+                        ))}
+                      </div>
                     </div>
 
                     {/* Proactive Chat Toggles */}
@@ -5489,7 +5509,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
           <div
             ref={scrollContainerRef}
-            className="flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list"
+            className="flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
@@ -5529,8 +5549,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 if (!showWeChatDivider) return messageElement;
                 return (
                   <React.Fragment key={`msg-group-${msg.id}`}>
-                    <div className="w-full flex justify-center my-3.5 select-none animate-fade-in" id={`timestamp-divider-${msg.id}`}>
-                      <div className="bg-black/5 dark:bg-white/10 text-[#888888] dark:text-stone-400 text-[11.5px] px-2.5 py-0.5 rounded-[4px] tracking-wide font-normal">
+                    <div className="w-full flex justify-center my-3.5 select-none animate-fade-in chat-timestamp" id={`timestamp-divider-${msg.id}`}>
+                      <div className="bg-black/5 dark:bg-white/10 text-[#888888] dark:text-stone-400 text-[11.5px] px-2.5 py-0.5 rounded-[4px] tracking-wide font-normal chat-timestamp__label">
                         {dividerText}
                       </div>
                     </div>
@@ -5641,6 +5661,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               }
 
               const isSelf = msg.sender === "user";
+              const messageVisualType = getChatMessageVisualType(msg.content);
               const prevMsg = idx > 0 ? currentChatMessages[idx - 1] : null;
               const shouldCollapse = settings.collapseConsecutiveAvatars !== false;
               const isConsecutivePrev = !!(
@@ -5657,6 +5678,23 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 : null;
               const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? settings.avatar : activeCharacter.avatar);
               const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : (activeCharacter.remark || activeCharacter.name);
+              const messageRow: MessageRowData = {
+                id: msg.id,
+                visualType: messageVisualType,
+                layout: settings.bubblePosition === "above" || settings.bubblePosition === "below" ? "stacked" : "side",
+                isConsecutive: isConsecutivePrev,
+                shouldCollapse,
+                showAvatar,
+                showNickname: !settings.hideNicknames,
+              };
+              const messageAvatar: MessageRowAvatar = {
+                src: isSelf ? settings.avatar : msgAvatar,
+                name: isSelf ? settings.name : msgName,
+                className: `w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar chat-message__avatar ${
+                  isSelf ? "user-avatar" : "ai-avatar"
+                } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`,
+                onClick: !isSelf ? () => setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id) : undefined,
+              };
 
               const renderBubbleInner = () => {
                 return (
@@ -5696,7 +5734,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         <img
                           src={msg.content}
                           alt="chat-pic"
-                          className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
+                          className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100 chat-message__image chat-message__image--content"
                         />
                       ) : msg.content.startsWith("[表情]|") ? (() => {
                         const [_, stickerName, stickerUrl] = msg.content.split("|");
@@ -5704,7 +5742,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s => s.name === stickerName);
                         const displayUrl = foundSticker ? foundSticker.url : stickerUrl;
                         return (
-                          <div className="max-w-[130px] rounded-xl overflow-hidden relative select-none">
+                          <div className="max-w-[130px] rounded-xl overflow-hidden relative select-none chat-sticker-message">
                             <img
                               src={displayUrl}
                               alt={stickerName}
@@ -5762,11 +5800,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               });
                               setShowRedPacketOpenModal(true);
                             }}
-                            className={`${cardBg} rounded-2xl w-56 overflow-hidden cursor-pointer shadow-md transition-all flex flex-col active:scale-[0.99] select-none cv-transfer`}
+                            className={`${cardBg} rounded-2xl w-56 overflow-hidden cursor-pointer shadow-md transition-all flex flex-col active:scale-[0.99] select-none cv-transfer chat-red-packet-message`}
                           >
                             <div className="p-3.5 flex items-center gap-3">
                               <div className={`w-9 h-9 ${iconBg} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner`}>
-                                🧧
+                                <ChatIcon src={getChatIcon("redPacket")} className="w-5 h-5">🧧</ChatIcon>
                               </div>
                               <div className="flex-1 min-w-0 text-left">
                                 <p className={`text-xs ${titleColor} truncate`}>{greeting || "恭喜发财，万事如意"}</p>
@@ -5787,13 +5825,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
                               setShowTransferDetailModal(true);
                             }}
-                            className={`bg-[#fdfcfb] border border-[#f5ebe0]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#faf5f0] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
+                            className={`bg-[#fdfcfb] border border-[#f5ebe0]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#faf5f0] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer chat-transfer-message ${
                               isSelf ? "transfer-card" : "received-transfer-card"
                             }`}
                           >
                             <div className="p-3.5 flex items-center gap-3 cv-transfer-body transfer-body">
                               <div className={`w-9 h-9 ${isConfirmed ? "bg-orange-500/10 text-orange-500" : "bg-amber-500/10 text-amber-500"} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner cv-transfer-status transfer-icon confirm-icon`}>
-                                💸
+                                <ChatIcon src={getChatIcon("transfer")} className="w-5 h-5">💸</ChatIcon>
                               </div>
                               <div className="flex-1 min-w-0 text-left">
                                 <p className="text-xs font-bold text-stone-800 truncate">¥{amount || "100.00"}</p>
@@ -5887,7 +5925,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                   triggerMessageSpeech(msg);
                                   setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
                                 }}
-                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape}`}
+                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar chat-voice-message cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape}`}
                                 style={{ width: `${80 + duration * 6.5}px`, minWidth: "95px", maxWidth: "220px" }}
                               >
                                 {/* Left element: Play/Pause/Speaker icon */}
@@ -5966,7 +6004,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         );
                       })() : (
                         <div
-                          className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                          className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble chat-message__bubble chat-message__bubble--${isSelf ? "self" : "other"} chat-message__bubble--${messageVisualType} relative group/bubble ${
                             isSelf
                               ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
                               : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
@@ -5990,99 +6028,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 );
               };
 
-              if (settings.bubblePosition === "above" || settings.bubblePosition === "below") {
-                return wrapMessageWithDivider(
-                  <div
-                    key={msg.id}
-                    className={`w-full flex flex-col ${
-                      isSelf ? "items-end" : "items-start"
-                    } ${
-                      (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
-                    } cv-msg-row message message-container`}
-                  >
-                    {/* Avatar + Meta Header */}
-                    {showAvatar && (
-                      <div className={`flex items-center gap-2.5 mb-1.5 select-none ${
-                        isSelf ? "flex-row-reverse" : "flex-row"
-                      }`}>
-                        <RenderAvatar
-                          src={isSelf ? settings.avatar : msgAvatar}
-                          alt=""
-                          name={isSelf ? settings.name : msgName}
-                          onClick={() => {
-                            if (!isSelf) {
-                              setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
-                            }
-                          }}
-                          className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
-                            isSelf ? "user-avatar" : "ai-avatar"
-                          } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
-                        />
-                        <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header`}>
-                          {!isSelf && !settings.hideNicknames && (
-                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
-                              <span>🖤</span>
-                              <span>{msgName}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Message Bubble Block */}
-                    <div className="max-w-[85%]">
-                      {renderBubbleInner()}
-                    </div>
-                  </div>
-                );
-              } else {
-                return wrapMessageWithDivider(
-                  <div
-                    key={msg.id}
-                    className={`w-full flex gap-2.5 ${
-                      isSelf ? "flex-row-reverse items-start justify-start" : "flex-row items-start justify-start"
-                    } ${
-                      (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
-                    } cv-msg-row message message-container`}
-                  >
-                    {/* Avatar */}
-                    {showAvatar ? (
-                      <RenderAvatar
-                        src={isSelf ? settings.avatar : msgAvatar}
-                        alt=""
-                        name={isSelf ? settings.name : msgName}
-                        onClick={() => {
-                          if (!isSelf) {
-                            setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
-                          }
-                        }}
-                        className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
-                          isSelf ? "user-avatar" : "ai-avatar"
-                        } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
-                      />
-                    ) : (
-                      <div className="w-9 h-9 shrink-0" />
-                    )}
-
-                    {/* Meta Header + Message Bubble Column */}
-                    <div className={`flex flex-col max-w-[80%] ${isSelf ? "items-end" : "items-start"}`}>
-                      {showAvatar && !settings.hideNicknames && (
-                        <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 mb-1 space-y-0.5 msg-meta-header`}>
-                          {!isSelf && (
-                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
-                              <span>🖤</span>
-                              <span>{msgName}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      <div className="max-w-full">
-                        {renderBubbleInner()}
-                      </div>
-                    </div>
-                  </div>
-                );
-              }
+              return wrapMessageWithDivider(
+                <MessageRow key={msg.id} message={messageRow} isSelf={isSelf} avatar={messageAvatar}>
+                  {renderBubbleInner()}
+                </MessageRow>
+              );
             })}
 
             {/* AI is writing/typing indicator */}
@@ -6135,8 +6085,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               ? "mx-3.5 mb-3.5 mt-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area" 
               : activeStylePreset === "liquid-glass"
                 ? "mx-3.5 mb-3.5 mt-1 bg-transparent border-0 shadow-none overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area"
-                : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
-          }`}>
+              : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
+          } chat-composer`}>
             {quotedMessage && (
               <div className="px-3 py-1.5 bg-stone-50 border-b border-stone-100 flex items-center justify-between text-[11px] text-stone-600 shrink-0 animate-fade-in">
                 <div className="truncate flex-1 pr-4 text-left">
@@ -6157,95 +6107,44 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             
 
 
-            <form
+            <ChatComposer
+              value={chatInputText}
+              placeholder={isOfflineModeActive
+                ? (isInputNarration ? "输入旁白..." : "输入发言，继续剧本对话...")
+                : `发送消息给 ${activeCharacter.name}...`}
+              isTyping={isTyping}
+              isFloatingCute={isFloatingCute}
+              isAttachPanelOpen={showAttachPanel}
+              plusIcon={getChatIcon("plus")}
+              sendIcon={getChatIcon("send")}
+              onChange={(e) => setChatInputText(e.target.value)}
+              onFocus={() => {
+                setTimeout(() => {
+                  if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+                }, 120);
+              }}
               onSubmit={(e) => {
                 e.preventDefault();
                 handleSendAndReply(e);
               }}
-              className="px-3 py-2 flex items-center gap-2"
-            >
-              {/* Plus (+) Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAttachPanel(!showAttachPanel);
-                  setShowStickerSelector(false);
-                }}
-                className={`w-10 h-10 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn text-slate-700 ${
-                  showAttachPanel
-                    ? "bg-stone-100 rotate-45"
-                    : "bg-white hover:bg-slate-100"
-                }`}
-                title="附加菜单"
-              >
-                <span className="cv-plus-icon flex items-center justify-center w-full h-full">
-                  <Plus className="w-3.5 h-3.5" />
-                </span>
-              </button>
-
-              {/* Chat Input text box */}
-              <input
-                type="text"
-                value={chatInputText}
-                onChange={(e) => setChatInputText(e.target.value)}
-                onFocus={() => {
-                  setTimeout(() => {
-                    if (chatEndRef.current) {
-                      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-                    }
-                  }, 120);
-                }}
-                placeholder={
-                  isOfflineModeActive 
-                    ? (isInputNarration 
-                        ? "输入旁白..." 
-                        : "输入发言，继续剧本对话...")
-                    : `发送消息给 ${activeCharacter.name}...`
-                }
-                className={`flex-1 h-10 border focus:outline-none rounded-[8px] px-4 text-xs text-slate-800 chat-input ${
-                  isFloatingCute 
-                    ? "bg-white/60 border-slate-200/40 focus:bg-white" 
-                    : "bg-slate-50 border-slate-200/80"
-                }`}
-              />
-
-              {/* Send Button 1 (User send only - gray background with white upward arrow) */}
-              <button
-                type="button"
-                onClick={(e) => handleSendOnly(e)}
-                disabled={!chatInputText.trim() || isTyping}
-                className="w-10 h-10 rounded-full bg-slate-300 hover:bg-slate-400 disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm cv-send-only-btn"
-                title="仅发送消息 (不立即得到回复)"
-              >
-                <span className="cv-send-only-icon flex items-center justify-center w-full h-full">
-                  <ArrowUp className="w-4 h-4 stroke-[2.5]" />
-                </span>
-              </button>
-
-              {/* Send Button 2 (Send and AI Reply - black background with white paper plane) */}
-              <button
-                type="submit"
-                disabled={isTyping}
-                className="w-10 h-10 rounded-full bg-slate-900 hover:bg-black disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm send-button"
-                title="发送消息并获取回复"
-              >
-                <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
-                  <Send className="w-3.5 h-3.5 fill-white text-white" />
-                </span>
-              </button>
-            </form>
+              onSendOnly={() => handleSendOnly()}
+              onAttachButtonClick={() => {
+                setShowAttachPanel(!showAttachPanel);
+                setShowStickerSelector(false);
+              }}
+            />
 
             {/* Attach Panel */}
             {showAttachPanel && (
-              <div className={`py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto ${
+              <div className={`py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto chat-composer__attachment-panel ${
                 activeStylePreset === "liquid-glass"
                   ? "bg-white/60 backdrop-blur-md border-t border-white/40"
                   : "bg-slate-50 border-t border-slate-100"
               }`}>
                 {/* 1. 相册 (Album) */}
-                <label className="flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
+                <label className="flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10 chat-tool chat-tool--image">
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <ImageIcon className="w-4 h-4 text-slate-700" />
+                    <ChatIcon src={getChatIcon("image")} className="w-4 h-4"><ImageIcon className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">相册</span>
                   <input
@@ -6276,10 +6175,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     setActiveAttachModal("redpacket");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--red-packet"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <Gift className="w-4 h-4 text-slate-700" />
+                    <ChatIcon src={getChatIcon("redPacket")} className="w-4 h-4"><Gift className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
                 </button>
@@ -6292,10 +6191,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     setActiveAttachModal("voice");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--voice chat-composer__voice-button"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <Mic className="w-4 h-4 text-slate-700" />
+                    <ChatIcon src={getChatIcon("voice")} className="w-4 h-4"><Mic className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
                 </button>
@@ -6307,10 +6206,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     setShowCallingDirectionModal(true);
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--call"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <Phone className="w-4 h-4 text-slate-700" />
+                    <ChatIcon src={getChatIcon("call")} className="w-4 h-4"><Phone className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
                 </button>
@@ -6322,10 +6221,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     setActiveAttachModal("location");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--location"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <MapPin className="w-4 h-4 text-slate-700" />
+                    <ChatIcon src={getChatIcon("location")} className="w-4 h-4"><MapPin className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
                 </button>
@@ -6337,10 +6236,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     setShowStickerSelector(true);
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--sticker"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <Smile className="w-4 h-4 text-slate-700" />
+                    <ChatIcon src={getChatIcon("sticker")} className="w-4 h-4"><Smile className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
                 </button>
@@ -6917,7 +6816,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 <div className="p-3 overflow-y-auto space-y-2 flex-1">
                   {memoNotes.length === 0 ? (
                     <div className="text-center py-6 px-4 space-y-3">
-                      <FileText className="w-8 h-8 text-stone-300 mx-auto" />
+                      <ChatIcon src={getChatIcon("file")} className="w-8 h-8 mx-auto"><FileText className="w-8 h-8 text-stone-300 mx-auto" /></ChatIcon>
                       <p className="text-xs font-bold text-stone-500">暂无备忘录笔记</p>
                       <p className="text-[10px] text-stone-400 leading-relaxed">
                         您可以先前往手机主屏幕的【备忘录】应用，写下您的创意和备忘，然后就可以在这里选择并发送给对方。对方还能点击阅读笔记的全部内容哦！
@@ -6939,7 +6838,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             备忘录笔记 • {note.content ? note.content.length : 0} 字
                           </p>
                         </div>
-                        <FileText className="w-4 h-4 shrink-0 text-blue-500 group-hover:text-white" />
+                        <ChatIcon src={getChatIcon("file")} className="w-4 h-4 shrink-0"><FileText className="w-4 h-4 shrink-0 text-blue-500 group-hover:text-white" /></ChatIcon>
                       </button>
                     ))
                   )}

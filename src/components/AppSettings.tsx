@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { UserSettings, StylePreset, ApiPreset } from "../types";
+import { UserSettings, StylePreset, ApiPreset, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
 import { apiFetchModels, apiTestKey } from "../utils/apiHelper";
 import {
   ChevronLeft,
@@ -79,6 +79,19 @@ const DEFAULT_PRESETS: StylePreset[] = [
   }
 ];
 
+const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
+  { key: "image", label: "图片" },
+  { key: "voice", label: "语音" },
+  { key: "sticker", label: "表情" },
+  { key: "redPacket", label: "红包" },
+  { key: "transfer", label: "转账" },
+  { key: "file", label: "文件" },
+  { key: "location", label: "位置" },
+  { key: "call", label: "通话" },
+  { key: "plus", label: "加号" },
+  { key: "send", label: "发送" },
+];
+
 export default function AppSettings({
   settings,
   presets,
@@ -145,6 +158,8 @@ export default function AppSettings({
   const [wallpaper, setWallpaper] = useState(settings.wallpaper);
   const [bubbleCss, setBubbleCss] = useState(settings.bubbleCss);
   const [globalCss, setGlobalCss] = useState(settings.globalCss);
+  const [chatGlobalCSS, setChatGlobalCSS] = useState(settings.chatGlobalCSS || "");
+  const [chatIcons, setChatIcons] = useState<ChatIconOverrides>(() => sanitizeChatIcons(settings.chatIcons));
   const [showHomeButton, setShowHomeButton] = useState(!!settings.showHomeButton);
   const [dockColor, setDockColor] = useState(settings.dockColor || "#ffffff");
   const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
@@ -438,6 +453,48 @@ export default function AppSettings({
       identities: updatedIdentities
     };
     onSaveSettings(updated);
+  };
+
+  const updateChatIcon = (key: ChatIconKey, value: string) => {
+    const next = { ...chatIcons };
+    const url = value.trim();
+    if (url) next[key] = url;
+    else delete next[key];
+    setChatIcons(next);
+    handleSave({ chatIcons: next });
+  };
+
+  const handleExportChatTheme = () => {
+    const data = JSON.stringify({ version: 1, chatGlobalCSS, chatIcons }, null, 2);
+    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "fanfanji-chat-theme.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportChatTheme = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const imported = JSON.parse(String(reader.result));
+        if (!imported || typeof imported !== "object") throw new Error("invalid theme");
+        const nextCss = typeof imported.chatGlobalCSS === "string" ? imported.chatGlobalCSS : "";
+        const nextIcons = sanitizeChatIcons(imported.chatIcons);
+        setChatGlobalCSS(nextCss);
+        setChatIcons(nextIcons);
+        handleSave({ chatGlobalCSS: nextCss, chatIcons: nextIcons });
+        alert("聊天美化主题已导入。");
+      } catch {
+        alert("无法导入该主题文件，请选择有效的聊天主题 JSON。");
+      } finally {
+        event.target.value = "";
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleSwitchIdentity = (id: string) => {
@@ -2155,7 +2212,7 @@ export default function AppSettings({
 
                   {/* 自定义 CSS */}
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <span className="text-xs font-bold text-slate-700">高阶自定义气泡 CSS 样式</span>
+                    <span className="text-xs font-bold text-slate-700">旧版气泡 CSS（兼容）</span>
                     <textarea
                       rows={3}
                       value={bubbleCss}
@@ -2166,6 +2223,47 @@ export default function AppSettings({
                       placeholder={`.chat-bubble-self { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%) !important; }`}
                       className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
                     />
+                  </div>
+
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                    <span className="text-xs font-bold text-slate-700">全局聊天样式 CSS</span>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">用于修改所有聊天页面视觉效果，包括背景、导航、气泡、消息、输入区域等。</p>
+                    <textarea
+                      rows={5}
+                      value={chatGlobalCSS}
+                      onChange={(e) => {
+                        setChatGlobalCSS(e.target.value);
+                        handleSave({ chatGlobalCSS: e.target.value });
+                      }}
+                      placeholder={`.chat-theme {\n  --chat-accent: #07c160;\n}\n.chat-message__bubble--self {\n  border-radius: 8px;\n}`}
+                      className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
+                    />
+                  </div>
+
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                    <div>
+                      <span className="text-xs font-bold text-slate-700">聊天功能图标</span>
+                      <p className="text-[10px] text-slate-400 leading-relaxed mt-1">填写图片 URL 后替换默认图标；角色覆盖优先于这里的全局配置。</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {CHAT_ICON_FIELDS.map(({ key, label }) => (
+                        <label key={key} className="space-y-1">
+                          <span className="text-[10px] font-semibold text-slate-500">{label}图标</span>
+                          <input value={chatIcons[key] || ""} onChange={(e) => updateChatIcon(key, e.target.value)} placeholder="图片 URL（留空用默认）" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                    <div>
+                      <span className="text-xs font-bold text-slate-700">导入 / 导出聊天主题</span>
+                      <p className="text-[10px] text-slate-400 leading-relaxed mt-1">主题文件仅包含全局聊天 CSS 与全局聊天图标配置。</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={handleExportChatTheme} className="flex-1 py-2 rounded-lg bg-slate-900 text-white text-[10px] font-bold">导出 JSON</button>
+                      <label className="flex-1 py-2 rounded-lg bg-slate-100 text-slate-700 text-[10px] font-bold text-center cursor-pointer">导入 JSON<input type="file" accept="application/json,.json" onChange={handleImportChatTheme} className="hidden" /></label>
+                    </div>
                   </div>
                 </div>
               )}
