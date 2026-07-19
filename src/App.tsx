@@ -150,8 +150,6 @@ const DEFAULT_SETTINGS: UserSettings = {
   border-radius: 18px 18px 18px 2px !important;
 }`,
   globalCss: ``,
-  chatGlobalCSS: ``,
-  chatIcons: {},
   customFontName: "",
   customFontData: "",
   activePreset: "温和灰蓝 (Default)",

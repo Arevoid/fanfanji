@@ -4,22 +4,6 @@ export interface CharacterReference {
   content: string;
 }
 
-export const CHAT_ICON_KEYS = ["image", "voice", "sticker", "redPacket", "transfer", "file", "location", "call", "plus", "send"] as const;
-export type ChatIconKey = typeof CHAT_ICON_KEYS[number];
-export type ChatIconOverrides = Partial<Record<ChatIconKey, string>>;
-
-/** Keeps persisted/imported icon configuration safe for direct image rendering. */
-export function sanitizeChatIcons(value: unknown): ChatIconOverrides {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-
-  const source = value as Record<string, unknown>;
-  return CHAT_ICON_KEYS.reduce<ChatIconOverrides>((icons, key) => {
-    const icon = source[key];
-    if (typeof icon === "string" && icon.trim()) icons[key] = icon.trim();
-    return icons;
-  }, {});
-}
-
 export interface Character {
   id: string;
   name: string;
@@ -45,11 +29,6 @@ export interface Character {
   proactiveEndTime?: string;
   lastActiveTime?: number;
   scheduledProactiveTime?: number;
-  /** CSS scoped to this character's active chat conversation. */
-  customChatCSS?: string;
-  /** Per-character overrides for chat function icon resources. */
-  customChatIcons?: ChatIconOverrides;
-  /** @deprecated Use customChatCSS for chat-only styling. */
   customCss?: string;
   chatStylePreset?: "default" | "floating-cute" | "liquid-glass";
   greeting?: string;
@@ -161,10 +140,6 @@ export interface UserSettings {
   customIcons: Record<string, string>; // appKey -> image base64/URL or empty
   bubbleCss: string; // Custom bubble CSS
   globalCss: string; // Custom global CSS
-  /** CSS scoped to active chat conversation screens only. */
-  chatGlobalCSS?: string;
-  /** Globally configured chat function icon resources. */
-  chatIcons?: ChatIconOverrides;
   globalChatStylePreset?: "default" | "floating-cute" | "liquid-glass";
   activePreset: string; // Preset name
   momentsCover?: string; // Moments cover image URL or base64
