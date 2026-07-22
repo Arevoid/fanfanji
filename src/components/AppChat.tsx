@@ -25,6 +25,8 @@ import ChatIcon from "./ChatIcon";
 import { ChatTopBar } from "../features/chat/components/ChatTopBar";
 import { ContactList } from "../features/chat/components/ContactList";
 import { ConversationList } from "../features/chat/components/ConversationList";
+import { MessageList } from "../features/chat/components/MessageList";
+import { QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
 import {
   MessageSquare,
   Users,
@@ -5803,8 +5805,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
           {/* Active Chat Messages body */}
 
-          <div
-            ref={scrollContainerRef}
+          <MessageList
+            messages={currentChatMessages}
+            scrollRef={scrollContainerRef}
             className="flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
@@ -5812,10 +5815,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 : undefined,
               WebkitOverflowScrolling: "touch",
             }}
-          >
-
-
-            {currentChatMessages.map((msg, idx) => {
+            renderMessage={(msg, idx) => {
               // Calculate WeChat timestamp divider
               let showWeChatDivider = false;
               let dividerText = "";
@@ -6419,7 +6419,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   </div>
                 );
               }
-            })}
+            }}>
 
             {/* AI is writing/typing indicator */}
             {isTyping && (
@@ -6463,7 +6463,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             )}
 
             <div ref={chatEndRef} />
-          </div>
+          </MessageList>
 
           {/* Active Chat Footer Input form */}
           <div className={`${
@@ -6473,23 +6473,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 ? "mx-3.5 mb-3.5 mt-1 bg-transparent border-0 shadow-none overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area"
                 : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
           }`}>
-            {quotedMessage && (
-              <div className="px-3 py-1.5 bg-stone-50 border-b border-stone-100 flex items-center justify-between text-[11px] text-stone-600 shrink-0 animate-fade-in">
-                <div className="truncate flex-1 pr-4 text-left">
-                  <span className="font-extrabold text-stone-700">引用自 {quotedMessage.sender === "user" ? "自己" : (activeCharacter.remark || activeCharacter.name)}: </span>
-                  <span className="italic">
-                    {quotedMessage.content.startsWith("[文件]") 
-                      ? `[文件] ${quotedMessage.content.split("|")[1] || "笔记"}` 
-                      : quotedMessage.content.startsWith("[") 
-                        ? "[媒体内容]" 
-                        : quotedMessage.content}
-                  </span>
-                </div>
-                <button type="button" onClick={() => setQuotedMessage(null)} className="text-stone-400 hover:text-stone-600 p-0.5">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
+            {quotedMessage && <QuotedMessagePreview message={quotedMessage} senderName={activeCharacter.remark || activeCharacter.name} onClear={() => setQuotedMessage(null)} closeIcon={<X className="w-3.5 h-3.5" />} />}
             
 
 
