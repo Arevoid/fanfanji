@@ -9,16 +9,18 @@ interface QuotedMessagePreviewProps {
 }
 
 export function QuotedMessagePreview({ message, senderName, onClear, closeIcon }: QuotedMessagePreviewProps) {
-  const summary = message.content.startsWith("[文件]")
-    ? `[文件] ${message.content.split("|")[1] || "笔记"}`
-    : message.content.startsWith("[")
-      ? "[媒体内容]"
-      : message.content;
+  const summary = message.content.startsWith("data:image/") ? "[图片]"
+    : message.content.startsWith("[文件]") ? "[文件]"
+    : message.content.startsWith("[语音]") ? "[语音]"
+    : message.content.startsWith("[红包]") ? "[红包]"
+    : message.content.startsWith("[转账]") ? "[转账]"
+    : message.content.startsWith("[") ? "[媒体内容]"
+    : message.content.trim() || "[消息]";
 
   return (
-    <div className="px-3 py-1.5 bg-stone-50 border-b border-stone-100 flex items-center justify-between text-[11px] text-stone-600 shrink-0 animate-fade-in">
-      <div className="truncate flex-1 pr-4 text-left">
-        <span className="font-extrabold text-stone-700">引用自 {message.sender === "user" ? "自己" : senderName}: </span>
+    <div className="composer-quote-preview message-quote px-3 py-1.5 border-b border-stone-100 flex items-center justify-between text-[11px] shrink-0 animate-fade-in">
+      <div className="message-quote__content truncate flex-1 pr-4 pl-2 py-1 text-left">
+        <span className="message-quote__author font-extrabold">引用自 {message.sender === "user" ? "自己" : senderName}: </span>
         <span className="italic">{summary}</span>
       </div>
       <button type="button" onClick={onClear} className="text-stone-400 hover:text-stone-600 p-0.5">{closeIcon}</button>

@@ -1,0 +1,60 @@
+.message-quote {
+  --quote-bg: rgba(120, 113, 108, 0.08);
+  --quote-border: #94a3b8;
+  --quote-author: #334155;
+  --quote-content: #64748b;
+}
+
+.message-quote__content {
+  background: var(--quote-bg);
+  border-left: 3px solid var(--quote-border);
+  border-radius: 0.5rem;
+  color: var(--quote-content);
+}
+
+.message-quote__author { color: var(--quote-author); }
+
+.special-payment-card {
+  width: min(20rem, 100%);
+  overflow: hidden;
+  border-radius: 1.25rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  cursor: pointer;
+  transition: transform 150ms ease, filter 150ms ease;
+}
+
+.special-payment-card:hover { filter: brightness(1.03); }
+.special-payment-card:active { transform: scale(0.99); }
+
+.redpacket-card {
+  --redpacket-bg: linear-gradient(135deg, #7f1d1d, #dc2626 60%, #f97316);
+  --redpacket-title-color: #fff7ed;
+  --redpacket-money-color: #fef3c7;
+  --redpacket-status-color: #fde68a;
+  --redpacket-note-color: rgba(255, 247, 237, 0.78);
+  background: var(--redpacket-bg);
+  color: var(--redpacket-title-color);
+}
+
+.redpacket-card[data-status="claimed"] { filter: saturate(0.55) opacity(0.75); }
+.redpacket-card[data-status="expired"], .redpacket-card[data-status="refunded"] { --redpacket-bg: linear-gradient(135deg, #475569, #64748b); filter: grayscale(0.45); }
+
+.transfer-card {
+  --transfer-bg: linear-gradient(135deg, #0f766e, #0891b2);
+  --transfer-title-color: #ecfeff;
+  --transfer-money-color: #ffffff;
+  --transfer-status-color: #a5f3fc;
+  --transfer-note-color: rgba(236, 254, 255, 0.78);
+  background: var(--transfer-bg);
+  color: var(--transfer-title-color);
+}
+
+.transfer-card[data-status="confirmed"] { filter: saturate(0.55) opacity(0.78); }
+.transfer-card[data-status="refunded"] { --transfer-bg: linear-gradient(135deg, #475569, #64748b); filter: grayscale(0.45); }
+
+.special-payment-card__top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem 0; }
+.special-payment-card__title { color: var(--redpacket-title-color, var(--transfer-title-color)); font-size: 0.75rem; font-weight: 700; }
+.special-payment-card__status { color: var(--redpacket-status-color, var(--transfer-status-color)); font-size: 0.7rem; font-weight: 700; }
+.special-payment-card__money { color: var(--redpacket-money-color, var(--transfer-money-color)); font-size: 1.65rem; font-weight: 800; line-height: 1; padding: 0.7rem 1rem 0.65rem; }
+.special-payment-card__note { color: var(--redpacket-note-color, var(--transfer-note-color)); font-size: 0.72rem; overflow: hidden; padding: 0.55rem 1rem 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
+.special-payment-card__brand { color: var(--redpacket-status-color, var(--transfer-status-color)); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; opacity: 0.78; }

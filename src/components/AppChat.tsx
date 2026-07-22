@@ -30,6 +30,8 @@ import { QuotedMessagePreview } from "../features/chat/components/QuotedMessageP
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
 import { ChatComposer } from "../features/chat/components/ChatComposer";
 import { ChatTextInput } from "../features/chat/components/ChatTextInput";
+import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
+import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
 import {
   MessageSquare,
   Users,
@@ -6054,99 +6056,20 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </button>
                         );
                       })() : isRedPacketMarkup(msg.content) ? (() => {
-                        const [_, amount, greeting] = msg.content.split("|");
+                        const [, amount, greeting] = msg.content.split("|");
                         const status = getRedPacketActualStatus(msg.id, msg.timestamp, msg.sender);
-                        
-                        let cardBg = "bg-[#fa9d3b] hover:brightness-[1.03] text-white";
-                        let ribbonBg = "bg-[#f4932d] text-[#ffeada]/75 border-t border-[#fa9d3b]";
-                        let iconBg = "bg-[#f35543] text-yellow-300";
-                        let titleColor = "text-white font-bold";
-                        let actionText = "查看红包";
-                        let ribbonText = "微信红包";
-
-                        if (status === "claimed") {
-                          cardBg = "bg-[#fa9d3b]/55 text-white/70";
-                          ribbonBg = "bg-[#e18b2b]/40 text-[#ffeada]/50 border-t border-[#fa9d3b]/20";
-                          iconBg = "bg-[#f35543]/40 text-yellow-300/40";
-                          titleColor = "text-white/60 font-semibold";
-                          actionText = isSelf ? "红包已被领完" : "已领入零钱";
-                          ribbonText = "微信红包 · 已拆开";
-                        } else if (status === "expired" || status === "refunded") {
-                          cardBg = "bg-slate-200 text-slate-500 hover:bg-slate-200/90";
-                          ribbonBg = "bg-slate-300/60 text-slate-400 border-t border-slate-200";
-                          iconBg = "bg-slate-300 text-slate-400";
-                          titleColor = "text-slate-400 font-normal";
-                          actionText = "红包已过期";
-                          ribbonText = "微信红包 · 已失效";
-                        } else {
-                          actionText = isSelf ? "等待对方拆开" : "点击拆红包";
-                        }
-
-                        return (
-                          <div 
-                            onClick={() => {
-                              const packetAmount = amount || "8.88";
-                              const char = characters.find(c => c.id === msg.characterId);
-                              const senderName = char?.remark || char?.name || "未知好友";
-                              const senderAvatar = char?.avatar || "🧧";
-                              
-                              setOpenRedPacketDetail({
-                                id: msg.id,
-                                amount: packetAmount,
-                                greeting: greeting || "恭喜发财",
-                                senderName,
-                                senderAvatar,
-                                sender: msg.sender as "user" | "character",
-                                timestamp: msg.timestamp
-                              });
-                              setShowRedPacketOpenModal(true);
-                            }}
-                            className={`${cardBg} rounded-2xl w-56 overflow-hidden cursor-pointer shadow-md transition-all flex flex-col active:scale-[0.99] select-none cv-transfer`}
-                          >
-                            <div className="p-3.5 flex items-center gap-3">
-                              <div className={`w-9 h-9 ${iconBg} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner`}>
-                                🧧
-                              </div>
-                              <div className="flex-1 min-w-0 text-left">
-                                <p className={`text-xs ${titleColor} truncate`}>{greeting || "恭喜发财，万事如意"}</p>
-                                <p className="text-[10px] mt-1 font-bold tracking-wide">{actionText}</p>
-                              </div>
-                            </div>
-                            <div className={`px-3.5 py-1.5 ${ribbonBg} text-[9px] font-bold flex items-center justify-between select-none`}>
-                              <span>{ribbonText}</span>
-                            </div>
-                          </div>
-                        );
+                        return <RedPacketCard amount={amount || "8.88"} greeting={greeting || "恭喜发财，万事如意"} status={status} isSelf={isSelf} onClick={() => {
+                          const char = characters.find((character) => character.id === msg.characterId);
+                          setOpenRedPacketDetail({ id: msg.id, amount: amount || "8.88", greeting: greeting || "恭喜发财", senderName: char?.remark || char?.name || "未知好友", senderAvatar: char?.avatar || "🧧", sender: msg.sender as "user" | "character", timestamp: msg.timestamp });
+                          setShowRedPacketOpenModal(true);
+                        }} />;
                       })() : isTransferMarkup(msg.content) ? (() => {
-                        const [_, amount, memo, isConfirmedStr] = msg.content.split("|");
+                        const [, amount, memo, isConfirmedStr] = msg.content.split("|");
                         const isConfirmed = isConfirmedStr === "true";
-                        return (
-                          <div 
-                            onClick={() => {
-                              setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
-                              setShowTransferDetailModal(true);
-                            }}
-                            className={`bg-[#fdfcfb] border border-[#f5ebe0]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#faf5f0] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
-                              isSelf ? "transfer-card" : "received-transfer-card"
-                            }`}
-                          >
-                            <div className="p-3.5 flex items-center gap-3 cv-transfer-body transfer-body">
-                              <div className={`w-9 h-9 ${isConfirmed ? "bg-orange-500/10 text-orange-500" : "bg-amber-500/10 text-amber-500"} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner cv-transfer-status transfer-icon confirm-icon`}>
-                                💸
-                              </div>
-                              <div className="flex-1 min-w-0 text-left">
-                                <p className="text-xs font-bold text-stone-800 truncate">¥{amount || "100.00"}</p>
-                                <p className="text-[10px] text-stone-400 mt-0.5 truncate">{memo || "转账"}</p>
-                              </div>
-                            </div>
-                            <div className="px-3.5 py-2 bg-stone-50 text-stone-400 text-[9px] font-bold flex items-center justify-between border-t border-orange-50 cv-transfer-ribbon transfer-status select-none">
-                              <span className="font-semibold text-stone-400">微信转账</span>
-                              <span className={`font-semibold ${isConfirmed ? "text-green-600" : "text-amber-600"}`}>
-                                {isConfirmed ? "已收钱" : "待接收"}
-                              </span>
-                            </div>
-                          </div>
-                        );
+                        return <TransferCard amount={amount || "100.00"} memo={memo || "转账"} status={isConfirmed ? "confirmed" : "pending"} onClick={() => {
+                          setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
+                          setShowTransferDetailModal(true);
+                        }} />;
                       })() : msg.content.startsWith("[语音") ? (() => {
                         let content = msg.content;
                         let durationStr = "3";
