@@ -32,6 +32,7 @@ import { ChatComposer } from "../features/chat/components/ChatComposer";
 import { ChatTextInput } from "../features/chat/components/ChatTextInput";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
+import { MomentsApp } from "../features/moments/MomentsApp";
 import {
   MessageSquare,
   Users,
@@ -4409,6 +4410,46 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
     handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
   };
 
+  const publishMomentFromFeature = (input: { content: string; image: string | null; imageDescription: string }) => {
+    const newMo: Moment = {
+      id: Date.now().toString(),
+      ownerIdentityId: activeIdentityId,
+      authorName: settings.name,
+      authorAvatar: settings.avatar,
+      content: input.content.trim(),
+      timestamp: Date.now(),
+      likes: [],
+      comments: [],
+      image: input.image || undefined,
+      imageType: input.image ? "photo" : (input.imageDescription.trim() ? "text" : undefined),
+      imageDescription: input.imageDescription.trim() || undefined,
+    };
+    onAddMoment(newMo);
+    handleAutoCommentOnUserMoment(newMo);
+  };
+
+  const publishMomentCommentFromFeature = (momentId: string, text: string, replyingTo?: MomentComment) => {
+    const prefix = replyingTo ? `回复${replyingTo.authorName}：` : "";
+    const newComment: MomentComment = {
+      id: Date.now().toString(),
+      authorName: settings.name,
+      authorAvatar: settings.avatar,
+      content: `${prefix}${text.trim()}`,
+      timestamp: Date.now(),
+    };
+    onAddCommentToMoment(momentId, newComment);
+    handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
+  };
+
+  const uploadMomentImageFromFeature = async (file: File, kind: "moment" | "cover") => {
+    const compressed = await compressImage(file, kind === "cover" ? 1000 : 800, kind === "cover" ? 1000 : 800, 0.7);
+    if (kind === "cover") {
+      onSaveSettings({ ...settings, momentsCover: compressed });
+      return undefined;
+    }
+    return compressed;
+  };
+
   // Active chat threads list builder
   const chatThreads = characters
     .filter((char) => {
@@ -7397,7 +7438,36 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
           )}
 
           {/* TABS: MOMENTS FEED (朋友圈) */}
-          {activeTab === "moments" && (() => {
+          {activeTab === "moments" && (
+            <MomentsApp
+              moments={allMoments}
+              characters={characters}
+              settings={settings}
+              translations={momentTranslations}
+              filterCharacterId={momentsFilterCharId}
+              onClearFilter={() => setMomentsFilterCharId(null)}
+              onClose={onClose}
+              onAddMoment={onAddMoment}
+              onAddComment={onAddCommentToMoment}
+              onDeleteComment={(momentId, commentId) => onDeleteCommentFromMoment?.(momentId, commentId)}
+              onDeleteMoment={onDeleteMoment}
+              onLikeMoment={onLikeMoment}
+              onSaveSettings={onSaveSettings}
+              onPublishUserMoment={publishMomentFromFeature}
+              onPublishComment={publishMomentCommentFromFeature}
+              onUploadImage={uploadMomentImageFromFeature}
+              onAutoReply={handleAutoReplyToUserComment}
+              showToast={showToast}
+              onMomentTextContextMenu={handleMomentTextContextMenu}
+              onMomentTextPointerDown={handleMomentTextPointerDown}
+              onMomentTextPointerUpOrLeave={handleMomentTextPointerUpOrLeave}
+              onMomentTextPointerMove={handleMomentTextPointerMove}
+              onCommentClick={handleMomentCommentClick}
+              onCommentPointerDown={handleMomentCommentPointerDown}
+              onClearCommentLongPress={clearMomentCommentLongPress}
+            />
+          )}
+          {false && activeTab === "moments" && (() => {
             const filterChar = momentsFilterCharId ? characters.find((c) => c.id === momentsFilterCharId) : null;
             const momentsTabName = filterChar ? (filterChar.remark || filterChar.name) : settings.name;
             const momentsTabAvatar = filterChar ? filterChar.avatar : settings.avatar;
