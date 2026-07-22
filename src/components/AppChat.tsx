@@ -10,6 +10,7 @@ import { getRelevantMemories } from "./AppMemory";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
+import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
 import {
@@ -1477,6 +1478,7 @@ export default function AppChat({
   // Memory Compression and Proactive Chat states
   const [isCompressingMemory, setIsCompressingMemory] = useState(false);
   const [isTriggeringProactive, setIsTriggeringProactive] = useState(false);
+  const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
   const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
   const [showDisbandGroupModal, setShowDisbandGroupModal] = useState(false);
   const [editingMemoryText, setEditingMemoryText] = useState("");
@@ -3843,8 +3845,9 @@ ${stickerListStr}
 
   // Manual Trigger Proactive Message simulation
   const handleTriggerProactiveMessage = async () => {
-    if (!activeChatCharId || !activeCharacter) return;
+    if (!activeChatCharId || !activeCharacter || activeCharacter.isGroupChat || proactiveMessageInFlightRef.current.has(activeChatCharId)) return;
 
+    proactiveMessageInFlightRef.current.add(activeChatCharId);
     setIsTriggeringProactive(true);
     setIsTyping(true);
     try {
@@ -3859,6 +3862,8 @@ ${stickerListStr}
       }
 
       const charMsgs = messages.filter(m => m.characterId === activeChatCharId);
+      const recentConversation = analyzeRecentConversation(charMsgs, activeChatCharId);
+      const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
@@ -3884,7 +3889,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}PROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
 ${proactivePrompt}`;
@@ -3892,7 +3897,10 @@ ${proactivePrompt}`;
       const composedPrompt = PromptComposer.compose({
         scenario: "proactive-message",
         message: "(用户失联3小时，你主动给其发送了一条信息)",
-        history: [],
+        history: recentConversation.recentMessages.map((message) => ({
+          role: message.sender === "user" ? "user" : "model",
+          text: message.content,
+        })),
         systemInstruction,
       });
       const data = await apiChat({
@@ -3925,6 +3933,7 @@ ${proactivePrompt}`;
     } catch (err: any) {
       alert(`主动联络错误: ${err.message || err}`);
     } finally {
+      proactiveMessageInFlightRef.current.delete(activeChatCharId);
       setIsTriggeringProactive(false);
       setIsTyping(false);
     }
@@ -3974,10 +3983,11 @@ ${proactivePrompt}`;
 
   // Automated background proactive message generator for any character
   const triggerProactiveFor = async (charId: string, customTaskText?: string, backdateTimestamp?: number) => {
-    if (isOfflineStoryActiveFor(charId)) return;
+    if (isOfflineStoryActiveFor(charId) || proactiveMessageInFlightRef.current.has(charId)) return;
     const friend = characters.find((c) => c.id === charId);
-    if (!friend) return;
+    if (!friend || friend.isGroupChat) return;
 
+    proactiveMessageInFlightRef.current.add(charId);
     try {
       let instructionsPrompt = `Instructions:
 1. Speak in Chinese. Maintain character role-play thoroughly.
@@ -3990,6 +4000,8 @@ ${proactivePrompt}`;
       }
 
       const charMsgs = messagesRef.current.filter(m => m.characterId === charId);
+      const recentConversation = analyzeRecentConversation(charMsgs, charId);
+      const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], charId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
@@ -4017,7 +4029,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}PROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
 ${taskPrompt}
 
 ${instructionsPrompt}`;
@@ -4025,7 +4037,10 @@ ${instructionsPrompt}`;
       const composedPrompt = PromptComposer.compose({
         scenario: "proactive-message",
         message: "(你主动给用户发送了一条信息)",
-        history: [],
+        history: recentConversation.recentMessages.map((message) => ({
+          role: message.sender === "user" ? "user" : "model",
+          text: message.content,
+        })),
         systemInstruction,
       });
       const data = await apiChat({
@@ -4062,6 +4077,8 @@ ${instructionsPrompt}`;
       }
     } catch (err) {
       console.error("Proactive message auto-trigger error:", err);
+    } finally {
+      proactiveMessageInFlightRef.current.delete(charId);
     }
   };
 
