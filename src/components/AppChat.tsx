@@ -8,15 +8,15 @@ import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from 
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
 import StickerSettings from "./StickerSettings";
-import ChatHeader from "./ChatHeader";
-import ChatComposer from "./ChatComposer";
-import MessageRow, { type MessageRowAvatar, type MessageRowData } from "./MessageRow";
 import ChatIcon from "./ChatIcon";
 import {
   MessageSquare,
   Users,
   Compass,
   User,
+  Send,
+  ArrowUp,
+  MoreHorizontal,
   Bookmark,
   Pin,
   Image as ImageIcon,
@@ -55,7 +55,8 @@ import {
   Play,
   Pause,
   Loader2,
-  Database
+  Database,
+  Check
 } from "lucide-react";
 
 import { getSpeechForText, MINIMAX_DEFAULT_VOICES } from "../utils/minimaxTts";
@@ -79,27 +80,50 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
 
-// Presentation-only classification used as stable CSS hooks. It does not alter
-// message parsing, sending, or any special-message behavior.
 function getChatMessageVisualType(content: string): string {
   if (content.startsWith("data:image/")) return "image";
-  if (content.startsWith("[\u8868\u60c5]|")) return "sticker";
-  if (content.startsWith("[\u7ea2\u5305]")) return "red-packet";
-  if (content.startsWith("[\u8f6c\u8d26]")) return "transfer";
-  if (content.startsWith("[\u8bed\u97f3\u901a\u8bdd]") || content.startsWith("[\u89c6\u9891\u901a\u8bdd]")) return "call";
-  if (content.startsWith("[\u8bed\u97f3")) return "voice";
-  if (content.startsWith("[\u6587\u4ef6]")) return "file";
-  if (content.startsWith("[\u4f4d\u7f6e]")) return "location";
+  if (content.startsWith("[表情]|")) return "sticker";
+  if (content.startsWith("[红包]")) return "red-packet";
+  if (content.startsWith("[转账]")) return "transfer";
+  if (content.startsWith("[语音通话]") || content.startsWith("[视频通话]")) return "call";
+  if (content.startsWith("[语音")) return "voice";
+  if (content.startsWith("[文件]")) return "file";
+  if (content.startsWith("[位置]")) return "location";
   return "text";
 }
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
-  { key: "image", label: "图片" }, { key: "voice", label: "语音" },
-  { key: "sticker", label: "表情" }, { key: "redPacket", label: "红包" },
-  { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
-  { key: "location", label: "位置" }, { key: "call", label: "通话" },
-  { key: "plus", label: "加号" }, { key: "send", label: "发送" },
+  { key: "image", label: "图片" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },
+  { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
+  { key: "location", label: "位置" }, { key: "call", label: "通话" }, { key: "plus", label: "加号" }, { key: "send", label: "发送" },
 ];
+
+const SettingsSwitch = ({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    onClick={() => onChange(!checked)}
+    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${
+      checked ? "bg-neutral-950" : "bg-slate-200"
+    }`}
+  >
+    <span
+      className={`absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-transform duration-200 ${
+        checked ? "translate-x-5" : "translate-x-0"
+      }`}
+    />
+  </button>
+);
 
 // Parse recent messages to detect if an agreed proactive contact time exists
 const getScheduledContactTime = (charMsgs: any[], settingsName: string) => {
@@ -287,6 +311,7 @@ interface AppChatProps {
   onSaveCharacter: (char: Character) => void; // Support updating character remark, pinned status, chatBg
   onAddMoment: (moment: Moment) => void;
   onAddCommentToMoment: (momentId: string, comment: MomentComment) => void;
+  onDeleteCommentFromMoment?: (momentId: string, commentId: string) => void;
   onLikeMoment: (momentId: string, userName: string) => void;
   onDeleteMoment?: (momentId: string) => void;
   onToggleBookmark: (messageId: string) => void;
@@ -304,14 +329,74 @@ interface AppChatProps {
   setActiveChatCharId: (id: string | null) => void;
   offlineStories?: OfflineStory[];
   onSaveOfflineStory?: (story: OfflineStory) => void;
+  onDeleteOfflineStory?: (storyId: string) => void;
   onDeleteCharacter?: (id: string, skipConfirm?: boolean) => void;
 }
 
 const PRESEED_MOMENTS: Moment[] = [];
 
+const isOfflineStoryActiveFor = (characterId: string) =>
+  localStorage.getItem(`offline_mode_active_${characterId}`) === "true";
+
+// Models sometimes return the human-readable WeChat labels instead of the
+// canonical app markup. Normalize new output and recognize old saved messages.
+const normalizePaymentMarkup = (content: string) => content
+  .replace(/^\[微信红包\]/, "[红包]")
+  .replace(/^\[微信转账\]/, "[转账]");
+
+const isRedPacketMarkup = (content: string) => /^\[(?:红包|微信红包)\]/.test(content);
+const isTransferMarkup = (content: string) => /^\[(?:转账|微信转账)\]/.test(content);
+const isCallRecordMarkup = (content: string) => /^\[通话记录\]\|/.test(content);
+
+type CallTranscriptItem = Pick<Message, "id" | "sender" | "content" | "timestamp">;
+
+const getCallTranscriptText = (content: string) =>
+  content.startsWith("[语音]|") ? content.split("|").slice(2).join("|") : content;
+
+const parseCallRecord = (content: string) => {
+  const [, callType = "语音通话", duration = "00:00", encodedTranscript = ""] = content.split("|");
+  try {
+    const transcript = JSON.parse(decodeURIComponent(encodedTranscript));
+    return {
+      callType,
+      duration,
+      transcript: Array.isArray(transcript) ? transcript as CallTranscriptItem[] : [],
+    };
+  } catch {
+    return { callType, duration, transcript: [] as CallTranscriptItem[] };
+  }
+};
+
+const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: string) =>
+  getLatestWorldBookEntries(entries)
+    .filter((entry) => entry.isActive !== false && (!entry.characterId || entry.characterId === "global" || entry.characterId === characterId))
+    .sort((a, b) => (a.depth || 5) - (b.depth || 5))
+    .map((entry) => `【${entry.title}】\n${entry.content}`)
+    .join("\n\n");
+
 const cleanAndExtractMoment = (content: string) => {
   let cleanContent = content.trim();
   const selfComments: string[] = [];
+  let imageDescription: string | undefined;
+
+  // Older generated posts may have placed the image description directly in
+  // the body. Extract it so it is rendered as a tappable text-image card.
+  cleanContent = cleanContent.replace(/(?:^|\n)\s*[（(]\s*配图\s*[：:]\s*([^）)\n]+)\s*[）)]\s*/g, (_match, text) => {
+    if (!imageDescription && text.trim()) imageDescription = text.trim();
+    return "\n";
+  });
+
+  // Keep generated metadata and mock comments out of the post body. Older data can
+  // still contain these forms, so normalize it when rendering as well as generating.
+  cleanContent = cleanContent.replace(/^\s*(?:朋友圈|动态)\s*[：:]\s*/i, "");
+  cleanContent = cleanContent.replace(/(?:^|\n)\s*[（(]\s*评论\s*[：:]\s*([^）)]+)[）)]\s*/g, (_match, text) => {
+    if (text.trim()) selfComments.push(text.trim());
+    return "\n";
+  });
+  cleanContent = cleanContent.replace(/(?:^|\n)\s*评论\s*[：:]\s*([^\n]+)/g, (_match, text) => {
+    if (text.trim()) selfComments.push(text.trim());
+    return "\n";
+  });
 
   // 1. Remove starting "(xx发了朋友圈)" or "(xx发了条朋友圈)" or similar
   const startPostRegex = /^[（\(]\s*[^）\)]*?发了[^）\)]*?朋友圈\s*[）\)]\s*\n*/i;
@@ -340,6 +425,7 @@ const cleanAndExtractMoment = (content: string) => {
   return {
     content: cleanContent,
     selfComments,
+    imageDescription,
   };
 };
 
@@ -365,7 +451,8 @@ const getMomentComments = (mom: Moment) => {
     }
   });
 
-  return [...mom.comments, ...dynamicComments];
+  const deletedCommentIds = new Set(mom.deletedCommentIds || []);
+  return [...mom.comments, ...dynamicComments].filter((comment) => !deletedCommentIds.has(comment.id));
 };
 
 const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ownerName: string) => {
@@ -388,6 +475,10 @@ ${momentLines.join("\n")}`;
 };
 
 const getOfflineStoriesContextString = (offlineStories: OfflineStory[] | undefined, activeCharId: string, charName: string) => {
+  // Original offline dialogue must never leak into the online context. A user
+  // can explicitly archive a concise summary into the normal memory vault.
+  return "";
+  /*
   if (!offlineStories || offlineStories.length === 0) return "";
   const charStories = offlineStories.filter(s => s.characterId === activeCharId);
   if (charStories.length === 0) return "";
@@ -410,6 +501,7 @@ ${msgContent || "  (暂无剧情)"}`;
 以下是你们在线下剧本/平行时空剧情模式（Offline Mode）中共同创造的小说故事线与经历，你对这些线下剧情细节拥有清晰的记忆。
 当线上聊天涉及相关话题时，你可以在不破坏线上微信身份的前提下，极为自然地将这些经历作为你们两人“发生过的默契、回忆、平行宇宙经历”来进行互动：
 ${storyLines.join("\n\n")}`;
+  */
 };
 
 const getGroupChatMemories = (
@@ -482,6 +574,7 @@ export default function AppChat({
   onSaveCharacter,
   onAddMoment,
   onAddCommentToMoment,
+  onDeleteCommentFromMoment,
   onLikeMoment,
   onDeleteMoment,
   onToggleBookmark,
@@ -499,6 +592,7 @@ export default function AppChat({
   setActiveChatCharId,
   offlineStories = [],
   onSaveOfflineStory,
+  onDeleteOfflineStory,
   onDeleteCharacter,
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
@@ -507,6 +601,8 @@ export default function AppChat({
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [audioLoadingMessageId, setAudioLoadingMessageId] = useState<string | null>(null);
   const [activeTtsAudio, setActiveTtsAudio] = useState<HTMLAudioElement | null>(null);
+  const callSpeechQueueRef = useRef<Message[]>([]);
+  const isCallSpeechPlayingRef = useRef(false);
 
   // Serial Playback Queue Manager
   const playNextMessageInQueue = (currentId: string) => {
@@ -516,7 +612,7 @@ export default function AppChat({
   };
 
   // TTS Trigger Speech Function
-  const triggerMessageSpeech = async (msg: Message) => {
+  const triggerMessageSpeech = async (msg: Message, isQueuedCallSpeech = false) => {
     // Guard: Prevent non-voice messages from being synthesized/played in standard chat layout
     const isVoice = msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage);
     if (!isOfflineModeActive && !isVoice) {
@@ -540,7 +636,7 @@ export default function AppChat({
       return;
     }
 
-    if (activeTtsAudio) {
+    if (activeTtsAudio && !isQueuedCallSpeech) {
       try {
         activeTtsAudio.pause();
       } catch (e) {
@@ -548,7 +644,7 @@ export default function AppChat({
       }
       setActiveTtsAudio(null);
     }
-    if (voiceTimer) {
+    if (voiceTimer && !isQueuedCallSpeech) {
       clearInterval(voiceTimer);
       setVoiceTimer(null);
     }
@@ -615,7 +711,8 @@ export default function AppChat({
       if (!cleanText) {
         setPlayingMessageId(null);
         setAudioLoadingMessageId(null);
-        playNextMessageInQueue(msg.id);
+        if (isQueuedCallSpeech) finishQueuedCallSpeech();
+        else playNextMessageInQueue(msg.id);
         return;
       }
 
@@ -627,13 +724,15 @@ export default function AppChat({
       setAudioLoadingMessageId(null);
 
       audio.onended = () => {
-        playNextMessageInQueue(msg.id);
+        if (isQueuedCallSpeech) finishQueuedCallSpeech();
+        else playNextMessageInQueue(msg.id);
       };
 
       audio.onerror = (e) => {
         console.warn("Audio playback error:", e);
         setPlayingMessageId(null);
         setAudioLoadingMessageId(null);
+        if (isQueuedCallSpeech) finishQueuedCallSpeech();
       };
 
       audio.play();
@@ -641,8 +740,29 @@ export default function AppChat({
       console.warn("TTS generation failed:", err);
       setPlayingMessageId(null);
       setAudioLoadingMessageId(null);
+      if (isQueuedCallSpeech) finishQueuedCallSpeech();
       showToast("语音合成失败，请确认 MiniMax 设置正确！");
     }
+  };
+
+  const playNextQueuedCallSpeech = () => {
+    if (isCallSpeechPlayingRef.current) return;
+    const nextMessage = callSpeechQueueRef.current.shift();
+    if (!nextMessage) return;
+    isCallSpeechPlayingRef.current = true;
+    triggerMessageSpeech(nextMessage, true);
+  };
+
+  const finishQueuedCallSpeech = () => {
+    isCallSpeechPlayingRef.current = false;
+    setPlayingMessageId(null);
+    setActiveTtsAudio(null);
+    window.setTimeout(playNextQueuedCallSpeech, 0);
+  };
+
+  const enqueueCallSpeech = (msg: Message) => {
+    callSpeechQueueRef.current.push(msg);
+    playNextQueuedCallSpeech();
   };
 
   // Visibility and Cleanup Effects
@@ -712,34 +832,38 @@ export default function AppChat({
     }
 
     const isCallActive = activeAttachModal === "calling" && callingStatus === "connected";
-    const shouldBeVoice = isCallActive && msg.sender === "character";
-
+    // A real voice call only carries spoken content. Drop sticker/image payloads
+    // instead of showing or reading their markup as call subtitles.
     if (
-      shouldBeVoice && 
-      msg.content && 
-      !msg.content.startsWith("[语音") && 
-      !msg.content.startsWith("[系统]") && 
-      !msg.content.startsWith("[红包]") && 
-      !msg.content.startsWith("[转账]") && 
-      !msg.content.startsWith("data:image/") && 
-      !msg.content.startsWith("[表情]|")
+      isCallActive &&
+      msg.sender === "character" &&
+      (/^\[(?:表情|贴图|图片)\]/.test(msg.content || "") || msg.content?.startsWith("data:image/"))
     ) {
-      const text = msg.content;
-      const secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
-      msg.content = `[语音]|${secs}|${text}`;
+      return;
+    }
+
+    // Call subtitles are private to the call screen. They are only persisted inside
+    // the call record after hang-up, never mixed into the normal online timeline.
+    if (isCallActive) {
+      const subtitleContent = getCallTranscriptText(msg.content || "");
+      setCallTranscript((prev) => [...prev, {
+        id: msg.id,
+        sender: msg.sender,
+        content: subtitleContent,
+        timestamp: msg.timestamp,
+      }]);
+
+      if (msg.sender === "character" && subtitleContent) {
+        // TTS remains automatic during calls, but the call UI and saved transcript
+        // always contain plain subtitles rather than voice-message markup.
+        enqueueCallSpeech({ ...msg, content: subtitleContent });
+      }
+      return;
     }
 
     onSendMessageRaw(msg);
 
-    // Auto-play the synthetic voice for incoming character voice messages has been disabled per user request
-    // (requires user to manually click the voice bubble to play)
-    /*
-    if (msg.sender === "character" && msg.content && msg.content.startsWith("[语音") && settings.enableMiniMaxTts) {
-      setTimeout(() => {
-        triggerMessageSpeech(msg);
-      }, 500);
-    }
-    */
+    // Normal chat remains manual-play only.
   };
 
   // Sticker groups state
@@ -847,9 +971,10 @@ export default function AppChat({
   const isFloatingCute = activeStylePreset === "floating-cute";
   const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
   const globalChatIcons = sanitizeChatIcons(settings.chatIcons);
-  const getChatIcon = (key: ChatIconKey): string | undefined => {
-    return characterChatIcons[key] || globalChatIcons[key];
-  };
+  const getChatIcon = (key: ChatIconKey): string | undefined => characterChatIcons[key] || globalChatIcons[key];
+  const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const belongsToActiveIdentity = (ownerIdentityId?: string) =>
+    (ownerIdentityId || "identity-1") === activeIdentityId;
 
   const [momentsFilterCharId, setMomentsFilterCharId] = useState<string | null>(null);
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
@@ -870,7 +995,44 @@ export default function AppChat({
     }
   }, [friendIds]);
 
-  const friends = characters.filter((c) => friendIds.includes(c.id) && !c.isGroupChat);
+  const friends = characters.filter((c) =>
+    friendIds.includes(c.id) && !c.isGroupChat && belongsToActiveIdentity(c.ownerIdentityId)
+  );
+
+  const handleDeleteFriend = () => {
+    if (!activeCharacter || activeCharacter.isGroupChat || !onDeleteCharacter) return;
+
+    const friendName = activeCharacter.remark || activeCharacter.name;
+    if (!window.confirm(`确定删除好友“${friendName}”吗？与该好友的聊天、朋友圈、记忆和线下剧本将一并删除，且无法恢复。`)) {
+      return;
+    }
+
+    const friendId = activeCharacter.id;
+    setFriendIds((prev) => prev.filter((id) => id !== friendId));
+    onSaveMemories(memories.filter((memory) => memory.characterId !== friendId));
+    offlineStories
+      .filter((story) => story.characterId === friendId || story.characterIds?.includes(friendId))
+      .forEach((story) => onDeleteOfflineStory?.(story.id));
+    characters
+      .filter((character) => character.isGroupChat && character.memberIds?.includes(friendId))
+      .forEach((group) => onSaveCharacter({
+        ...group,
+        memberIds: group.memberIds?.filter((memberId) => memberId !== friendId),
+      }));
+
+    localStorage.removeItem(`offline_mode_active_${friendId}`);
+    localStorage.removeItem(`offline_story_id_${friendId}`);
+    onDeleteCharacter(friendId, true);
+    setIsShowingCardModal(false);
+    setActiveChatCharId(null);
+  };
+
+  // Never leave an old identity's private thread open after switching profiles.
+  useEffect(() => {
+    if (activeChatCharId && activeCharacter && !belongsToActiveIdentity(activeCharacter.ownerIdentityId)) {
+      setActiveChatCharId(null);
+    }
+  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId]);
 
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
@@ -1016,16 +1178,50 @@ export default function AppChat({
     if (!activeChatCharId || !activeCharacter) return;
     
     const charName = activeCharacter.remark || activeCharacter.name;
+    const offlineParticipantIds = activeCharacter.isGroupChat
+      ? (activeCharacter.memberIds || [])
+      : [activeChatCharId];
+    const offlineParticipantSet = new Set(offlineParticipantIds);
+    // The direct menu action used to import only the clicked message. Snapshot
+    // the whole configured context window so the offline scene has a real handoff.
+    const contextLimit = activeCharacter.contextMemoryLimit || 20;
+    const recentOnlineMessages = messages
+      .filter((item) => item.characterId === activeChatCharId && !item.isOffline)
+      .slice(-contextLimit * 2);
+    const sourceMessages = recentOnlineMessages.length > 0 ? recentOnlineMessages : [msg];
+    const snapshotTimestamp = Date.now();
+    const importedMessages = sourceMessages.map((item, index) => ({
+      ...item,
+      id: `offline-import-${snapshotTimestamp}-${index}-${item.id}`,
+      isOffline: true,
+      isImportedContext: true,
+    }));
+    const importedContext: OfflineStory["importedContext"] = {
+      messages: importedMessages,
+      memories: memories
+        .filter((memory) => memory.characterId === activeChatCharId || offlineParticipantSet.has(memory.characterId))
+        .map((memory) => memory.content),
+      worldBook: getLatestWorldBookEntries(worldBookEntries || [])
+        .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId))
+        .map((entry) => `${entry.title}: ${entry.content}`),
+      importedAt: snapshotTimestamp,
+    };
+
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: activeChatCharId,
+      // A group is only a container; the actual offline actors are its members.
+      characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
       title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: "continue",
       sourceChatId: activeChatCharId,
-      sourceChatMsgCount: 1,
-      messages: [{ ...msg, isOffline: true }]
+      sourceChatMsgCount: importedMessages.length,
+      importedContext,
+      enableTimeAwareness: Boolean(activeCharacter.enableTimeAwareness),
+      // Imported online chat is context only; the offline page starts with new story content.
+      messages: []
     };
     
     if (onSaveOfflineStory) {
@@ -1075,6 +1271,9 @@ export default function AppChat({
   // Moments form state
   const [momentInputText, setMomentInputText] = useState("");
   const [momentAttachedImage, setMomentAttachedImage] = useState<string | null>(null);
+  const [momentTextImageDescription, setMomentTextImageDescription] = useState("");
+  const [showTextImageInput, setShowTextImageInput] = useState(false);
+  const [viewingImageDescription, setViewingImageDescription] = useState<string | null>(null);
   const [showMomentPublisher, setShowMomentPublisher] = useState(false);
   const [inlineCommentsTexts, setInlineCommentsTexts] = useState<Record<string, string>>({});
   const [showCommentInputMap, setShowCommentInputMap] = useState<Record<string, boolean>>({});
@@ -1100,6 +1299,7 @@ export default function AppChat({
   const [draftChatIcons, setDraftChatIcons] = useState<ChatIconOverrides>({});
   const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
+  const [draftEnableProactiveCall, setDraftEnableProactiveCall] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
   const [draftProactiveStartTime, setDraftProactiveStartTime] = useState("09:00");
   const [draftProactiveEndTime, setDraftProactiveEndTime] = useState("22:00");
@@ -1114,20 +1314,21 @@ export default function AppChat({
   const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
   const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
   const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState<number>(1.0);
-  const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("medium");
+  const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("low");
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
   const [activeAttachModal, setActiveAttachModal] = useState<"redpacket" | "music" | "location" | "file" | "calling" | "voice" | null>(null);
-  const [callingType, setCallingType] = useState<"voice" | "video">("voice");
   const [voiceDuration, setVoiceDuration] = useState("5");
   const [voiceText, setVoiceText] = useState("");
   const [callingStatus, setCallingStatus] = useState<"ringing" | "connected" | "ended">("ringing");
   const [callingDuration, setCallingDuration] = useState(0);
   const [isIncomingCall, setIsIncomingCall] = useState(false);
-  const [showCallingDirectionModal, setShowCallingDirectionModal] = useState(false);
   const [callStartTime, setCallStartTime] = useState<number>(0);
   const [callingInputText, setCallingInputText] = useState("");
+  const [callTranscript, setCallTranscript] = useState<CallTranscriptItem[]>([]);
+  const callTranscriptEndRef = useRef<HTMLDivElement | null>(null);
+  const [callRecordDetail, setCallRecordDetail] = useState<ReturnType<typeof parseCallRecord> | null>(null);
   const [redPacketAmount, setRedPacketAmount] = useState("8.88");
   const [redPacketGreeting, setRedPacketGreeting] = useState("恭喜发财，万事如意");
   const [showRedPacketOpenModal, setShowRedPacketOpenModal] = useState<boolean>(false);
@@ -1217,7 +1418,7 @@ export default function AppChat({
     let refundAmountTotal = 0;
 
     messages.forEach((msg) => {
-      if (msg.content.startsWith("[红包]")) {
+      if (isRedPacketMarkup(msg.content)) {
         const currentStatus = redPacketStatuses[msg.id] || "unclaimed";
         const isExpired = Date.now() - msg.timestamp > 24 * 3600 * 1000;
         
@@ -1287,6 +1488,9 @@ export default function AppChat({
     isOwn: boolean;
     timestamp: number;
   } | null>(null);
+  const [commentDeleteTarget, setCommentDeleteTarget] = useState<{ momentId: string; commentId: string } | null>(null);
+  const commentLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressCommentClickRef = useRef(false);
 
   const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() => {
     try {
@@ -1371,6 +1575,7 @@ export default function AppChat({
   // Send character's custom opening speech / greeting if there are no messages in the chat history
   useEffect(() => {
     if (!activeChatCharId || !activeCharacter) return;
+    if (isOfflineStoryActiveFor(activeChatCharId)) return;
     
     const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
     if (currentChatMessages.length > 0) return;
@@ -1410,6 +1615,7 @@ export default function AppChat({
 
     friends.forEach((friend) => {
       if (!friend.enableProactiveChat) return;
+      if (isOfflineStoryActiveFor(friend.id)) return;
 
       // Only execute catch-up once per character per app session to avoid duplicates
       if (processedCatchupsRef.current[friend.id]) return;
@@ -1453,6 +1659,7 @@ export default function AppChat({
 
       friends.forEach((friend) => {
         if (!friend.enableProactiveChat) return;
+        if (isOfflineStoryActiveFor(friend.id)) return;
 
         // 0. Guaranteed scheduled proactive contact check
         if (friend.scheduledProactiveTime && Date.now() >= friend.scheduledProactiveTime) {
@@ -1551,6 +1758,13 @@ export default function AppChat({
     return () => clearInterval(timer);
   }, [activeAttachModal, callingStatus]);
 
+  useEffect(() => {
+    if (activeAttachModal !== "calling" || callingStatus !== "connected") return;
+    requestAnimationFrame(() => {
+      callTranscriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+  }, [callTranscript.length, activeAttachModal, callingStatus]);
+
   // Auto connect timer for user-initiated call
   useEffect(() => {
     let autoConnectTimer: any = null;
@@ -1564,6 +1778,71 @@ export default function AppChat({
       if (autoConnectTimer) clearTimeout(autoConnectTimer);
     };
   }, [activeAttachModal, callingStatus, isIncomingCall]);
+
+  const beginVoiceCall = (incoming: boolean) => {
+    if (!activeCharacter || activeCharacter.isGroupChat) return;
+    setIsIncomingCall(incoming);
+    setCallingStatus("ringing");
+    setCallingDuration(0);
+    setCallStartTime(0);
+    setCallingInputText("");
+    setCallTranscript([]);
+    setActiveAttachModal("calling");
+    setShowAttachPanel(false);
+  };
+
+  const endVoiceCall = () => {
+    if (!activeChatCharId || callingStatus !== "connected") {
+      setActiveAttachModal(null);
+      return;
+    }
+    const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
+    const secs = (callingDuration % 60).toString().padStart(2, "0");
+    onSendMessageRaw({
+      id: `call-record-${Date.now()}`,
+      characterId: activeChatCharId,
+      sender: "user",
+      content: `[通话记录]|语音通话|${mins}:${secs}|${encodeURIComponent(JSON.stringify(callTranscript))}`,
+      timestamp: Date.now(),
+    });
+    if (activeTtsAudio) activeTtsAudio.pause();
+    callSpeechQueueRef.current = [];
+    isCallSpeechPlayingRef.current = false;
+    setCallingStatus("ended");
+    setCallingInputText("");
+    setActiveAttachModal(null);
+  };
+
+  const sendVoiceCallMessage = () => {
+    const text = callingInputText.trim();
+    if (!activeChatCharId || !text) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      characterId: activeChatCharId,
+      sender: "user",
+      content: text,
+      timestamp: Date.now(),
+    };
+    onSendMessage(userMsg);
+    generateResponseForUserMessage(userMsg);
+    setCallingInputText("");
+  };
+
+  // Enabled contacts occasionally call the user while their chat is open.
+  // The cooldown keeps this feeling spontaneous rather than intrusive.
+  const proactiveCallCooldownRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!activeChatCharId || !activeCharacter || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
+    const timer = setInterval(() => {
+      if (activeAttachModal || isOfflineStoryActiveFor(activeChatCharId)) return;
+      const lastCallAt = proactiveCallCooldownRef.current[activeChatCharId] || 0;
+      if (Date.now() - lastCallAt < 5 * 60 * 1000 || Math.random() >= 0.18) return;
+      proactiveCallCooldownRef.current[activeChatCharId] = Date.now();
+      beginVoiceCall(true);
+    }, 60 * 1000);
+    return () => clearInterval(timer);
+  }, [activeChatCharId, activeCharacter, activeAttachModal]);
 
   const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return;
@@ -1635,6 +1914,7 @@ ${member.compressedMemory ? `- 过去的互动记忆: ${member.compressedMemory}
 ${membersDefText}
 
 【群聊互动核心原则】：
+0. [CURRENT-SCENE CONTINUITY — CRITICAL]: Messages in the recent group history establish the current scene facts. Do not silently replace a member's just-stated activity, location, physical condition, possession, or relationship fact with a contradictory one. If a member changes from one activity to another, explicitly establish a believable transition and time passage first; otherwise continue the existing situation or avoid inventing a new concrete activity.
 1. 【人设绝对统一与高恢复度】：每个群成员发言必须 100% 贴合其人设、性格、背景故事以及各自的专属世界书设定/日常日程/时间线。对于那些设置了特殊语气词、口癖（如每句话都加“喵”等）的角色，他们在群里发言时也必须【绝对强制、无一例外地完全忠实执行该句式/口癖设定】。
 2. 🚨【回复概率与不回复机制】：并非每个成员在每次互动时都必须发言！在真实的微信群聊中，人物是否回复信息要参考对方人设、自己的世界书日常时间线和日程、当前话题的兴趣度以及与发言人的关系等。
    - 例如：高冷、傲娇、忙碌、或正在执行专属世界书日程时间线上其他任务的角色（比如世界书设定某个角色此时应该在睡觉、在上班、或生病等），应该保持沉默，不返回任何回复，或者仅在极度契合的话题下简单插一句；而热情、空闲、爱凑热闹、或与发言人关系特别亲密的角色，则应该高频且积极地在群里接话。
@@ -1825,8 +2105,9 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     // Exclude non-voice formats
     if (
       !bubbleText ||
-      bubbleText.startsWith("[红包]") ||
-      bubbleText.startsWith("[转账]") ||
+      isCallRecordMarkup(bubbleText) ||
+      isRedPacketMarkup(bubbleText) ||
+      isTransferMarkup(bubbleText) ||
       bubbleText.startsWith("[系统]") ||
       bubbleText.startsWith("data:image/") ||
       bubbleText.startsWith("[表情]|") ||
@@ -1914,7 +2195,7 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
     setIsTyping(true);
 
-    const isRedPacket = userMsg && userMsg.content.startsWith("[红包]");
+    const isRedPacket = userMsg && isRedPacketMarkup(userMsg.content);
     if (isRedPacket) {
       const rpId = userMsg!.id;
       // Simulate partner claiming after 3 seconds
@@ -1936,7 +2217,22 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
     try {
       // Collect message history of this specific character to pass to backend
-      const sourceMsgs = customHistoryOverride || (userMsg ? [...currentChatMessages, userMsg] : [...currentChatMessages]);
+      const isConnectedVoiceCall = activeAttachModal === "calling" && callingStatus === "connected";
+      const callHistoryMessages: Message[] = isConnectedVoiceCall
+        ? callTranscript.map((item) => ({
+            id: item.id,
+            characterId: activeChatCharId,
+            sender: item.sender,
+            content: item.content,
+            timestamp: item.timestamp,
+          }))
+        : [];
+      // A call has its own live history. Keep a short online-chat lead-in for
+      // continuity, then append this call's subtitles in chronological order.
+      const baseSourceMsgs = isConnectedVoiceCall
+        ? [...currentChatMessages.slice(-Math.min(20, activeCharacter.contextMemoryLimit ?? 20)), ...callHistoryMessages]
+        : [...currentChatMessages];
+      const sourceMsgs = customHistoryOverride || (userMsg ? [...baseSourceMsgs, userMsg] : baseSourceMsgs);
       const uniqueMsgsMap = new Map<string, Message>();
       sourceMsgs.forEach(m => {
         if (m) uniqueMsgsMap.set(m.id, m);
@@ -1950,7 +2246,21 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
       const msgsForHistory = (userMsg && finalMsgs.length > 0 && finalMsgs[finalMsgs.length - 1].id === userMsg.id)
         ? finalMsgs.slice(0, -1)
         : finalMsgs;
-      const slicedMsgs = msgsForHistory.slice(-limit);
+      const isSameLocalDay = (left: number, right: number) => {
+        const leftDate = new Date(left);
+        const rightDate = new Date(right);
+        return leftDate.getFullYear() === rightDate.getFullYear()
+          && leftDate.getMonth() === rightDate.getMonth()
+          && leftDate.getDate() === rightDate.getDate();
+      };
+      const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
+      // With time awareness enabled, the first message on a new calendar day
+      // starts a fresh live session. Yesterday's tail remains stored, but it is
+      // no longer sent as the topic that the model should answer right now.
+      const isCrossDayNewSession = activeCharacter.enableTimeAwareness !== false
+        && Boolean(userMsg && latestHistoryMessage)
+        && !isSameLocalDay(userMsg!.timestamp, latestHistoryMessage.timestamp);
+      const slicedMsgs = isCrossDayNewSession ? [] : msgsForHistory.slice(-limit);
 
       const history = slicedMsgs.map((m) => {
         let contentText = m.content;
@@ -2039,19 +2349,64 @@ ${activeCharacter.disableBracketActions
 - Personality & Behavior: ${activeCharacter.personality}
 - Background Story: ${activeCharacter.backstory}`;
 
+      if (activeCharacter.initialChatMode === "context" && activeCharacter.initialChatContext?.trim() && msgsForHistory.length === 0) {
+        charDefText += `\n\n[First chat setup — hidden guidance only]\n${activeCharacter.initialChatContext.trim()}\nUse this scene and relationship as the starting point for your first reply. Do not quote, mention, or render this setup as a system message or chat bubble.`;
+      }
+
       charDefText += `\n\n[🚨 记忆与上下文关联优先级规则]:
 1. 归档精炼总结优先：以下“先前背景与归档总结”及“召回深度记忆”为历史最高优先级真实记忆，你必须绝对优先根据它们来保持角色认同、长久羁绊和态度。
 2. 历史检索及短期上下文：你的短期上下文聊天记录已按照用户的限制进行了智能截断，以节省 Token 开销。请勿认为你忘记了先前对话，一切先前细节请完全基于归档精炼总结中包含的信息。`;
 
-      if (activeCharacter.compressedMemory) {
+      const normalizeTopicText = (value: string) => value
+        .replace(/\[[^\]]*\]/g, " ")
+        .replace(/[\s\p{P}\p{S}]+/gu, "")
+        .toLowerCase();
+      const currentTopicText = normalizeTopicText(userMsg?.content || "");
+      const recentCallTopicText = normalizeTopicText(
+        callTranscript.slice(-8).map((item) => item.content).join(" ")
+      );
+      const toTopicUnits = (value: string) => {
+        if (value.length < 2) return value ? [value] : [];
+        return Array.from(new Set(Array.from({ length: value.length - 1 }, (_, index) => value.slice(index, index + 2))));
+      };
+      const topicUnits = toTopicUnits(currentTopicText);
+      const sharedTopicUnits = topicUnits.filter((unit) => recentCallTopicText.includes(unit)).length;
+      const topicOverlap = topicUnits.length > 0 ? sharedTopicUnits / topicUnits.length : 1;
+      const callTopicShiftDetected = isConnectedVoiceCall
+        && callTranscript.length >= 2
+        && currentTopicText.length >= 4
+        && topicOverlap < 0.28;
+      const shouldLoadLongTermMemory = (!isConnectedVoiceCall || callTopicShiftDetected)
+        && !isCrossDayNewSession;
+
+      if (activeCharacter.compressedMemory && shouldLoadLongTermMemory) {
         charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeCharacter.compressedMemory}`;
       }
 
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", userMsg ? userMsg.content : "", topK);
+      const relevantMemories = shouldLoadLongTermMemory
+        ? getRelevantMemories(memories || [], activeChatCharId || "", userMsg ? userMsg.content : "", topK)
+        : [];
       if (relevantMemories.length > 0) {
         charDefText += `\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+      }
+
+      // A continuation synchronized while leaving the offline app is an explicit
+      // handoff. Surface the newest one on the immediate return to online chat,
+      // even when a short greeting is too vague for semantic retrieval.
+      const latestOfflineContinuationMemory = [...(memories || [])]
+        .filter((memory) => memory.characterId === activeChatCharId && memory.content.includes("offline-story:"))
+        .sort((a, b) => b.timestamp - a.timestamp)[0];
+      const isFreshOfflineHandoff = latestOfflineContinuationMemory
+        // The handoff must be newer than the last online message. This keeps an
+        // old archived story from resurfacing, while allowing an immediate return
+        // to online chat to bridge naturally even when it crosses midnight.
+        && (!latestHistoryMessage || latestOfflineContinuationMemory.timestamp >= latestHistoryMessage.timestamp)
+        && Date.now() - latestOfflineContinuationMemory.timestamp < 2 * 60 * 60 * 1000;
+      if (isFreshOfflineHandoff
+        && !relevantMemories.some((memory) => memory.id === latestOfflineContinuationMemory.id)) {
+        charDefText += `\n- Latest offline continuation handoff (continue this naturally if relevant):\n  * ${latestOfflineContinuationMemory.content}`;
       }
 
       const userProfileText = `User Profile (interacting with you):
@@ -2091,6 +2446,12 @@ ${activeCharacter.disableBracketActions
 1. 你已经【拆开并领取】了这个红包。你感到开心、意外、被宠溺、受宠若惊、感激或者开玩笑，具体情绪取决于你的人设！
 2. 在你的本轮回复中，你必须【极其自然且生动地对此做出反应】（例如：开心地谢谢对方、调侃对方是大款、撒娇、承诺用这个钱去买你喜欢的东西、或者也想礼貌地找机会回礼等）。
 3. 请用你完全符合人设的角色口吻和微信聊天风格来回复。绝对不要说“系统”、“格式”或“指令”等AI字眼。`);
+      }
+
+      if (isCrossDayNewSession) {
+        assembledInstructions.push(`[NEW-DAY CONVERSATION BOUNDARY — HIGHEST PRIORITY]
+The user's newest message starts a fresh conversation on a different calendar day. Yesterday's unfinished exchange is closed historical context, not the topic currently being continued.
+Answer only the user's newest message as today's opening. Do not resume, answer, or elaborate on yesterday's last topic unless the user explicitly mentions it again.`);
       }
 
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
@@ -2198,32 +2559,58 @@ ${isLastVoiceOld
       // 6. User Profile
       assembledInstructions.push(userProfileText);
 
+      // Treat the immediate chat state as a continuity anchor, not merely optional style context.
+      // This prevents the model from casually replacing a just-established activity (such as
+      // running) with an unrelated one (such as cycling) in the next reply.
+      const sceneAnchorTranscript = finalMsgs.slice(-8).map((message) => {
+        const sender = message.sender === "user" ? settings.name : activeCharacter.name;
+        return `- ${sender}: ${message.content}`;
+      }).join("\n");
+      assembledInstructions.push(`[CRITICAL CURRENT-SCENE CONTINUITY]
+The recent conversation below contains the current, established facts of the scene. Treat a recently stated activity, location, physical condition, possession, promise, or relationship fact as true and still in effect.
+- Never silently replace one activity with another. For example, if you just said you were sweaty from running, do not later say you just returned from cycling.
+- If the activity, location, or situation really changes, first make the transition explicit and plausible (including time passing where needed). Do not call the new activity "just now" unless the transition has been established.
+- When the history is unclear, avoid inventing a new concrete activity. Continue the existing topic or ask naturally instead.
+- This continuity rule applies to every message in a multi-bubble reply as well.
+
+Recent scene facts:
+${sceneAnchorTranscript || "(No prior scene facts.)"}`);
+
       // 7. Before Chat History entries
       if (wbBlocks.before_chat_history.length > 0) {
         assembledInstructions.push(`[World Book Background: Story Anchor]\n` + wbBlocks.before_chat_history.join("\n\n"));
       }
 
       // 8. WeChat Moments Context memory
-      const momentsContext = getMomentsContextString(moments, activeCharacter, settings.name);
-      if (momentsContext) {
+      const momentsContext = getMomentsContextString(allMoments, activeCharacter, settings.name);
+      if (momentsContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(momentsContext);
       }
 
       // 8.5 Offline stories context memory
       const offlineStoriesContext = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
-      if (offlineStoriesContext) {
+      if (offlineStoriesContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(offlineStoriesContext);
       }
 
       // 8.7 Real-time group chat memories
       const groupMemoriesContext = getGroupChatMemories(activeCharacter, characters, messages, settings.name);
-      if (groupMemoriesContext) {
+      if (groupMemoriesContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(groupMemoriesContext);
       }
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers1 = stickerGroups.flatMap(g => g.stickers);
-      if (allStickers1.length > 0) {
+      if (activeAttachModal === "calling") {
+        assembledInstructions.push(`[语音电话输出规则]
+你正在和用户进行实时语音电话。只输出适合直接说出口的纯文字台词。
+禁止发送表情包、贴图、图片、红包、转账、文件、位置或任何方括号附件标记；不要输出“[表情]”“[图片]”等描述。`);
+        assembledInstructions.push(`[VOICE CALL MEMORY ROUTING]
+1. Highest priority: the current call transcript and the short online-chat lead-in. Answer the user's newest sentence and continue the topic already in progress.
+2. Do not repeat, paraphrase, or restart an answer already spoken during this call. Compare against your recent call lines and add only new information or a natural follow-up.
+3. Long-term archived memory is ${callTopicShiftDetected ? "available because the user shifted to a different topic; use only directly relevant facts" : "not loaded for this turn; stay with short-term live context"}.
+4. Never force an old memory into the conversation merely because it exists. If the user's meaning is unclear, ask a brief natural question instead of replaying an earlier answer.`);
+      } else if (allStickers1.length > 0) {
         const stickerListStr = allStickers1.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
         assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
 你作为扮演角色，现在可以使用我的自定义表情包来回复我！当你想要表达特定情绪、调侃、撒娇或进行有趣回应时，你可以在你发出的消息序列中【单独一行发送表情包】，或者直接把表情包作为一条独立的消息发送出来。
@@ -2391,7 +2778,7 @@ ${stickerListStr}
             }
           }
         } else {
-          const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
+          const cleanedText = normalizePaymentMarkup(cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false));
           const textToSplit = cleanedText || data.text;
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
           const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
@@ -2402,7 +2789,8 @@ ${stickerListStr}
             
             // Dynamically decide if this bubble should be a voice message or a text message
             let finalContent = bubbleText;
-            const isVoice = shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
+            const isVoice = activeAttachModal !== "calling"
+              && shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
             if (isVoice) {
               const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
               finalContent = `[语音]|${secs}|${bubbleText}`;
@@ -2530,8 +2918,9 @@ ${stickerListStr}
       content: contentString,
       timestamp: Date.now(),
     };
-    onSendMessage(userMsg);
-    generateResponseForUserMessage(userMsg);
+    const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
+    onSendMessage(normalizedUserMsg);
+    generateResponseForUserMessage(normalizedUserMsg);
   };
 
   const sendPartnerRedPacket = async (amount: string, greeting: string) => {
@@ -2634,6 +3023,39 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+  };
+
+  const handleMomentCommentPointerDown = (momentId: string, commentId: string) => {
+    suppressCommentClickRef.current = false;
+    if (commentLongPressTimerRef.current) clearTimeout(commentLongPressTimerRef.current);
+    commentLongPressTimerRef.current = setTimeout(() => {
+      suppressCommentClickRef.current = true;
+      commentLongPressTimerRef.current = null;
+      setCommentDeleteTarget({ momentId, commentId });
+    }, 550);
+  };
+
+  const clearMomentCommentLongPress = () => {
+    if (commentLongPressTimerRef.current) {
+      clearTimeout(commentLongPressTimerRef.current);
+      commentLongPressTimerRef.current = null;
+    }
+  };
+
+  const handleMomentCommentClick = (momentId: string, comment: MomentComment) => {
+    if (suppressCommentClickRef.current) {
+      suppressCommentClickRef.current = false;
+      return;
+    }
+    setReplyingToCommentMap(prev => ({ ...prev, [momentId]: comment }));
+    setShowCommentInputMap(prev => ({ ...prev, [momentId]: true }));
+  };
+
+  const confirmDeleteMomentComment = () => {
+    if (!commentDeleteTarget || !onDeleteCommentFromMoment) return;
+    onDeleteCommentFromMoment(commentDeleteTarget.momentId, commentDeleteTarget.commentId);
+    setCommentDeleteTarget(null);
+    showToast("评论已删除");
   };
 
   const handleMomentTextContextMenu = (
@@ -2740,7 +3162,8 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
   }, [messages]);
 
   // Pre-seed moments if state empty
-  const allMoments = moments.length === 0 ? PRESEED_MOMENTS : moments;
+  const allMoments = (moments.length === 0 ? PRESEED_MOMENTS : moments)
+    .filter((moment) => belongsToActiveIdentity(moment.ownerIdentityId));
 
   // Auto scroll in chats with smart detection
   useEffect(() => {
@@ -3004,7 +3427,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
 
-      const momentsContextRegen = getMomentsContextString(moments, activeCharacter, settings.name);
+      const momentsContextRegen = getMomentsContextString(allMoments, activeCharacter, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
 
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
@@ -3203,6 +3626,7 @@ ${stickerListStr}
         customChatIcons: draftChatIcons,
         chatStylePreset: draftChatStylePreset,
         enableProactiveChat: draftEnableProactiveChat,
+        enableProactiveCall: draftEnableProactiveCall,
         proactiveChatInterval: draftProactiveChatInterval,
         proactiveStartTime: draftProactiveStartTime,
         proactiveEndTime: draftProactiveEndTime,
@@ -3530,6 +3954,7 @@ ${proactivePrompt}`;
 
   // Automated background proactive message generator for any character
   const triggerProactiveFor = async (charId: string, customTaskText?: string, backdateTimestamp?: number) => {
+    if (isOfflineStoryActiveFor(charId)) return;
     const friend = characters.find((c) => c.id === charId);
     if (!friend) return;
 
@@ -3816,11 +4241,19 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
   };
 
   const generateCharacterMoment = async (friend: Character) => {
+    if (isOfflineStoryActiveFor(friend.id)) return;
     try {
       const friendMsgs = messages
         .filter((m) => m.characterId === friend.id)
         .sort((a, b) => a.timestamp - b.timestamp);
-      const slicedMsgs = friendMsgs.slice(-60); // 30 rounds of dialogue memory
+      const contextLimit = friend.contextMemoryLimit || 20;
+      const slicedMsgs = friendMsgs.slice(-contextLimit * 2);
+      const archivedMemories = (memories || [])
+        .filter((memory) => memory.characterId === friend.id)
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, recallSettings?.recallCount || 5);
+      const historicalFallback = friendMsgs.slice(-(friend.retrievalHistoryLimit || 100));
+      const fullWorldBook = getFullCharacterWorldBook(worldBookEntries || [], friend.id);
 
       const history = slicedMsgs.map((m) => ({
         role: m.sender === "user" ? "user" : "model",
@@ -3831,6 +4264,16 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
 Character Profile:
 - Personality: ${friend.personality}
 - Background: ${friend.backstory}
+
+Memory source policy, in strict order: do not make up events, dates, shared experiences, or emotions that are not supported below.
+1. Recent real-time conversation (highest priority, ${contextLimit} rounds):
+${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "User" : friend.name}: ${m.content}`).join("\n") : "(No recent chat)"}
+2. Long-term archived summaries:
+${archivedMemories.length ? archivedMemories.map(m => `* ${m.content}`).join("\n") : "(No archived summaries)"}
+3. Historical fallback (only if the above has no usable material; capped at ${friend.retrievalHistoryLimit || 100} messages):
+${historicalFallback.length > 0 ? historicalFallback.map(m => `* ${m.sender === "user" ? "User" : friend.name}: ${m.content}`).join("\n") : "(No historical chat)"}
+4. Complete active world book (always obey):
+${fullWorldBook || "(No world book entries)"}
 
 User Profile (Machine Owner / 机主):
 - Nickname: ${settings.name}
@@ -3844,8 +4287,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 1. The post must fit your personality. It can be about your own personal life (feelings, work, hobbies) OR about your relationship/recent chats/interactions with the user.
 2. The post content must be natural, engaging, and in Chinese.
 3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
-4. Do NOT use OOC tags, narration brackets, or talk like an AI. Just output the text of the Moment post.
-5. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)" or "(配图：...)" at the start.
+4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, or talk like an AI. Just output the text of the Moment post.
+5. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)".
+6. If this post needs an image, add one final separate line in exactly this format: "(配图：图片描述)". This line will be rendered as a text-image card, never as post body text.
 6. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 `;
 
@@ -3866,7 +4310,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         const parsed = cleanAndExtractMoment(cleanedContent);
 
         let momentImage: string | undefined = undefined;
-        if (friend.album && friend.album.length > 0) {
+        if (!parsed.imageDescription && friend.album && friend.album.length > 0) {
           // 40% chance of attaching a photo from their album
           if (Math.random() < 0.4) {
             const randomIndex = Math.floor(Math.random() * friend.album.length);
@@ -3877,6 +4321,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         const newMo: Moment = {
           id: `${Date.now()}-char-moment-${Math.random().toString(36).substr(2, 5)}`,
           characterId: friend.id,
+          ownerIdentityId: activeIdentityId,
           authorName: friend.remark || friend.name,
           authorAvatar: friend.avatar,
           content: parsed.content,
@@ -3890,9 +4335,19 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             timestamp: Date.now() + (idx + 1) * 1000,
           })),
           image: momentImage,
+          imageType: momentImage ? "photo" : (parsed.imageDescription ? "text" : undefined),
+          imageDescription: parsed.imageDescription,
         };
 
         onAddMoment(newMo);
+        onSaveMemories([{
+          id: `${Date.now()}-moment-memory-${Math.random().toString(36).slice(2, 6)}`,
+          characterId: friend.id,
+          content: `【朋友圈动态】${parsed.content}${momentImage ? "（发布时附有配图）" : ""}`,
+          timestamp: Date.now(),
+          importance: 4,
+          isManual: false,
+        }, ...(memories || [])]);
       }
     } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
@@ -3914,6 +4369,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
     if (friends.length === 0) return;
 
     for (const friend of friends) {
+      if (isOfflineStoryActiveFor(friend.id)) continue;
       const lastPostTime = getCharacterLastMomentTimestamp(moments, friend.id);
       const interval = getPostIntervalMs(friend);
       const timeElapsed = Date.now() - lastPostTime;
@@ -3941,10 +4397,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
   const handlePublishMoment = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!momentInputText.trim() && !momentAttachedImage) return;
+    if (!momentInputText.trim() && !momentAttachedImage && !momentTextImageDescription.trim()) return;
 
     const newMo: Moment = {
       id: Date.now().toString(),
+      ownerIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
       content: momentInputText.trim(),
@@ -3952,11 +4409,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
       likes: [],
       comments: [],
       image: momentAttachedImage || undefined,
+      imageType: momentAttachedImage ? "photo" : (momentTextImageDescription.trim() ? "text" : undefined),
+      imageDescription: momentTextImageDescription.trim() || undefined,
     };
 
     onAddMoment(newMo);
     setMomentInputText("");
     setMomentAttachedImage(null);
+    setMomentTextImageDescription("");
+    setShowTextImageInput(false);
     setShowMomentPublisher(false);
 
     // Auto-comment trigger
@@ -4012,6 +4473,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
   const chatThreads = characters
     .filter((char) => {
       if (char.isGroupChat) {
+        if (!belongsToActiveIdentity(char.ownerIdentityId)) return false;
         const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
         const hasMessages = threadMsgs.length > 0;
         const isInitiated = initiatedChatIds.includes(char.id);
@@ -4091,6 +4553,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               #conv-screen .chat-bubble-self,
               #conv-screen .chat-bubble-other {
                 position: relative !important;
+                isolation: isolate;
+                z-index: 0;
+                overflow: visible !important;
               }
 
               ${settings.avatarBorderRadius !== undefined ? `
@@ -4156,12 +4621,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   content: '' !important;
                   display: block !important;
                   position: absolute;
-                  width: 0;
-                  height: 0;
-                  border-style: solid;
-                  border-width: 6px;
-                  border-color: transparent transparent transparent ${settings.selfBubbleBg || '#18181b'};
-                  right: -11px;
+                  width: 13px;
+                  height: 13px;
+                  background: ${getBubbleBackgroundStyle(settings.selfBubbleBg || '#18181b', settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100)};
+                  border: none;
+                  border-radius: 0 0 4px 0;
+                  transform: rotate(45deg);
+                  right: -5px;
+                  z-index: -1;
                   ${settings.bubbleTailVertical === 'top' ? 'top: 8px; bottom: auto;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px; top: auto;' : 'top: calc(50% - 6px); bottom: auto;'}
                 }
 
@@ -4169,12 +4636,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   content: '' !important;
                   display: block !important;
                   position: absolute;
-                  width: 0;
-                  height: 0;
-                  border-style: solid;
-                  border-width: 6px;
-                  border-color: transparent ${settings.otherBubbleBg || '#f4f4f5'} transparent transparent;
-                  left: -11px;
+                  width: 13px;
+                  height: 13px;
+                  background: ${getBubbleBackgroundStyle(settings.otherBubbleBg || '#f4f4f5', settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100)};
+                  border: none;
+                  border-radius: 0 0 0 4px;
+                  transform: rotate(45deg);
+                  left: -5px;
+                  z-index: -1;
                   ${settings.bubbleTailVertical === 'top' ? 'top: 8px; bottom: auto;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px; top: auto;' : 'top: calc(50% - 6px); bottom: auto;'}
                 }
               ` : `
@@ -4511,19 +4980,53 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 }
               `}</style>
             )}
-            {/* Chat Window Header */}
-            <ChatHeader
-              name={activeCharacter.name}
-              remark={activeCharacter.remark}
-              avatar={activeCharacter.avatar}
-              isGroupChat={activeCharacter.isGroupChat}
-              memberCount={activeCharacter.memberIds?.length || 0}
-              isFloatingCute={isFloatingCute}
-              onBack={() => {
-                setActiveChatCharId(null);
-                setIsShowingCardModal(false);
-              }}
-              onMore={() => {
+            {/* Chat Window Header with standard classes and compact size */}
+            <div className={`flex items-center justify-between z-10 shrink-0 relative cv-header chat-header header app-top-container default-controls selection-controls ${
+              isFloatingCute
+                ? "mx-3.5 mt-3.5 mb-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] px-4 py-2"
+                : "px-4 py-1.5 bg-transparent"
+            }`}>
+              <button
+                onClick={() => {
+                  setActiveChatCharId(null);
+                  setIsShowingCardModal(false);
+                }}
+                className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button"
+              >
+                <span className="cv-back-icon flex items-center justify-center w-full h-full">
+                  <ChevronLeft className="w-4 h-4 text-slate-700" />
+                </span>
+              </button>
+
+              <div className="flex items-center gap-1.5 w-max max-w-[200px] header-title">
+                {activeCharacter.isGroupChat ? (
+                  <div className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] shrink-0 header-title-avatar">
+                    👥
+                  </div>
+                ) : (
+                  <img
+                    src={activeCharacter.avatar}
+                    alt=""
+                    className="w-5 h-5 rounded-full object-cover shrink-0 border border-white/50 header-title-avatar"
+                  />
+                )}
+                <h2 className="text-[13px] font-bold text-slate-800 tracking-tight truncate header-title-name chat-header__name">
+                  {activeCharacter.remark || activeCharacter.name}
+                  {activeCharacter.isGroupChat && (
+                    <span className="text-slate-400 font-normal ml-0.5">
+                      ({1 + (activeCharacter.memberIds?.length || 0)})
+                    </span>
+                  )}
+                </h2>
+                {!activeCharacter.isGroupChat && (
+                  <div className="flex items-center gap-0.5 character-status chat-header__status">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 status-indicator online animate-pulse" />
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => {
                   setDraftRemark(activeCharacter.isGroupChat ? activeCharacter.name : (activeCharacter.remark || ""));
                   setDraftAvatar(activeCharacter.avatar);
                   setIsDeleteMemberMode(false);
@@ -4533,6 +5036,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftChatIcons(sanitizeChatIcons(activeCharacter.customChatIcons));
                   setDraftChatStylePreset(activeCharacter.chatStylePreset || "default");
                   setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
+                  setDraftEnableProactiveCall(activeCharacter.enableProactiveCall || false);
                   setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
                   setDraftProactiveStartTime(activeCharacter.proactiveStartTime || "09:00");
                   setDraftProactiveEndTime(activeCharacter.proactiveEndTime || "22:00");
@@ -4547,10 +5051,16 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftEnableAutoTranslate(activeCharacter.enableAutoTranslate || false);
                   setDraftMinimaxVoiceId(activeCharacter.minimaxVoiceId || "");
                   setDraftMinimaxSpeed(activeCharacter.minimaxSpeed !== undefined ? activeCharacter.minimaxSpeed : 1.0);
-                  setDraftVoiceFrequency(activeCharacter.voiceFrequency || "medium");
+                  setDraftVoiceFrequency(activeCharacter.voiceFrequency || "low");
                   setIsShowingCardModal(!isShowingCardModal);
-              }}
-            />
+                }}
+                className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button"
+              >
+                <span className="cv-menu-icon flex items-center justify-center w-full h-full">
+                  <MoreHorizontal className="w-4 h-4 text-slate-700" />
+                </span>
+              </button>
+            </div>
 
 
 
@@ -4566,7 +5076,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   <ChevronLeft className="w-4 h-4 text-slate-700" />
                 </button>
                 <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">设置</h2>
-                <div className="w-8 shrink-0" />
+                <button
+                  type="button"
+                  onClick={handleSaveSettings}
+                  aria-label="保存设置"
+                  title="保存设置"
+                  className="w-8 h-8 rounded-full bg-neutral-950 text-white flex items-center justify-center hover:bg-neutral-800 active:scale-95 transition-all z-10 shrink-0"
+                >
+                  <Check className="w-4 h-4" strokeWidth={2.5} />
+                </button>
               </div>
 
               {/* Body */}
@@ -4706,102 +5224,82 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   </div>
                 )}
 
-                {/* Operations Group Card */}
-                <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm space-y-4 text-xs">
+                {/* Chat behaviour */}
+                <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                   {/* Settings toggles */}
-                  <div className="divide-y divide-slate-100 pt-1 space-y-4">
+                  <div className="pt-1">
                     {/* Pin Chat */}
-                    <div className="flex items-center justify-between pb-1">
+                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
                       <span className="text-[#52525b] font-bold text-xs">置顶聊天</span>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftIsPinned}
-                          onChange={(e) => setDraftIsPinned(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
-                    </div>
-
-                     {/* Character Specific Chat Style Preset Selector */}
-                    <div className="py-3 border-t border-slate-100 space-y-2">
-                      <span className="text-[#52525b] font-bold block text-xs">聊天页面预设样式</span>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setDraftChatStylePreset("default")}
-                          className={`py-1.5 px-2 rounded-[16px] border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
-                            draftChatStylePreset === "default"
-                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
-                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
-                          }`}
-                        >
-                          <span className="text-[11px]">默认经典</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDraftChatStylePreset("liquid-glass")}
-                          className={`py-1.5 px-2 rounded-[16px] border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
-                            draftChatStylePreset === "liquid-glass"
-                              ? "border-neutral-950 bg-neutral-950 text-white font-bold shadow-sm"
-                              : "border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100"
-                          }`}
-                        >
-                          <span className="text-[11px]">液态玻璃</span>
-                        </button>
-                      </div>
+                      <SettingsSwitch checked={draftIsPinned} onChange={setDraftIsPinned} label="置顶聊天" />
                     </div>
 
                     {/* Disable Bracket Actions */}
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
                       <div className="space-y-0.5">
                         <span className="text-[#52525b] font-bold text-xs">过滤括号动描</span>
-                        <span className="text-[10px] text-slate-400 block">开启后线上模式对话中不使用括号动作/描述，保留纯语言交流（除非人物说话特色）</span>
+                        <span className="text-[10px] text-slate-400 block">线上聊天仅保留语言交流，过滤括号动作描写。</span>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftDisableBracketActions}
-                          onChange={(e) => setDraftDisableBracketActions(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
+                      <SettingsSwitch checked={draftDisableBracketActions} onChange={setDraftDisableBracketActions} label="过滤括号动描" />
                     </div>
 
                     {/* Time Awareness */}
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
                       <div className="space-y-0.5">
                         <span className="text-[#52525b] font-bold text-xs">时间感知功能</span>
-                        <span className="text-[10px] text-slate-400 block">开启后角色在对话时能实时感知物理时间（如清晨、深夜、饭点），并动态生成贴合语境的时间对话</span>
+                        <span className="text-[10px] text-slate-400 block">角色会结合当前日期与时间回应。</span>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftEnableTimeAwareness}
-                          onChange={(e) => setDraftEnableTimeAwareness(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
+                      <SettingsSwitch checked={draftEnableTimeAwareness} onChange={setDraftEnableTimeAwareness} label="时间感知" />
                     </div>
 
                     {/* Auto Translate Toggle */}
-                    <div className="flex items-center justify-between py-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
                       <div className="space-y-0.5">
                         <span className="text-[#52525b] font-bold text-xs">全部自动翻译</span>
-                        <span className="text-[10px] text-slate-400 block">对方发言非中文时，启用后自动将对方的发言翻译为中文</span>
+                        <span className="text-[10px] text-slate-400 block">自动把对方的非中文发言翻译为中文。</span>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={draftEnableAutoTranslate}
-                          onChange={(e) => setDraftEnableAutoTranslate(e.target.checked)}
-                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                      </label>
+                      <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
 
+                    <div className="py-3 border-b border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5 pr-3">
+                          <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
+                          <span className="text-[10px] text-slate-400 block">允许对方在设定时段内主动发来消息。</span>
+                        </div>
+                        <SettingsSwitch checked={draftEnableProactiveChat} onChange={setDraftEnableProactiveChat} label="主动联络" />
+                      </div>
+                      {draftEnableProactiveChat && (
+                        <div className="flex items-end gap-3 pt-3">
+                          <div className="flex flex-col flex-1">
+                            <span className="text-[9px] text-slate-400 font-bold mb-1">开始时间</span>
+                            <select value={draftProactiveStartTime} onChange={(e) => setDraftProactiveStartTime(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none">
+                              {Array.from({ length: 48 }, (_, i) => { const h = Math.floor(i / 2).toString().padStart(2, "0"); const m = i % 2 === 0 ? "00" : "30"; const t = `${h}:${m}`; return <option key={t} value={t}>{t}</option>; })}
+                            </select>
+                          </div>
+                          <span className="text-xs text-slate-400 font-bold mb-2">至</span>
+                          <div className="flex flex-col flex-1">
+                            <span className="text-[9px] text-slate-400 font-bold mb-1">结束时间</span>
+                            <select value={draftProactiveEndTime} onChange={(e) => setDraftProactiveEndTime(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none">
+                              {Array.from({ length: 48 }, (_, i) => { const h = Math.floor(i / 2).toString().padStart(2, "0"); const m = i % 2 === 0 ? "00" : "30"; const t = `${h}:${m}`; return <option key={t} value={t}>{t}</option>; })}
+                            </select>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between py-3">
+                      <div className="space-y-0.5 pr-3">
+                        <span className="text-[#52525b] font-bold text-xs block">主动来电</span>
+                        <span className="text-[10px] text-slate-400 block">允许对方有机会主动发起语音通话。</span>
+                      </div>
+                      <SettingsSwitch checked={draftEnableProactiveCall} onChange={setDraftEnableProactiveCall} label="主动来电" />
+                    </div>
+                  </div>
+                </div>
+
                     {/* Chat Background customizer */}
-                    <div className="py-3 space-y-2 border-t border-slate-100">
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                       <span className="text-[#52525b] font-bold block text-xs">专属背景壁纸</span>
                       {draftChatBg ? (
                         <div className="relative group rounded-[16px] overflow-hidden border border-slate-200 bg-slate-50 h-24 flex items-center justify-center">
@@ -4828,7 +5326,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       ) : (
                         <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-4 rounded-[16px] text-xs transition-colors group">
                           <span className="text-slate-500 font-medium group-hover:text-slate-700">点击上传专属背景图片</span>
-                          <span className="text-[10px] text-slate-400 mt-0.5">支持 PNG, JPG 等格式</span>
                           <input
                             type="file"
                             accept="image/*"
@@ -4840,9 +5337,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </div>
 
                      {/* Three-Layer Memory Optimization System Panel */}
-                    <div className="py-4 space-y-4 border-t border-slate-100">
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4 text-xs">
                       <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
-                        <span className="text-slate-800 font-bold text-sm">三层记忆隔离与优化配置</span>
+                        <span className="text-slate-800 font-bold text-sm">记忆配置</span>
                       </div>
 
                       {/* Token Preview Badge Container */}
@@ -4936,12 +5433,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             <span className="text-xs font-bold text-neutral-800 font-mono bg-white px-2.5 py-0.5 rounded-full border border-neutral-100">
                               {draftEnableAutoArchive ? `${draftAutoArchiveInterval} 轮` : "已关闭"}
                             </span>
-                            <input
-                              type="checkbox"
-                              checked={draftEnableAutoArchive}
-                              onChange={(e) => setDraftEnableAutoArchive(e.target.checked)}
-                              className="rounded border-slate-300 text-neutral-900 focus:ring-neutral-950 w-3.5 h-3.5 accent-black cursor-pointer"
-                            />
+                            <SettingsSwitch checked={draftEnableAutoArchive} onChange={setDraftEnableAutoArchive} label="自动归档" />
                           </div>
                         </div>
 
@@ -5008,10 +5500,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </div>
 
                     {/* MiniMax Character-specific Voice Settings */}
-                    <div className="py-3.5 space-y-3 border-t border-slate-100">
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                       <div className="flex items-center justify-between">
-                        <span className="text-[#52525b] font-bold text-xs">MiniMax 专属语音声线</span>
-                        <span className="text-[9px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">当前角色</span>
+                        <span className="text-slate-800 font-bold text-sm">语音设置</span>
                       </div>
                       
                       <div className="space-y-2">
@@ -5049,47 +5540,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </div>
                         </div>
 
-                        {/* Voice Frequency Selector */}
-                        <div className="space-y-1.5 pt-2 border-t border-slate-100/50">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] text-slate-400 font-semibold">动态语音发送频率</span>
-                            <span className="text-[9px] text-slate-500 font-medium">智能多维度切换</span>
-                          </div>
-                          <div className="grid grid-cols-4 gap-1.5">
-                            {[
-                              { label: "无 (文字)", value: "none" },
-                              { label: "低频", value: "low" },
-                              { label: "中频 (默认)", value: "medium" },
-                              { label: "高频", value: "high" },
-                            ].map((opt) => (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                onClick={() => setDraftVoiceFrequency(opt.value as any)}
-                                className={`py-1.5 rounded-[8px] text-[10px] font-bold transition-all border ${
-                                  draftVoiceFrequency === opt.value
-                                    ? "bg-neutral-900 border-neutral-900 text-white shadow-sm"
-                                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                                }`}
-                              >
-                                {opt.label}
-                              </button>
-                            ))}
-                          </div>
-                          <p className="text-[8px] text-slate-400 leading-normal">
-                            智能判断消息形式。内向稳重角色低频、活泼外放角色高频。
-                            深夜闲聊、亲密撒娇提升几率；严肃正事、长篇叙事降低几率。
-                            自动跟随用户近期发语音/文字的习惯并附带真人随机浮动。
-                          </p>
-                        </div>
                       </div>
                     </div>
 
                     {/* Character Specific CSS Customizer */}
-                    <div className="py-3 space-y-1.5 border-t border-slate-100">
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                       <div className="flex items-center justify-between">
-                        <span className="text-[#52525b] font-bold text-xs">聊天样式 CSS</span>
-                        <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">优先于全局聊天样式</span>
+                        <span className="text-slate-800 font-bold text-sm">个性化样式</span>
+                        <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">覆盖全局设置</span>
                       </div>
                       <textarea
                         rows={12}
@@ -5135,134 +5593,39 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       />
                     </div>
 
-                    <div className="py-3 space-y-2.5 border-t border-slate-100">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[#52525b] font-bold text-xs">聊天图标覆盖</span>
-                        <span className="text-[9px] text-slate-400">留空继承全局或默认图标</span>
-                      </div>
+                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
+                      <div className="flex items-center justify-between"><span className="text-slate-800 font-bold text-sm">聊天图标覆盖</span><span className="text-[9px] text-slate-400">留空继承全局或默认图标</span></div>
                       <div className="grid grid-cols-2 gap-2">
-                        {CHAT_ICON_FIELDS.map(({ key, label }) => (
-                          <label key={key} className="space-y-1">
-                            <span className="block text-[10px] text-slate-500 font-medium">{label}图标</span>
-                            <input value={draftChatIcons[key] || ""} onChange={(e) => updateDraftChatIcon(key, e.target.value)} placeholder="图片 URL" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" />
-                          </label>
-                        ))}
+                        {CHAT_ICON_FIELDS.map(({ key, label }) => <label key={key} className="space-y-1"><span className="block text-[10px] text-slate-500 font-medium">{label}图标</span><input value={draftChatIcons[key] || ""} onChange={(e) => updateDraftChatIcon(key, e.target.value)} placeholder="图片 URL" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" /></label>)}
                       </div>
                     </div>
 
-                    {/* Proactive Chat Toggles */}
-                    <div className="py-3.5 space-y-2.5 border-t border-slate-100">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
-                          <span className="text-[10px] text-slate-400 block">设置时间段后，对方会在时间段内随机主动发送信息（支持设置 00:00-00:00 为全天随时）</span>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={draftEnableProactiveChat}
-                            onChange={(e) => setDraftEnableProactiveChat(e.target.checked)}
-                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                          />
-                        </label>
-                      </div>
+                  {/* Destructive actions */}
+                  <button
+                    type="button"
+                    onClick={() => setShowClearHistoryModal(true)}
+                    className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
+                  >
+                    清空对话记录
+                  </button>
 
-                      {draftEnableProactiveChat && (
-                        <div className="space-y-3 pt-2.5 border-t border-slate-100">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] text-[#52525b] font-medium">联络时间段设置</span>
-                            <span className="text-xs font-bold text-slate-700 font-mono">
-                              {draftProactiveStartTime} - {draftProactiveEndTime}
-                            </span>
-                          </div>
-                          
-                          {/* Time Picker Dropdowns */}
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex flex-col flex-1">
-                              <span className="text-[9px] text-slate-400 font-bold mb-1">开始时间</span>
-                              <select
-                                value={draftProactiveStartTime}
-                                onChange={(e) => setDraftProactiveStartTime(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
-                              >
-                                {Array.from({ length: 48 }, (_, i) => {
-                                  const h = Math.floor(i / 2).toString().padStart(2, "0");
-                                  const m = (i % 2 === 0 ? "00" : "30");
-                                  const t = `${h}:${m}`;
-                                  return (
-                                    <option key={t} value={t}>{t}</option>
-                                  );
-                                })}
-                              </select>
-                            </div>
-                            <span className="text-xs text-slate-400 font-bold self-end mb-2">至</span>
-                            <div className="flex flex-col flex-1">
-                              <span className="text-[9px] text-slate-400 font-bold mb-1">结束时间</span>
-                              <select
-                                value={draftProactiveEndTime}
-                                onChange={(e) => setDraftProactiveEndTime(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
-                              >
-                                {Array.from({ length: 48 }, (_, i) => {
-                                  const h = Math.floor(i / 2).toString().padStart(2, "0");
-                                  const m = (i % 2 === 0 ? "00" : "30");
-                                  const t = `${h}:${m}`;
-                                  return (
-                                    <option key={t} value={t}>{t}</option>
-                                  );
-                                })}
-                              </select>
-                            </div>
-                          </div>
-
-                          <div className="bg-slate-50 p-2.5 rounded-[16px] border border-slate-100 flex items-center justify-between gap-2">
-                            <span className="text-[10px] text-slate-400 leading-snug">
-                              Ta 将在此时间段内随机主动给您发送消息。若设为 00:00 - 00:00 则为全天候随机发信。
-                            </span>
-                            <button
-                              type="button"
-                              onClick={handleTriggerProactiveMessage}
-                              disabled={isTriggeringProactive}
-                              className="shrink-0 px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white font-bold rounded-[16px] text-[9px] transition-colors shadow-sm disabled:opacity-50"
-                            >
-                              {isTriggeringProactive ? "正在发送..." : "⚡ 模拟主动发信"}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Save button and clear record buttons at bottom of the page */}
-                  <div className="pt-4 space-y-3 border-t border-slate-100">
+                  {!activeCharacter.isGroupChat ? (
                     <button
-                      onClick={handleSaveSettings}
-                      className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                      type="button"
+                      onClick={handleDeleteFriend}
+                      className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
                     >
-                      保存设置
+                      删除好友
                     </button>
-                    
-                    <div className="flex flex-col items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowClearHistoryModal(true)}
-                        className="text-xs text-red-500 hover:text-red-600 font-medium py-1 px-4 rounded-[16px] hover:bg-red-50/50 transition-colors"
-                      >
-                        清空对话记录
-                      </button>
-
-                      {activeCharacter.isGroupChat && (
-                        <button
-                          type="button"
-                          onClick={() => setShowDisbandGroupModal(true)}
-                          className="text-xs text-red-600 hover:text-red-700 font-bold py-1 px-4 rounded-[16px] hover:bg-red-50/80 transition-colors flex items-center gap-1"
-                        >
-                          解除群聊
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowDisbandGroupModal(true)}
+                      className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
+                    >
+                      解除群聊
+                    </button>
+                  )}
               </div>
 
               {/* Clear History Choice Modal Overlay */}
@@ -5661,9 +6024,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               }
 
               const isSelf = msg.sender === "user";
-              const messageVisualType = getChatMessageVisualType(msg.content);
               const prevMsg = idx > 0 ? currentChatMessages[idx - 1] : null;
-              const shouldCollapse = settings.collapseConsecutiveAvatars !== false;
+              // While an offline story is active, online messages remain a separate
+              // live channel. Keep their avatars visible instead of treating them as
+              // one collapsed story paragraph.
+              const shouldCollapse = settings.collapseConsecutiveAvatars !== false && !isOfflineStoryActiveFor(activeChatCharId);
               const isConsecutivePrev = !!(
                 prevMsg &&
                 !prevMsg.isNarration &&
@@ -5678,23 +6043,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 : null;
               const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? settings.avatar : activeCharacter.avatar);
               const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : (activeCharacter.remark || activeCharacter.name);
-              const messageRow: MessageRowData = {
-                id: msg.id,
-                visualType: messageVisualType,
-                layout: settings.bubblePosition === "above" || settings.bubblePosition === "below" ? "stacked" : "side",
-                isConsecutive: isConsecutivePrev,
-                shouldCollapse,
-                showAvatar,
-                showNickname: !settings.hideNicknames,
-              };
-              const messageAvatar: MessageRowAvatar = {
-                src: isSelf ? settings.avatar : msgAvatar,
-                name: isSelf ? settings.name : msgName,
-                className: `w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar chat-message__avatar ${
-                  isSelf ? "user-avatar" : "ai-avatar"
-                } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`,
-                onClick: !isSelf ? () => setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id) : undefined,
-              };
 
               const renderBubbleInner = () => {
                 return (
@@ -5734,7 +6082,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         <img
                           src={msg.content}
                           alt="chat-pic"
-                          className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100 chat-message__image chat-message__image--content"
+                          className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
                         />
                       ) : msg.content.startsWith("[表情]|") ? (() => {
                         const [_, stickerName, stickerUrl] = msg.content.split("|");
@@ -5742,7 +6090,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s => s.name === stickerName);
                         const displayUrl = foundSticker ? foundSticker.url : stickerUrl;
                         return (
-                          <div className="max-w-[130px] rounded-xl overflow-hidden relative select-none chat-sticker-message">
+                          <div className="max-w-[130px] rounded-xl overflow-hidden relative select-none">
                             <img
                               src={displayUrl}
                               alt={stickerName}
@@ -5752,7 +6100,24 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             <span className="sr-only">[{stickerName}]</span>
                           </div>
                         );
-                      })() : msg.content.startsWith("[红包]") ? (() => {
+                      })() : isCallRecordMarkup(msg.content) ? (() => {
+                        const { callType, duration } = parseCallRecord(msg.content);
+                        const bubbleStyle = isSelf
+                          ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-[#95ec69] text-[#191919] chat-bubble-self rounded-tr-sm")
+                          : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100");
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setCallRecordDetail(parseCallRecord(msg.content))}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 shadow-sm transition-transform active:scale-[0.98] cv-bubble message-bubble ${bubbleStyle}`}
+                            title="查看通话内容"
+                          >
+                            <Phone className="w-3.5 h-3.5 shrink-0" />
+                            <span className="text-xs font-medium whitespace-nowrap">通话时长 {duration}</span>
+                            <span className="sr-only">{callType}</span>
+                          </button>
+                        );
+                      })() : isRedPacketMarkup(msg.content) ? (() => {
                         const [_, amount, greeting] = msg.content.split("|");
                         const status = getRedPacketActualStatus(msg.id, msg.timestamp, msg.sender);
                         
@@ -5800,11 +6165,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               });
                               setShowRedPacketOpenModal(true);
                             }}
-                            className={`${cardBg} rounded-2xl w-56 overflow-hidden cursor-pointer shadow-md transition-all flex flex-col active:scale-[0.99] select-none cv-transfer chat-red-packet-message`}
+                            className={`${cardBg} rounded-2xl w-56 overflow-hidden cursor-pointer shadow-md transition-all flex flex-col active:scale-[0.99] select-none cv-transfer`}
                           >
                             <div className="p-3.5 flex items-center gap-3">
                               <div className={`w-9 h-9 ${iconBg} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner`}>
-                                <ChatIcon src={getChatIcon("redPacket")} className="w-5 h-5">🧧</ChatIcon>
+                                🧧
                               </div>
                               <div className="flex-1 min-w-0 text-left">
                                 <p className={`text-xs ${titleColor} truncate`}>{greeting || "恭喜发财，万事如意"}</p>
@@ -5816,7 +6181,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             </div>
                           </div>
                         );
-                      })() : msg.content.startsWith("[转账]") ? (() => {
+                      })() : isTransferMarkup(msg.content) ? (() => {
                         const [_, amount, memo, isConfirmedStr] = msg.content.split("|");
                         const isConfirmed = isConfirmedStr === "true";
                         return (
@@ -5825,13 +6190,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                               setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
                               setShowTransferDetailModal(true);
                             }}
-                            className={`bg-[#fdfcfb] border border-[#f5ebe0]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#faf5f0] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer chat-transfer-message ${
+                            className={`bg-[#fdfcfb] border border-[#f5ebe0]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#faf5f0] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
                               isSelf ? "transfer-card" : "received-transfer-card"
                             }`}
                           >
                             <div className="p-3.5 flex items-center gap-3 cv-transfer-body transfer-body">
                               <div className={`w-9 h-9 ${isConfirmed ? "bg-orange-500/10 text-orange-500" : "bg-amber-500/10 text-amber-500"} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner cv-transfer-status transfer-icon confirm-icon`}>
-                                <ChatIcon src={getChatIcon("transfer")} className="w-5 h-5">💸</ChatIcon>
+                                💸
                               </div>
                               <div className="flex-1 min-w-0 text-left">
                                 <p className="text-xs font-bold text-stone-800 truncate">¥{amount || "100.00"}</p>
@@ -5925,7 +6290,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                   triggerMessageSpeech(msg);
                                   setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
                                 }}
-                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar chat-voice-message cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape}`}
+                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape}`}
                                 style={{ width: `${80 + duration * 6.5}px`, minWidth: "95px", maxWidth: "220px" }}
                               >
                                 {/* Left element: Play/Pause/Speaker icon */}
@@ -6004,7 +6369,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         );
                       })() : (
                         <div
-                          className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble chat-message__bubble chat-message__bubble--${isSelf ? "self" : "other"} chat-message__bubble--${messageVisualType} relative group/bubble ${
+                          className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                             isSelf
                               ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
                               : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
@@ -6028,11 +6393,99 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 );
               };
 
-              return wrapMessageWithDivider(
-                <MessageRow key={msg.id} message={messageRow} isSelf={isSelf} avatar={messageAvatar}>
-                  {renderBubbleInner()}
-                </MessageRow>
-              );
+              if (settings.bubblePosition === "above" || settings.bubblePosition === "below") {
+                return wrapMessageWithDivider(
+                  <div
+                    key={msg.id}
+                    className={`w-full flex flex-col ${
+                      isSelf ? "items-end" : "items-start"
+                    } ${
+                      (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
+                    } cv-msg-row message message-container`}
+                  >
+                    {/* Avatar + Meta Header */}
+                    {showAvatar && (
+                      <div className={`flex items-center gap-2.5 mb-1.5 select-none ${
+                        isSelf ? "flex-row-reverse" : "flex-row"
+                      }`}>
+                        <RenderAvatar
+                          src={isSelf ? settings.avatar : msgAvatar}
+                          alt=""
+                          name={isSelf ? settings.name : msgName}
+                          onClick={() => {
+                            if (!isSelf) {
+                              setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
+                            }
+                          }}
+                          className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
+                            isSelf ? "user-avatar" : "ai-avatar"
+                          } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
+                        />
+                        <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header`}>
+                          {!isSelf && !settings.hideNicknames && (
+                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
+                              <span>🖤</span>
+                              <span>{msgName}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Message Bubble Block */}
+                    <div className="max-w-[85%]">
+                      {renderBubbleInner()}
+                    </div>
+                  </div>
+                );
+              } else {
+                return wrapMessageWithDivider(
+                  <div
+                    key={msg.id}
+                    className={`w-full flex gap-2.5 ${
+                      isSelf ? "flex-row-reverse items-start justify-start" : "flex-row items-start justify-start"
+                    } ${
+                      (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
+                    } cv-msg-row message message-container`}
+                  >
+                    {/* Avatar */}
+                    {showAvatar ? (
+                      <RenderAvatar
+                        src={isSelf ? settings.avatar : msgAvatar}
+                        alt=""
+                        name={isSelf ? settings.name : msgName}
+                        onClick={() => {
+                          if (!isSelf) {
+                            setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
+                          }
+                        }}
+                        className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
+                          isSelf ? "user-avatar" : "ai-avatar"
+                        } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
+                      />
+                    ) : (
+                      <div className="w-9 h-9 shrink-0" />
+                    )}
+
+                    {/* Meta Header + Message Bubble Column */}
+                    <div className={`flex flex-col max-w-[80%] ${isSelf ? "items-end" : "items-start"}`}>
+                      {showAvatar && !settings.hideNicknames && (
+                        <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 mb-1 space-y-0.5 msg-meta-header`}>
+                          {!isSelf && (
+                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
+                              <span>🖤</span>
+                              <span>{msgName}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <div className="max-w-full">
+                        {renderBubbleInner()}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
             })}
 
             {/* AI is writing/typing indicator */}
@@ -6085,8 +6538,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               ? "mx-3.5 mb-3.5 mt-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area" 
               : activeStylePreset === "liquid-glass"
                 ? "mx-3.5 mb-3.5 mt-1 bg-transparent border-0 shadow-none overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area"
-              : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
-          } chat-composer`}>
+                : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
+          }`}>
             {quotedMessage && (
               <div className="px-3 py-1.5 bg-stone-50 border-b border-stone-100 flex items-center justify-between text-[11px] text-stone-600 shrink-0 animate-fade-in">
                 <div className="truncate flex-1 pr-4 text-left">
@@ -6107,32 +6560,83 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             
 
 
-            <ChatComposer
-              value={chatInputText}
-              placeholder={isOfflineModeActive
-                ? (isInputNarration ? "输入旁白..." : "输入发言，继续剧本对话...")
-                : `发送消息给 ${activeCharacter.name}...`}
-              isTyping={isTyping}
-              isFloatingCute={isFloatingCute}
-              isAttachPanelOpen={showAttachPanel}
-              plusIcon={getChatIcon("plus")}
-              sendIcon={getChatIcon("send")}
-              onChange={(e) => setChatInputText(e.target.value)}
-              onFocus={() => {
-                setTimeout(() => {
-                  if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-                }, 120);
-              }}
+            <form
               onSubmit={(e) => {
                 e.preventDefault();
                 handleSendAndReply(e);
               }}
-              onSendOnly={() => handleSendOnly()}
-              onAttachButtonClick={() => {
-                setShowAttachPanel(!showAttachPanel);
-                setShowStickerSelector(false);
-              }}
-            />
+              className="px-3 py-2 flex items-center gap-2 chat-composer__form"
+            >
+              {/* Plus (+) Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAttachPanel(!showAttachPanel);
+                  setShowStickerSelector(false);
+                }}
+                className={`w-10 h-10 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn chat-composer__attach-button text-slate-700 ${
+                  showAttachPanel
+                    ? "bg-stone-100 rotate-45"
+                    : "bg-white hover:bg-slate-100"
+                }`}
+                title="附加菜单"
+              >
+                <span className="cv-plus-icon flex items-center justify-center w-full h-full">
+                  <ChatIcon src={getChatIcon("plus")} className="w-3.5 h-3.5"><Plus className="w-3.5 h-3.5" /></ChatIcon>
+                </span>
+              </button>
+
+              {/* Chat Input text box */}
+              <input
+                type="text"
+                value={chatInputText}
+                onChange={(e) => setChatInputText(e.target.value)}
+                onFocus={() => {
+                  setTimeout(() => {
+                    if (chatEndRef.current) {
+                      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+                    }
+                  }, 120);
+                }}
+                placeholder={
+                  isOfflineModeActive
+                    ? (isInputNarration
+                        ? "输入旁白..."
+                        : "输入发言，继续剧本对话...")
+                    : `发送消息给 ${activeCharacter.name}...`
+                }
+                className={`flex-1 h-10 border focus:outline-none rounded-[8px] px-4 text-xs text-slate-800 chat-input chat-composer__input ${
+                  isFloatingCute
+                    ? "bg-white/60 border-slate-200/40 focus:bg-white"
+                    : "bg-slate-50 border-slate-200/80"
+                }`}
+              />
+
+              {/* Send Button 1 (User send only - gray background with white upward arrow) */}
+              <button
+                type="button"
+                onClick={(e) => handleSendOnly(e)}
+                disabled={!chatInputText.trim() || isTyping}
+                className="w-10 h-10 rounded-full bg-slate-300 hover:bg-slate-400 disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm cv-send-only-btn chat-composer__send-button"
+                title="仅发送消息 (不立即得到回复)"
+              >
+                <span className="cv-send-only-icon flex items-center justify-center w-full h-full">
+                  <ChatIcon src={getChatIcon("send")} className="w-4 h-4"><ArrowUp className="w-4 h-4 stroke-[2.5]" /></ChatIcon>
+                </span>
+              </button>
+
+              {/* Send Button 2 (Send and AI Reply - black background with white paper plane) */}
+              <button
+                type="submit"
+                disabled={isTyping}
+                className="w-10 h-10 rounded-full bg-slate-900 hover:bg-black disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm send-button chat-composer__send-button"
+                title="发送消息并获取回复"
+              >
+                <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
+                  <ChatIcon src={getChatIcon("send")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-white text-white" /></ChatIcon>
+                </span>
+              </button>
+            </form>
 
             {/* Attach Panel */}
             {showAttachPanel && (
@@ -6142,7 +6646,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   : "bg-slate-50 border-t border-slate-100"
               }`}>
                 {/* 1. 相册 (Album) */}
-                <label className="flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10 chat-tool chat-tool--image">
+                <label className="flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("image")} className="w-4 h-4"><ImageIcon className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
@@ -6175,7 +6679,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     setActiveAttachModal("redpacket");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--red-packet"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("redPacket")} className="w-4 h-4"><Gift className="w-4 h-4 text-slate-700" /></ChatIcon>
@@ -6191,7 +6695,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     setActiveAttachModal("voice");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--voice chat-composer__voice-button"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("voice")} className="w-4 h-4"><Mic className="w-4 h-4 text-slate-700" /></ChatIcon>
@@ -6203,10 +6707,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 <button
                   type="button"
                   onClick={() => {
-                    setShowCallingDirectionModal(true);
-                    setShowAttachPanel(false);
+                    beginVoiceCall(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--call"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("call")} className="w-4 h-4"><Phone className="w-4 h-4 text-slate-700" /></ChatIcon>
@@ -6221,7 +6724,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     setActiveAttachModal("location");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--location"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("location")} className="w-4 h-4"><MapPin className="w-4 h-4 text-slate-700" /></ChatIcon>
@@ -6236,7 +6739,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     setShowStickerSelector(true);
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10 chat-tool chat-tool--sticker"
+                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("sticker")} className="w-4 h-4"><Smile className="w-4 h-4 text-slate-700" /></ChatIcon>
@@ -6816,7 +7319,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 <div className="p-3 overflow-y-auto space-y-2 flex-1">
                   {memoNotes.length === 0 ? (
                     <div className="text-center py-6 px-4 space-y-3">
-                      <ChatIcon src={getChatIcon("file")} className="w-8 h-8 mx-auto"><FileText className="w-8 h-8 text-stone-300 mx-auto" /></ChatIcon>
+                      <FileText className="w-8 h-8 text-stone-300 mx-auto" />
                       <p className="text-xs font-bold text-stone-500">暂无备忘录笔记</p>
                       <p className="text-[10px] text-stone-400 leading-relaxed">
                         您可以先前往手机主屏幕的【备忘录】应用，写下您的创意和备忘，然后就可以在这里选择并发送给对方。对方还能点击阅读笔记的全部内容哦！
@@ -6838,7 +7341,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             备忘录笔记 • {note.content ? note.content.length : 0} 字
                           </p>
                         </div>
-                        <ChatIcon src={getChatIcon("file")} className="w-4 h-4 shrink-0"><FileText className="w-4 h-4 shrink-0 text-blue-500 group-hover:text-white" /></ChatIcon>
+                        <FileText className="w-4 h-4 shrink-0 text-blue-500 group-hover:text-white" />
                       </button>
                     ))
                   )}
@@ -6849,22 +7352,23 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
           {/* Calling Screen Modal Overlay */}
           {activeAttachModal === "calling" && (
-            <div className="absolute inset-0 bg-stone-950 z-50 flex flex-col justify-between p-6 animate-fade-in text-white text-center">
-              <div className="space-y-4 mt-8 shrink-0">
+            <div className="absolute inset-0 bg-[#171514] z-50 flex flex-col justify-between p-6 animate-fade-in text-white text-center overflow-hidden">
+              <div
+                className="absolute -inset-10 bg-cover bg-center blur-3xl scale-125 opacity-25"
+                style={{ backgroundImage: `url(${activeCharacter.avatar})` }}
+              />
+              <div className="absolute inset-0 bg-black/45" />
+              <div className={`relative z-10 space-y-3 shrink-0 ${callingStatus === "ringing" ? "mt-16" : "mt-8"}`}>
                 <img 
                   src={activeCharacter.avatar} 
                   alt="" 
-                  className="w-20 h-20 rounded-full mx-auto border-2 border-white/25 object-cover shadow-2xl animate-pulse" 
+                  className={`w-20 h-20 mx-auto border border-white/20 object-cover shadow-2xl ${callingStatus === "ringing" ? "rounded-2xl" : "rounded-full"}`}
                 />
-                <div>
-                  <h3 className="text-md font-black">{activeCharacter.remark || activeCharacter.name}</h3>
-                  <p className="text-xs text-white/50 mt-1">
-                    {callingStatus === "connected" 
-                      ? "语音通话中..." 
-                      : isIncomingCall 
-                        ? "邀请你进行语音通话..." 
-                        : "等待对方接通..."}
-                  </p>
+                <div className="space-y-1">
+                  <h3 className="text-lg font-semibold text-white leading-tight">{activeCharacter.remark || activeCharacter.name}</h3>
+                  {callingStatus === "connected" && (
+                    <p className="text-xs text-white/50 mt-1">语音通话中...</p>
+                  )}
                 </div>
 
                 {callingStatus === "connected" && (
@@ -6877,158 +7381,77 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               {/* Connected Chat Area or Ringing screen */}
               {callingStatus === "connected" ? (
-                <div className="flex-1 my-4 bg-white/5 rounded-[20px] p-3 flex flex-col overflow-hidden border border-white/5">
-                  <div className="text-[10px] text-white/30 mb-2 font-semibold">通话实时字幕</div>
-                  
-                  {/* Messages list inside the call */}
+                <div className="relative z-10 flex-1 my-4 flex flex-col min-h-0">
                   <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-left scrollbar-thin">
-                    {currentChatMessages
-                      .filter(m => m.timestamp >= callStartTime)
-                      .map((msg) => {
-                        const isSelfMsg = msg.sender === "user";
-                        const isVoice = msg.content.startsWith("[语音]|");
-                        let contentToDisplay = msg.content;
-                        if (isVoice) {
-                          contentToDisplay = msg.content.split("|").slice(2).join("|") || "[语音]";
-                        }
-                        
-                        return (
-                          <div 
-                            key={msg.id} 
-                            className={`flex ${isSelfMsg ? "justify-end" : "justify-start"} animate-fade-in`}
-                          >
-                            <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
-                              isSelfMsg 
-                                ? "bg-emerald-600/80 text-white" 
-                                : "bg-white/10 text-white border border-white/5"
-                            }`}>
-                              {isVoice && <span className="mr-1">🎙️</span>}
-                              <span>{contentToDisplay}</span>
-                            </div>
+                    {callTranscript.map((item) => {
+                      const isSelfMessage = item.sender === "user";
+                      return (
+                        <div key={item.id} className={`flex ${isSelfMessage ? "justify-end" : "justify-start"} animate-fade-in`}>
+                          <div className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-sm ${
+                            isSelfMessage ? "bg-white/85 text-slate-800 rounded-br-sm" : "bg-white/15 text-white border border-white/10 rounded-bl-sm"
+                          }`}>
+                            {getCallTranscriptText(item.content)}
                           </div>
-                        );
-                      })}
+                        </div>
+                      );
+                    })}
+                    <div ref={callTranscriptEndRef} aria-hidden="true" className="h-px" />
                   </div>
-
-                  {/* Connected bottom inputs */}
-                  <div className="mt-2 border-t border-white/10 pt-3 space-y-2.5">
-                    <div className="flex items-center gap-1.5">
-                      <input 
-                        type="text"
-                        value={callingInputText}
-                        onChange={(e) => setCallingInputText(e.target.value)}
-                        placeholder="在此输入文字，可转为文字或语音发送..."
-                        className="flex-1 bg-white/10 hover:bg-white/15 focus:bg-white/20 text-white placeholder-white/30 border border-white/10 rounded-[14px] px-3 py-2 text-xs outline-none transition-all"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && callingInputText.trim()) {
-                            const text = callingInputText.trim();
-                            const userMsg: Message = {
-                              id: Date.now().toString(),
-                              characterId: activeChatCharId,
-                              sender: "user",
-                              content: text,
-                              timestamp: Date.now(),
-                            };
-                            onSendMessage(userMsg);
-                            generateResponseForUserMessage(userMsg);
-                            setCallingInputText("");
-                          }
-                        }}
-                      />
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      {/* Hang up (red circular button) */}
-                      <button
-                        onClick={() => {
-                          const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
-                          const secs = (callingDuration % 60).toString().padStart(2, "0");
-                          sendCustomMessage(`[语音通话]|通话已结束 ${mins}:${secs}`);
-                          setActiveAttachModal(null);
-                        }}
-                        className="w-10 h-10 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 shrink-0"
-                        title="挂断"
-                      >
-                        <X className="w-5 h-5 text-white" />
-                      </button>
-                      
-                      {/* Button 1: 发送文字 */}
-                      <button
-                        onClick={() => {
-                          if (!callingInputText.trim()) return;
-                          const text = callingInputText.trim();
-                          const userMsg: Message = {
-                            id: Date.now().toString(),
-                            characterId: activeChatCharId,
-                            sender: "user",
-                            content: text,
-                            timestamp: Date.now(),
-                          };
-                          onSendMessage(userMsg);
-                          generateResponseForUserMessage(userMsg);
-                          setCallingInputText("");
-                        }}
-                        disabled={!callingInputText.trim()}
-                        className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold rounded-[14px] text-xs transition-all disabled:opacity-40"
-                      >
-                        发送文字
-                      </button>
-                      
-                      {/* Button 2: 发送语音 */}
-                      <button
-                        onClick={() => {
-                          if (!callingInputText.trim()) return;
-                          const text = callingInputText.trim();
-                          const secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
-                          const userMsg: Message = {
-                            id: Date.now().toString(),
-                            characterId: activeChatCharId,
-                            sender: "user",
-                            content: `[语音]|${secs}|${text}`,
-                            timestamp: Date.now(),
-                          };
-                          onSendMessage(userMsg);
-                          generateResponseForUserMessage(userMsg);
-                          setCallingInputText("");
-                        }}
-                        disabled={!callingInputText.trim()}
-                        className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-[14px] text-xs transition-all disabled:opacity-40 flex items-center justify-center gap-1"
-                      >
-                        <Mic className="w-3 h-3" />
-                        <span>发送语音</span>
-                      </button>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={callingInputText}
+                      onChange={(e) => setCallingInputText(e.target.value)}
+                      placeholder="输入消息..."
+                      className="flex-1 bg-white/10 hover:bg-white/15 focus:bg-white/20 text-white placeholder-white/30 border border-white/10 rounded-[14px] px-3 py-3 text-sm outline-none transition-all"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") sendVoiceCallMessage();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={sendVoiceCallMessage}
+                      disabled={!callingInputText.trim()}
+                      className="w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-white/10 disabled:text-white/30 flex items-center justify-center transition-all active:scale-95"
+                      title="发送"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={endVoiceCall}
+                      className="w-11 h-11 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center shadow-lg transition-all active:scale-95"
+                      title="挂断"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
                   </div>
                 </div>
               ) : (
                 /* Ringing Screen middle spacer */
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="space-y-2">
-                    <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto border border-emerald-500/20 animate-ping absolute opacity-40" style={{ animationDuration: "2s" }} />
-                    <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto border border-emerald-500/30">
-                      <Phone className="w-6 h-6 text-emerald-400 animate-pulse" />
-                    </div>
-                  </div>
+                <div className="relative z-10 flex-1 flex items-end justify-center pb-8">
+                  <p className="text-sm text-white/55 tracking-wide">
+                    {isIncomingCall ? "邀请你语音通话..." : "等待对方接受邀请..."}
+                  </p>
                 </div>
               )}
 
               {/* Ringing Action Controls */}
               {callingStatus === "ringing" && (
-                <div className="space-y-12 mb-8 shrink-0">
+                <div className="relative z-10 mb-4 shrink-0">
                   {isIncomingCall ? (
-                    <div className="flex justify-around items-center px-6">
+                    <div className="flex justify-between items-center px-2">
                       {/* Decline (Incoming Call) */}
                       <button
                         onClick={() => {
-                          sendCustomMessage(`[语音通话]|已拒绝`);
                           setActiveAttachModal(null);
                         }}
                         className="flex flex-col items-center gap-2"
                       >
-                        <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
-                          <X className="w-6 h-6 text-white" />
+                        <div className="w-14 h-14 bg-[#ef4b50] hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
+                          <Phone className="w-6 h-6 text-white rotate-[135deg] fill-white" />
                         </div>
-                        <span className="text-[10px] text-white/70">挂断</span>
+                        <span className="text-[11px] text-white/70">拒绝</span>
                       </button>
 
                       {/* Accept (Incoming Call) */}
@@ -7039,10 +7462,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         }}
                         className="flex flex-col items-center gap-2"
                       >
-                        <div className="w-14 h-14 bg-emerald-500 hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg transition-all animate-bounce active:scale-95">
-                          <Phone className="w-6 h-6 text-white" />
+                        <div className="w-14 h-14 bg-[#16c76f] hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
+                          <Phone className="w-6 h-6 text-white fill-white" />
                         </div>
-                        <span className="text-[10px] text-white/70">接听</span>
+                        <span className="text-[11px] text-white/70">接听</span>
                       </button>
                     </div>
                   ) : (
@@ -7050,15 +7473,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       {/* Cancel (User Outgoing Call) */}
                       <button
                         onClick={() => {
-                          sendCustomMessage(`[语音通话]|已取消`);
                           setActiveAttachModal(null);
                         }}
                         className="flex flex-col items-center gap-2"
                       >
-                        <div className="w-14 h-14 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
-                          <X className="w-6 h-6 text-white" />
+                        <div className="w-14 h-14 bg-[#ef4b50] hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
+                          <Phone className="w-6 h-6 text-white rotate-[135deg] fill-white" />
                         </div>
-                        <span className="text-[10px] text-white/70">取消</span>
+                        <span className="text-[11px] text-white/70">取消</span>
                       </button>
                     </div>
                   )}
@@ -7067,65 +7489,36 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             </div>
           )}
 
-          {/* Calling Direction Choose Modal */}
-          {showCallingDirectionModal && (
-            <div className="absolute inset-0 bg-black/60 z-50 flex items-end justify-center animate-fade-in" onClick={() => setShowCallingDirectionModal(false)}>
-              <div 
-                className="bg-white rounded-t-[28px] w-full max-w-md p-6 pb-8 space-y-4 animate-slide-up text-slate-800"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between pb-1">
-                  <span className="text-xs font-black text-slate-400 uppercase tracking-wider">选择通话类型</span>
-                  <button 
-                    onClick={() => setShowCallingDirectionModal(false)}
-                    className="p-1 text-slate-400 hover:text-slate-600 transition-colors"
-                  >
+          {callRecordDetail && (
+            <div className="absolute inset-0 z-[60] flex items-end bg-black/55 p-3 animate-fade-in" onClick={() => setCallRecordDetail(null)}>
+              <div className="w-full max-h-[76%] overflow-hidden rounded-[26px] bg-white text-slate-800 shadow-2xl animate-slide-up" onClick={(event) => event.stopPropagation()}>
+                <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                  <div>
+                    <h3 className="text-sm font-bold">{callRecordDetail.callType}</h3>
+                    <p className="mt-0.5 text-[11px] text-slate-400">通话时长 {callRecordDetail.duration}</p>
+                  </div>
+                  <button type="button" onClick={() => setCallRecordDetail(null)} className="rounded-full bg-slate-100 p-1.5 text-slate-500 hover:bg-slate-200">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
-
-                <div className="space-y-3">
-                  {/* Option 1: Active Call */}
-                  <button
-                    onClick={() => {
-                      setIsIncomingCall(false);
-                      setCallingStatus("ringing");
-                      setActiveAttachModal("calling");
-                      setShowCallingDirectionModal(false);
-                    }}
-                    className="w-full p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 active:scale-99 transition-all text-left flex items-center gap-3 border border-slate-100"
-                  >
-                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
-                      <Phone className="w-5 h-5 text-emerald-600" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800">拨打语音电话</h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5">向对方发起通话，等待对方接听（3秒后自动模拟接通）</p>
-                    </div>
-                  </button>
-
-                  {/* Option 2: Passive Incoming Call */}
-                  <button
-                    onClick={() => {
-                      setIsIncomingCall(true);
-                      setCallingStatus("ringing");
-                      setActiveAttachModal("calling");
-                      setShowCallingDirectionModal(false);
-                    }}
-                    className="w-full p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 active:scale-99 transition-all text-left flex items-center gap-3 border border-slate-100"
-                  >
-                    <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center shrink-0">
-                      <Phone className="w-5 h-5 text-indigo-600" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800">模拟对方来电</h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5">立即产生一个对方拨打给你的来电，可选择接听或挂断</p>
-                    </div>
-                  </button>
+                <div className="max-h-[55vh] space-y-3 overflow-y-auto bg-slate-50 px-4 py-4">
+                  {callRecordDetail.transcript.length > 0 ? callRecordDetail.transcript.map((item) => {
+                    const isSelfMessage = item.sender === "user";
+                    return (
+                      <div key={item.id} className={`flex ${isSelfMessage ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${isSelfMessage ? "bg-[#95ec69] text-[#191919] rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
+                          {getCallTranscriptText(item.content)}
+                        </div>
+                      </div>
+                    );
+                  }) : (
+                    <p className="py-8 text-center text-xs text-slate-400">本次通话没有文字内容</p>
+                  )}
                 </div>
               </div>
             </div>
           )}
+
           </div>
         </div>
       ) : null}
@@ -7408,12 +7801,34 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       </label>
 
                       <button
+                        type="button"
+                        onClick={() => setShowTextImageInput((value) => !value)}
+                        className="text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold"
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span>文字图</span>
+                      </button>
+
+                      <button
                         type="submit"
                         className="px-4 py-1.5 bg-neutral-950 hover:bg-neutral-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
                       >
                         发布动态
                       </button>
                     </div>
+
+                    {showTextImageInput && (
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 space-y-2">
+                        <p className="text-[11px] text-slate-500">填写图片描述。发布后会以文字图显示，点击可查看完整描述。</p>
+                        <textarea
+                          rows={2}
+                          value={momentTextImageDescription}
+                          onChange={(e) => setMomentTextImageDescription(e.target.value)}
+                          placeholder="例如：傍晚的操场，跑道边放着一瓶喝了一半的水"
+                          className="w-full px-2.5 py-2 rounded-lg bg-white border border-slate-200 focus:outline-none text-xs resize-none"
+                        />
+                      </div>
+                    )}
 
                     {momentAttachedImage && (
                       <div className="relative w-24 h-24 rounded-lg overflow-hidden border">
@@ -7442,6 +7857,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     const momChar = mom.characterId ? characters.find((c) => c.id === mom.characterId) : null;
                     const momAuthorName = momChar ? (momChar.remark || momChar.name) : mom.authorName;
                     const momAuthorAvatar = momChar ? momChar.avatar : mom.authorAvatar;
+                    const textImageDescription = mom.imageDescription || cleanAndExtractMoment(mom.content).imageDescription;
                     return (
                       <div key={mom.id} className="py-5 flex gap-3">
                         
@@ -7500,6 +7916,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           )}
 
                           {/* Attached Photo */}
+                          {textImageDescription && (
+                            <button
+                              type="button"
+                              onClick={() => setViewingImageDescription(textImageDescription)}
+                              className="mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm"
+                            >
+                              <ImageIcon className="w-4 h-4 text-slate-400 mb-4" />
+                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{textImageDescription}</p>
+                              <span className="block mt-2 text-[10px] text-slate-400">文字图 · 点击查看</span>
+                            </button>
+                          )}
                           {mom.image && (
                             <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
                               <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
@@ -7565,12 +7992,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                     return (
                                       <div
                                         key={comm.id}
-                                        onClick={() => {
-                                          setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
-                                          setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
-                                        }}
+                                        onClick={() => handleMomentCommentClick(mom.id, comm)}
+                                        onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
+                                        onPointerUp={clearMomentCommentLongPress}
+                                        onPointerLeave={clearMomentCommentLongPress}
+                                        onPointerCancel={clearMomentCommentLongPress}
+                                        onContextMenu={(event) => event.preventDefault()}
                                         className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
-                                        title={`回复 ${commAuthorName}`}
+                                        title={`点击回复；长按删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">
                                           {commAuthorName}
@@ -7823,6 +8252,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                 setEditMyBio(idty.bio || "");
                                 onSaveSettings({
                                   ...settings,
+                                  activeIdentityId: idty.id,
                                   name: idty.name,
                                   avatar: idty.avatar,
                                   signature: idty.signature || "",
@@ -8339,6 +8769,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     const momChar = mom.characterId ? characters.find((c) => c.id === mom.characterId) : null;
                     const momAuthorName = momChar ? (momChar.remark || momChar.name) : mom.authorName;
                     const momAuthorAvatar = momChar ? momChar.avatar : mom.authorAvatar;
+                    const textImageDescription = mom.imageDescription || cleanAndExtractMoment(mom.content).imageDescription;
                     return (
                       <div key={mom.id} className="py-5 flex gap-3">
                         
@@ -8397,6 +8828,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           )}
 
                           {/* Photo if attached */}
+                          {textImageDescription && (
+                            <button
+                              type="button"
+                              onClick={() => setViewingImageDescription(textImageDescription)}
+                              className="mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm"
+                            >
+                              <ImageIcon className="w-4 h-4 text-slate-400 mb-4" />
+                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{textImageDescription}</p>
+                              <span className="block mt-2 text-[10px] text-slate-400">文字图 · 点击查看</span>
+                            </button>
+                          )}
                           {mom.image && (
                             <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
                               <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
@@ -8462,12 +8904,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                                     return (
                                       <div
                                         key={comm.id}
-                                        onClick={() => {
-                                          setReplyingToCommentMap(prev => ({ ...prev, [mom.id]: comm }));
-                                          setShowCommentInputMap(prev => ({ ...prev, [mom.id]: true }));
-                                        }}
+                                        onClick={() => handleMomentCommentClick(mom.id, comm)}
+                                        onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
+                                        onPointerUp={clearMomentCommentLongPress}
+                                        onPointerLeave={clearMomentCommentLongPress}
+                                        onPointerCancel={clearMomentCommentLongPress}
+                                        onContextMenu={(event) => event.preventDefault()}
                                         className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
-                                        title={`回复 ${commAuthorName}`}
+                                        title={`点击回复；长按删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">{commAuthorName}</span>
                                         <span className="text-slate-700">{comm.content}</span>
@@ -8714,7 +9158,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
       {/* Add Friend Confirmation Overlay */}
       {isShowingAddFriendDialog && (() => {
-        const unaddedCharacters = characters.filter((c) => !friendIds.includes(c.id));
+        const addedSourceIds = new Set(friends.map((friend) => friend.profileSourceId || friend.id));
+        const unaddedCharacters = Array.from(
+          new Map(
+            characters
+              .filter((c) => !c.isGroupChat && !addedSourceIds.has(c.profileSourceId || c.id))
+              .map((c) => [c.profileSourceId || c.id, c])
+          ).values()
+        );
         return (
           <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-5 shadow-2xl max-w-[320px] w-full flex flex-col max-h-[85%] animate-slide-up border border-slate-100">
@@ -8735,6 +9186,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
               {/* Modal Body */}
               <div className={`${unaddedCharacters.length === 0 ? "" : "flex-1 overflow-y-auto"} py-3 space-y-3 pr-1`}>
+                <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-3 py-2 text-[10px] text-indigo-700 font-semibold">
+                  正在以「{settings.name}」的身份添加好友；好友、群聊和朋友圈将只属于这个身份。
+                </div>
                 {unaddedCharacters.length === 0 ? (
                   <div className="text-center py-4 px-2 space-y-3">
                     <div className="w-12 h-12 bg-slate-50 text-neutral-800 rounded-full flex items-center justify-center mx-auto shadow-inner border border-slate-100">
@@ -8788,7 +9242,23 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </div>
                           <button
                             onClick={() => {
-                              setFriendIds((prev) => [...prev, char.id]);
+                              const sourceId = char.profileSourceId || char.id;
+                              const contactId = `contact-${activeIdentityId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                              // Contacts are copies bound to one user identity. This allows the
+                              // same archive profile to be independently added by another identity.
+                              onSaveCharacter({
+                                ...char,
+                                id: contactId,
+                                ownerIdentityId: activeIdentityId,
+                                isContactInstance: true,
+                                profileSourceId: sourceId,
+                                isPinned: false,
+                                isGroupChat: false,
+                                memberIds: undefined,
+                                lastActiveTime: undefined,
+                                scheduledProactiveTime: undefined,
+                              });
+                              setFriendIds((prev) => [...prev, contactId]);
                             }}
                             className="px-2.5 py-1 bg-neutral-950 hover:bg-neutral-900 text-white rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
                           >
@@ -8934,6 +9404,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     }).filter(Boolean).join("、")}。`,
                     isGroupChat: true,
                     memberIds: selectedGroupMemberIds,
+                    ownerIdentityId: activeIdentityId,
                   };
 
                   // Save
@@ -9190,6 +9661,29 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         </div>
       )}
 
+      {/* Moment comment delete confirmation */}
+      {commentDeleteTarget && (
+        <div className="fixed inset-0 z-[70] flex items-end bg-black/30 p-4" onClick={() => setCommentDeleteTarget(null)}>
+          <div className="w-full rounded-[24px] bg-white p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <p className="px-2 pb-3 text-center text-xs text-slate-500">删除后无法恢复</p>
+            <button
+              type="button"
+              onClick={confirmDeleteMomentComment}
+              className="w-full rounded-2xl bg-red-50 py-3 text-sm font-bold text-red-600 active:bg-red-100"
+            >
+              删除评论
+            </button>
+            <button
+              type="button"
+              onClick={() => setCommentDeleteTarget(null)}
+              className="mt-2 w-full rounded-2xl bg-slate-100 py-3 text-sm font-bold text-slate-700"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Moments Text Context Menu Overlay */}
       {momentContextMenu && (
         <div 
@@ -9248,6 +9742,21 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               <span>删除动态</span>
             </button>
           </motion.div>
+        </div>
+      )}
+
+      {viewingImageDescription && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/45 p-6 flex items-center justify-center"
+          onClick={() => setViewingImageDescription(null)}
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-bold text-slate-800">文字图描述</span>
+              <button type="button" onClick={() => setViewingImageDescription(null)} className="text-slate-400"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-600">{viewingImageDescription}</p>
+          </div>
         </div>
       )}
 

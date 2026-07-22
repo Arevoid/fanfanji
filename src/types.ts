@@ -11,7 +11,6 @@ export type ChatIconOverrides = Partial<Record<ChatIconKey, string>>;
 /** Keeps persisted/imported icon configuration safe for direct image rendering. */
 export function sanitizeChatIcons(value: unknown): ChatIconOverrides {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-
   const source = value as Record<string, unknown>;
   return CHAT_ICON_KEYS.reduce<ChatIconOverrides>((icons, key) => {
     const icon = source[key];
@@ -40,6 +39,8 @@ export interface Character {
   summaryTriggerRound?: number;
   compressedMemory?: string;
   enableProactiveChat?: boolean;
+  /** Whether this contact may occasionally start an incoming voice call. */
+  enableProactiveCall?: boolean;
   proactiveChatInterval?: number;
   proactiveStartTime?: string;
   proactiveEndTime?: string;
@@ -53,6 +54,9 @@ export interface Character {
   customCss?: string;
   chatStylePreset?: "default" | "floating-cute" | "liquid-glass";
   greeting?: string;
+  /** First-chat setup used as hidden guidance instead of a visible greeting bubble. */
+  initialChatContext?: string;
+  initialChatMode?: "greeting" | "context";
   lastImmediateSummaryMsgId?: string;
   disableBracketActions?: boolean;
   historyMemoryLimit?: number;
@@ -64,6 +68,11 @@ export interface Character {
   enableTimeAwareness?: boolean;
   isGroupChat?: boolean;
   memberIds?: string[];
+  /** Identity that owns this contact or group. Unset records belong to the legacy primary identity. */
+  ownerIdentityId?: string;
+  /** Contact copies are hidden from the archive and keep a link to their source profile. */
+  isContactInstance?: boolean;
+  profileSourceId?: string;
   minimaxVoiceId?: string;
   minimaxSpeed?: number;
   voiceFrequency?: "low" | "medium" | "high" | "none";
@@ -78,6 +87,8 @@ export interface Message {
   timestamp: number;
   isBookmarked?: boolean;
   isOffline?: boolean;
+  /** Snapshot-only online context. It informs a story but is never rendered as story text. */
+  isImportedContext?: boolean;
   isNarration?: boolean;
   translation?: string;
   audioUrl?: string;
@@ -102,7 +113,14 @@ export interface Moment {
   timestamp: number;
   likes: string[]; // List of names
   comments: MomentComment[];
+  /** Legacy comments parsed from older post content that the user has removed. */
+  deletedCommentIds?: string[];
   image?: string; // base64 or URL
+  /** A placeholder image rendered from text until image generation is available. */
+  imageType?: "photo" | "text";
+  imageDescription?: string;
+  /** The user identity whose social circle this post belongs to. */
+  ownerIdentityId?: string;
 }
 
 export interface MusicTrack {
@@ -296,6 +314,19 @@ export interface OfflineStory {
   stylePromptContent?: string;
   showAvatars?: boolean;
   customCss?: string;
+  /** Continue-mode stories inherit this from the source chat; other modes choose it at creation. */
+  enableTimeAwareness?: boolean;
+  /** Frozen at the moment an online chat is explicitly imported into this story. */
+  importedContext?: {
+    messages: Message[];
+    memories: string[];
+    worldBook: string[];
+    importedAt: number;
+  };
+  archivedAt?: number;
+  archivedMemoryIds?: string[];
+  /** Number of story messages already condensed into online memory. */
+  lastSyncedMessageCount?: number;
 }
 
 export interface Sticker {

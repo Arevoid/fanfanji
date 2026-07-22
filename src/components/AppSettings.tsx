@@ -80,16 +80,11 @@ const DEFAULT_PRESETS: StylePreset[] = [
 ];
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
-  { key: "image", label: "图片" },
-  { key: "voice", label: "语音" },
-  { key: "sticker", label: "表情" },
-  { key: "redPacket", label: "红包" },
-  { key: "transfer", label: "转账" },
-  { key: "file", label: "文件" },
-  { key: "location", label: "位置" },
-  { key: "call", label: "通话" },
-  { key: "plus", label: "加号" },
-  { key: "send", label: "发送" },
+  { key: "image", label: "图片" }, { key: "voice", label: "语音" },
+  { key: "sticker", label: "表情" }, { key: "redPacket", label: "红包" },
+  { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
+  { key: "location", label: "位置" }, { key: "call", label: "通话" },
+  { key: "plus", label: "加号" }, { key: "send", label: "发送" },
 ];
 
 export default function AppSettings({
@@ -1544,12 +1539,12 @@ export default function AppSettings({
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    left: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    borderRadius: "0 0 0 4px",
+                                    transform: "rotate(45deg)",
+                                    left: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1584,12 +1579,12 @@ export default function AppSettings({
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    left: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    borderRadius: "0 0 0 4px",
+                                    transform: "rotate(45deg)",
+                                    left: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1633,12 +1628,12 @@ export default function AppSettings({
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    left: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    borderRadius: "0 0 0 4px",
+                                    transform: "rotate(45deg)",
+                                    left: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1680,12 +1675,12 @@ export default function AppSettings({
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent ${getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity)} transparent transparent`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    left: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    borderRadius: "0 0 0 4px",
+                                    transform: "rotate(45deg)",
+                                    left: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1727,12 +1722,12 @@ export default function AppSettings({
                               我的专属气泡！效果完全同步 ✨
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)}`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    right: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                                    borderRadius: "0 0 4px 0",
+                                    transform: "rotate(45deg)",
+                                    right: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -1767,12 +1762,12 @@ export default function AppSettings({
                               我的专属气泡！效果完全同步 ✨
                               {bubbleTailEnabled && (
                                 <div
-                                  className="absolute w-0 h-0"
+                                  className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    borderColor: `transparent transparent transparent ${getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity)}`,
-                                    borderStyle: "solid",
-                                    borderWidth: "6px",
-                                    right: "-11px",
+                                    backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                                    borderRadius: "0 0 4px 0",
+                                    transform: "rotate(45deg)",
+                                    right: "-5px",
                                     top: bubbleTailVertical === "top" ? "8px" : bubbleTailVertical === "center" ? "calc(50% - 6px)" : "auto",
                                     bottom: bubbleTailVertical === "bottom" ? "8px" : "auto"
                                   }}
@@ -2228,42 +2223,19 @@ export default function AppSettings({
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
                     <span className="text-xs font-bold text-slate-700">全局聊天样式 CSS</span>
                     <p className="text-[10px] text-slate-400 leading-relaxed">用于修改所有聊天页面视觉效果，包括背景、导航、气泡、消息、输入区域等。</p>
-                    <textarea
-                      rows={5}
-                      value={chatGlobalCSS}
-                      onChange={(e) => {
-                        setChatGlobalCSS(e.target.value);
-                        handleSave({ chatGlobalCSS: e.target.value });
-                      }}
-                      placeholder={`.chat-theme {\n  --chat-accent: #07c160;\n}\n.chat-message__bubble--self {\n  border-radius: 8px;\n}`}
-                      className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
-                    />
+                    <textarea rows={5} value={chatGlobalCSS} onChange={(e) => { setChatGlobalCSS(e.target.value); handleSave({ chatGlobalCSS: e.target.value }); }} placeholder={`.chat-theme {\n  --chat-accent: #07c160;\n}`} className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed" />
                   </div>
 
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <div>
-                      <span className="text-xs font-bold text-slate-700">聊天功能图标</span>
-                      <p className="text-[10px] text-slate-400 leading-relaxed mt-1">填写图片 URL 后替换默认图标；角色覆盖优先于这里的全局配置。</p>
-                    </div>
+                    <div><span className="text-xs font-bold text-slate-700">聊天功能图标</span><p className="text-[10px] text-slate-400 leading-relaxed mt-1">填写图片 URL 后替换默认图标；角色覆盖优先于这里的全局配置。</p></div>
                     <div className="grid grid-cols-2 gap-2">
-                      {CHAT_ICON_FIELDS.map(({ key, label }) => (
-                        <label key={key} className="space-y-1">
-                          <span className="text-[10px] font-semibold text-slate-500">{label}图标</span>
-                          <input value={chatIcons[key] || ""} onChange={(e) => updateChatIcon(key, e.target.value)} placeholder="图片 URL（留空用默认）" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" />
-                        </label>
-                      ))}
+                      {CHAT_ICON_FIELDS.map(({ key, label }) => <label key={key} className="space-y-1"><span className="text-[10px] font-semibold text-slate-500">{label}图标</span><input value={chatIcons[key] || ""} onChange={(e) => updateChatIcon(key, e.target.value)} placeholder="图片 URL（留空用默认）" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" /></label>)}
                     </div>
                   </div>
 
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <div>
-                      <span className="text-xs font-bold text-slate-700">导入 / 导出聊天主题</span>
-                      <p className="text-[10px] text-slate-400 leading-relaxed mt-1">主题文件仅包含全局聊天 CSS 与全局聊天图标配置。</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={handleExportChatTheme} className="flex-1 py-2 rounded-lg bg-slate-900 text-white text-[10px] font-bold">导出 JSON</button>
-                      <label className="flex-1 py-2 rounded-lg bg-slate-100 text-slate-700 text-[10px] font-bold text-center cursor-pointer">导入 JSON<input type="file" accept="application/json,.json" onChange={handleImportChatTheme} className="hidden" /></label>
-                    </div>
+                    <div><span className="text-xs font-bold text-slate-700">导入 / 导出聊天主题</span><p className="text-[10px] text-slate-400 leading-relaxed mt-1">主题文件仅包含全局聊天 CSS 与全局聊天图标配置。</p></div>
+                    <div className="flex gap-2"><button type="button" onClick={handleExportChatTheme} className="flex-1 py-2 rounded-lg bg-slate-900 text-white text-[10px] font-bold">导出 JSON</button><label className="flex-1 py-2 rounded-lg bg-slate-100 text-slate-700 text-[10px] font-bold text-center cursor-pointer">导入 JSON<input type="file" accept="application/json,.json" onChange={handleImportChatTheme} className="hidden" /></label></div>
                   </div>
                 </div>
               )}

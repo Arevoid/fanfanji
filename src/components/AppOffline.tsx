@@ -62,10 +62,14 @@ export default function AppOffline({
   const [newMode, setNewMode] = useState<"director" | "continue" | "if">("director");
   const [newIfPrompt, setNewIfPrompt] = useState("");
   const [newStartFromChat, setNewStartFromChat] = useState<boolean>(false);
+  const [newTimeAwareness, setNewTimeAwareness] = useState<boolean>(false);
 
   // Chat/Editor input state
   const [inputText, setInputText] = useState("");
-  const [inputNarration, setInputNarration] = useState(false); // speaking vs narration toggle
+  // Kept as a constant for backward-compatible rendering of older story data.
+  // The composer no longer exposes a narration/speech mode selector.
+  const inputNarration = false;
+  const setInputNarration = (_value: boolean) => undefined;
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   
@@ -210,6 +214,12 @@ export default function AppOffline({
   const storyCharNamesLabel = storyChars.map(c => c.remark || c.name).join("、");
   const firstActorLabel = storyChars.length > 1 ? "角色们" : (selectedChar.remark || selectedChar.name);
 
+  // Online messages are an invisible handoff context, never part of the offline
+  // manuscript. The id check also hides snapshots created before this flag existed.
+  const visibleStoryMessages = activeStory?.messages.filter((message) =>
+    !message.isImportedContext && !message.id.startsWith("offline-import-")
+  ) || [];
+
   const workspaceEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -241,12 +251,30 @@ export default function AppOffline({
     localStorage.setItem(`offline_story_id_${story.characterId}`, story.id);
   };
 
+  const getSyncedMessageCount = (story: OfflineStory) =>
+    story.lastSyncedMessageCount ?? (story.archivedAt ? story.messages.length : 0);
+
+  const hasUnsyncedOnlineProgress = (story: OfflineStory) =>
+    story.messages.length > getSyncedMessageCount(story);
+
+  const clearOfflineSession = (story: OfflineStory) => {
+    localStorage.removeItem(`offline_story_id_${story.characterId}`);
+    localStorage.setItem(`offline_mode_active_${story.characterId}`, "false");
+  };
+
   // Exit story workspace back to list
   const handleExitStoryWorkspace = () => {
+    // Online continuations always archive their newly-written plot immediately
+    // on exit, so the next online reply can continue the same topic.
+    let completedStory = activeStory;
+    if (activeStory
+      && (activeStory.sourceChatId || activeStory.mode === "continue")
+      && hasUnsyncedOnlineProgress(activeStory)) {
+      completedStory = handleSyncMemoryToBrain(activeStory);
+    }
+    if (completedStory) clearOfflineSession(completedStory);
     setActiveStory(null);
     setIsSettingsOpen(false);
-    localStorage.removeItem(`offline_story_id_${selectedCharId}`);
-    localStorage.setItem(`offline_mode_active_${selectedCharId}`, "false");
   };
 
   // Create new offline story
@@ -261,24 +289,35 @@ export default function AppOffline({
     const modeLabel = newMode === "director" ? "导演剧本" : newMode === "if" ? "IF假想线" : "续写故事";
     const titleToUse = newTitle.trim() || `「${charsLabel}」的${modeLabel} - ${new Date().toLocaleDateString()}`;
 
-    let initialMessages: Message[] = [];
+    let importedContext: OfflineStory["importedContext"];
 
     // Reference from current chat history (if requested)
     if (newStartFromChat) {
-      // Find normal chat messages of this character in localStorage
-      const allChatsRaw = localStorage.getItem("phone_messages_v3");
-      if (allChatsRaw) {
+      // Prefer the live app state: it includes the latest message even before a
+      // persistence effect has finished. Local storage remains a fallback.
+      const liveMessages = messages.filter(m => m.characterId === selectedCharId);
+      const allChatsRaw = liveMessages.length === 0 ? localStorage.getItem("phone_messages_v3") : null;
+      if (liveMessages.length > 0 || allChatsRaw) {
         try {
-          const parsed = JSON.parse(allChatsRaw) as Message[];
+          const parsed = liveMessages.length > 0 ? liveMessages : JSON.parse(allChatsRaw || "[]") as Message[];
+          const contextLimit = characters.find(c => c.id === selectedCharId)?.contextMemoryLimit || 20;
           const relevantMsgs = parsed
             .filter(m => m.characterId === selectedCharId)
-            .slice(-15); // Copy last 15 messages for high context continuity
+            .slice(-contextLimit * 2); // preserve the configured number of dialogue rounds
           
-          initialMessages = relevantMsgs.map(m => ({
+          const importedMessages = relevantMsgs.map(m => ({
             ...m,
             id: `offline-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
             isOffline: true
           }));
+          importedContext = {
+            messages: importedMessages,
+            memories: memories.filter(m => m.characterId === selectedCharId).map(m => m.content),
+            worldBook: getLatestWorldBookEntries(worldBookEntries || [])
+              .filter(entry => !entry.characterId || entry.characterId === selectedCharId)
+              .map(entry => `${entry.title}: ${entry.content}`),
+            importedAt: Date.now()
+          };
         } catch (e) {
           console.error("Failed to copy chat history:", e);
         }
@@ -295,8 +334,13 @@ export default function AppOffline({
       mode: newMode,
       ifPrompt: newMode === "if" ? newIfPrompt : undefined,
       sourceChatId: newStartFromChat ? selectedCharId : undefined,
-      sourceChatMsgCount: newStartFromChat ? initialMessages.length : undefined,
-      messages: initialMessages
+      sourceChatMsgCount: newStartFromChat ? importedContext?.messages.length : undefined,
+      importedContext,
+      enableTimeAwareness: newStartFromChat
+        ? Boolean(characters.find(c => c.id === selectedCharId)?.enableTimeAwareness)
+        : newTimeAwareness,
+      // Imported chat is context only; newly written plot remains in this independent archive.
+      messages: []
     };
 
     onSaveOfflineStory(newStory);
@@ -310,6 +354,7 @@ export default function AppOffline({
     setNewMode("director");
     setNewIfPrompt("");
     setNewStartFromChat(false);
+    setNewTimeAwareness(false);
 
     showToast("线下故事创建成功");
   };
@@ -327,11 +372,15 @@ export default function AppOffline({
   };
 
   // Sync memory manually
-  const handleSyncMemoryToBrain = (story: OfflineStory) => {
-    if (!story.messages.length) return;
+  const handleSyncMemoryToBrain = (story: OfflineStory): OfflineStory => {
+    const syncStart = getSyncedMessageCount(story);
+    const messagesToSync = story.messages.slice(syncStart);
+    if (!messagesToSync.length) return story;
     
     // Create a summarized memory of this offline development
-    const lastMsgs = story.messages.slice(-5);
+    // Keep the archive concise but include the full newly-written segment when
+    // it is short. Long segments retain their latest 12 beats for continuity.
+    const lastMsgs = messagesToSync.slice(-12);
     const storyCharsList = story.characterIds && story.characterIds.length > 0 
       ? characters.filter(c => story.characterIds?.includes(c.id))
       : [selectedChar];
@@ -341,13 +390,14 @@ export default function AppOffline({
       .map(m => m.isNarration ? `[旁白描述] ${m.content}` : `[对话] ${m.sender === "user" ? "我" : "角色"}: ${m.content}`)
       .join(" \n");
 
-    const newMemoryContent = `[线下剧本《${story.title}》（参与者: ${formattedCharsList}）记忆同步]: 在离线虚构走向中发生：\n${summaryText}`;
+    const syncMarker = `offline-story:${story.id}:${syncStart}-${story.messages.length}`;
+    const newMemoryContent = `[线下剧本《${story.title}》新增剧情总结（参与者: ${formattedCharsList}）| ${syncMarker}]\n${summaryText}`;
 
     // Sync to all participating characters
     const newMems = [...memories];
     let syncedCount = 0;
     storyCharsList.forEach(char => {
-      const isDup = memories.some(m => m.characterId === char.id && m.content.includes(`《${story.title}》`));
+      const isDup = memories.some(m => m.characterId === char.id && m.content.includes(syncMarker));
       if (!isDup) {
         const memoryItem: MemoryItem = {
           id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -364,9 +414,24 @@ export default function AppOffline({
 
     if (syncedCount > 0) {
       onSaveMemories(newMems);
+      // Persist before navigation as well as updating React state. This makes an
+      // offline-to-online handoff available immediately, even if the user leaves
+      // the workspace in the same event loop turn.
+      localStorage.setItem("phone_memory_vault_items", JSON.stringify(newMems));
+      const archivedStory = {
+        ...story,
+        archivedAt: Date.now(),
+        archivedMemoryIds: [...(story.archivedMemoryIds || []), ...newMems.slice(0, syncedCount).map(memory => memory.id)],
+        lastSyncedMessageCount: story.messages.length,
+        updatedAt: Date.now()
+      };
+      onSaveOfflineStory(archivedStory);
+      if (activeStory?.id === story.id) setActiveStory(archivedStory);
       showToast(`剧情记忆已成功同步至 ${syncedCount} 位参与角色的主大脑！`);
+      return archivedStory;
     } else {
       showToast("所有角色的最近进展已同步，无需重复同步");
+      return story;
     }
   };
 
@@ -405,7 +470,7 @@ export default function AppOffline({
         content: text,
         timestamp: Date.now(),
         isOffline: true,
-        isNarration: inputNarration
+        isNarration: false
       };
       updatedStory = {
         ...activeStory,
@@ -451,11 +516,12 @@ export default function AppOffline({
       const storyCharsList = updatedStory.characterIds && updatedStory.characterIds.length > 0 
         ? characters.filter(c => updatedStory.characterIds?.includes(c.id))
         : [selectedChar];
+      const sourceChat = characters.find(c => c.id === updatedStory.sourceChatId);
+      const isImportedGroupStory = Boolean(sourceChat?.isGroupChat);
 
-      const wbPrompts = storyCharsList.map(char => {
-        const blocks = buildWorldBookSystemBlocks(worldBookEntries || [], char.id, scanText);
-        return blocks.formattedAll ? `【${char.remark || char.name} 的世界书设定】：\n${blocks.formattedAll}` : "";
-      }).filter(Boolean).join("\n\n");
+      const wbPrompts = updatedStory.importedContext?.worldBook.length
+        ? `【导入时冻结的世界书设定】：\n${updatedStory.importedContext.worldBook.map(item => `- ${item}`).join("\n")}`
+        : "";
 
       // Base Persona
       let sysPrompt = `你现在正在与用户进行“线下故事/小说剧本”的联合创作。本场剧本中共有以下 ${storyCharsList.length} 位角色参与：\n\n`;
@@ -469,6 +535,13 @@ export default function AppOffline({
 - 互通的线上记忆：${char.compressedMemory || "暂无"}
 \n`;
       });
+
+      if (isImportedGroupStory) {
+        sysPrompt += `\n【群聊关系事实：绝对不可改写】
+这是从群聊导入的续写。以上每位角色档案中的身份、与用户的关系、以及角色彼此的关系，均为已确定的事实，必须逐字按其含义延续。
+严禁因为多人同场，就把用户擅自写成任一角色的恋人、前任、暧昧对象、家属或专属伴侣；除非对应角色档案已明确这样设定。
+用户可能只是朋友、旁观者或 CP 粉。必须保持这种定位，并保持角色之间原有的情侣或其他既定关系，不能自行替换、转移或制造新的恋爱关系。\n`;
+      }
 
       if (wbPrompts) {
         sysPrompt += `\n【相关世界书背景设定】：
@@ -529,10 +602,18 @@ ${wbPrompts}
         sysPrompt += `\n【续写模式】：以现有的聊天/故事为草稿，根据设定和目前的逻辑走向，续写故事的精彩发展。`;
       }
 
-      // Recall memories from vault for all participating characters
+      // Only an explicitly imported online story may use its frozen snapshot.
+      // Self-directed and IF stories stay fully isolated from the online vault.
       const allMemoriesParts: string[] = [];
-      storyCharsList.forEach(char => {
-        const relevantMems = getRelevantMemories(memories, char.id, text || "续写故事", 3);
+      if (updatedStory.importedContext) storyCharsList.forEach(char => {
+        const snapshotMemories = updatedStory.importedContext!.memories.map((content, index) => ({
+          id: `snapshot-memory-${index}`,
+          characterId: char.id,
+          content,
+          timestamp: updatedStory.importedContext!.importedAt,
+          importance: 5
+        }));
+        const relevantMems = getRelevantMemories(snapshotMemories, char.id, text || "续写故事", 3);
         if (relevantMems.length > 0) {
           const lines = relevantMems.map(m => `  - ${m.content}`).join("\n");
           allMemoriesParts.push(`* 【${char.remark || char.name}】的线上记忆库事实：\n${lines}`);
@@ -542,12 +623,16 @@ ${wbPrompts}
         sysPrompt += `\n\n【互通的线上记忆库】：以下是各个参与角色的线上对话中发生并提取的核心事实，请将其有机融入作为故事的背景事实支撑：\n${allMemoriesParts.join("\n")}`;
       }
 
-      // Recall online chat history for all participating characters
+      // Never fetch live online chat while writing offline. Use the import snapshot only.
       const chatContextParts: string[] = [];
-      storyCharsList.forEach(char => {
-        const onlineMsgs = (messages || [])
-          .filter(m => m.characterId === char.id && !m.isOffline)
-          .slice(-10);
+      if (updatedStory.importedContext) storyCharsList.forEach(char => {
+        const onlineMsgs = updatedStory.importedContext!.messages
+          // Group messages belong to the group container, while senderId identifies
+          // the actual member. Include the user's group messages for every member.
+          .filter(m => m.characterId === char.id || m.senderId === char.id || (
+            m.sender === "user" && isImportedGroupStory && m.characterId === updatedStory.sourceChatId
+          ))
+          .slice(-15);
         if (onlineMsgs.length > 0) {
           const lines = onlineMsgs.map(m => `  - ${m.sender === "user" ? "我" : char.remark || char.name}: ${m.content}`).join("\n");
           chatContextParts.push(`* 【与 ${char.remark || char.name}】的最新线上聊天：\n${lines}`);
@@ -561,6 +646,29 @@ ${chatContextParts.join("\n")}`;
 
       const lastUserMsgText = text || "请继续编织并续写这幕场景。";
 
+      const importedTail = updatedStory.importedContext?.messages.slice(-6) || [];
+      if (updatedStory.importedContext && importedTail.length > 0) {
+        const lastImported = importedTail[importedTail.length - 1];
+        const handoffTime = new Date(lastImported.timestamp);
+        const handoffClock = handoffTime.toLocaleString("zh-CN", {
+          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+        });
+        sysPrompt += `\n\n【ONLINE-TO-OFFLINE CONTINUITY — ABSOLUTE RULE】
+This scene begins immediately after the imported online conversation, not as a new unrelated scene.
+The last imported message is the current canonical handoff. Continue its topic, location, activity, promises, and emotional momentum. Do not replace it with a new activity (for example, do not switch from eating to bathing) unless the user explicitly asks for a time jump or transition.
+Imported handoff transcript:\n${importedTail.map(m => `- ${m.sender === "user" ? settings.name : (selectedChar?.name || "Character")}: ${m.content}`).join("\n")}
+Canonical handoff time: ${handoffClock}. The first continuation may advance only naturally by a few minutes unless the user explicitly changes the time or scene.`;
+      }
+
+      if (updatedStory.enableTimeAwareness) {
+        const now = new Date();
+        const currentClock = now.toLocaleString("zh-CN", {
+          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+        });
+        sysPrompt += `\n\n【TIME AWARENESS — REQUIRED】
+Current real-world time is ${currentClock}. Use this as the authoritative present time. Do not state a conflicting clock time, and do not casually jump hours. If this is an imported continuation, its handoff time is authoritative for the scene and the present can only move forward naturally from it.`;
+      }
+
       const response = await apiChat({
         message: lastUserMsgText,
         history: historyContext,
@@ -573,32 +681,17 @@ ${chatContextParts.join("\n")}`;
       });
 
       if (response && response.text) {
-        // Split AI response into individual paragraphs to maintain nice formatting and allow easy deletion of single paragraphs
-        const paragraphs = response.text.split("\n").map(p => p.trim()).filter(Boolean);
-        
-        let newMsgs: Message[] = [];
-        if (paragraphs.length > 0) {
-          newMsgs = paragraphs.map((para, pIdx) => ({
-            id: `offline-reply-${Date.now()}-${pIdx}-${Math.random().toString(36).substr(2, 5)}`,
-            characterId: activeStory.characterId,
-            sender: "character",
-            content: para,
-            timestamp: Date.now() + pIdx,
-            isOffline: true,
-            isNarration: false
-          }));
-        } else {
-          // Fallback if empty
-          newMsgs = [{
-            id: `offline-reply-fallback-${Date.now()}`,
-            characterId: activeStory.characterId,
-            sender: "character",
-            content: response.text,
-            timestamp: Date.now(),
-            isOffline: true,
-            isNarration: false
-          }];
-        }
+        // A single generation is one editable script entry. Preserve its paragraphs
+        // inside the entry instead of turning every paragraph into a separate message.
+        const newMsgs: Message[] = [{
+          id: `offline-reply-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          characterId: activeStory.characterId,
+          sender: "character",
+          content: response.text.trim(),
+          timestamp: Date.now(),
+          isOffline: true,
+          isNarration: false
+        }];
 
         const finalStory = {
           ...updatedStory,
@@ -899,7 +992,7 @@ ${chatContextParts.join("\n")}`;
                         onChange={(e) => {
                           const selId = e.target.value;
                           setSettingsStylePresetId(selId);
-                          const matched = [...DEFAULT_STYLE_PRESETS, ...customPresets].find(p => p.id === selId);
+                          const matched = [...DEFAULT_STYLE_PRESETS.slice(0, 1), ...customPresets].find(p => p.id === selId);
                           if (matched) {
                             setSettingsStylePromptName(matched.name === "默认风格" ? "" : matched.name);
                             setSettingsStylePromptContent(selId === "none" ? "" : matched.description);
@@ -907,7 +1000,7 @@ ${chatContextParts.join("\n")}`;
                         }}
                         className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
                       >
-                        {[...DEFAULT_STYLE_PRESETS, ...customPresets].map(p => (
+                        {[...DEFAULT_STYLE_PRESETS.slice(0, 1), ...customPresets].map(p => (
                           <option key={p.id} value={p.id}>
                             {p.id.startsWith("custom_") ? `⭐ ${p.name} (自定义)` : p.name}
                           </option>
@@ -944,7 +1037,7 @@ ${chatContextParts.join("\n")}`;
                         />
                       </div>
 
-                      {settingsStylePresetId === "custom_edit" && settingsStylePromptName.trim() && settingsStylePromptContent.trim() && (
+                      {settingsStylePromptName.trim() && settingsStylePromptContent.trim() && (
                         <button
                           type="button"
                           onClick={handleCreateCustomPreset}
@@ -1084,7 +1177,16 @@ ${chatContextParts.join("\n")}`;
                 </div>
                 {onNavigateToChat && (
                   <button 
-                    onClick={() => onNavigateToChat(activeStory.characterId)}
+                    onClick={() => {
+                      let completedStory = activeStory;
+                      if (hasUnsyncedOnlineProgress(activeStory)) {
+                        completedStory = handleSyncMemoryToBrain(activeStory);
+                      }
+                      clearOfflineSession(completedStory);
+                      setActiveStory(null);
+                      setIsSettingsOpen(false);
+                      onNavigateToChat(completedStory.characterId);
+                    }}
                     className="text-[10px] underline font-bold hover:text-indigo-700"
                   >
                     返回线上聊天
@@ -1113,7 +1215,7 @@ ${chatContextParts.join("\n")}`;
                 }} />
               )}
               
-              {activeStory.messages.length > 0 && (
+              {visibleStoryMessages.length > 0 && (
                 /* Elegant session metadata header */
                 <div className="flex items-center justify-between border-b border-slate-150/40 pb-3 mb-6 select-none">
                   <span className="text-[11px] font-medium tracking-wide text-slate-400 font-mono">
@@ -1125,7 +1227,7 @@ ${chatContextParts.join("\n")}`;
                 </div>
               )}
 
-              {activeStory.messages.length === 0 && (
+              {visibleStoryMessages.length === 0 && (
                 <div className="py-12 text-center text-slate-500 space-y-3 px-6">
                   <p className="text-xs leading-relaxed">🎬 剧本空间已就绪！可以先在输入框选择“旁白/描述”或“发言”来开个头，也可以直接点击下方的 “AI 续写” 让 {selectedChar.remark || selectedChar.name} 主动打破僵局并书写一段精美的小说开场白。</p>
                   <button
@@ -1137,7 +1239,7 @@ ${chatContextParts.join("\n")}`;
                 </div>
               )}
 
-              {activeStory.messages.map((msg) => {
+              {visibleStoryMessages.map((msg) => {
                 const isSelf = msg.sender === "user";
                 const isUserSpoken = isSelf && !msg.isNarration;
                 const showAvatars = activeStory.showAvatars !== false;
@@ -1163,7 +1265,7 @@ ${chatContextParts.join("\n")}`;
                       className="offline-message-item offline-msg-user w-full flex items-start justify-end my-5 gap-3 group relative pr-7 select-text"
                     >
                       {/* Edit or Delete Action triggers */}
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10">
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-100 transition-all z-10">
                         <button
                           onClick={() => handleStartEdit(msg.id, msg.content)}
                           className="p-1 rounded bg-slate-50 hover:bg-slate-100 text-slate-500 shadow-sm border border-slate-200"
@@ -1322,7 +1424,7 @@ ${chatContextParts.join("\n")}`;
                       </div>
 
                       {/* Edit or Delete Action triggers */}
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-10">
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-100 transition-all z-10">
                         <button
                           onClick={() => handleStartEdit(msg.id, msg.content)}
                           className="p-1 rounded bg-slate-50 hover:bg-slate-100 text-slate-500 shadow-sm border border-slate-200"
@@ -1363,7 +1465,7 @@ ${chatContextParts.join("\n")}`;
 
             {/* Bottom control & Input bar */}
             <div className="p-3 bg-white border-t border-slate-100 space-y-2 shadow-inner">
-              <div className="flex items-center justify-between">
+              <div className="hidden">
                 
                 {/* Input Mode Toggle: Spoken dialogue vs Narrative */}
                 <div className="flex items-center gap-2">
@@ -1403,7 +1505,7 @@ ${chatContextParts.join("\n")}`;
 
               {/* Chat Input Field form */}
               <form 
-                onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
+                onSubmit={(e) => { e.preventDefault(); handleSendMessage(undefined, !inputText.trim()); }}
                 className="flex items-center gap-2"
               >
                 <input
@@ -1421,7 +1523,7 @@ ${chatContextParts.join("\n")}`;
                 />
                 <button
                   type="submit"
-                  disabled={isGenerating || (!inputText.trim() && !isGenerating)}
+                  disabled={isGenerating}
                   className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center transition-colors shadow-md disabled:opacity-50 shrink-0"
                 >
                   <Send className="w-3.5 h-3.5" />
@@ -1522,6 +1624,27 @@ ${chatContextParts.join("\n")}`;
                     checked={newStartFromChat}
                     onChange={(e) => setNewStartFromChat(e.target.checked)}
                     className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-slate-50 cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                  <div>
+                    <span className="text-[11px] font-bold text-slate-700 block">时间感知</span>
+                    <span className="text-[8px] text-slate-400">
+                      {newStartFromChat
+                        ? "线上转线下时自动继承该角色线上聊天的时间感知设置"
+                        : "自导自演 / IF 线独立使用当前真实时间"
+                      }
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={newStartFromChat
+                      ? Boolean(characters.find(c => c.id === selectedCharId)?.enableTimeAwareness)
+                      : newTimeAwareness}
+                    disabled={newStartFromChat}
+                    onChange={(e) => setNewTimeAwareness(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-slate-50 cursor-pointer disabled:opacity-50"
                   />
                 </div>
               </div>
