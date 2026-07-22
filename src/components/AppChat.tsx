@@ -3,7 +3,9 @@ import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
-import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles, compressImage } from "../utils/pngParser";
+import { splitTextToOfflineSegments, compressImage } from "../utils/pngParser";
+import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles as splitIntoWeChatBubbles, type CallTranscriptItem } from "../features/chat/services/messageParser";
+import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
@@ -83,18 +85,6 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   const rgb = hexToRgb(hexColor);
   if (!rgb) return hexColor;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
-}
-
-function getChatMessageVisualType(content: string): string {
-  if (content.startsWith("data:image/")) return "image";
-  if (content.startsWith("[表情]|")) return "sticker";
-  if (content.startsWith("[红包]")) return "red-packet";
-  if (content.startsWith("[转账]")) return "transfer";
-  if (content.startsWith("[语音通话]") || content.startsWith("[视频通话]")) return "call";
-  if (content.startsWith("[语音")) return "voice";
-  if (content.startsWith("[文件]")) return "file";
-  if (content.startsWith("[位置]")) return "location";
-  return "text";
 }
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
@@ -342,35 +332,6 @@ const PRESEED_MOMENTS: Moment[] = [];
 
 const isOfflineStoryActiveFor = (characterId: string) =>
   localStorage.getItem(`offline_mode_active_${characterId}`) === "true";
-
-// Models sometimes return the human-readable WeChat labels instead of the
-// canonical app markup. Normalize new output and recognize old saved messages.
-const normalizePaymentMarkup = (content: string) => content
-  .replace(/^\[微信红包\]/, "[红包]")
-  .replace(/^\[微信转账\]/, "[转账]");
-
-const isRedPacketMarkup = (content: string) => /^\[(?:红包|微信红包)\]/.test(content);
-const isTransferMarkup = (content: string) => /^\[(?:转账|微信转账)\]/.test(content);
-const isCallRecordMarkup = (content: string) => /^\[通话记录\]\|/.test(content);
-
-type CallTranscriptItem = Pick<Message, "id" | "sender" | "content" | "timestamp">;
-
-const getCallTranscriptText = (content: string) =>
-  content.startsWith("[语音]|") ? content.split("|").slice(2).join("|") : content;
-
-const parseCallRecord = (content: string) => {
-  const [, callType = "语音通话", duration = "00:00", encodedTranscript = ""] = content.split("|");
-  try {
-    const transcript = JSON.parse(decodeURIComponent(encodedTranscript));
-    return {
-      callType,
-      duration,
-      transcript: Array.isArray(transcript) ? transcript as CallTranscriptItem[] : [],
-    };
-  } catch {
-    return { callType, duration, transcript: [] as CallTranscriptItem[] };
-  }
-};
 
 const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: string) =>
   getLatestWorldBookEntries(entries)
@@ -2048,14 +2009,13 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
               const cleanedContent = cleanOnlineMessage(currentItem.reply.content.trim(), activeCharacter.disableBracketActions || false);
               
               if (cleanedContent) {
-                const charMsg: Message = {
+                const charMsg = createGroupCharacterMessage({
                   id: `group-reply-${Date.now()}-${currentItem.idx}-${Math.random().toString(36).substr(2, 5)}`,
                   characterId: activeChatCharId, // Save under the Group's ID
-                  sender: "character",
                   senderId: currentItem.member.id, // Keep track of the specific sender
                   content: cleanedContent,
                   timestamp: Date.now(),
-                };
+                });
                 onSendMessage(charMsg);
               }
 
@@ -2814,13 +2774,12 @@ ${stickerListStr}
               finalContent = `[语音]|${secs}|${bubbleText}`;
             }
 
-            const charMsg: Message = {
+            const charMsg = createCharacterTextMessage({
               id: `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
               characterId: activeChatCharId,
-              sender: "character",
               content: finalContent,
               timestamp: Date.now(),
-            };
+            });
             
             setIsTyping(true);
             const chars = bubbleText.length;
@@ -2929,13 +2888,12 @@ ${stickerListStr}
 
   const sendCustomMessage = (contentString: string) => {
     if (!activeChatCharId || !activeCharacter) return;
-    const userMsg: Message = {
+    const userMsg = createUserTextMessage({
       id: Date.now().toString(),
       characterId: activeChatCharId,
-      sender: "user",
       content: contentString,
       timestamp: Date.now(),
-    };
+    });
     const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
     onSendMessage(normalizedUserMsg);
     generateResponseForUserMessage(normalizedUserMsg);
@@ -3259,15 +3217,14 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
 
     setChatInputText("");
 
-    const userMsg: Message = {
+    const userMsg = createUserTextMessage({
       id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       characterId: activeChatCharId,
-      sender: "user",
       content: userMsgText,
       timestamp: Date.now(),
       isOffline: isOfflineModeActive ? true : undefined,
       isNarration: isOfflineModeActive ? isInputNarration : undefined
-    };
+    });
 
     onSendMessage(userMsg);
 
@@ -3315,15 +3272,14 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
 
     setChatInputText("");
 
-    const userMsg: Message = {
+    const userMsg = createUserTextMessage({
       id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       characterId: activeChatCharId,
-      sender: "user",
       content: userMsgText,
       timestamp: Date.now(),
       isOffline: isOfflineModeActive ? true : undefined,
       isNarration: isOfflineModeActive ? isInputNarration : undefined
-    };
+    });
 
     onSendMessage(userMsg);
 
@@ -3578,13 +3534,12 @@ ${stickerListStr}
         const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
         const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
         bubbles.forEach((bubbleText, idx) => {
-          const charMsg: Message = {
+          const charMsg = createCharacterTextMessage({
             id: `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
             characterId: activeChatCharId,
-            sender: "character",
             content: bubbleText,
             timestamp: Date.now() + idx,
-          };
+          });
           onSendMessage(charMsg);
         });
       }
@@ -3884,13 +3839,12 @@ ${proactivePrompt}`;
         const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
         const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
         bubbles.forEach((bubbleText, idx) => {
-          const proactiveMsg: Message = {
+          const proactiveMsg = createCharacterTextMessage({
             id: `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
             characterId: activeChatCharId,
-            sender: "character",
             content: bubbleText,
             timestamp: Date.now() + idx,
-          };
+          });
           onSendMessage(proactiveMsg);
         });
       } else {
@@ -4032,13 +3986,12 @@ ${instructionsPrompt}`;
             finalContent = `[语音]|${secs}|${bubbleText}`;
           }
 
-          const proactiveMsg: Message = {
+          const proactiveMsg = createCharacterTextMessage({
             id: `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
             characterId: charId,
-            sender: "character",
             content: finalContent,
             timestamp: backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
-          };
+          });
           onSendMessage(proactiveMsg);
         });
       }
