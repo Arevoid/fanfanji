@@ -11,6 +11,7 @@ import { createDirectReplyCandidates } from "../features/chat/services/directCha
 import { createRegeneratedReplyCandidates } from "../features/chat/services/regenerateService";
 import { generateGroupReplyCandidates } from "../features/chat/services/groupChatService";
 import { generateProactiveReplyCandidates } from "../features/chat/services/proactiveMessageService";
+import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
@@ -1021,6 +1022,9 @@ export default function AppChat({
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
     if (!activeCharacter) return [];
+    return getWorldBookLocationReferences(getLatestWorldBookEntries(worldBookEntries), activeCharacter.id);
+    /* Legacy broad extraction retained below only as an inactive reference while
+       location references use the conservative domain helper above.
     
     const latestWorldBookEntries = getLatestWorldBookEntries(worldBookEntries);
 
@@ -1107,6 +1111,7 @@ export default function AppChat({
     }
     
     return locations;
+    */
   };
 
   // User profile edit states
