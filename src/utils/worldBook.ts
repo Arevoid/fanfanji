@@ -1,11 +1,11 @@
 import { WorldBookEntry } from "../types";
+import { loadWorldBookEntries } from "../core/storage/repositories/worldBookRepository";
 
 export function getLatestWorldBookEntries(propEntries: WorldBookEntry[]): WorldBookEntry[] {
   try {
-    const raw = localStorage.getItem("phone_worldbook_entries");
-    if (!raw) return propEntries;
-    const stored = JSON.parse(raw) as WorldBookEntry[];
-    if (!Array.isArray(stored)) return propEntries;
+    const storedResult = loadWorldBookEntries(propEntries);
+    if (!storedResult.found || !storedResult.valid) return propEntries;
+    const stored = storedResult.value;
 
     const propMax = propEntries.length > 0 ? Math.max(0, ...propEntries.map(e => e.timestamp || 0)) : 0;
     const storedMax = stored.length > 0 ? Math.max(0, ...stored.map(e => e.timestamp || 0)) : 0;

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { WorldBookEntry, Character } from "../types";
 import { Plus, Trash2, Edit, Search, ChevronLeft, Save, BookOpen, Layers, Globe, User, X, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries, safeParseDocx } from "../utils/pngParser";
+import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
 
 export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBookEntry | null => {
   if (!e || typeof e !== "object") return null;
@@ -159,6 +160,7 @@ export default function AppWorldBook({
   onDeleteEntry,
   onClose,
 }: AppWorldBookProps) {
+  const characterOptions = buildUniqueCharacterOptions(characters);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBinding, setSelectedBinding] = useState<string | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>(() => {
@@ -717,9 +719,9 @@ export default function AppWorldBook({
                           onChange={(e) => setBoundCharacterId(e.target.value)}
                           className="w-full pl-3 pr-8 py-1.5 rounded-[8px] bg-white border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold appearance-none cursor-pointer"
                         >
-                          {characters.map((char) => (
-                            <option key={char.id} value={char.id}>
-                              {char.name}
+                          {characterOptions.map(({ id, label }) => (
+                            <option key={id} value={id}>
+                              {label}
                             </option>
                           ))}
                         </select>
@@ -936,18 +938,18 @@ export default function AppWorldBook({
                   <Globe className="w-3 h-3" />
                   <span>全局生效</span>
                 </button>
-                {characters.map((char) => (
+                {characterOptions.map(({ id, label, character: char }) => (
                   <button
-                     key={char.id}
-                     onClick={() => setSelectedBinding(char.id)}
+                     key={id}
+                     onClick={() => setSelectedBinding(id)}
                      className={`px-3 py-1.5 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
-                       selectedBinding === char.id
+                       selectedBinding === id
                          ? "bg-neutral-950 border-neutral-950 text-white shadow-sm"
                          : "bg-white border-stone-200 text-stone-600 hover:bg-stone-100"
                      }`}
                   >
                     <img src={char.avatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover shrink-0" />
-                    <span>{char.name}</span>
+                    <span>{label}</span>
                   </button>
                 ))}
               </div>

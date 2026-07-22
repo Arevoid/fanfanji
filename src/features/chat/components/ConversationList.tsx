@@ -1,0 +1,79 @@
+import type { ReactNode } from "react";
+import { MessageSquare, Pin } from "lucide-react";
+import type { Character, Message } from "../../../types";
+
+export interface ConversationThread {
+  character: Character;
+  lastMessage: Message | null;
+  isPinned: boolean;
+}
+
+interface ConversationListProps {
+  header: ReactNode;
+  threads: readonly ConversationThread[];
+  onSelect: (characterId: string) => void;
+  getUnreadCount: (characterId: string) => number;
+  renderAvatar: (character: Character) => ReactNode;
+  getGroupMessageSummary: (message: Message) => string;
+}
+
+export function ConversationList({
+  header,
+  threads,
+  onSelect,
+  getUnreadCount,
+  renderAvatar,
+  getGroupMessageSummary,
+}: ConversationListProps) {
+  return (
+    <div className="divide-y divide-slate-100">
+      {header}
+      {threads.length === 0 ? (
+        <div className="text-center py-20 px-4">
+          <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-3">
+            <MessageSquare className="w-6 h-6" />
+          </div>
+          <h4 className="text-xs font-bold text-slate-700">暂无任何对话</h4>
+          <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
+            您还没有开始任何聊天。请前往底部的“通讯录”，选择一位档案馆中的虚拟伙伴发起首条对话！
+          </p>
+        </div>
+      ) : (
+        threads.map(({ character, lastMessage, isPinned }) => {
+          const unreadCount = getUnreadCount(character.id);
+          return (
+            <div
+              key={character.id}
+              onClick={() => onSelect(character.id)}
+              className={`flex items-center p-3 cursor-pointer transition-colors relative ${
+                isPinned ? "bg-blue-50/20 hover:bg-blue-50/40" : "hover:bg-slate-50"
+              }`}
+            >
+              {isPinned && <Pin className="w-3 h-3 text-blue-500 absolute top-2 right-2 rotate-45 opacity-60" />}
+              <div className="relative shrink-0 mr-3">
+                {renderAvatar(character)}
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 border border-white shadow-sm">
+                    {unreadCount}
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0 pr-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-800 truncate">
+                    {character.remark || character.name}
+                    {character.isGroupChat && <span className="text-slate-400 font-normal ml-1">({1 + (character.memberIds?.length || 0)})</span>}
+                  </h4>
+                  {lastMessage && <span className="text-[9px] text-slate-400 font-medium">{new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
+                </div>
+                <p className="text-[11px] text-slate-500 truncate mt-0.5 leading-normal">
+                  {lastMessage ? (character.isGroupChat ? getGroupMessageSummary(lastMessage) : lastMessage.content) : ""}
+                </p>
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}

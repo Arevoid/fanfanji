@@ -3,12 +3,42 @@ import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
-import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles, compressImage } from "../utils/pngParser";
+import { splitTextToOfflineSegments, compressImage } from "../utils/pngParser";
+import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles as splitIntoWeChatBubbles, type CallTranscriptItem } from "../features/chat/services/messageParser";
+import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
+import { requestAiReply } from "../features/chat/services/aiReplyService";
+import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
+import { createRegeneratedReplyCandidates } from "../features/chat/services/regenerateService";
+import { generateGroupReplyCandidates } from "../features/chat/services/groupChatService";
+import { generateProactiveReplyCandidates } from "../features/chat/services/proactiveMessageService";
+import { isBracketWrappedNarration } from "../features/chat/services/voiceMessageEligibility";
+import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
-import { getRelevantMemories } from "./AppMemory";
+import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
+import { buildOfflineHandoffPromptBlock } from "../domain/memory/offlineMemorySync";
+import { PromptComposer } from "../domain/prompt/PromptComposer";
+import { formatLocalTimeContext } from "../domain/prompt/timeContext";
+import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
+import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
+import { formatCharacterKnowledgeBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
+import { ChatTopBar } from "../features/chat/components/ChatTopBar";
+import { ContactList } from "../features/chat/components/ContactList";
+import { ConversationList } from "../features/chat/components/ConversationList";
+import { MessageList } from "../features/chat/components/MessageList";
+import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
+import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
+import { ChatComposer } from "../features/chat/components/ChatComposer";
+import { ChatTextInput } from "../features/chat/components/ChatTextInput";
+import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
+import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
+import { MomentsApp } from "../features/moments/MomentsApp";
+import { requestCharacterMoment } from "../features/moments/services/momentGenerator";
+import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
+import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
+import { stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
 import {
   MessageSquare,
   Users,
@@ -78,18 +108,6 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   const rgb = hexToRgb(hexColor);
   if (!rgb) return hexColor;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
-}
-
-function getChatMessageVisualType(content: string): string {
-  if (content.startsWith("data:image/")) return "image";
-  if (content.startsWith("[表情]|")) return "sticker";
-  if (content.startsWith("[红包]")) return "red-packet";
-  if (content.startsWith("[转账]")) return "transfer";
-  if (content.startsWith("[语音通话]") || content.startsWith("[视频通话]")) return "call";
-  if (content.startsWith("[语音")) return "voice";
-  if (content.startsWith("[文件]")) return "file";
-  if (content.startsWith("[位置]")) return "location";
-  return "text";
 }
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
@@ -338,35 +356,6 @@ const PRESEED_MOMENTS: Moment[] = [];
 const isOfflineStoryActiveFor = (characterId: string) =>
   localStorage.getItem(`offline_mode_active_${characterId}`) === "true";
 
-// Models sometimes return the human-readable WeChat labels instead of the
-// canonical app markup. Normalize new output and recognize old saved messages.
-const normalizePaymentMarkup = (content: string) => content
-  .replace(/^\[微信红包\]/, "[红包]")
-  .replace(/^\[微信转账\]/, "[转账]");
-
-const isRedPacketMarkup = (content: string) => /^\[(?:红包|微信红包)\]/.test(content);
-const isTransferMarkup = (content: string) => /^\[(?:转账|微信转账)\]/.test(content);
-const isCallRecordMarkup = (content: string) => /^\[通话记录\]\|/.test(content);
-
-type CallTranscriptItem = Pick<Message, "id" | "sender" | "content" | "timestamp">;
-
-const getCallTranscriptText = (content: string) =>
-  content.startsWith("[语音]|") ? content.split("|").slice(2).join("|") : content;
-
-const parseCallRecord = (content: string) => {
-  const [, callType = "语音通话", duration = "00:00", encodedTranscript = ""] = content.split("|");
-  try {
-    const transcript = JSON.parse(decodeURIComponent(encodedTranscript));
-    return {
-      callType,
-      duration,
-      transcript: Array.isArray(transcript) ? transcript as CallTranscriptItem[] : [],
-    };
-  } catch {
-    return { callType, duration, transcript: [] as CallTranscriptItem[] };
-  }
-};
-
 const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: string) =>
   getLatestWorldBookEntries(entries)
     .filter((entry) => entry.isActive !== false && (!entry.characterId || entry.characterId === "global" || entry.characterId === characterId))
@@ -375,7 +364,7 @@ const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: strin
     .join("\n\n");
 
 const cleanAndExtractMoment = (content: string) => {
-  let cleanContent = content.trim();
+  let cleanContent = stripMomentVoiceMarkup(content).trim();
   const selfComments: string[] = [];
   let imageDescription: string | undefined;
 
@@ -452,7 +441,9 @@ const getMomentComments = (mom: Moment) => {
   });
 
   const deletedCommentIds = new Set(mom.deletedCommentIds || []);
-  return [...mom.comments, ...dynamicComments].filter((comment) => !deletedCommentIds.has(comment.id));
+  return [...mom.comments, ...dynamicComments]
+    .filter((comment) => !deletedCommentIds.has(comment.id))
+    .map((comment) => ({ ...comment, content: stripMomentVoiceMarkup(comment.content).trim() }));
 };
 
 const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ownerName: string) => {
@@ -473,6 +464,19 @@ const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ow
 以下是最近微信朋友圈里的动态，你对这些内容拥有清晰的记忆。你不一定要主动提起它们，但它们是你们共享的日常生活背景。在交流中，你可以根据你们的亲疏关系极度自然地参考这些生活点滴，例如偶尔作为话题，或对对方最近的状态有所了解。
 ${momentLines.join("\n")}`;
 };
+
+const getKnownMomentsContextString = (
+  allMoments: Moment[],
+  activeChar: Character,
+  activeIdentityId: string,
+  ownerName: string
+) => buildKnownMomentsContext({
+  moments: allMoments,
+  activeCharacterId: activeChar.id,
+  activeIdentityId,
+  userName: ownerName,
+  getPublicBody: (moment) => renderMomentContent(moment.content),
+});
 
 const getOfflineStoriesContextString = (offlineStories: OfflineStory[] | undefined, activeCharId: string, charName: string) => {
   // Original offline dialogue must never leak into the online context. A user
@@ -1037,6 +1041,9 @@ export default function AppChat({
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
     if (!activeCharacter) return [];
+    return getWorldBookLocationReferences(getLatestWorldBookEntries(worldBookEntries), activeCharacter.id);
+    /* Legacy broad extraction retained below only as an inactive reference while
+       location references use the conservative domain helper above.
     
     const latestWorldBookEntries = getLatestWorldBookEntries(worldBookEntries);
 
@@ -1123,6 +1130,7 @@ export default function AppChat({
     }
     
     return locations;
+    */
   };
 
   // User profile edit states
@@ -1461,6 +1469,7 @@ export default function AppChat({
   // Memory Compression and Proactive Chat states
   const [isCompressingMemory, setIsCompressingMemory] = useState(false);
   const [isTriggeringProactive, setIsTriggeringProactive] = useState(false);
+  const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
   const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
   const [showDisbandGroupModal, setShowDisbandGroupModal] = useState(false);
   const [editingMemoryText, setEditingMemoryText] = useState("");
@@ -1892,7 +1901,11 @@ export default function AppChat({
 
       // Query group-level worldbook entries
       const groupWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText);
-      const groupWbText = groupWbBlocks.formattedAll ? `\n\n【🚨 微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
+      let groupWbText = groupWbBlocks.formattedAll ? `\n\n【🚨 微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
+      if (activeCharacter.enableTimeAwareness !== false) {
+        groupWbText += `\n【当前现实时间】\n${formatLocalTimeContext()}\n`;
+      }
+      groupWbText += `\n${formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id, groupMemberIds: groupMembers.map((member) => member.id) })}\n`;
 
       // Construct a system instruction that contains details about all members and how they should reply
       const membersDefText = groupMembers.map((member, idx) => {
@@ -1920,7 +1933,12 @@ ${membersDefText}
    - 例如：高冷、傲娇、忙碌、或正在执行专属世界书日程时间线上其他任务的角色（比如世界书设定某个角色此时应该在睡觉、在上班、或生病等），应该保持沉默，不返回任何回复，或者仅在极度契合的话题下简单插一句；而热情、空闲、爱凑热闹、或与发言人关系特别亲密的角色，则应该高频且积极地在群里接话。
    - 在生成的单次互动中，你应该让 1 到 3 位在此时、该话题、该状态下最契合、最有可能说话的成员进行回复（视话题和人设状态而定）。如果大家都觉得没有需要发言的内容，甚至可以只有 0~1 个人回复。不要强求每个人都说话！
 3. 🚨【成员间互动】：成员之间不仅是单独回复机主，更重要的是他们也是群友。他们也可以互相回复、接话、吐槽、附和、拆台或私下八卦抬杠。
-4. 🚨【中国标点与格式规范】：
+4. 🚨【成员关系与称呼边界】：成员可以互相回应，但称呼、语气和熟悉程度必须严格符合人设、世界书或当前群聊中明确说明的关系。同处一个群聊不代表彼此熟悉，不代表可以使用昵称、亲昵称呼或虚构共同经历；明确写明“只见过几次”“不熟悉”或没有关系信息时，使用全名、名字或中性称呼并保持适当距离。只有明确提供昵称及允许使用该昵称的关系对象时才能使用昵称；只对机主使用的亲昵称呼不得转移给其他成员。
+5. 🚨【自然的多人轮次】：一次群聊生成可以有 0 至 6 条发言，通常只让当前话题最可能参与的 1 至 3 位成员开口；不要强迫全员回应。
+   - 每条发言都可以回应机主，或回应历史中另一位成员刚刚说过的话。成员之间的接话、赞同、反驳、打趣和追问都应基于真实群聊历史、人设、世界书和明确关系。
+   - 同一成员可以连续发送 2 至 3 条短消息，例如先回应再补充，或发出一句后被另一位成员接话再继续；每一条都必须独立使用自己的 [SENDER_NAME: 名字] 标记。
+   - 不要为了“多人”而编造成员之间不存在的熟识、共同经历或关系；没有足够上下文时宁可让该成员保持沉默。
+6. 🚨【中国标点与格式规范】：
    - 微信聊天简短而随意，请保持口语化、极度真实的微信聊天风格。
    - 不要输出大段的长篇大论，尽量简短有力。
    - 不要使用任何小说式的“旁白、场景描写、动作心理括号（如 '(笑)' 或 '（叹气）'）”。群聊里只能输出他们作为真人打字发在微信群里的文本。
@@ -1953,47 +1971,32 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 按照规定的格式输出。`;
 
       // Call apiChat to generate responses
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "group-chat",
         message: promptMessage,
         history: [],
         systemInstruction,
+      });
+      const groupResult = await generateGroupReplyCandidates({
+        requestAi: apiChat,
+        request: {
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
         apiTemperature: settings.apiTemperature,
         streamCompatible: settings.streamCompatible,
+        },
+        members: groupMembers,
+        groupId: activeChatCharId,
+        disableBracketActions: activeCharacter.disableBracketActions || false,
+        createId: (index) => `group-reply-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`,
+        currentTime: () => Date.now(),
       });
 
-      if (data && data.text) {
-        // Parse replies
-        const lines = data.text.split("\n");
-        const parsedReplies: { charName: string; content: string }[] = [];
-        let currentReply: { charName: string; content: string } | null = null;
-
-        for (let line of lines) {
-          const senderMatch = line.match(/^\[SENDER_NAME:\s*(.+?)\]/i);
-          if (senderMatch) {
-            if (currentReply && currentReply.content.trim()) {
-              parsedReplies.push(currentReply);
-            }
-            currentReply = { charName: senderMatch[1].trim(), content: "" };
-          } else if (currentReply) {
-            currentReply.content += (currentReply.content ? "\n" : "") + line;
-          }
-        }
-        if (currentReply && currentReply.content.trim()) {
-          parsedReplies.push(currentReply);
-        }
-
-        // Filter and construct messages with sequential typing simulation and bracket action cleaning
+      if (groupResult.messages.length > 0) {
         repliesScheduled = false;
-        const validReplies = parsedReplies.map((reply, idx) => {
-          const member = groupMembers.find(
-            m => m.name.toLowerCase() === reply.charName.toLowerCase() || 
-                 (m.remark && m.remark.toLowerCase() === reply.charName.toLowerCase())
-          );
-          return { reply, member, idx };
-        }).filter(item => !!item.member) as { reply: { charName: string; content: string }; member: Character; idx: number }[];
+        const validReplies = groupResult.messages.map((message, idx) => ({ message, member: groupResult.members[idx], idx }));
 
         if (validReplies.length > 0) {
           repliesScheduled = true;
@@ -2018,19 +2021,8 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
             // Simulate typing for 1500ms
             setTimeout(() => {
-              const cleanedContent = cleanOnlineMessage(currentItem.reply.content.trim(), activeCharacter.disableBracketActions || false);
-              
-              if (cleanedContent) {
-                const charMsg: Message = {
-                  id: `group-reply-${Date.now()}-${currentItem.idx}-${Math.random().toString(36).substr(2, 5)}`,
-                  characterId: activeChatCharId, // Save under the Group's ID
-                  sender: "character",
-                  senderId: currentItem.member.id, // Keep track of the specific sender
-                  content: cleanedContent,
-                  timestamp: Date.now(),
-                };
-                onSendMessage(charMsg);
-              }
+              currentItem.message.timestamp = Date.now();
+              onSendMessage(currentItem.message);
 
               currentIdx++;
               if (currentIdx < validReplies.length) {
@@ -2101,6 +2093,8 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
   ): boolean => {
     const baseProb = getCharacterBaseVoiceProbability(character);
     if (baseProb === 0) return false;
+
+    if (isBracketWrappedNarration(bubbleText)) return false;
     
     // Exclude non-voice formats
     if (
@@ -2386,10 +2380,10 @@ ${activeCharacter.disableBracketActions
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = shouldLoadLongTermMemory
-        ? getRelevantMemories(memories || [], activeChatCharId || "", userMsg ? userMsg.content : "", topK)
+        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", queryText: userMsg ? userMsg.content : "", existingMemories: memories || [], limit: topK, scenario: "chat" })
         : [];
       if (relevantMemories.length > 0) {
-        charDefText += `\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+        charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n");
       }
 
       // A continuation synchronized while leaving the offline app is an explicit
@@ -2406,7 +2400,7 @@ ${activeCharacter.disableBracketActions
         && Date.now() - latestOfflineContinuationMemory.timestamp < 2 * 60 * 60 * 1000;
       if (isFreshOfflineHandoff
         && !relevantMemories.some((memory) => memory.id === latestOfflineContinuationMemory.id)) {
-        charDefText += `\n- Latest offline continuation handoff (continue this naturally if relevant):\n  * ${latestOfflineContinuationMemory.content}`;
+        charDefText += buildOfflineHandoffPromptBlock(latestOfflineContinuationMemory);
       }
 
       const userProfileText = `User Profile (interacting with you):
@@ -2456,16 +2450,7 @@ Answer only the user's newest message as today's opening. Do not resume, answer,
 
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
       if (activeCharacter.enableTimeAwareness !== false) {
-        const now = new Date();
-        const timeStr = now.toLocaleString("zh-CN", { 
-          year: "numeric", 
-          month: "long", 
-          day: "numeric", 
-          hour: "2-digit", 
-          minute: "2-digit", 
-          second: "2-digit",
-          weekday: "long" 
-        });
+        const timeStr = formatLocalTimeContext();
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
@@ -2582,7 +2567,7 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
       }
 
       // 8. WeChat Moments Context memory
-      const momentsContext = getMomentsContextString(allMoments, activeCharacter, settings.name);
+      const momentsContext = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
       if (momentsContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(momentsContext);
       }
@@ -2593,11 +2578,7 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
         assembledInstructions.push(offlineStoriesContext);
       }
 
-      // 8.7 Real-time group chat memories
-      const groupMemoriesContext = getGroupChatMemories(activeCharacter, characters, messages, settings.name);
-      if (groupMemoriesContext && shouldLoadLongTermMemory) {
-        assembledInstructions.push(groupMemoriesContext);
-      }
+      assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers1 = stickerGroups.flatMap(g => g.stickers);
@@ -2697,10 +2678,14 @@ ${stickerListStr}
 请你根据我们正在聊天的上下文话题或我们之前的对话脉络【极其自然、顺畅地继续对话】。如果当下适合，你也可以顺应氛围跟着发一个你自己的表情包，或者在文字对话里自然带过，保持微信好友日常聊天和斗图的真实、轻松感。`;
       }
 
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "direct-chat",
         message: promptMessage,
         history,
         systemInstruction,
+      });
+      const data = await requestAiReply(apiChat, {
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
@@ -2778,31 +2763,26 @@ ${stickerListStr}
             }
           }
         } else {
-          const cleanedText = normalizePaymentMarkup(cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false));
-          const textToSplit = cleanedText || data.text;
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
-          const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
+          const replyCandidates = createDirectReplyCandidates({
+            rawText: data.text,
+            disableBracketActions: activeCharacter.disableBracketActions || false,
+            keepPeriods,
+            characterId: activeChatCharId,
+            createId: (idx) => `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+            currentTime: () => Date.now(),
+            transformBubble: (bubbleText, idx) => {
+              const isVoice = activeAttachModal !== "calling" && shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
+              if (!isVoice) return bubbleText;
+              const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
+              return `[语音]|${secs}|${bubbleText}`;
+            },
+          });
           const createdMessages: Message[] = [];
           
-          for (let idx = 0; idx < bubbles.length; idx++) {
-            const bubbleText = bubbles[idx];
-            
-            // Dynamically decide if this bubble should be a voice message or a text message
-            let finalContent = bubbleText;
-            const isVoice = activeAttachModal !== "calling"
-              && shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
-            if (isVoice) {
-              const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
-              finalContent = `[语音]|${secs}|${bubbleText}`;
-            }
-
-            const charMsg: Message = {
-              id: `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-              characterId: activeChatCharId,
-              sender: "character",
-              content: finalContent,
-              timestamp: Date.now(),
-            };
+          for (let idx = 0; idx < replyCandidates.messages.length; idx++) {
+            const charMsg = replyCandidates.messages[idx];
+            const bubbleText = replyCandidates.bubbleTexts[idx];
             
             setIsTyping(true);
             const chars = bubbleText.length;
@@ -2814,7 +2794,7 @@ ${stickerListStr}
             createdMessages.push(charMsg);
             setIsTyping(false);
             
-            if (idx < bubbles.length - 1) {
+            if (idx < replyCandidates.messages.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
             }
           }
@@ -2911,13 +2891,12 @@ ${stickerListStr}
 
   const sendCustomMessage = (contentString: string) => {
     if (!activeChatCharId || !activeCharacter) return;
-    const userMsg: Message = {
+    const userMsg = createUserTextMessage({
       id: Date.now().toString(),
       characterId: activeChatCharId,
-      sender: "user",
       content: contentString,
       timestamp: Date.now(),
-    };
+    });
     const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
     onSendMessage(normalizedUserMsg);
     generateResponseForUserMessage(normalizedUserMsg);
@@ -3241,15 +3220,14 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
 
     setChatInputText("");
 
-    const userMsg: Message = {
+    const userMsg = createUserTextMessage({
       id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       characterId: activeChatCharId,
-      sender: "user",
       content: userMsgText,
       timestamp: Date.now(),
       isOffline: isOfflineModeActive ? true : undefined,
       isNarration: isOfflineModeActive ? isInputNarration : undefined
-    };
+    });
 
     onSendMessage(userMsg);
 
@@ -3297,15 +3275,14 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
 
     setChatInputText("");
 
-    const userMsg: Message = {
+    const userMsg = createUserTextMessage({
       id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       characterId: activeChatCharId,
-      sender: "user",
       content: userMsgText,
       timestamp: Date.now(),
       isOffline: isOfflineModeActive ? true : undefined,
       isNarration: isOfflineModeActive ? isInputNarration : undefined
-    };
+    });
 
     onSendMessage(userMsg);
 
@@ -3418,16 +3395,16 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // Recall memories
       const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", lastUserMsg.content, topK);
+      const relevantMemories = MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", queryText: lastUserMsg.content, existingMemories: memories || [], limit: topK, scenario: "chat" });
       if (relevantMemories.length > 0) {
-        charDefText += `\n- Reclaimed Memories / 召回深度记忆:\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+        charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories / 召回深度记忆:\n");
       }
 
       const userProfileText = `User Profile:
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
 
-      const momentsContextRegen = getMomentsContextString(allMoments, activeCharacter, settings.name);
+      const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
 
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
@@ -3451,16 +3428,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // 1.5 Time awareness prompt if enabled
       if (activeCharacter.enableTimeAwareness !== false) {
-        const now = new Date();
-        const timeStr = now.toLocaleString("zh-CN", { 
-          year: "numeric", 
-          month: "long", 
-          day: "numeric", 
-          hour: "2-digit", 
-          minute: "2-digit", 
-          second: "2-digit",
-          weekday: "long" 
-        });
+        const timeStr = formatLocalTimeContext();
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
@@ -3511,11 +3479,7 @@ ${timeLogString}
         assembledInstructions.push(offlineStoriesContextRegen);
       }
 
-      // 8.7 Real-time group chat memories
-      const groupMemoriesContextRegen = getGroupChatMemories(activeCharacter, characters, messages, settings.name);
-      if (groupMemoriesContextRegen) {
-        assembledInstructions.push(groupMemoriesContextRegen);
-      }
+      assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers2 = stickerGroups.flatMap(g => g.stickers);
@@ -3552,10 +3516,14 @@ ${stickerListStr}
 
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "regenerate",
         message: lastUserMsg.content,
         history,
         systemInstruction,
+      });
+      const data = await requestAiReply(apiChat, {
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
@@ -3564,20 +3532,16 @@ ${stickerListStr}
       });
 
       if (data && data.text) {
-        const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
-        const textToSplit = cleanedText || data.text;
         const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
-        const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
-        bubbles.forEach((bubbleText, idx) => {
-          const charMsg: Message = {
-            id: `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-            characterId: activeChatCharId,
-            sender: "character",
-            content: bubbleText,
-            timestamp: Date.now() + idx,
-          };
-          onSendMessage(charMsg);
+        const replyCandidates = createRegeneratedReplyCandidates({
+          rawText: data.text,
+          disableBracketActions: activeCharacter.disableBracketActions || false,
+          keepPeriods,
+          characterId: activeChatCharId,
+          createId: (idx) => `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+          currentTime: (idx) => Date.now() + idx,
         });
+        replyCandidates.messages.forEach(onSendMessage);
       }
     } catch (err: any) {
       console.error("Regeneration error:", err);
@@ -3769,57 +3733,28 @@ ${stickerListStr}
         return 0;
       }
       
-      const history = messagesToCompress.map((m) => ({
-        role: m.sender === "user" ? "user" : "model",
-        text: m.content,
-      }));
-
-      const data = await apiExtractMemories({
-        history,
-        characterName: activeCharacter.name,
+      const isDelicate = activeCharacter.archiveTemplateType === "delicate";
+      const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
+      const result = await MemoryService.extractMemories({
+        character: activeCharacter,
+        characterId: activeChatCharId,
+        recentMessages: messagesToCompress,
+        existingMemories: memories || [],
+        scenario: "chat",
         apiKey: settings.apiKey,
-        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model")
-          ? (settings.selectedModel || "gemini-3.5-flash")
-          : recallSettings.extractModel,
+        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
         apiEndpoint: settings.apiEndpoint,
         templateType: activeCharacter.archiveTemplateType,
-      });
-
-      if (data && data.items && Array.isArray(data.items)) {
-        const validItems = data.items
-          .map((content: string) => content.trim())
-          .filter((content: string) => content.length > 0);
-
-        if (validItems.length > 0) {
-          const bulletPoints = validItems.map((item: string) => `- ${item}`).join("\n");
-          const isDelicate = activeCharacter.archiveTemplateType === "delicate";
-          const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
-          const singleSummaryContent = `${headerLabel}\n${bulletPoints}`;
-
-          const isDup = (memories || []).some(
-            (m) =>
-              m.characterId === activeChatCharId &&
-              m.content.toLowerCase().replace(/[\s,.:;!?"']/g, "") ===
-                singleSummaryContent.toLowerCase().replace(/[\s,.:;!?"']/g, "")
-          );
-
-          if (!isDup) {
-            const newSingleItem: MemoryItem = {
-              id: (Date.now() + Math.random()).toString(),
-              characterId: activeChatCharId,
-              content: singleSummaryContent,
-              timestamp: Date.now(),
-              importance: 5,
-              isManual: false,
-            };
-            onSaveMemories([newSingleItem, ...(memories || [])]);
-            return 1;
-          }
-        }
-        return 0;
-      } else {
-        console.error("Extract memory API error:", (data as any).error);
+        createId: () => (Date.now() + Math.random()).toString(),
+        currentTime: () => Date.now(),
+        formatContent: (items) => formatExtractedMemorySummary(headerLabel, items),
+      }, apiExtractMemories);
+      if (result.apiError) console.error("Extract memory API error:", result.apiError);
+      if (result.extractedMemories.length > 0) {
+        onSaveMemories(MemoryService.mergeMemories(memories || [], result.extractedMemories));
+        return result.extractedMemories.length;
       }
+      return 0;
     } catch (err: any) {
       console.error("Memory extraction error:", err);
     } finally {
@@ -3830,8 +3765,9 @@ ${stickerListStr}
 
   // Manual Trigger Proactive Message simulation
   const handleTriggerProactiveMessage = async () => {
-    if (!activeChatCharId || !activeCharacter) return;
+    if (!activeChatCharId || !activeCharacter || activeCharacter.isGroupChat || proactiveMessageInFlightRef.current.has(activeChatCharId)) return;
 
+    proactiveMessageInFlightRef.current.add(activeChatCharId);
     setIsTriggeringProactive(true);
     setIsTyping(true);
     try {
@@ -3846,9 +3782,15 @@ ${stickerListStr}
       }
 
       const charMsgs = messages.filter(m => m.characterId === activeChatCharId);
+      const recentConversation = analyzeRecentConversation(charMsgs, activeChatCharId);
+      const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
+      const timeContext = activeCharacter.enableTimeAwareness !== false
+        ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
+        : "";
+      const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id });
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
@@ -3868,43 +3810,40 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}PROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
 ${proactivePrompt}`;
 
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "proactive-message",
         message: "(用户失联3小时，你主动给其发送了一条信息)",
-        history: [],
+        history: recentConversation.recentMessages.map((message) => ({
+          role: message.sender === "user" ? "user" : "model",
+          text: message.content,
+        })),
         systemInstruction,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature,
-        streamCompatible: settings.streamCompatible,
+      });
+      const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+      const proactiveResult = await generateProactiveReplyCandidates({
+        requestAi: apiChat,
+        request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
+        characterId: activeChatCharId,
+        disableBracketActions: activeCharacter.disableBracketActions || false,
+        keepPeriods,
+        createId: (idx) => `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+        currentTime: (idx) => Date.now() + idx,
       });
 
-      if (data && data.text) {
-        const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
-        const textToSplit = cleanedText || data.text;
-        const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
-        const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
-        bubbles.forEach((bubbleText, idx) => {
-          const proactiveMsg: Message = {
-            id: `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-            characterId: activeChatCharId,
-            sender: "character",
-            content: bubbleText,
-            timestamp: Date.now() + idx,
-          };
-          onSendMessage(proactiveMsg);
-        });
+      if (proactiveResult.data && proactiveResult.data.text) {
+        proactiveResult.messages.forEach(onSendMessage);
       } else {
-        alert(`主动联络失败: ${(data as any).error || "智能体无响应"}`);
+        alert(`主动联络失败: ${(proactiveResult.data as any).error || "智能体无响应"}`);
       }
     } catch (err: any) {
       alert(`主动联络错误: ${err.message || err}`);
     } finally {
+      proactiveMessageInFlightRef.current.delete(activeChatCharId);
       setIsTriggeringProactive(false);
       setIsTyping(false);
     }
@@ -3954,10 +3893,11 @@ ${proactivePrompt}`;
 
   // Automated background proactive message generator for any character
   const triggerProactiveFor = async (charId: string, customTaskText?: string, backdateTimestamp?: number) => {
-    if (isOfflineStoryActiveFor(charId)) return;
+    if (isOfflineStoryActiveFor(charId) || proactiveMessageInFlightRef.current.has(charId)) return;
     const friend = characters.find((c) => c.id === charId);
-    if (!friend) return;
+    if (!friend || friend.isGroupChat) return;
 
+    proactiveMessageInFlightRef.current.add(charId);
     try {
       let instructionsPrompt = `Instructions:
 1. Speak in Chinese. Maintain character role-play thoroughly.
@@ -3970,9 +3910,15 @@ ${proactivePrompt}`;
       }
 
       const charMsgs = messagesRef.current.filter(m => m.characterId === charId);
+      const recentConversation = analyzeRecentConversation(charMsgs, charId);
+      const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], charId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
+      const timeContext = friend.enableTimeAwareness !== false
+        ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
+        : "";
+      const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: friend.id });
 
       const taskPrompt = customTaskText || "It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.";
 
@@ -3994,47 +3940,44 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}PROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
 ${taskPrompt}
 
 ${instructionsPrompt}`;
 
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "proactive-message",
         message: "(你主动给用户发送了一条信息)",
-        history: [],
+        history: recentConversation.recentMessages.map((message) => ({
+          role: message.sender === "user" ? "user" : "model",
+          text: message.content,
+        })),
         systemInstruction,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature,
-        streamCompatible: settings.streamCompatible,
+      });
+      const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
+      const proactiveResult = await generateProactiveReplyCandidates({
+        requestAi: apiChat,
+        request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
+        characterId: charId,
+        disableBracketActions: friend.disableBracketActions || false,
+        keepPeriods,
+        createId: (idx) => `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+        currentTime: (idx) => backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
+        transformBubble: (bubbleText, idx) => {
+          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText);
+          if (!isVoice) return bubbleText;
+          const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
+          return `[语音]|${secs}|${bubbleText}`;
+        },
       });
 
-      if (data && data.text) {
-        const cleanedText = cleanOnlineMessage(data.text, friend.disableBracketActions || false);
-        const textToSplit = cleanedText || data.text;
-        const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
-        const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
-        bubbles.forEach((bubbleText, idx) => {
-          let finalContent = bubbleText;
-          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText);
-          if (isVoice) {
-            const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
-            finalContent = `[语音]|${secs}|${bubbleText}`;
-          }
-
-          const proactiveMsg: Message = {
-            id: `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-            characterId: charId,
-            sender: "character",
-            content: finalContent,
-            timestamp: backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
-          };
-          onSendMessage(proactiveMsg);
-        });
+      if (proactiveResult.data && proactiveResult.data.text) {
+        proactiveResult.messages.forEach(onSendMessage);
       }
     } catch (err) {
       console.error("Proactive message auto-trigger error:", err);
+    } finally {
+      proactiveMessageInFlightRef.current.delete(charId);
     }
   };
 
@@ -4091,29 +4034,25 @@ Your task: Write a short, natural comment on this Moment.
 4. Try to make it feel deeply personal or reference recent chats subtly if applicable.
 `;
 
-          const response = await apiChat({
+          const composedPrompt = PromptComposer.compose({
+            scenario: "moment-comment",
             message: "请根据以上内容，为机主的新朋友圈写一条符合你人设和记忆的简短微信评论：",
             history,
             systemInstruction,
+          });
+          const comment = await requestAutomaticMomentComment({
+            requestAi: apiChat,
+            request: {
+            ...composedPrompt,
             apiKey: settings.apiKey,
             model: settings.selectedModel || "gemini-3.5-flash",
             apiEndpoint: settings.apiEndpoint,
             apiTemperature: settings.apiTemperature,
+            },
+            character: friend,
+            cleanText: (text) => cleanOnlineMessage(text, true),
           });
-
-          if (response && response.text) {
-            let cleanedComment = cleanOnlineMessage(response.text.trim(), true);
-            cleanedComment = cleanedComment.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
-
-            const newComment: MomentComment = {
-              id: `${Date.now()}-comment-${Math.random().toString(36).substr(2, 5)}`,
-              authorName: friend.remark || friend.name,
-              authorAvatar: friend.avatar,
-              content: cleanedComment,
-              timestamp: Date.now(),
-            };
-            onAddCommentToMoment(newMo.id, newComment);
-          }
+          if (comment) onAddCommentToMoment(newMo.id, comment);
         } catch (err) {
           console.error(`Failed to generate automatic comment for ${friend.name}:`, err);
         }
@@ -4204,36 +4143,26 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
 4. Try to make it feel responsive to their comment.
 `;
 
-        const response = await apiChat({
+        const composedPrompt = PromptComposer.compose({
+          scenario: "moment-reply",
           message: `请针对用户在朋友圈下对你（或他人）发表的最新评论 "${userCommentText}"，写一条符合你人设和记忆的简短微信回复：`,
           history,
           systemInstruction,
+        });
+        const reply = await requestMomentCommentReply({
+          requestAi: apiChat,
+          request: {
+          ...composedPrompt,
           apiKey: settings.apiKey,
           model: settings.selectedModel || "gemini-3.5-flash",
           apiEndpoint: settings.apiEndpoint,
           apiTemperature: settings.apiTemperature,
+          },
+          character: friend,
+          userName: settings.name,
+          cleanText: (text) => cleanOnlineMessage(text, true),
         });
-
-        if (response && response.text) {
-          let cleanedReply = cleanOnlineMessage(response.text.trim(), true);
-          cleanedReply = cleanedReply.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
-
-          // Clean up any existing AI-generated reply prefix to prevent duplication
-          cleanedReply = cleanedReply.replace(/^回复\s*[\(（].*?[\)）]\s*[:：]\s*/, "");
-          cleanedReply = cleanedReply.replace(/^回复\s*.*?\s*[:：]\s*/, "");
-
-          // Since the friend is replying to the user, the prefix must be 回复${settings.name}：
-          const finalReply = `回复${settings.name}：${cleanedReply}`;
-
-          const newComment: MomentComment = {
-            id: `${Date.now()}-reply-${Math.random().toString(36).substr(2, 5)}`,
-            authorName: friend.remark || friend.name,
-            authorAvatar: friend.avatar,
-            content: finalReply,
-            timestamp: Date.now(),
-          };
-          onAddCommentToMoment(momentId, newComment);
-        }
+        if (reply) onAddCommentToMoment(momentId, reply);
       } catch (err) {
         console.error(`Failed to generate reply to user comment for ${friend.name}:`, err);
       }
@@ -4293,62 +4222,27 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 6. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 `;
 
-      const response = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "moment-post",
         message: "请根据你的设定以及与机主的历史记忆，写一条朋友圈内容（内容可以与你自己有关，也可以与机主有关）：",
         history,
         systemInstruction,
+      });
+      const generated = await requestCharacterMoment({
+        requestAi: apiChat,
+        request: {
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
         apiTemperature: settings.apiTemperature,
+        },
+        character: friend,
+        ownerIdentityId: activeIdentityId,
+        parseContent: cleanAndExtractMoment,
       });
-
-      if (response && response.text) {
-        let cleanedContent = response.text.trim();
-        cleanedContent = cleanedContent.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
-
-        const parsed = cleanAndExtractMoment(cleanedContent);
-
-        let momentImage: string | undefined = undefined;
-        if (!parsed.imageDescription && friend.album && friend.album.length > 0) {
-          // 40% chance of attaching a photo from their album
-          if (Math.random() < 0.4) {
-            const randomIndex = Math.floor(Math.random() * friend.album.length);
-            momentImage = friend.album[randomIndex];
-          }
-        }
-
-        const newMo: Moment = {
-          id: `${Date.now()}-char-moment-${Math.random().toString(36).substr(2, 5)}`,
-          characterId: friend.id,
-          ownerIdentityId: activeIdentityId,
-          authorName: friend.remark || friend.name,
-          authorAvatar: friend.avatar,
-          content: parsed.content,
-          timestamp: Date.now(),
-          likes: [],
-          comments: parsed.selfComments.map((text, idx) => ({
-            id: `${Date.now()}-self-comment-${idx}-${Math.random().toString(36).substr(2, 4)}`,
-            authorName: friend.remark || friend.name,
-            authorAvatar: friend.avatar,
-            content: text,
-            timestamp: Date.now() + (idx + 1) * 1000,
-          })),
-          image: momentImage,
-          imageType: momentImage ? "photo" : (parsed.imageDescription ? "text" : undefined),
-          imageDescription: parsed.imageDescription,
-        };
-
-        onAddMoment(newMo);
-        onSaveMemories([{
-          id: `${Date.now()}-moment-memory-${Math.random().toString(36).slice(2, 6)}`,
-          characterId: friend.id,
-          content: `【朋友圈动态】${parsed.content}${momentImage ? "（发布时附有配图）" : ""}`,
-          timestamp: Date.now(),
-          importance: 4,
-          isManual: false,
-        }, ...(memories || [])]);
-      }
+      if (generated.moment) onAddMoment(generated.moment);
+      if (generated.memory) onSaveMemories(MemoryService.mergeMemories(memories || [], [generated.memory]));
     } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
       const errMsgStr = err?.message || String(err);
@@ -4404,7 +4298,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
       ownerIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
-      content: momentInputText.trim(),
+      content: stripMomentVoiceMarkup(momentInputText).trim(),
       timestamp: Date.now(),
       likes: [],
       comments: [],
@@ -4442,7 +4336,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
     const replyingTo = replyingToCommentMap[momentId];
     const prefix = replyingTo ? `回复${replyingTo.authorName}：` : "";
-    const finalContent = `${prefix}${text.trim()}`;
+    const finalContent = `${prefix}${stripMomentVoiceMarkup(text).trim()}`;
 
     const newComment: MomentComment = {
       id: Date.now().toString(),
@@ -4467,6 +4361,46 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
     // Trigger character auto-reply to the user's new comment
     handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
+  };
+
+  const publishMomentFromFeature = (input: { content: string; image: string | null; imageDescription: string }) => {
+    const newMo: Moment = {
+      id: Date.now().toString(),
+      ownerIdentityId: activeIdentityId,
+      authorName: settings.name,
+      authorAvatar: settings.avatar,
+      content: stripMomentVoiceMarkup(input.content).trim(),
+      timestamp: Date.now(),
+      likes: [],
+      comments: [],
+      image: input.image || undefined,
+      imageType: input.image ? "photo" : (input.imageDescription.trim() ? "text" : undefined),
+      imageDescription: input.imageDescription.trim() || undefined,
+    };
+    onAddMoment(newMo);
+    handleAutoCommentOnUserMoment(newMo);
+  };
+
+  const publishMomentCommentFromFeature = (momentId: string, text: string, replyingTo?: MomentComment) => {
+    const prefix = replyingTo ? `回复${replyingTo.authorName}：` : "";
+    const newComment: MomentComment = {
+      id: Date.now().toString(),
+      authorName: settings.name,
+      authorAvatar: settings.avatar,
+      content: `${prefix}${stripMomentVoiceMarkup(text).trim()}`,
+      timestamp: Date.now(),
+    };
+    onAddCommentToMoment(momentId, newComment);
+    handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
+  };
+
+  const uploadMomentImageFromFeature = async (file: File, kind: "moment" | "cover") => {
+    const compressed = await compressImage(file, kind === "cover" ? 1000 : 800, kind === "cover" ? 1000 : 800, 0.7);
+    if (kind === "cover") {
+      onSaveSettings({ ...settings, momentsCover: compressed });
+      return undefined;
+    }
+    return compressed;
   };
 
   // Active chat threads list builder
@@ -5870,8 +5804,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
           {/* Active Chat Messages body */}
 
-          <div
-            ref={scrollContainerRef}
+          <MessageList
+            messages={currentChatMessages}
+            scrollRef={scrollContainerRef}
             className="flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
@@ -5879,10 +5814,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 : undefined,
               WebkitOverflowScrolling: "touch",
             }}
-          >
-
-
-            {currentChatMessages.map((msg, idx) => {
+            renderMessage={(msg, idx) => {
               // Calculate WeChat timestamp divider
               let showWeChatDivider = false;
               let dividerText = "";
@@ -6118,99 +6050,20 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </button>
                         );
                       })() : isRedPacketMarkup(msg.content) ? (() => {
-                        const [_, amount, greeting] = msg.content.split("|");
+                        const [, amount, greeting] = msg.content.split("|");
                         const status = getRedPacketActualStatus(msg.id, msg.timestamp, msg.sender);
-                        
-                        let cardBg = "bg-[#fa9d3b] hover:brightness-[1.03] text-white";
-                        let ribbonBg = "bg-[#f4932d] text-[#ffeada]/75 border-t border-[#fa9d3b]";
-                        let iconBg = "bg-[#f35543] text-yellow-300";
-                        let titleColor = "text-white font-bold";
-                        let actionText = "查看红包";
-                        let ribbonText = "微信红包";
-
-                        if (status === "claimed") {
-                          cardBg = "bg-[#fa9d3b]/55 text-white/70";
-                          ribbonBg = "bg-[#e18b2b]/40 text-[#ffeada]/50 border-t border-[#fa9d3b]/20";
-                          iconBg = "bg-[#f35543]/40 text-yellow-300/40";
-                          titleColor = "text-white/60 font-semibold";
-                          actionText = isSelf ? "红包已被领完" : "已领入零钱";
-                          ribbonText = "微信红包 · 已拆开";
-                        } else if (status === "expired" || status === "refunded") {
-                          cardBg = "bg-slate-200 text-slate-500 hover:bg-slate-200/90";
-                          ribbonBg = "bg-slate-300/60 text-slate-400 border-t border-slate-200";
-                          iconBg = "bg-slate-300 text-slate-400";
-                          titleColor = "text-slate-400 font-normal";
-                          actionText = "红包已过期";
-                          ribbonText = "微信红包 · 已失效";
-                        } else {
-                          actionText = isSelf ? "等待对方拆开" : "点击拆红包";
-                        }
-
-                        return (
-                          <div 
-                            onClick={() => {
-                              const packetAmount = amount || "8.88";
-                              const char = characters.find(c => c.id === msg.characterId);
-                              const senderName = char?.remark || char?.name || "未知好友";
-                              const senderAvatar = char?.avatar || "🧧";
-                              
-                              setOpenRedPacketDetail({
-                                id: msg.id,
-                                amount: packetAmount,
-                                greeting: greeting || "恭喜发财",
-                                senderName,
-                                senderAvatar,
-                                sender: msg.sender as "user" | "character",
-                                timestamp: msg.timestamp
-                              });
-                              setShowRedPacketOpenModal(true);
-                            }}
-                            className={`${cardBg} rounded-2xl w-56 overflow-hidden cursor-pointer shadow-md transition-all flex flex-col active:scale-[0.99] select-none cv-transfer`}
-                          >
-                            <div className="p-3.5 flex items-center gap-3">
-                              <div className={`w-9 h-9 ${iconBg} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner`}>
-                                🧧
-                              </div>
-                              <div className="flex-1 min-w-0 text-left">
-                                <p className={`text-xs ${titleColor} truncate`}>{greeting || "恭喜发财，万事如意"}</p>
-                                <p className="text-[10px] mt-1 font-bold tracking-wide">{actionText}</p>
-                              </div>
-                            </div>
-                            <div className={`px-3.5 py-1.5 ${ribbonBg} text-[9px] font-bold flex items-center justify-between select-none`}>
-                              <span>{ribbonText}</span>
-                            </div>
-                          </div>
-                        );
+                        return <RedPacketCard amount={amount || "8.88"} greeting={greeting || "恭喜发财，万事如意"} status={status} isSelf={isSelf} onClick={() => {
+                          const char = characters.find((character) => character.id === msg.characterId);
+                          setOpenRedPacketDetail({ id: msg.id, amount: amount || "8.88", greeting: greeting || "恭喜发财", senderName: char?.remark || char?.name || "未知好友", senderAvatar: char?.avatar || "🧧", sender: msg.sender as "user" | "character", timestamp: msg.timestamp });
+                          setShowRedPacketOpenModal(true);
+                        }} />;
                       })() : isTransferMarkup(msg.content) ? (() => {
-                        const [_, amount, memo, isConfirmedStr] = msg.content.split("|");
+                        const [, amount, memo, isConfirmedStr] = msg.content.split("|");
                         const isConfirmed = isConfirmedStr === "true";
-                        return (
-                          <div 
-                            onClick={() => {
-                              setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
-                              setShowTransferDetailModal(true);
-                            }}
-                            className={`bg-[#fdfcfb] border border-[#f5ebe0]/40 text-stone-800 rounded-2xl w-56 overflow-hidden cursor-pointer shadow-sm hover:bg-[#faf5f0] transition-all flex flex-col active:scale-[0.99] select-none cv-transfer ${
-                              isSelf ? "transfer-card" : "received-transfer-card"
-                            }`}
-                          >
-                            <div className="p-3.5 flex items-center gap-3 cv-transfer-body transfer-body">
-                              <div className={`w-9 h-9 ${isConfirmed ? "bg-orange-500/10 text-orange-500" : "bg-amber-500/10 text-amber-500"} rounded-full flex items-center justify-center text-lg leading-none shrink-0 font-bold shadow-inner cv-transfer-status transfer-icon confirm-icon`}>
-                                💸
-                              </div>
-                              <div className="flex-1 min-w-0 text-left">
-                                <p className="text-xs font-bold text-stone-800 truncate">¥{amount || "100.00"}</p>
-                                <p className="text-[10px] text-stone-400 mt-0.5 truncate">{memo || "转账"}</p>
-                              </div>
-                            </div>
-                            <div className="px-3.5 py-2 bg-stone-50 text-stone-400 text-[9px] font-bold flex items-center justify-between border-t border-orange-50 cv-transfer-ribbon transfer-status select-none">
-                              <span className="font-semibold text-stone-400">微信转账</span>
-                              <span className={`font-semibold ${isConfirmed ? "text-green-600" : "text-amber-600"}`}>
-                                {isConfirmed ? "已收钱" : "待接收"}
-                              </span>
-                            </div>
-                          </div>
-                        );
+                        return <TransferCard amount={amount || "100.00"} memo={memo || "转账"} status={isConfirmed ? "confirmed" : "pending"} onClick={() => {
+                          setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
+                          setShowTransferDetailModal(true);
+                        }} />;
                       })() : msg.content.startsWith("[语音") ? (() => {
                         let content = msg.content;
                         let durationStr = "3";
@@ -6368,14 +6221,27 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </div>
                         );
                       })() : (
-                        <div
-                          className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
-                            isSelf
-                              ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
-                              : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
-                          }`}
-                        >
-                          <div className="text-left">{msg.content}</div>
+                        <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"}` : `px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                          isSelf
+                            ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
+                            : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
+                        }`}>
+                          {(() => {
+                            const quoteReply = parseQuoteReply(msg.content);
+                            return quoteReply ? (
+                              <>
+                                <div className="message-quote__header">↩ {isSelf ? "你回复了" : "回复了"} {quoteReply.author}</div>
+                                <div className="message-quote text-left text-[11px]">
+                                  <div className="message-quote__content px-3 py-2">{quoteReply.content}</div>
+                                </div>
+                                <div className={`message-quote__reply-body px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                                  isSelf
+                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
+                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
+                                }`}>{quoteReply.body}</div>
+                              </>
+                            ) : <div className="text-left">{msg.content}</div>;
+                          })()}
                           {msg.translation && (
                             <>
                               <div className={`my-1.5 border-t border-dashed ${isSelf ? "border-white/20" : "border-stone-200"}`} />
@@ -6486,10 +6352,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   </div>
                 );
               }
-            })}
+            }}>
 
             {/* AI is writing/typing indicator */}
-            {isTyping && (
+            {isTyping && (isOfflineModeActive || !activeCharacter?.isGroupChat) && (
               isOfflineModeActive ? (
                 <div className="flex items-center gap-2 text-xs text-indigo-600 font-bold italic px-1 py-2 my-2 animate-pulse">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -6530,33 +6396,16 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             )}
 
             <div ref={chatEndRef} />
-          </div>
+          </MessageList>
 
           {/* Active Chat Footer Input form */}
-          <div className={`${
+          <ChatComposer className={`${
             isFloatingCute 
               ? "mx-3.5 mb-3.5 mt-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area" 
               : activeStylePreset === "liquid-glass"
                 ? "mx-3.5 mb-3.5 mt-1 bg-transparent border-0 shadow-none overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area"
                 : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
-          }`}>
-            {quotedMessage && (
-              <div className="px-3 py-1.5 bg-stone-50 border-b border-stone-100 flex items-center justify-between text-[11px] text-stone-600 shrink-0 animate-fade-in">
-                <div className="truncate flex-1 pr-4 text-left">
-                  <span className="font-extrabold text-stone-700">引用自 {quotedMessage.sender === "user" ? "自己" : (activeCharacter.remark || activeCharacter.name)}: </span>
-                  <span className="italic">
-                    {quotedMessage.content.startsWith("[文件]") 
-                      ? `[文件] ${quotedMessage.content.split("|")[1] || "笔记"}` 
-                      : quotedMessage.content.startsWith("[") 
-                        ? "[媒体内容]" 
-                        : quotedMessage.content}
-                  </span>
-                </div>
-                <button type="button" onClick={() => setQuotedMessage(null)} className="text-stone-400 hover:text-stone-600 p-0.5">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
+          }`} quotePreview={quotedMessage && <QuotedMessagePreview message={quotedMessage} senderName={activeCharacter.remark || activeCharacter.name} onClear={() => setQuotedMessage(null)} closeIcon={<X className="w-3.5 h-3.5" />} />}>
             
 
 
@@ -6587,7 +6436,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               </button>
 
               {/* Chat Input text box */}
-              <input
+              <ChatTextInput
                 type="text"
                 value={chatInputText}
                 onChange={(e) => setChatInputText(e.target.value)}
@@ -6640,7 +6489,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
             {/* Attach Panel */}
             {showAttachPanel && (
-              <div className={`py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto chat-composer__attachment-panel ${
+              <AttachmentMenu className={`py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto chat-composer__attachment-panel ${
                 activeStylePreset === "liquid-glass"
                   ? "bg-white/60 backdrop-blur-md border-t border-white/40"
                   : "bg-slate-50 border-t border-slate-100"
@@ -6746,7 +6595,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
                 </button>
-              </div>
+              </AttachmentMenu>
             )}
 
             {/* Sticker Selector Panel */}
@@ -6877,7 +6726,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 </div>
               </div>
             )}
-          </div>
+          </ChatComposer>
 
           {/* Voice Text Input Modal Overlay */}
           {activeAttachModal === "voice" && (
@@ -7531,167 +7380,60 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
           
           {/* TABS: CHATS LIST (聊天首页) */}
           {activeTab === "chats" && (
-            <div className="divide-y divide-slate-100">
-              <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative">
-                <button
-                  onClick={onClose}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-                  title="返回主页"
-                >
-                  <ChevronLeft className="w-4 h-4 text-slate-700" />
-                </button>
-                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">聊天 ({chatThreads.length})</h2>
-                <button
-                  onClick={() => {
-                    setGroupNameInput("");
-                    setSelectedGroupMemberIds([]);
-                    setShowCreateGroupModal(true);
-                  }}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10"
-                  title="发起群聊"
-                >
-                  <Plus className="w-4 h-4 text-slate-700" />
-                </button>
-              </div>
-
-              {chatThreads.length === 0 ? (
-                <div className="text-center py-20 px-4">
-                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-3">
-                    <MessageSquare className="w-6 h-6" />
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-700">暂无任何对话</h4>
-                  <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
-                    您还没有开始任何聊天。请前往底部的“通讯录”，选择一位档案馆中的虚拟伙伴发起首条对话！
-                  </p>
-                </div>
-              ) : (
-                chatThreads.map(({ character, lastMessage, isPinned }) => (
-                  <div
-                    key={character.id}
-                    onClick={() => startChatWith(character.id)}
-                    className={`flex items-center p-3 cursor-pointer transition-colors relative ${
-                      isPinned ? "bg-blue-50/20 hover:bg-blue-50/40" : "hover:bg-slate-50"
-                    }`}
-                  >
-                    {isPinned && (
-                      <Pin className="w-3 h-3 text-blue-500 absolute top-2 right-2 rotate-45 opacity-60" />
-                    )}
-
-                    {/* Avatar */}
-                    <div className="relative shrink-0 mr-3">
-                      <RenderAvatar
-                        src={character.avatar || (character.isGroupChat ? "👥" : "")}
-                        alt={character.name}
-                        name={character.remark || character.name}
-                        className="w-11 h-11 rounded-full object-cover bg-slate-100 border border-slate-100 aspect-square flex items-center justify-center text-xl select-none"
-                      />
-                      {getUnreadCount(character.id) > 0 && (
-                        <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 border border-white shadow-sm">
-                          {getUnreadCount(character.id)}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Last details */}
-                    <div className="flex-1 min-w-0 pr-4">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-slate-800 truncate">
-                          {character.remark || character.name}
-                          {character.isGroupChat && (
-                            <span className="text-slate-400 font-normal ml-1">
-                              ({1 + (character.memberIds?.length || 0)})
-                            </span>
-                          )}
-                        </h4>
-                        {lastMessage && (
-                          <span className="text-[9px] text-slate-400 font-medium">
-                            {new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-500 truncate mt-0.5 leading-normal">
-                        {lastMessage ? (
-                          character.isGroupChat ? (
-                            (() => {
-                              if (lastMessage.sender === "user") {
-                                return `我: ${lastMessage.content}`;
-                              }
-                              const senderChar = characters.find(c => c.id === lastMessage.senderId);
-                              const senderName = senderChar ? (senderChar.remark || senderChar.name) : "成员";
-                              return `${senderName}: ${lastMessage.content}`;
-                            })()
-                          ) : (
-                            lastMessage.content
-                          )
-                        ) : (
-                          ""
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+            <ConversationList
+              threads={chatThreads}
+              onSelect={startChatWith}
+              getUnreadCount={getUnreadCount}
+              renderAvatar={(character) => <RenderAvatar src={character.avatar || (character.isGroupChat ? "👥" : "")} alt={character.name} name={character.remark || character.name} className="w-11 h-11 rounded-full object-cover bg-slate-100 border border-slate-100 aspect-square flex items-center justify-center text-xl select-none" />}
+              getGroupMessageSummary={(message) => {
+                if (message.sender === "user") return `我: ${message.content}`;
+                const senderChar = characters.find((character) => character.id === message.senderId);
+                return `${senderChar ? (senderChar.remark || senderChar.name) : "成员"}: ${message.content}`;
+              }}
+              header={<ChatTopBar title={<>聊天 ({chatThreads.length})</>} leftAction={<button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => { setGroupNameInput(""); setSelectedGroupMemberIds([]); setShowCreateGroupModal(true); }} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10" title="发起群聊"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
+            />
           )}
 
           {/* TABS: CONTACTS LIST (通讯录) */}
           {activeTab === "contacts" && (
-            <div className="divide-y divide-slate-100">
-              <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative">
-                <button
-                  onClick={onClose}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-                  title="返回主页"
-                >
-                  <ChevronLeft className="w-4 h-4 text-slate-700" />
-                </button>
-                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">通讯录 ({friends.length})</h2>
-                <button
-                  onClick={() => setIsShowingAddFriendDialog(true)}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10"
-                  title="添加好友"
-                >
-                  <Plus className="w-4 h-4 text-slate-700" />
-                </button>
-              </div>
-
-              {friends.length === 0 ? (
-                <div className="text-center py-20 px-4">
-                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-3">
-                    <Users className="w-6 h-6" />
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-700">通讯录空空如也</h4>
-                  <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
-                    暂无好友。请点击右上角“+”号直接从档案馆添加已创建的角色，或到桌面打开“档案馆”新建！
-                  </p>
-                </div>
-              ) : (
-                friends.map((char) => (
-                  <div
-                    key={char.id}
-                    onClick={() => startChatWith(char.id)}
-                    className="flex items-center p-3 hover:bg-slate-50 cursor-pointer transition-colors"
-                  >
-                    <img
-                      src={char.avatar}
-                      alt={char.name}
-                      className="w-10 h-10 rounded-full object-cover mr-3 bg-slate-100 border border-slate-100 shrink-0 aspect-square"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-xs font-bold text-slate-800 truncate">
-                        {char.remark || char.name}
-                        {char.remark && <span className="text-[10px] font-normal text-slate-400 ml-1.5">({char.name})</span>}
-                      </h4>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+            <ContactList
+              contacts={friends}
+              onSelect={startChatWith}
+              header={<ChatTopBar title={<>通讯录 ({friends.length})</>} leftAction={<button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setIsShowingAddFriendDialog(true)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10" title="添加好友"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
+            />
           )}
 
           {/* TABS: MOMENTS FEED (朋友圈) */}
-          {activeTab === "moments" && (() => {
+          {activeTab === "moments" && (
+            <MomentsApp
+              moments={allMoments}
+              characters={characters}
+              settings={settings}
+              translations={momentTranslations}
+              filterCharacterId={momentsFilterCharId}
+              onClearFilter={() => setMomentsFilterCharId(null)}
+              onClose={onClose}
+              onAddMoment={onAddMoment}
+              onAddComment={onAddCommentToMoment}
+              onDeleteComment={(momentId, commentId) => onDeleteCommentFromMoment?.(momentId, commentId)}
+              onDeleteMoment={onDeleteMoment}
+              onLikeMoment={onLikeMoment}
+              onSaveSettings={onSaveSettings}
+              onPublishUserMoment={publishMomentFromFeature}
+              onPublishComment={publishMomentCommentFromFeature}
+              onUploadImage={uploadMomentImageFromFeature}
+              onAutoReply={handleAutoReplyToUserComment}
+              showToast={showToast}
+              onMomentTextContextMenu={handleMomentTextContextMenu}
+              onMomentTextPointerDown={handleMomentTextPointerDown}
+              onMomentTextPointerUpOrLeave={handleMomentTextPointerUpOrLeave}
+              onMomentTextPointerMove={handleMomentTextPointerMove}
+              onCommentClick={handleMomentCommentClick}
+              onCommentPointerDown={handleMomentCommentPointerDown}
+              onClearCommentLongPress={clearMomentCommentLongPress}
+            />
+          )}
+          {false && activeTab === "moments" && (() => {
             const filterChar = momentsFilterCharId ? characters.find((c) => c.id === momentsFilterCharId) : null;
             const momentsTabName = filterChar ? (filterChar.remark || filterChar.name) : settings.name;
             const momentsTabAvatar = filterChar ? filterChar.avatar : settings.avatar;
@@ -9614,7 +9356,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     importance: 8,
                   };
                   
-                  onSaveMemories([oocMemory, ...memories]);
+                  onSaveMemories(MemoryService.mergeMemories(memories, [oocMemory]));
                   
                   const comment = oocCommentText.trim();
                   setShowOocCommentModal(null);

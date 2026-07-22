@@ -1,0 +1,24 @@
+import type { Character, MomentComment } from "../../../types";
+import type { apiChat } from "../../../utils/apiHelper";
+import { stripMomentVoiceMarkup } from "./momentContent";
+
+type ChatRequest = Parameters<typeof apiChat>[0];
+type RequestAi = (request: ChatRequest) => ReturnType<typeof apiChat>;
+
+export async function requestMomentCommentReply(input: {
+  requestAi: RequestAi;
+  request: ChatRequest;
+  character: Character;
+  userName: string;
+  cleanText: (text: string) => string;
+  now?: () => number;
+  random?: () => number;
+}): Promise<MomentComment | undefined> {
+  const response = await input.requestAi(input.request);
+  if (!response?.text) return undefined;
+  const now = input.now || Date.now;
+  const random = input.random || Math.random;
+  let content = stripMomentVoiceMarkup(input.cleanText(response.text.trim())).replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+  content = content.replace(/^回复\s*[\(（].*?[\)）]\s*[:：]\s*/, "").replace(/^回复\s*.*?\s*[:：]\s*/, "");
+  return { id: `${now()}-reply-${random().toString(36).substr(2, 5)}`, authorName: input.character.remark || input.character.name, authorAvatar: input.character.avatar, content: `回复${input.userName}：${content}`, timestamp: now() };
+}

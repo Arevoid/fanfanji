@@ -1,0 +1,18 @@
+export const storageKeys = {
+  settings: "phone_settings",
+  characters: "phone_characters_v3",
+  legacyCharacters: "phone_characters",
+  messages: "phone_messages_v3",
+  legacyMessages: "phone_messages",
+  moments: "phone_moments_v3",
+  worldBookEntries: "phone_worldbook_entries",
+  memoryVaultItems: "phone_memory_vault_items",
+  offlineStories: "phone_offline_stories",
+  memoryVaultSettings: "phone_memory_vault_settings",
+  calendarEvents: "phone_calendar_events",
+  presets: "phone_presets",
+  dataSchemaVersion: "phone_data_schema_version",
+  offlineModeActive: (characterId: string) => `offline_mode_active_${characterId}`,
+  offlineStoryId: (characterId: string) => `offline_story_id_${characterId}`,
+  albumWidgetPhotos: (id: string) => `album_widget_photos_${id}`,
+} as const;

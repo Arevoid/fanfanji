@@ -87,6 +87,40 @@ const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "plus", label: "加号" }, { key: "send", label: "发送" },
 ];
 
+const BACKUP_KEYS = [
+  "phone_calendar_events",
+  "phone_characters",
+  "phone_characters_v3",
+  "phone_homescreen_items",
+  "phone_installed_apps",
+  "phone_memory_vault_items",
+  "phone_memory_vault_settings",
+  "phone_messages",
+  "phone_messages_v3",
+  "phone_moments_v3",
+  "phone_music_playlists",
+  "phone_music_tracks",
+  "phone_offline_stories",
+  "phone_presets",
+  "phone_settings",
+  "phone_worldbook_entries",
+] as const;
+
+const BACKUP_KEY_SET = new Set<string>(BACKUP_KEYS);
+type BackupData = Partial<Record<(typeof BACKUP_KEYS)[number], string | null>>;
+
+function snapshotLocalStorage(): Map<string, string> {
+  const snapshot = new Map<string, string>();
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key !== null) {
+      const value = localStorage.getItem(key);
+      if (value !== null) snapshot.set(key, value);
+    }
+  }
+  return snapshot;
+}
+
 export default function AppSettings({
   settings,
   presets,
@@ -2435,21 +2469,8 @@ export default function AppSettings({
                     type="button"
                     onClick={() => {
                       try {
-                        const backupData: Record<string, string | null> = {};
-                        const keysToBackup = [
-                          "phone_calendar_events",
-                          "phone_characters_v3",
-                          "phone_homescreen_items",
-                          "phone_installed_apps",
-                          "phone_messages_v3",
-                          "phone_moments_v3",
-                          "phone_music_playlists",
-                          "phone_music_tracks",
-                          "phone_presets",
-                          "phone_settings",
-                          "phone_worldbook_entries"
-                        ];
-                        keysToBackup.forEach(key => {
+                        const backupData: BackupData = {};
+                        BACKUP_KEYS.forEach(key => {
                           backupData[key] = localStorage.getItem(key);
                         });
 
@@ -2489,23 +2510,45 @@ export default function AppSettings({
                         const reader = new FileReader();
                         reader.onload = () => {
                           try {
-                            const json = JSON.parse(reader.result as string);
-                            if (typeof json !== "object" || json === null) {
+                            const json: unknown = JSON.parse(reader.result as string);
+                            if (typeof json !== "object" || json === null || Array.isArray(json)) {
                               throw new Error("无效的备份文件格式！");
                             }
 
-                            // Validate key signature
-                            const hasValidKey = Object.keys(json).some(k => k.startsWith("phone_"));
-                            if (!hasValidKey) {
+                            const entries = Object.entries(json);
+                            if (entries.length === 0 || entries.some(([key, value]) => !BACKUP_KEY_SET.has(key) || (value !== null && typeof value !== "string"))) {
                               throw new Error("非有效的小手机备份文件！");
                             }
 
                             if (confirm("确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置 and 世界书数据且不可撤销！")) {
-                              Object.entries(json).forEach(([key, val]) => {
-                                if (val !== null && typeof val === "string") {
-                                  localStorage.setItem(key, val);
+                              const snapshot = snapshotLocalStorage();
+                              const writtenKeys: string[] = [];
+
+                              try {
+                                for (const [key, value] of entries) {
+                                  if (typeof value === "string") {
+                                    writtenKeys.push(key);
+                                    localStorage.setItem(key, value);
+                                  }
                                 }
-                              });
+                              } catch (writeError) {
+                                for (const key of writtenKeys) {
+                                  const previousValue = snapshot.get(key);
+                                  try {
+                                    if (previousValue === undefined) {
+                                      localStorage.removeItem(key);
+                                    } else {
+                                      localStorage.setItem(key, previousValue);
+                                    }
+                                  } catch (rollbackError) {
+                                    console.error("Backup restore rollback failed:", rollbackError);
+                                  }
+                                }
+                                throw writeError;
+                              }
+
+                              // JSON backups intentionally exclude MusicAppDB and StickerAppDB Blobs.
+                              // Importing JSON never clears IndexedDB, so existing local music and stickers remain.
                               alert("导入成功！应用即将刷新加载新数据。");
                               window.location.reload();
                             }

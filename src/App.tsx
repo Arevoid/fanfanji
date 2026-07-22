@@ -2,6 +2,16 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiExtractMemories, apiTranslate } from "./utils/apiHelper";
 import { audioDb } from "./utils/audioDb";
+import { loadSettings, saveSettings } from "./core/storage/repositories/settingsRepository";
+import { loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
+import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
+import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
+import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
+import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
+import { loadOfflineStories, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
+import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
+import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
+import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory } from "./types";
 import { 
   AlbumWidget, 
@@ -220,153 +230,21 @@ const DEFAULT_MESSAGES: Message[] = [];
 
 export default function App() {
   // Load initial states from LocalStorage or fallbacks
-  const [characters, setCharacters] = useState<Character[]>(() => {
-    const raw = localStorage.getItem("phone_characters_v3");
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as Character[];
-        // Filter out any pre-seeded characters
-        const filtered = parsed.filter(c => c.id !== "pre-char-lc" && !c.id.startsWith("pre-char-"));
-        if (filtered.length !== parsed.length) {
-          localStorage.setItem("phone_characters_v3", JSON.stringify(filtered));
-        }
-        return filtered;
-      } catch (e) {
-        // ignore
-      }
-    }
-    
-    // Clear old pre-seeded characters if they exist in localStorage
-    const oldRaw = localStorage.getItem("phone_characters");
-    if (oldRaw) {
-      try {
-        const parsed = JSON.parse(oldRaw) as Character[];
-        const userCreated = parsed.filter(c => c.id !== "pre-char-lc" && !c.id.startsWith("pre-char-") && !["pre-char-1", "pre-char-2", "pre-char-3"].includes(c.id));
-        localStorage.setItem("phone_characters_v3", JSON.stringify(userCreated));
-        return userCreated;
-      } catch (e) {
-        // ignore
-      }
-    }
-    
-    localStorage.setItem("phone_characters_v3", JSON.stringify(DEFAULT_CHARACTERS));
-    return DEFAULT_CHARACTERS;
-  });
+  const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
 
-  const [settings, setSettings] = useState<UserSettings>(() => {
-    const raw = localStorage.getItem("phone_settings");
-    if (!raw) return DEFAULT_SETTINGS;
-    try {
-      const parsed = JSON.parse(raw);
-      const migrated = {
-        ...DEFAULT_SETTINGS,
-        ...parsed,
-        apiPresets: parsed.apiPresets || DEFAULT_SETTINGS.apiPresets,
-        activeApiPresetId: parsed.activeApiPresetId || DEFAULT_SETTINGS.activeApiPresetId,
-        identities: parsed.identities || DEFAULT_SETTINGS.identities,
-        activeIdentityId: parsed.activeIdentityId || DEFAULT_SETTINGS.activeIdentityId
-      };
-      if (!migrated.wallpaper || migrated.wallpaper.includes("BQACAgUAAyEGAASHRsPbAAEW4qlqT1pFp4Gj5EqG1Gmkjd5vpi7lCgACjCQAAuHegVYQ0GSE8vFwEjwE")) {
-        migrated.wallpaper = "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)";
-      }
-      migrated.globalChatStylePreset = parsed.globalChatStylePreset || "default";
-      if (!migrated.name || migrated.name === "萌新机主") {
-        migrated.name = "饭饭";
-      }
-      if (migrated.avatar === "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&h=150&fit=crop" || migrated.avatar === "https://images.unsplash.com/photo-1532978379173-523e16f37248?w=150&h=150&fit=crop" || migrated.avatar === "https://free.picui.cn/free/2026/07/06/6a4b62d9eaa31.png" || migrated.avatar === "https://picui.ogmua.cn/s1/2026/07/08/6a4dda2cbb97b.webp") {
-        migrated.avatar = "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png";
-      }
-      if (migrated.identities) {
-        migrated.identities = migrated.identities.map((idty: any, index: number) => {
-          const isOldDefaultAvatar = !idty.avatar || idty.avatar.includes("photo-1534528741775-53994a69daeb") || idty.avatar.includes("photo-1507003211169-0a1dd7228f2d") || idty.avatar.includes("photo-1517841905240-472988babdf9") || idty.avatar.includes("photo-1532978379173-523e16f37248") || idty.avatar.includes("6a4b62d9eaa31") || idty.avatar.includes("6a4dda2cbb97b");
-          let name = idty.name;
-          let signature = idty.signature;
-          if (idty.id === "identity-1") {
-            if (!name || name === "萌新机主" || name === "预设身份一") {
-              name = "饭饭";
-            }
-            if (!signature) {
-              signature = "今天你也想我了吗";
-            }
-          }
-          return {
-            ...idty,
-            name: name,
-            signature: signature,
-            avatar: isOldDefaultAvatar ? "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png" : idty.avatar,
-          };
-        });
-      }
-      if (!migrated.signature) {
-        migrated.signature = "今天你也想我了吗";
-      }
-      if (migrated.bio === "一个小手机极客玩家，喜欢探索科技、文学 and 创造有趣好玩的角色人设。") {
-        migrated.bio = "";
-      }
-      if (migrated.momentsCover === "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop") {
-        migrated.momentsCover = "";
-      }
-      localStorage.setItem("phone_settings", JSON.stringify(migrated));
-      return migrated;
-    } catch (e) {
-      return DEFAULT_SETTINGS;
-    }
-  });
+  const [settings, setSettingsState] = useState<UserSettings>(() => loadSettings(DEFAULT_SETTINGS).value);
 
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const raw = localStorage.getItem("phone_messages_v3");
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as Message[];
-        const filtered = parsed.filter(m => m.characterId !== "pre-char-lc" && !m.characterId.startsWith("pre-char-"));
-        if (filtered.length !== parsed.length) {
-          localStorage.setItem("phone_messages_v3", JSON.stringify(filtered));
-        }
-        return filtered;
-      } catch (e) {
-        // ignore
-      }
-    }
+  const settingsChangedByUser = useRef(false);
+  const setSettings: React.Dispatch<React.SetStateAction<UserSettings>> = (next) => {
+    settingsChangedByUser.current = true;
+    setSettingsState(next);
+  };
 
-    const oldRaw = localStorage.getItem("phone_messages");
-    if (oldRaw) {
-      try {
-        const parsed = JSON.parse(oldRaw) as Message[];
-        const filtered = parsed.filter(m => m.characterId !== "pre-char-lc" && !m.characterId.startsWith("pre-char-") && !["pre-char-1", "pre-char-2", "pre-char-3"].includes(m.characterId));
-        localStorage.setItem("phone_messages_v3", JSON.stringify(filtered));
-        return filtered;
-      } catch (e) {
-        // ignore
-      }
-    }
+  const [messages, setMessages] = useState<Message[]>(() => loadMessages(DEFAULT_MESSAGES).value);
 
-    localStorage.setItem("phone_messages_v3", JSON.stringify(DEFAULT_MESSAGES));
-    return DEFAULT_MESSAGES;
-  });
+  const [moments, setMoments] = useState<Moment[]>(() => loadMoments([]).value);
 
-  const [moments, setMoments] = useState<Moment[]>(() => {
-    const raw = localStorage.getItem("phone_moments_v3");
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as Moment[];
-        const filtered = parsed.filter(m => m.characterId !== "pre-char-lc" && (!m.characterId || !m.characterId.startsWith("pre-char-")));
-        if (filtered.length !== parsed.length) {
-          localStorage.setItem("phone_moments_v3", JSON.stringify(filtered));
-        }
-        return filtered;
-      } catch (e) {
-        // ignore
-      }
-    }
-
-    localStorage.setItem("phone_moments_v3", JSON.stringify([]));
-    return [];
-  });
-
-  const [presets, setPresets] = useState<StylePreset[]>(() => {
-    const raw = localStorage.getItem("phone_presets");
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
 
   const [tracks, setTracks] = useState<MusicTrack[]>(() => {
     const raw = localStorage.getItem("phone_music_tracks");
@@ -378,49 +256,26 @@ export default function App() {
     return raw ? JSON.parse(raw) : [];
   });
 
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
-    const raw = localStorage.getItem("phone_calendar_events");
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => loadCalendarEvents([]).value);
 
-  const [worldBookEntries, setWorldBookEntries] = useState<WorldBookEntry[]>(() => {
-    const raw = localStorage.getItem("phone_worldbook_entries");
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as WorldBookEntry[];
-        let updated = false;
-        const merged = [...parsed];
-        DEFAULT_WORLDBOOK_ENTRIES.forEach((preset) => {
-          if (!merged.some((e) => e.id === preset.id || e.title === preset.title)) {
-            merged.push(preset);
-            updated = true;
-          }
-        });
-        if (updated) {
-          localStorage.setItem("phone_worldbook_entries", JSON.stringify(merged));
-        }
-        return merged;
-      } catch (e) {
-        return DEFAULT_WORLDBOOK_ENTRIES;
-      }
-    }
-    localStorage.setItem("phone_worldbook_entries", JSON.stringify(DEFAULT_WORLDBOOK_ENTRIES));
-    return DEFAULT_WORLDBOOK_ENTRIES;
-  });
+  const [worldBookEntries, setWorldBookEntries] = useState<WorldBookEntry[]>(() => loadWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES).value);
 
   // Navigation State
   const [activeApp, setActiveApp] = useState<string | null>(null);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
 
   // Offline Stories State & Handlers
-  const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => {
-    try {
-      const raw = localStorage.getItem("phone_offline_stories");
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => loadOfflineStories([]).value);
+  const charactersPersistenceReady = useRef(false);
+  const messagesPersistenceReady = useRef(false);
+  const momentsPersistenceReady = useRef(false);
+  const presetsPersistenceReady = useRef(false);
+  const calendarPersistenceReady = useRef(false);
+  const worldBookPersistenceReady = useRef(false);
+  const memoriesPersistenceReady = useRef(false);
+  const skipNextMemoriesPersistenceRef = useRef(false);
+  const memorySettingsPersistenceReady = useRef(false);
+  const offlineStoriesPersistenceReady = useRef(false);
 
   const handleSaveOfflineStory = (story: OfflineStory) => {
     setOfflineStories((prev) => {
@@ -432,7 +287,6 @@ export default function App() {
       } else {
         updated = [story, ...prev];
       }
-      localStorage.setItem("phone_offline_stories", JSON.stringify(updated));
       return updated;
     });
   };
@@ -440,7 +294,6 @@ export default function App() {
   const handleDeleteOfflineStory = (storyId: string) => {
     setOfflineStories((prev) => {
       const filtered = prev.filter((s) => s.id !== storyId);
-      localStorage.setItem("phone_offline_stories", JSON.stringify(filtered));
       return filtered;
     });
   };
@@ -831,38 +684,28 @@ export default function App() {
   });
 
   // Memory Vault (Memory Book) States
-  const [memories, setMemories] = useState<MemoryItem[]>(() => {
-    const raw = localStorage.getItem("phone_memory_vault_items");
-    if (raw) {
-      try {
-        return JSON.parse(raw);
-      } catch (e) {}
+  const [memories, setMemories] = useState<MemoryItem[]>(() => loadMemories([]).value);
+
+  // Offline-story handoffs must be persisted before their story is marked as
+  // synced. The ordinary effect remains the single path for every other memory
+  // update, while this callback gives the offline exit flow a durable result.
+  const persistOfflineStoryMemories = (nextMemories: MemoryItem[]): boolean => {
+    const result = saveMemories(nextMemories);
+    if (!result.success) {
+      console.error("Failed to persist offline story memories:", result.error);
+      return false;
     }
-    return [];
-  });
+    skipNextMemoriesPersistenceRef.current = true;
+    setMemories(nextMemories);
+    return true;
+  };
 
-  useEffect(() => {
-    localStorage.setItem("phone_memory_vault_items", JSON.stringify(memories));
-  }, [memories]);
-
-  const [recallSettings, setRecallSettings] = useState<MemoryVaultSettings>(() => {
-    const raw = localStorage.getItem("phone_memory_vault_settings");
-    if (raw) {
-      try {
-        return JSON.parse(raw);
-      } catch (e) {}
-    }
-    return {
-      extractModel: "gemini-3.5-flash",
-      recallCount: 5,
-      autoExtract: true,
-      extractInterval: 10
-    };
-  });
-
-  useEffect(() => {
-    localStorage.setItem("phone_memory_vault_settings", JSON.stringify(recallSettings));
-  }, [recallSettings]);
+  const [recallSettings, setRecallSettings] = useState<MemoryVaultSettings>(() => loadMemorySettings({
+    extractModel: "gemini-3.5-flash",
+    recallCount: 5,
+    autoExtract: true,
+    extractInterval: 10,
+  }).value);
 
   const [immediateSummaryTask, setImmediateSummaryTask] = useState<ImmediateSummaryTask>(() => {
     const raw = localStorage.getItem("phone_immediate_summary_task");
@@ -911,77 +754,50 @@ export default function App() {
 
       const msgsToSummarize = charMsgs.slice(-rounds * 2);
 
-      const history = msgsToSummarize.map((m) => ({
-        role: m.sender === "user" ? "user" : "model",
-        text: m.content,
-      }));
-
-      const data = await apiExtractMemories({
-        history,
-        characterName: char.name,
+      // Preserve the original one-item summary format and save it only once.
+      const isDelicate = char.archiveTemplateType === "delicate";
+      const headerLabel = isDelicate ? `【心境日记一键归档 (细腻版 - 最近 ${rounds} 轮)】` : `【精炼事件日志一键归档 (精炼版 - 最近 ${rounds} 轮)】`;
+      const result = await MemoryService.summarizeConversation({
+        character: char,
+        characterId,
+        recentMessages: msgsToSummarize,
+        existingMemories: memories,
+        scenario: "immediate-summary",
         apiKey: settings.apiKey,
-        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model")
-          ? (settings.selectedModel || "gemini-3.5-flash")
-          : recallSettings.extractModel,
+        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
         apiEndpoint: settings.apiEndpoint,
         templateType: char.archiveTemplateType,
-      });
-
-      if (data && data.items && Array.isArray(data.items)) {
-        const validItems = data.items
-          .map((content: string) => content.trim())
-          .filter((content: string) => content.length > 0);
-
-        let addedCount = 0;
-        if (validItems.length > 0) {
-          // Format as requested: "总结格式，设置的轮数，总结为一条，多项内容前面加-号然后换行下一项内容"
-          const bulletPoints = validItems.map((item: string) => `- ${item}`).join("\n");
-          const isDelicate = char.archiveTemplateType === "delicate";
-          const headerLabel = isDelicate ? `【心境日记一键归档 (细腻版 - 最近 ${rounds} 轮)】` : `【精炼事件日志一键归档 (精炼版 - 最近 ${rounds} 轮)】`;
-          const singleSummaryContent = `${headerLabel}\n${bulletPoints}`;
-
-          const isDup = memories.some(
-            (m) =>
-              m.characterId === characterId &&
-              m.content.toLowerCase().replace(/[\s,.:;!?"']/g, "") ===
-                singleSummaryContent.toLowerCase().replace(/[\s,.:;!?"']/g, "")
-          );
-
-          if (!isDup) {
-            const newSingleItem: MemoryItem = {
-              id: (Date.now() + Math.random()).toString(),
-              characterId: characterId,
-              content: singleSummaryContent,
-              timestamp: Date.now(),
-              importance: 5,
-              isManual: false,
-            };
-            setMemories(prev => [newSingleItem, ...prev]);
-            addedCount = 1;
-          }
-        }
-
-        setImmediateSummaryTask({
-          characterId,
-          status: "completed",
-          rounds,
-          extractedCount: addedCount,
-        });
-
-        // Save last summarized message ID to character so auto-summary can skip them
-        const lastMsg = msgsToSummarize[msgsToSummarize.length - 1];
-        if (lastMsg) {
-          handleSaveCharacter({
-            ...char,
-            lastImmediateSummaryMsgId: lastMsg.id,
-          });
-        }
-      } else {
+        createId: () => (Date.now() + Math.random()).toString(),
+        currentTime: () => Date.now(),
+        formatContent: (items) => formatExtractedMemorySummary(headerLabel, items),
+      }, apiExtractMemories);
+      if (result.apiError) {
         setImmediateSummaryTask(prev => ({
           ...prev,
           status: "error",
-          error: (data as any).error || "提炼失败，未提取到有效记忆或API请求出错",
+          error: result.apiError || "提炼失败，未提取到有效记忆或API请求出错",
         }));
+        return;
+      }
+      const addedCount = result.extractedMemories.length;
+      if (addedCount > 0) {
+        setMemories(prev => MemoryService.mergeMemories(prev, result.extractedMemories));
+      }
+
+      setImmediateSummaryTask({
+        characterId,
+        status: "completed",
+        rounds,
+        extractedCount: addedCount,
+      });
+
+      // Save last summarized message ID to character so auto-summary can skip them
+      const lastMsg = msgsToSummarize[msgsToSummarize.length - 1];
+      if (lastMsg) {
+        handleSaveCharacter({
+          ...char,
+          lastImmediateSummaryMsgId: lastMsg.id,
+        });
       }
     } catch (err: any) {
       setImmediateSummaryTask(prev => ({
@@ -1559,43 +1375,49 @@ export default function App() {
     }
   };
   useEffect(() => {
-    try {
-      localStorage.setItem("phone_characters_v3", JSON.stringify(characters));
-    } catch (e) {
-      console.error("Failed to save characters to localStorage:", e);
+    if (!charactersPersistenceReady.current) {
+      charactersPersistenceReady.current = true;
+      return;
     }
+    const result = saveCharacters(characters);
+    if (!result.success) console.error("Failed to save characters to localStorage:", result.error);
   }, [characters]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("phone_settings", JSON.stringify(settings));
-    } catch (e) {
-      console.error("Failed to save settings to localStorage:", e);
+    if (!settingsChangedByUser.current) return;
+
+    const result = saveSettings(settings);
+    if (!result.success) {
+      console.error("Failed to save settings to localStorage:", result.error);
     }
+    settingsChangedByUser.current = false;
   }, [settings]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("phone_messages_v3", JSON.stringify(messages));
-    } catch (e) {
-      console.error("Failed to save messages to localStorage:", e);
+    if (!messagesPersistenceReady.current) {
+      messagesPersistenceReady.current = true;
+      return;
     }
+    const result = saveMessages(messages);
+    if (!result.success) console.error("Failed to save messages to localStorage:", result.error);
   }, [messages]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("phone_moments_v3", JSON.stringify(moments));
-    } catch (e) {
-      console.error("Failed to save moments to localStorage:", e);
+    if (!momentsPersistenceReady.current) {
+      momentsPersistenceReady.current = true;
+      return;
     }
+    const result = saveMoments(moments);
+    if (!result.success) console.error("Failed to save moments to localStorage:", result.error);
   }, [moments]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("phone_presets", JSON.stringify(presets));
-    } catch (e) {
-      console.error("Failed to save presets to localStorage:", e);
+    if (!presetsPersistenceReady.current) {
+      presetsPersistenceReady.current = true;
+      return;
     }
+    const result = savePresets(presets);
+    if (!result.success) console.error("Failed to save presets to localStorage:", result.error);
   }, [presets]);
 
   useEffect(() => {
@@ -1615,20 +1437,53 @@ export default function App() {
   }, [playlists]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("phone_calendar_events", JSON.stringify(calendarEvents));
-    } catch (e) {
-      console.error("Failed to save calendar events to localStorage:", e);
+    if (!calendarPersistenceReady.current) {
+      calendarPersistenceReady.current = true;
+      return;
     }
+    const result = saveCalendarEvents(calendarEvents);
+    if (!result.success) console.error("Failed to save calendar events to localStorage:", result.error);
   }, [calendarEvents]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("phone_worldbook_entries", JSON.stringify(worldBookEntries));
-    } catch (e) {
-      console.error("Failed to save worldbook entries to localStorage:", e);
+    if (!worldBookPersistenceReady.current) {
+      worldBookPersistenceReady.current = true;
+      return;
     }
+    const result = saveWorldBookEntries(worldBookEntries);
+    if (!result.success) console.error("Failed to save worldbook entries to localStorage:", result.error);
   }, [worldBookEntries]);
+
+  useEffect(() => {
+    if (!memoriesPersistenceReady.current) {
+      memoriesPersistenceReady.current = true;
+      return;
+    }
+    if (skipNextMemoriesPersistenceRef.current) {
+      skipNextMemoriesPersistenceRef.current = false;
+      return;
+    }
+    const result = saveMemories(memories);
+    if (!result.success) console.error("Failed to save memories to localStorage:", result.error);
+  }, [memories]);
+
+  useEffect(() => {
+    if (!memorySettingsPersistenceReady.current) {
+      memorySettingsPersistenceReady.current = true;
+      return;
+    }
+    const result = saveMemorySettings(recallSettings);
+    if (!result.success) console.error("Failed to save memory settings to localStorage:", result.error);
+  }, [recallSettings]);
+
+  useEffect(() => {
+    if (!offlineStoriesPersistenceReady.current) {
+      offlineStoriesPersistenceReady.current = true;
+      return;
+    }
+    const result = saveOfflineStories(offlineStories);
+    if (!result.success) console.error("Failed to save offline stories to localStorage:", result.error);
+  }, [offlineStories]);
 
   // Global Scroll Event Capture to handle show-on-scroll custom thin scrollbars
   useEffect(() => {
@@ -1825,12 +1680,6 @@ export default function App() {
       } else {
         next = [entry, ...prev];
       }
-      try {
-        localStorage.setItem("phone_worldbook_entries", JSON.stringify(next));
-      } catch (e) {
-        console.error("Failed to save worldbook entries synchronously to localStorage:", e);
-        showGlobalToast("⚠️ 浏览器存储空间不足，世界书更改保存失败！刷新后可能会丢失！", true);
-      }
       return next;
     });
   };
@@ -1840,12 +1689,6 @@ export default function App() {
       const incomingIds = new Set(entries.map(e => e.id));
       const filtered = prev.filter(e => !incomingIds.has(e.id));
       const next = [...entries, ...filtered];
-      try {
-        localStorage.setItem("phone_worldbook_entries", JSON.stringify(next));
-      } catch (e) {
-        console.error("Failed to save worldbook entries synchronously to localStorage:", e);
-        showGlobalToast("⚠️ 浏览器存储空间不足，批量保存世界书失败！", true);
-      }
       return next;
     });
   };
@@ -1853,12 +1696,6 @@ export default function App() {
   const handleDeleteWorldBookEntry = (id: string) => {
     setWorldBookEntries((prev) => {
       const next = prev.filter((e) => e.id !== id);
-      try {
-        localStorage.setItem("phone_worldbook_entries", JSON.stringify(next));
-      } catch (e) {
-        console.error("Failed to delete worldbook entry synchronously from localStorage:", e);
-        showGlobalToast("⚠️ 浏览器存储空间不足，删除词条未能同步！", true);
-      }
       return next;
     });
   };
@@ -2963,6 +2800,8 @@ export default function App() {
                     }}
                     memories={memories}
                     onSaveMemories={setMemories}
+                    onPersistMemories={persistOfflineStoryMemories}
+                    recallSettings={recallSettings}
                   />
                 )}
               </div>
