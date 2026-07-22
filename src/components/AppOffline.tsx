@@ -9,7 +9,7 @@ import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, User
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { getOfflineMemorySourceMessages, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
+import { createOfflineStoryHandoffMemory, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 
@@ -385,6 +385,7 @@ export default function AppOffline({
     }
 
     const now = Date.now();
+    const syncMarker = getOfflineStorySyncMarker(story);
     const markSynced = (memoryIds: string[] = []): OfflineStory => ({
       ...story,
       archivedAt: now,
@@ -410,34 +411,49 @@ export default function AppOffline({
       const headerLabel = character.archiveTemplateType === "delicate"
         ? `【线下剧本《${story.title}》心境归档】`
         : `【线下剧本《${story.title}》关键剧情归档】`;
-      const result = await MemoryService.extractMemories({
-        character,
-        characterId: story.characterId,
-        recentMessages: sourceMessages.slice(-historyLimit),
-        existingMemories: memories,
-        scenario: "offline",
-        apiKey: settings.apiKey,
-        model: !recallSettings.extractModel || recallSettings.extractModel === "default-chat-model"
-          ? (settings.selectedModel || "gemini-3.5-flash")
-          : recallSettings.extractModel,
-        apiEndpoint: settings.apiEndpoint,
-        templateType: character.archiveTemplateType,
-        createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        currentTime: () => Date.now(),
-        formatContent: (items) => formatExtractedMemorySummary(headerLabel, items),
-      }, apiExtractMemories);
-
-      if (result.apiError) throw new Error(result.apiError);
-      if (result.extractedMemories.length > 0) {
-        onSaveMemories(MemoryService.mergeMemories(memories, result.extractedMemories));
+      let extractedMemories: MemoryItem[] = [];
+      try {
+        const result = await MemoryService.extractMemories({
+          character,
+          characterId: story.characterId,
+          recentMessages: sourceMessages.slice(-historyLimit),
+          existingMemories: memories,
+          scenario: "offline",
+          apiKey: settings.apiKey,
+          model: !recallSettings.extractModel || recallSettings.extractModel === "default-chat-model"
+            ? (settings.selectedModel || "gemini-3.5-flash")
+            : recallSettings.extractModel,
+          apiEndpoint: settings.apiEndpoint,
+          templateType: character.archiveTemplateType,
+          createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          currentTime: () => Date.now(),
+          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]`,
+        }, apiExtractMemories);
+        if (result.apiError) throw new Error(result.apiError);
+        extractedMemories = result.extractedMemories;
+      } catch (error) {
+        console.warn("Offline memory extraction unavailable; saving a local handoff instead:", error);
       }
 
-      const syncedStory = markSynced(result.extractedMemories.map((memory) => memory.id));
+      const additions = extractedMemories.length > 0
+        ? extractedMemories
+        : (MemoryService.hasMarker(memories, story.characterId, syncMarker) ? [] : [createOfflineStoryHandoffMemory({
+          story,
+          sourceMessages,
+          characterId: story.characterId,
+          id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: now,
+        })]);
+      if (additions.length > 0) onSaveMemories(MemoryService.mergeMemories(memories, additions));
+
+      const syncedStory = markSynced(additions.map((memory) => memory.id));
       onSaveOfflineStory(syncedStory);
       if (activeStory?.id === story.id) setActiveStory(syncedStory);
-      showToast(result.extractedMemories.length > 0
+      showToast(extractedMemories.length > 0
         ? "线下剧情记忆已同步到当前角色"
-        : "线下剧情未提取到新的记忆，已完成去重同步");
+        : additions.length > 0
+          ? "线下剧情已保存为线上交接记忆"
+          : "线下剧情未提取到新的记忆，已完成去重同步");
       return syncedStory;
     } catch (error) {
       console.error("Failed to sync offline story memories:", error);
