@@ -26,6 +26,21 @@ assert.deepEqual(group.messages.map((message) => message.characterId), ["group",
 assert.equal(group.messages.length, 2);
 assert.equal(group.members.includes(outsider), false);
 
+// Repeated sender blocks are intentional: a member may send multiple short
+// messages in one natural group interaction, without another AI request.
+let multiTurnRequests = 0;
+const multiTurn = await generateGroupReplyCandidates({
+  requestAi: async () => {
+    multiTurnRequests += 1;
+    return { text: "[SENDER_NAME: A]\n先回应一下\n[SENDER_NAME: B]\n我同意\n[SENDER_NAME: A]\n再补充一句" };
+  },
+  request, members: [memberA, memberB], groupId: "group", disableBracketActions: false,
+  createId: (index) => `multi-${index}`, currentTime: () => 11,
+});
+assert.equal(multiTurnRequests, 1);
+assert.deepEqual(multiTurn.messages.map((message) => message.content), ["先回应一下", "我同意", "再补充一句"]);
+assert.deepEqual(multiTurn.messages.map((message) => message.senderId), ["a", "b", "a"]);
+
 let proactiveRequests = 0;
 const proactive = await generateProactiveReplyCandidates({
   requestAi: async () => { proactiveRequests += 1; return { text: "接着刚才的话。\n[红包]|1|hi" }; },

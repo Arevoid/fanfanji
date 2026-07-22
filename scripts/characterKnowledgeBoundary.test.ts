@@ -59,5 +59,12 @@ assert.match(directBoundary, /只能按该文本理解关系/);
 
 // Group membership is the sole additional automatic knowledge boundary.
 assert.match(groupBoundary, /本群真实成员/);
+// Group visibility permits a reply, not familiarity, nicknames, private facts,
+// or transfer of a pet name that belongs only to the user relationship.
+assert.match(groupBoundary, /同处一个群聊只代表成员能看见本群消息/);
+assert.match(groupBoundary, /默认是普通且不熟悉的群成员/);
+assert.match(groupBoundary, /只见过几次/);
+assert.match(groupBoundary, /阿某、小某、叠字/);
+assert.match(groupBoundary, /只对用户使用的亲昵称呼不得转移/);
 
-console.log("Character knowledge boundary: 7 fixed acceptance checks passed");
+console.log("Character knowledge boundary: 13 fixed acceptance checks passed");
