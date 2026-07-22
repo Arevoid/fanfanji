@@ -8,6 +8,7 @@ import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from 
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
+import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
 import {
@@ -1893,7 +1894,10 @@ export default function AppChat({
 
       // Query group-level worldbook entries
       const groupWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText);
-      const groupWbText = groupWbBlocks.formattedAll ? `\n\n【🚨 微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
+      let groupWbText = groupWbBlocks.formattedAll ? `\n\n【🚨 微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
+      if (activeCharacter.enableTimeAwareness !== false) {
+        groupWbText += `\n【当前现实时间】\n${formatLocalTimeContext()}\n`;
+      }
 
       // Construct a system instruction that contains details about all members and how they should reply
       const membersDefText = groupMembers.map((member, idx) => {
@@ -2461,16 +2465,7 @@ Answer only the user's newest message as today's opening. Do not resume, answer,
 
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
       if (activeCharacter.enableTimeAwareness !== false) {
-        const now = new Date();
-        const timeStr = now.toLocaleString("zh-CN", { 
-          year: "numeric", 
-          month: "long", 
-          day: "numeric", 
-          hour: "2-digit", 
-          minute: "2-digit", 
-          second: "2-digit",
-          weekday: "long" 
-        });
+        const timeStr = formatLocalTimeContext();
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
@@ -3460,16 +3455,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // 1.5 Time awareness prompt if enabled
       if (activeCharacter.enableTimeAwareness !== false) {
-        const now = new Date();
-        const timeStr = now.toLocaleString("zh-CN", { 
-          year: "numeric", 
-          month: "long", 
-          day: "numeric", 
-          hour: "2-digit", 
-          minute: "2-digit", 
-          second: "2-digit",
-          weekday: "long" 
-        });
+        const timeStr = formatLocalTimeContext();
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
@@ -3862,6 +3848,9 @@ ${stickerListStr}
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
+      const timeContext = activeCharacter.enableTimeAwareness !== false
+        ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
+        : "";
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
@@ -3881,7 +3870,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}PROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}PROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
 ${proactivePrompt}`;
@@ -3990,6 +3979,9 @@ ${proactivePrompt}`;
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], charId, scanText);
       const wbPrompt = wbBlocks.formattedAll;
+      const timeContext = friend.enableTimeAwareness !== false
+        ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
+        : "";
 
       const taskPrompt = customTaskText || "It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.";
 
@@ -4011,7 +4003,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}PROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}PROACTIVE CONTACT TASK:
 ${taskPrompt}
 
 ${instructionsPrompt}`;
