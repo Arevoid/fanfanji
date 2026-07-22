@@ -11,7 +11,7 @@ import { createDirectReplyCandidates } from "../features/chat/services/directCha
 import { createRegeneratedReplyCandidates } from "../features/chat/services/regenerateService";
 import { generateGroupReplyCandidates } from "../features/chat/services/groupChatService";
 import { generateProactiveReplyCandidates } from "../features/chat/services/proactiveMessageService";
-import { isBracketWrappedNarration } from "../features/chat/services/voiceMessageEligibility";
+import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
@@ -115,6 +115,12 @@ const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
   { key: "location", label: "位置" }, { key: "call", label: "通话" }, { key: "plus", label: "加号" }, { key: "send", label: "发送" },
 ];
+
+const CHARACTER_MEDIA_USAGE_RULES = `[特殊媒体使用规则]
+日常聊天默认优先使用普通文字。语音和表情包是具有额外表达作用的特殊消息，不要把它们当作普通文字的随机替代品或每次回复的固定装饰。
+只有在人设或世界书明确说明角色爱发语音/表情包、当前语境确实需要声音或即时情绪反应、或用户明确要求发送语音或表情包时，才自然使用。
+角色的性格和聊天习惯优先；沉稳、严谨、克制、冷淡或不习惯使用表情包的角色可以完全不自发表情包。
+不要为了显示功能而强迫角色使用特殊消息；不要连续多轮无理由发送语音或表情包；不要用表情包重复已经能由文字完整表达的内容。`;
 
 const SettingsSwitch = ({
   checked,
@@ -1942,6 +1948,7 @@ ${membersDefText}
    - 微信聊天简短而随意，请保持口语化、极度真实的微信聊天风格。
    - 不要输出大段的长篇大论，尽量简短有力。
    - 不要使用任何小说式的“旁白、场景描写、动作心理括号（如 '(笑)' 或 '（叹气）'）”。群聊里只能输出他们作为真人打字发在微信群里的文本。
+7. 🚨【特殊媒体克制使用】：日常群聊默认使用普通文字。除非成员人设或可用世界书明确偏好、当前语境确实需要声音或即时反应、或用户明确要求，否则不要输出语音或表情包标记；不要连续无理由发送特殊消息。
 
 【🚨🚨🚨 极其严格的输出格式规则】：
 你必须按照以下格式输出成员的发言。请确保在每条发言的前一行，用且仅用 \`[SENDER_NAME: 角色名字]\` 指定发送者。不要输出任何其他 markdown 标记，不要输出 JSON 块。
@@ -2055,35 +2062,6 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     }
   };
 
-  const getCharacterBaseVoiceProbability = (character: Character): number => {
-    const freq = character.voiceFrequency || "medium";
-    if (freq === "none") return 0;
-    if (freq === "low") return 0.15;
-    if (freq === "high") return 0.65;
-    
-    // For "medium" (default), we analyze character's profile
-    const profileText = ((character.personality || "") + " " + (character.backstory || "")).toLowerCase();
-    
-    const introvertedKeywords = [
-      "内向", "稳重", "安静", "沉默", "高冷", "冷酷", "话少", "严肃", "不苟言笑", 
-      "社恐", "淡漠", "孤僻", "深沉", "稳健", "reserved", "introvert", "quiet", "cold", 
-      "serious", "shy", "mature"
-    ];
-    
-    const outgoingKeywords = [
-      "活泼", "外放", "热情", "开朗", "俏皮", "傲娇", "话唠", "沙雕", "主动", "话多", 
-      "社交达人", "自来熟", "e人", "lively", "outgoing", "active", "playful", 
-      "extrovert", "talkative"
-    ];
-    
-    const isIntroverted = introvertedKeywords.some(keyword => profileText.includes(keyword));
-    const isOutgoing = outgoingKeywords.some(keyword => profileText.includes(keyword));
-    
-    if (isIntroverted && !isOutgoing) return 0.15;
-    if (isOutgoing && !isIntroverted) return 0.55;
-    return 0.30; // Default medium
-  };
-
   const shouldConvertBubbleToVoice = (
     character: Character,
     lastUserMsg: Message | null,
@@ -2091,93 +2069,13 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     bubbleIndex: number,
     bubbleText: string
   ): boolean => {
-    const baseProb = getCharacterBaseVoiceProbability(character);
-    if (baseProb === 0) return false;
-
-    if (isBracketWrappedNarration(bubbleText)) return false;
-    
-    // Exclude non-voice formats
-    if (
-      !bubbleText ||
-      isCallRecordMarkup(bubbleText) ||
-      isRedPacketMarkup(bubbleText) ||
-      isTransferMarkup(bubbleText) ||
-      bubbleText.startsWith("[系统]") ||
-      bubbleText.startsWith("data:image/") ||
-      bubbleText.startsWith("[表情]|") ||
-      bubbleText.startsWith("[位置]") ||
-      bubbleText.startsWith("[音乐]") ||
-      bubbleText.startsWith("[文件]") ||
-      bubbleText.startsWith("[视频通话]") ||
-      bubbleText.startsWith("[语音通话]")
-    ) {
-      return false;
-    }
-    
-    // Rule: Long time gap (> 5 mins) -> First reply bubble must be text
-    if (recentMsgs.length >= 2) {
-      const lastMsg = recentMsgs[recentMsgs.length - 1]; // current user message
-      const prevMsg = recentMsgs[recentMsgs.length - 2]; // previous message
-      if (lastMsg && prevMsg) {
-        const timeGap = lastMsg.timestamp - prevMsg.timestamp;
-        if (timeGap > 5 * 60 * 1000) {
-          if (bubbleIndex === 0) {
-            return false; // Force text to re-establish atmosphere
-          }
-        }
-      }
-    }
-    
-    let modifier = 0;
-    
-    // Late night casual chat (+20%)
-    const hour = new Date().getHours();
-    const isLateNight = hour >= 22 || hour < 5;
-    if (isLateNight) {
-      modifier += 0.20;
-    }
-    
-    // Intimate / cute context (+25%)
-    const intimateKeywords = [
-      "撒娇", "抱抱", "亲亲", "宝贝", "乖", "么么", "喜欢你", "粘人", "可爱", "哼", "喵", 
-      "嘿嘿", "哈", "想你", "心疼", "贴贴", "贴", "老婆", "老公", "猪猪", "笨蛋"
-    ];
-    const textToAnalyze = (bubbleText + " " + (lastUserMsg?.content || "")).toLowerCase();
-    const isIntimate = intimateKeywords.some(keyword => textToAnalyze.includes(keyword));
-    if (isIntimate) {
-      modifier += 0.25;
-    }
-    
-    // Serious / Formal / Narrative context (-30%)
-    const seriousKeywords = [
-      "工作", "合同", "商量", "正事", "严肃", "汇报", "剧情", "线索", "计划", "汇报", 
-      "商谈", "会议", "报告", "正式", "合作", "方案", "分析", "研究"
-    ];
-    const isSerious = seriousKeywords.some(keyword => textToAnalyze.includes(keyword)) || bubbleText.length > 60;
-    if (isSerious) {
-      modifier -= 0.30;
-    }
-    
-    // User's recent message habits: if user has sent mostly text, AI prefers text. If voice, AI prefers voice.
-    const userRecentMessages = recentMsgs
-      .filter(m => m.sender === "user")
-      .slice(-5);
-    if (userRecentMessages.length > 0) {
-      const userVoiceCount = userRecentMessages.filter(m => m.content.startsWith("[语音")).length;
-      const userVoiceRatio = userVoiceCount / userRecentMessages.length;
-      if (userVoiceRatio >= 0.6) {
-        modifier += 0.30; // Boost if user is voice-heavy
-      } else if (userVoiceRatio === 0) {
-        modifier -= 0.20; // Reduce if user is text-only
-      }
-    }
-    
-    // Slight random fluctuation (-6% to +6%)
-    const fluctuation = (Math.random() * 0.12) - 0.06;
-    
-    const finalProb = Math.max(0, Math.min(0.95, baseProb + modifier + fluctuation));
-    
-    return Math.random() < finalProb;
+    return shouldAutomaticallyConvertTextToVoice({
+      character,
+      lastUserMessage: lastUserMsg,
+      recentMessages: recentMsgs,
+      bubbleIndex,
+      bubbleText,
+    });
   };
 
   const generateResponseForUserMessage = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
@@ -2579,6 +2477,7 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
       }
 
       assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
+      assembledInstructions.push(CHARACTER_MEDIA_USAGE_RULES);
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers1 = stickerGroups.flatMap(g => g.stickers);
@@ -2594,7 +2493,7 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
       } else if (allStickers1.length > 0) {
         const stickerListStr = allStickers1.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
         assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
-你作为扮演角色，现在可以使用我的自定义表情包来回复我！当你想要表达特定情绪、调侃、撒娇或进行有趣回应时，你可以在你发出的消息序列中【单独一行发送表情包】，或者直接把表情包作为一条独立的消息发送出来。
+你作为扮演角色，现在可以在符合上方特殊媒体使用规则时使用我的自定义表情包来回复我。只有表情包本身能表达即时反应、且不重复文字内容时，才可以单独一行发送表情包。
 发送表情包的格式必须完全符合以下严格语法格式：
 [表情]|表情名称|图片URL
 
@@ -2604,7 +2503,7 @@ ${stickerListStr}
 【强制输出规则】：
 1. 绝对不允许胡编乱造不存在的表情包名称或图片URL！你只能从上面给出的列表中挑选！
 2. 发送时格式必须极其严格：[表情]|名称|URL。不能有任何多余的字符。
-3. 当你发送表情包时，通常伴随着一个简短的台词（台词写在另一个独立消息中，或者在同一消息的另一行）。请表现得非常自然，像个真正活在微信里、喜欢斗图撒娇的朋友！`);
+3. 不要为了显示功能或凑热闹而发送表情包；不适合时只发送普通文字即可。`);
       }
 
       // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
@@ -3480,13 +3379,14 @@ ${timeLogString}
       }
 
       assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
+      assembledInstructions.push(CHARACTER_MEDIA_USAGE_RULES);
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers2 = stickerGroups.flatMap(g => g.stickers);
       if (allStickers2.length > 0) {
         const stickerListStr = allStickers2.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
         assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
-你作为扮演角色，现在可以使用我的自定义表情包来回复我！当你想要表达特定情绪、调侃、撒娇或进行有趣回应时，你可以在你发出的消息序列中【单独一行发送表情包】，或者直接把表情包作为一条独立的消息发送出来。
+你作为扮演角色，现在可以在符合上方特殊媒体使用规则时使用我的自定义表情包来回复我。只有表情包本身能表达即时反应、且不重复文字内容时，才可以单独一行发送表情包。
 发送表情包的格式必须完全符合以下严格语法格式：
 [表情]|表情名称|图片URL
 
@@ -3496,7 +3396,7 @@ ${stickerListStr}
 【强制输出规则】：
 1. 绝对不允许胡编乱造不存在的表情包名称或图片URL！你只能从上面给出的列表中挑选！
 2. 发送时格式必须极其严格：[表情]|名称|URL。不能有任何多余的字符。
-3. 当你发送表情包时，通常伴随着一个简短的台词（台词写在另一个独立消息中，或者在同一消息的另一行）。请表现得非常自然，像个真正活在微信里、喜欢斗图撒娇的朋友！`);
+3. 不要为了显示功能或凑热闹而发送表情包；不适合时只发送普通文字即可。`);
       }
 
       // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
@@ -3810,7 +3710,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
 ${proactivePrompt}`;
@@ -3940,7 +3840,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 ${taskPrompt}
 
 ${instructionsPrompt}`;
@@ -6223,8 +6123,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                       })() : (
                         <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"}` : `px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                           isSelf
-                            ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
-                            : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
+                            ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
+                            : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
                         }`}>
                           {(() => {
                             const quoteReply = parseQuoteReply(msg.content);
