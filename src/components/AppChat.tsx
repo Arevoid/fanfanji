@@ -7,6 +7,7 @@ import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles,
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
+import { PromptComposer } from "../domain/prompt/PromptComposer";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
 import {
@@ -1953,10 +1954,14 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 按照规定的格式输出。`;
 
       // Call apiChat to generate responses
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "group-chat",
         message: promptMessage,
         history: [],
         systemInstruction,
+      });
+      const data = await apiChat({
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
@@ -2697,10 +2702,14 @@ ${stickerListStr}
 请你根据我们正在聊天的上下文话题或我们之前的对话脉络【极其自然、顺畅地继续对话】。如果当下适合，你也可以顺应氛围跟着发一个你自己的表情包，或者在文字对话里自然带过，保持微信好友日常聊天和斗图的真实、轻松感。`;
       }
 
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "direct-chat",
         message: promptMessage,
         history,
         systemInstruction,
+      });
+      const data = await apiChat({
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
@@ -3552,10 +3561,14 @@ ${stickerListStr}
 
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "regenerate",
         message: lastUserMsg.content,
         history,
         systemInstruction,
+      });
+      const data = await apiChat({
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
@@ -3873,10 +3886,14 @@ It has been 3 hours since you last talked to the user. You decided to proactivel
 
 ${proactivePrompt}`;
 
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "proactive-message",
         message: "(用户失联3小时，你主动给其发送了一条信息)",
         history: [],
         systemInstruction,
+      });
+      const data = await apiChat({
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
@@ -3999,10 +4016,14 @@ ${taskPrompt}
 
 ${instructionsPrompt}`;
 
-      const data = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "proactive-message",
         message: "(你主动给用户发送了一条信息)",
         history: [],
         systemInstruction,
+      });
+      const data = await apiChat({
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
@@ -4091,10 +4112,14 @@ Your task: Write a short, natural comment on this Moment.
 4. Try to make it feel deeply personal or reference recent chats subtly if applicable.
 `;
 
-          const response = await apiChat({
+          const composedPrompt = PromptComposer.compose({
+            scenario: "moment-comment",
             message: "请根据以上内容，为机主的新朋友圈写一条符合你人设和记忆的简短微信评论：",
             history,
             systemInstruction,
+          });
+          const response = await apiChat({
+            ...composedPrompt,
             apiKey: settings.apiKey,
             model: settings.selectedModel || "gemini-3.5-flash",
             apiEndpoint: settings.apiEndpoint,
@@ -4204,10 +4229,14 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
 4. Try to make it feel responsive to their comment.
 `;
 
-        const response = await apiChat({
+        const composedPrompt = PromptComposer.compose({
+          scenario: "moment-reply",
           message: `请针对用户在朋友圈下对你（或他人）发表的最新评论 "${userCommentText}"，写一条符合你人设和记忆的简短微信回复：`,
           history,
           systemInstruction,
+        });
+        const response = await apiChat({
+          ...composedPrompt,
           apiKey: settings.apiKey,
           model: settings.selectedModel || "gemini-3.5-flash",
           apiEndpoint: settings.apiEndpoint,
@@ -4293,10 +4322,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 6. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 `;
 
-      const response = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "moment-post",
         message: "请根据你的设定以及与机主的历史记忆，写一条朋友圈内容（内容可以与你自己有关，也可以与机主有关）：",
         history,
         systemInstruction,
+      });
+      const response = await apiChat({
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
