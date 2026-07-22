@@ -34,7 +34,6 @@ interface AppMemoryProps {
   selectedModel?: string;
   apiEndpoint?: string;
 }
-
 export default function AppMemory({
   characters,
   memories,
@@ -1035,45 +1034,4 @@ export default function AppMemory({
       </AnimatePresence>
     </div>
   );
-}
-
-// Helper function to rank memories by simple TF-IDF style similarity with user query
-export function getRelevantMemories(
-  memories: MemoryItem[],
-  characterId: string,
-  userQuery: string,
-  topK: number = 5
-): MemoryItem[] {
-  const characterMemories = memories.filter(m => m.characterId === characterId);
-  if (characterMemories.length === 0) return [];
-
-  if (!userQuery.trim()) {
-    // Return most recent memories
-    return characterMemories.slice(0, topK);
-  }
-
-  // Simple keyword matching score
-  const queryWords = userQuery.toLowerCase().split(/[\s,.:;!?"'（）()，。！“”]/).filter(w => w.length > 0);
-  
-  const scored = characterMemories.map(m => {
-    let score = 0;
-    const contentLower = m.content.toLowerCase();
-    
-    // Check keyword overlap
-    queryWords.forEach(word => {
-      if (contentLower.includes(word)) {
-        score += word.length; // More weight to longer matches
-      }
-    });
-
-    // Boost based on time, to prefer fresher matching memories slightly
-    score += m.timestamp * 0.00000000001;
-
-    return { m, score };
-  });
-
-  // Sort by score descending
-  scored.sort((a, b) => b.score - a.score);
-
-  return scored.slice(0, topK).map(x => x.m);
 }

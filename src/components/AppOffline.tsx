@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Character, Message, OfflineStory, MemoryItem, UserSettings, WorldBookEntry } from "../types";
 import { apiChat } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
-import { getRelevantMemories } from "./AppMemory";
+import { MemoryService } from "../domain/memory/MemoryService";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 
@@ -395,10 +395,10 @@ export default function AppOffline({
     const newMemoryContent = `[线下剧本《${story.title}》新增剧情总结（参与者: ${formattedCharsList}）| ${syncMarker}]\n${summaryText}`;
 
     // Sync to all participating characters
-    const newMems = [...memories];
+    const newMemoryItems: MemoryItem[] = [];
     let syncedCount = 0;
     storyCharsList.forEach(char => {
-      const isDup = memories.some(m => m.characterId === char.id && m.content.includes(syncMarker));
+      const isDup = MemoryService.hasMarker(memories, char.id, syncMarker);
       if (!isDup) {
         const memoryItem: MemoryItem = {
           id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -408,12 +408,13 @@ export default function AppOffline({
           importance: 7,
           isManual: true
         };
-        newMems.unshift(memoryItem);
+        newMemoryItems.push(memoryItem);
         syncedCount++;
       }
     });
 
     if (syncedCount > 0) {
+      const newMems = MemoryService.mergeMemories(memories, newMemoryItems);
       onSaveMemories(newMems);
       const archivedStory = {
         ...story,
@@ -610,7 +611,13 @@ ${wbPrompts}
           timestamp: updatedStory.importedContext!.importedAt,
           importance: 5
         }));
-        const relevantMems = getRelevantMemories(snapshotMemories, char.id, text || "续写故事", 3);
+        const relevantMems = MemoryService.retrieveRelevantMemories({
+          characterId: char.id,
+          queryText: text || "续写故事",
+          existingMemories: snapshotMemories,
+          limit: 3,
+          scenario: "offline",
+        });
         if (relevantMems.length > 0) {
           const lines = relevantMems.map(m => `  - ${m.content}`).join("\n");
           allMemoriesParts.push(`* 【${char.remark || char.name}】的线上记忆库事实：\n${lines}`);

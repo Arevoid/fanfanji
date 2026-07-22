@@ -11,6 +11,7 @@ import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } fr
 import { loadOfflineStories, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
+import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory } from "./types";
 import { 
   AlbumWidget, 
@@ -738,77 +739,50 @@ export default function App() {
 
       const msgsToSummarize = charMsgs.slice(-rounds * 2);
 
-      const history = msgsToSummarize.map((m) => ({
-        role: m.sender === "user" ? "user" : "model",
-        text: m.content,
-      }));
-
-      const data = await apiExtractMemories({
-        history,
-        characterName: char.name,
+      // Preserve the original one-item summary format and save it only once.
+      const isDelicate = char.archiveTemplateType === "delicate";
+      const headerLabel = isDelicate ? `【心境日记一键归档 (细腻版 - 最近 ${rounds} 轮)】` : `【精炼事件日志一键归档 (精炼版 - 最近 ${rounds} 轮)】`;
+      const result = await MemoryService.summarizeConversation({
+        character: char,
+        characterId,
+        recentMessages: msgsToSummarize,
+        existingMemories: memories,
+        scenario: "immediate-summary",
         apiKey: settings.apiKey,
-        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model")
-          ? (settings.selectedModel || "gemini-3.5-flash")
-          : recallSettings.extractModel,
+        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
         apiEndpoint: settings.apiEndpoint,
         templateType: char.archiveTemplateType,
-      });
-
-      if (data && data.items && Array.isArray(data.items)) {
-        const validItems = data.items
-          .map((content: string) => content.trim())
-          .filter((content: string) => content.length > 0);
-
-        let addedCount = 0;
-        if (validItems.length > 0) {
-          // Format as requested: "总结格式，设置的轮数，总结为一条，多项内容前面加-号然后换行下一项内容"
-          const bulletPoints = validItems.map((item: string) => `- ${item}`).join("\n");
-          const isDelicate = char.archiveTemplateType === "delicate";
-          const headerLabel = isDelicate ? `【心境日记一键归档 (细腻版 - 最近 ${rounds} 轮)】` : `【精炼事件日志一键归档 (精炼版 - 最近 ${rounds} 轮)】`;
-          const singleSummaryContent = `${headerLabel}\n${bulletPoints}`;
-
-          const isDup = memories.some(
-            (m) =>
-              m.characterId === characterId &&
-              m.content.toLowerCase().replace(/[\s,.:;!?"']/g, "") ===
-                singleSummaryContent.toLowerCase().replace(/[\s,.:;!?"']/g, "")
-          );
-
-          if (!isDup) {
-            const newSingleItem: MemoryItem = {
-              id: (Date.now() + Math.random()).toString(),
-              characterId: characterId,
-              content: singleSummaryContent,
-              timestamp: Date.now(),
-              importance: 5,
-              isManual: false,
-            };
-            setMemories(prev => [newSingleItem, ...prev]);
-            addedCount = 1;
-          }
-        }
-
-        setImmediateSummaryTask({
-          characterId,
-          status: "completed",
-          rounds,
-          extractedCount: addedCount,
-        });
-
-        // Save last summarized message ID to character so auto-summary can skip them
-        const lastMsg = msgsToSummarize[msgsToSummarize.length - 1];
-        if (lastMsg) {
-          handleSaveCharacter({
-            ...char,
-            lastImmediateSummaryMsgId: lastMsg.id,
-          });
-        }
-      } else {
+        createId: () => (Date.now() + Math.random()).toString(),
+        currentTime: () => Date.now(),
+        formatContent: (items) => formatExtractedMemorySummary(headerLabel, items),
+      }, apiExtractMemories);
+      if (result.apiError) {
         setImmediateSummaryTask(prev => ({
           ...prev,
           status: "error",
-          error: (data as any).error || "提炼失败，未提取到有效记忆或API请求出错",
+          error: result.apiError || "提炼失败，未提取到有效记忆或API请求出错",
         }));
+        return;
+      }
+      const addedCount = result.extractedMemories.length;
+      if (addedCount > 0) {
+        setMemories(prev => MemoryService.mergeMemories(prev, result.extractedMemories));
+      }
+
+      setImmediateSummaryTask({
+        characterId,
+        status: "completed",
+        rounds,
+        extractedCount: addedCount,
+      });
+
+      // Save last summarized message ID to character so auto-summary can skip them
+      const lastMsg = msgsToSummarize[msgsToSummarize.length - 1];
+      if (lastMsg) {
+        handleSaveCharacter({
+          ...char,
+          lastImmediateSummaryMsgId: lastMsg.id,
+        });
       }
     } catch (err: any) {
       setImmediateSummaryTask(prev => ({

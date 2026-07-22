@@ -6,7 +6,7 @@ import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry
 import { splitTextToOfflineSegments, cleanOnlineMessage, splitIntoWeChatBubbles, compressImage } from "../utils/pngParser";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
-import { getRelevantMemories } from "./AppMemory";
+import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
@@ -2413,10 +2413,10 @@ ${activeCharacter.disableBracketActions
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = shouldLoadLongTermMemory
-        ? getRelevantMemories(memories || [], activeChatCharId || "", userMsg ? userMsg.content : "", topK)
+        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", queryText: userMsg ? userMsg.content : "", existingMemories: memories || [], limit: topK, scenario: "chat" })
         : [];
       if (relevantMemories.length > 0) {
-        charDefText += `\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+        charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n");
       }
 
       // A continuation synchronized while leaving the offline app is an explicit
@@ -3436,9 +3436,9 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // Recall memories
       const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = getRelevantMemories(memories || [], activeChatCharId || "", lastUserMsg.content, topK);
+      const relevantMemories = MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", queryText: lastUserMsg.content, existingMemories: memories || [], limit: topK, scenario: "chat" });
       if (relevantMemories.length > 0) {
-        charDefText += `\n- Reclaimed Memories / 召回深度记忆:\n${relevantMemories.map((m) => `  * ${m.content}`).join("\n")}`;
+        charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories / 召回深度记忆:\n");
       }
 
       const userProfileText = `User Profile:
@@ -3778,57 +3778,28 @@ ${stickerListStr}
         return 0;
       }
       
-      const history = messagesToCompress.map((m) => ({
-        role: m.sender === "user" ? "user" : "model",
-        text: m.content,
-      }));
-
-      const data = await apiExtractMemories({
-        history,
-        characterName: activeCharacter.name,
+      const isDelicate = activeCharacter.archiveTemplateType === "delicate";
+      const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
+      const result = await MemoryService.extractMemories({
+        character: activeCharacter,
+        characterId: activeChatCharId,
+        recentMessages: messagesToCompress,
+        existingMemories: memories || [],
+        scenario: "chat",
         apiKey: settings.apiKey,
-        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model")
-          ? (settings.selectedModel || "gemini-3.5-flash")
-          : recallSettings.extractModel,
+        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
         apiEndpoint: settings.apiEndpoint,
         templateType: activeCharacter.archiveTemplateType,
-      });
-
-      if (data && data.items && Array.isArray(data.items)) {
-        const validItems = data.items
-          .map((content: string) => content.trim())
-          .filter((content: string) => content.length > 0);
-
-        if (validItems.length > 0) {
-          const bulletPoints = validItems.map((item: string) => `- ${item}`).join("\n");
-          const isDelicate = activeCharacter.archiveTemplateType === "delicate";
-          const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
-          const singleSummaryContent = `${headerLabel}\n${bulletPoints}`;
-
-          const isDup = (memories || []).some(
-            (m) =>
-              m.characterId === activeChatCharId &&
-              m.content.toLowerCase().replace(/[\s,.:;!?"']/g, "") ===
-                singleSummaryContent.toLowerCase().replace(/[\s,.:;!?"']/g, "")
-          );
-
-          if (!isDup) {
-            const newSingleItem: MemoryItem = {
-              id: (Date.now() + Math.random()).toString(),
-              characterId: activeChatCharId,
-              content: singleSummaryContent,
-              timestamp: Date.now(),
-              importance: 5,
-              isManual: false,
-            };
-            onSaveMemories([newSingleItem, ...(memories || [])]);
-            return 1;
-          }
-        }
-        return 0;
-      } else {
-        console.error("Extract memory API error:", (data as any).error);
+        createId: () => (Date.now() + Math.random()).toString(),
+        currentTime: () => Date.now(),
+        formatContent: (items) => formatExtractedMemorySummary(headerLabel, items),
+      }, apiExtractMemories);
+      if (result.apiError) console.error("Extract memory API error:", result.apiError);
+      if (result.extractedMemories.length > 0) {
+        onSaveMemories(MemoryService.mergeMemories(memories || [], result.extractedMemories));
+        return result.extractedMemories.length;
       }
+      return 0;
     } catch (err: any) {
       console.error("Memory extraction error:", err);
     } finally {
@@ -4392,14 +4363,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         };
 
         onAddMoment(newMo);
-        onSaveMemories([{
+        const momentMemory: MemoryItem = {
           id: `${Date.now()}-moment-memory-${Math.random().toString(36).slice(2, 6)}`,
           characterId: friend.id,
           content: `【朋友圈动态】${parsed.content}${momentImage ? "（发布时附有配图）" : ""}`,
           timestamp: Date.now(),
           importance: 4,
           isManual: false,
-        }, ...(memories || [])]);
+        };
+        onSaveMemories(MemoryService.mergeMemories(memories || [], [momentMemory]));
       }
     } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
@@ -9666,7 +9638,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     importance: 8,
                   };
                   
-                  onSaveMemories([oocMemory, ...memories]);
+                  onSaveMemories(MemoryService.mergeMemories(memories, [oocMemory]));
                   
                   const comment = oocCommentText.trim();
                   setShowOocCommentModal(null);
