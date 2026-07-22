@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { QuotedMessagePreview } from "../src/features/chat/components/QuotedMessagePreview";
+import { parseQuoteReply, QuotedMessagePreview } from "../src/features/chat/components/QuotedMessagePreview";
 import { RedPacketCard } from "../src/features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../src/features/chat/components/SpecialMessage/TransferCard";
 import type { Message } from "../src/types";
@@ -20,6 +20,8 @@ const checks: Array<[string, boolean]> = [
   ["quote transfer", quote("[转账]|10|午饭|false").includes("[转账]")],
   ["quote empty fallback", quote(" ").includes("[消息]")],
   ["quote classes", quote("文本").includes("message-quote") && quote("文本").includes("composer-quote-preview")],
+  ["quote preview omits wrapper wording", !quote("文本").includes("引用自")],
+  ["quote reply parser", parseQuoteReply("「引用 沈安：晚安」\n收到")?.body === "收到"],
   ["packet pending", packet("unclaimed").includes("点击拆红包") && packet("unclaimed").includes('data-status="unclaimed"')],
   ["packet claimed", packet("claimed").includes("已领取")],
   ["packet refunded", packet("refunded").includes("已退回")],
@@ -36,6 +38,8 @@ const checks: Array<[string, boolean]> = [
   ["packet CSS variables", ["--redpacket-bg", "--redpacket-title-color", "--redpacket-money-color", "--redpacket-status-color", "--redpacket-note-color"].every((name) => css.includes(name))],
   ["transfer CSS variables", ["--transfer-bg", "--transfer-title-color", "--transfer-money-color", "--transfer-status-color", "--transfer-note-color"].every((name) => css.includes(name))],
   ["no important rules", !css.includes("!important")],
+  ["fixed payment dimensions", ["--payment-card-width: 240px", "--payment-card-height: 112px", "calc(100vw - 120px)"].every((name) => css.includes(name))],
+  ["quote reply keeps sender bubble variants", ["message-quote-reply-wrapper--self", "message-quote-reply-wrapper--other", "message-quote__header"].every((name) => css.includes(name))],
 ];
 
 for (const [name, passed] of checks) {

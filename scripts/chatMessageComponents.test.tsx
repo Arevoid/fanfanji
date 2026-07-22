@@ -51,7 +51,7 @@ const checks: Array<[string, boolean]> = [
   ["K red packet passthrough", rendered.includes("[红包]|8.88")],
   ["L transfer passthrough", rendered.includes("[转账]|10.00")],
   ["M call passthrough", rendered.includes("[通话]|语音通话")],
-  ["N normal quote", normalQuote.includes("引用自 自己") && normalQuote.includes("引用文本")],
+  ["N normal quote", normalQuote.includes("自己:") && normalQuote.includes("引用文本")],
   ["O special quote summary", fileQuote.includes("[文件]") && mediaQuote.includes("[媒体内容]")],
   ["P typing position", rendered.indexOf("typing-anchor") < rendered.indexOf("bottom-anchor")],
   ["Q sender layout data remains available", rendered.includes("message-user") && rendered.includes("message-character")],

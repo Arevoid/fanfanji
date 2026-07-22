@@ -26,7 +26,7 @@ import { ChatTopBar } from "../features/chat/components/ChatTopBar";
 import { ContactList } from "../features/chat/components/ContactList";
 import { ConversationList } from "../features/chat/components/ConversationList";
 import { MessageList } from "../features/chat/components/MessageList";
-import { QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
+import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
 import { ChatComposer } from "../features/chat/components/ChatComposer";
 import { ChatTextInput } from "../features/chat/components/ChatTextInput";
@@ -6209,14 +6209,27 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </div>
                         );
                       })() : (
-                        <div
-                          className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
-                            isSelf
-                              ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
-                              : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
-                          }`}
-                        >
-                          <div className="text-left">{msg.content}</div>
+                        <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"}` : `px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                          isSelf
+                            ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
+                            : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
+                        }`}>
+                          {(() => {
+                            const quoteReply = parseQuoteReply(msg.content);
+                            return quoteReply ? (
+                              <>
+                                <div className="message-quote__header">↩ {isSelf ? "你回复了" : "回复了"} {quoteReply.author}</div>
+                                <div className="message-quote text-left text-[11px]">
+                                  <div className="message-quote__content px-3 py-2">{quoteReply.content}</div>
+                                </div>
+                                <div className={`message-quote__reply-body px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                                  isSelf
+                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
+                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
+                                }`}>{quoteReply.body}</div>
+                              </>
+                            ) : <div className="text-left">{msg.content}</div>;
+                          })()}
                           {msg.translation && (
                             <>
                               <div className={`my-1.5 border-t border-dashed ${isSelf ? "border-white/20" : "border-stone-200"}`} />

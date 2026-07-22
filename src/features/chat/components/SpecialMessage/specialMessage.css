@@ -6,18 +6,51 @@
 }
 
 .message-quote__content {
-  background: var(--quote-bg);
-  border-left: 3px solid var(--quote-border);
-  border-radius: 0.5rem;
+  background: transparent;
+  border: 2px solid #d2dde1;
+  border-radius: 1.35rem;
   color: var(--quote-content);
 }
 
 .message-quote__author { color: var(--quote-author); }
 
+.message-quote__reply-body {
+  margin-top: 0.75rem;
+}
+
+.message-quote-reply-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: min(100%, 30rem);
+}
+
+.message-quote-reply-wrapper--self { align-items: flex-end; }
+.message-quote-reply-wrapper--other { align-items: flex-start; }
+
+.message-quote__header {
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
 .special-payment-card {
-  width: min(20rem, 100%);
+  --payment-card-width: 240px;
+  --payment-card-height: 112px;
+  position: relative;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 8px;
+  width: min(var(--payment-card-width), calc(100vw - 120px));
+  min-width: min(220px, calc(100vw - 120px));
+  height: var(--payment-card-height);
+  min-height: var(--payment-card-height);
+  max-height: var(--payment-card-height);
+  flex: 0 0 auto;
   overflow: hidden;
-  border-radius: 1.25rem;
+  padding: 14px 16px 12px;
+  border-radius: 18px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
   cursor: pointer;
   transition: transform 150ms ease, filter 150ms ease;
@@ -27,11 +60,11 @@
 .special-payment-card:active { transform: scale(0.99); }
 
 .redpacket-card {
-  --redpacket-bg: linear-gradient(135deg, #7f1d1d, #dc2626 60%, #f97316);
-  --redpacket-title-color: #fff7ed;
-  --redpacket-money-color: #fef3c7;
-  --redpacket-status-color: #fde68a;
-  --redpacket-note-color: rgba(255, 247, 237, 0.78);
+  --redpacket-bg: linear-gradient(135deg, #0d1b1e, #101d20 72%, #17292c);
+  --redpacket-title-color: #f8fafc;
+  --redpacket-money-color: #ffffff;
+  --redpacket-status-color: #d7dde0;
+  --redpacket-note-color: rgba(241, 245, 249, 0.88);
   background: var(--redpacket-bg);
   color: var(--redpacket-title-color);
 }
@@ -52,9 +85,9 @@
 .transfer-card[data-status="confirmed"] { filter: saturate(0.55) opacity(0.78); }
 .transfer-card[data-status="refunded"] { --transfer-bg: linear-gradient(135deg, #475569, #64748b); filter: grayscale(0.45); }
 
-.special-payment-card__top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem 0; }
+.special-payment-card__top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; min-width: 0; padding: 0; }
 .special-payment-card__title { color: var(--redpacket-title-color, var(--transfer-title-color)); font-size: 0.75rem; font-weight: 700; }
 .special-payment-card__status { color: var(--redpacket-status-color, var(--transfer-status-color)); font-size: 0.7rem; font-weight: 700; }
-.special-payment-card__money { color: var(--redpacket-money-color, var(--transfer-money-color)); font-size: 1.65rem; font-weight: 800; line-height: 1; padding: 0.7rem 1rem 0.65rem; }
-.special-payment-card__note { color: var(--redpacket-note-color, var(--transfer-note-color)); font-size: 0.72rem; overflow: hidden; padding: 0.55rem 1rem 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
-.special-payment-card__brand { color: var(--redpacket-status-color, var(--transfer-status-color)); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; opacity: 0.78; }
+.special-payment-card__money { align-self: center; color: var(--redpacket-money-color, var(--transfer-money-color)); font-size: 1.4rem; font-weight: 800; line-height: 1; padding: 0; }
+.special-payment-card__note { color: var(--redpacket-note-color, var(--transfer-note-color)); font-size: 0.72rem; min-width: 0; overflow: hidden; padding: 0; text-overflow: ellipsis; white-space: nowrap; }
+.special-payment-card__brand { position: absolute; right: 16px; bottom: 12px; color: var(--redpacket-status-color, var(--transfer-status-color)); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; opacity: 0.52; }
