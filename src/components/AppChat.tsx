@@ -6,6 +6,9 @@ import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry
 import { splitTextToOfflineSegments, compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles as splitIntoWeChatBubbles, type CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
+import { requestAiReply } from "../features/chat/services/aiReplyService";
+import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
+import { createRegeneratedReplyCandidates } from "../features/chat/services/regenerateService";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
@@ -2677,7 +2680,7 @@ ${stickerListStr}
         history,
         systemInstruction,
       });
-      const data = await apiChat({
+      const data = await requestAiReply(apiChat, {
         ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
@@ -2756,30 +2759,26 @@ ${stickerListStr}
             }
           }
         } else {
-          const cleanedText = normalizePaymentMarkup(cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false));
-          const textToSplit = cleanedText || data.text;
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
-          const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
+          const replyCandidates = createDirectReplyCandidates({
+            rawText: data.text,
+            disableBracketActions: activeCharacter.disableBracketActions || false,
+            keepPeriods,
+            characterId: activeChatCharId,
+            createId: (idx) => `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+            currentTime: () => Date.now(),
+            transformBubble: (bubbleText, idx) => {
+              const isVoice = activeAttachModal !== "calling" && shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
+              if (!isVoice) return bubbleText;
+              const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
+              return `[语音]|${secs}|${bubbleText}`;
+            },
+          });
           const createdMessages: Message[] = [];
           
-          for (let idx = 0; idx < bubbles.length; idx++) {
-            const bubbleText = bubbles[idx];
-            
-            // Dynamically decide if this bubble should be a voice message or a text message
-            let finalContent = bubbleText;
-            const isVoice = activeAttachModal !== "calling"
-              && shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
-            if (isVoice) {
-              const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
-              finalContent = `[语音]|${secs}|${bubbleText}`;
-            }
-
-            const charMsg = createCharacterTextMessage({
-              id: `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-              characterId: activeChatCharId,
-              content: finalContent,
-              timestamp: Date.now(),
-            });
+          for (let idx = 0; idx < replyCandidates.messages.length; idx++) {
+            const charMsg = replyCandidates.messages[idx];
+            const bubbleText = replyCandidates.bubbleTexts[idx];
             
             setIsTyping(true);
             const chars = bubbleText.length;
@@ -2791,7 +2790,7 @@ ${stickerListStr}
             createdMessages.push(charMsg);
             setIsTyping(false);
             
-            if (idx < bubbles.length - 1) {
+            if (idx < replyCandidates.messages.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
             }
           }
@@ -3519,7 +3518,7 @@ ${stickerListStr}
         history,
         systemInstruction,
       });
-      const data = await apiChat({
+      const data = await requestAiReply(apiChat, {
         ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
@@ -3529,19 +3528,16 @@ ${stickerListStr}
       });
 
       if (data && data.text) {
-        const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
-        const textToSplit = cleanedText || data.text;
         const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
-        const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
-        bubbles.forEach((bubbleText, idx) => {
-          const charMsg = createCharacterTextMessage({
-            id: `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-            characterId: activeChatCharId,
-            content: bubbleText,
-            timestamp: Date.now() + idx,
-          });
-          onSendMessage(charMsg);
+        const replyCandidates = createRegeneratedReplyCandidates({
+          rawText: data.text,
+          disableBracketActions: activeCharacter.disableBracketActions || false,
+          keepPeriods,
+          characterId: activeChatCharId,
+          createId: (idx) => `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+          currentTime: (idx) => Date.now() + idx,
         });
+        replyCandidates.messages.forEach(onSendMessage);
       }
     } catch (err: any) {
       console.error("Regeneration error:", err);
