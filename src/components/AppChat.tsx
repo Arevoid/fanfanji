@@ -9,6 +9,7 @@ import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { getRelevantMemories } from "./AppMemory";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
+import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
 import {
@@ -475,6 +476,19 @@ const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ow
 以下是最近微信朋友圈里的动态，你对这些内容拥有清晰的记忆。你不一定要主动提起它们，但它们是你们共享的日常生活背景。在交流中，你可以根据你们的亲疏关系极度自然地参考这些生活点滴，例如偶尔作为话题，或对对方最近的状态有所了解。
 ${momentLines.join("\n")}`;
 };
+
+const getKnownMomentsContextString = (
+  allMoments: Moment[],
+  activeChar: Character,
+  activeIdentityId: string,
+  ownerName: string
+) => buildKnownMomentsContext({
+  moments: allMoments,
+  activeCharacterId: activeChar.id,
+  activeIdentityId,
+  userName: ownerName,
+  getPublicBody: (moment) => renderMomentContent(moment.content),
+});
 
 const getOfflineStoriesContextString = (offlineStories: OfflineStory[] | undefined, activeCharId: string, charName: string) => {
   // Original offline dialogue must never leak into the online context. A user
@@ -2582,7 +2596,7 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
       }
 
       // 8. WeChat Moments Context memory
-      const momentsContext = getMomentsContextString(allMoments, activeCharacter, settings.name);
+      const momentsContext = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
       if (momentsContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(momentsContext);
       }
@@ -3431,7 +3445,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
 
-      const momentsContextRegen = getMomentsContextString(allMoments, activeCharacter, settings.name);
+      const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
 
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
