@@ -1,3 +1,45 @@
+import type { Character, Message } from "../../../types";
+
 /** Parenthesized actions, narration, and stage directions are never spoken voice bubbles. */
 export const isBracketWrappedNarration = (text: string): boolean =>
   /^\s*[（(][\s\S]*[）)]\s*$/.test(text);
+
+const VOICE_REQUEST_PATTERN = /(发|来|用|录|说).{0,8}(语音|声音)|想听.{0,8}(声音|语音)|语音.{0,8}(说|回复|回)|给我.{0,8}(语音|声音)/i;
+const VOICE_CONTEXT_PATTERN = /(唱歌|唱一段|哼歌|哼唱|清唱|低声|小声|轻声|悄声|耳语|声音|嗓音|语音)/i;
+const VOICE_PREFERENCE_PATTERN = /(爱发语音|喜欢.{0,4}语音|经常.{0,4}语音|习惯.{0,4}语音|用语音聊天)/i;
+
+export const isExplicitVoiceRequest = (text?: string): boolean =>
+  Boolean(text && VOICE_REQUEST_PATTERN.test(text));
+
+export const hasExplicitVoicePreference = (character: Character): boolean =>
+  character.voiceFrequency === "high" || VOICE_PREFERENCE_PATTERN.test(`${character.personality || ""}\n${character.backstory || ""}`);
+
+const isCharacterVoiceMarkup = (message: Message, characterId: string): boolean =>
+  message.sender === "character"
+  && message.characterId === characterId
+  && (message.isVoiceMessage === true || message.content.startsWith("[语音"));
+
+export interface AutomaticVoiceConversionInput {
+  character: Character;
+  lastUserMessage: Message | null;
+  recentMessages: readonly Message[];
+  bubbleIndex: number;
+  bubbleText: string;
+  random?: () => number;
+}
+
+/** Keeps generated chat text as text by default; explicit model markup is unchanged. */
+export function shouldAutomaticallyConvertTextToVoice(input: AutomaticVoiceConversionInput): boolean {
+  const { character, lastUserMessage, recentMessages, bubbleIndex, bubbleText } = input;
+  if (character.voiceFrequency === "none" || bubbleIndex !== 0 || !bubbleText || isBracketWrappedNarration(bubbleText)) return false;
+  if (/^\[(?:语音|表情|红包|转账|系统|位置|音乐|文件|视频通话|语音通话)/.test(bubbleText) || bubbleText.startsWith("data:image/")) return false;
+
+  if (isExplicitVoiceRequest(lastUserMessage?.content)) return true;
+  if (recentMessages.some((message) => isCharacterVoiceMarkup(message, character.id))) return false;
+
+  const hasPreference = hasExplicitVoicePreference(character);
+  const needsVoiceForContext = VOICE_CONTEXT_PATTERN.test(`${lastUserMessage?.content || ""}\n${bubbleText}`);
+  if (!hasPreference && !needsVoiceForContext) return false;
+
+  return (input.random || Math.random)() < (hasPreference ? 0.18 : 0.08);
+}
