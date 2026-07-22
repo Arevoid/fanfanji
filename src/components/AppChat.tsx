@@ -33,6 +33,9 @@ import { ChatTextInput } from "../features/chat/components/ChatTextInput";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
 import { MomentsApp } from "../features/moments/MomentsApp";
+import { requestCharacterMoment } from "../features/moments/services/momentGenerator";
+import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
+import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
 import {
   MessageSquare,
   Users,
@@ -4025,27 +4028,19 @@ Your task: Write a short, natural comment on this Moment.
             history,
             systemInstruction,
           });
-          const response = await apiChat({
+          const comment = await requestAutomaticMomentComment({
+            requestAi: apiChat,
+            request: {
             ...composedPrompt,
             apiKey: settings.apiKey,
             model: settings.selectedModel || "gemini-3.5-flash",
             apiEndpoint: settings.apiEndpoint,
             apiTemperature: settings.apiTemperature,
+            },
+            character: friend,
+            cleanText: (text) => cleanOnlineMessage(text, true),
           });
-
-          if (response && response.text) {
-            let cleanedComment = cleanOnlineMessage(response.text.trim(), true);
-            cleanedComment = cleanedComment.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
-
-            const newComment: MomentComment = {
-              id: `${Date.now()}-comment-${Math.random().toString(36).substr(2, 5)}`,
-              authorName: friend.remark || friend.name,
-              authorAvatar: friend.avatar,
-              content: cleanedComment,
-              timestamp: Date.now(),
-            };
-            onAddCommentToMoment(newMo.id, newComment);
-          }
+          if (comment) onAddCommentToMoment(newMo.id, comment);
         } catch (err) {
           console.error(`Failed to generate automatic comment for ${friend.name}:`, err);
         }
@@ -4142,34 +4137,20 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
           history,
           systemInstruction,
         });
-        const response = await apiChat({
+        const reply = await requestMomentCommentReply({
+          requestAi: apiChat,
+          request: {
           ...composedPrompt,
           apiKey: settings.apiKey,
           model: settings.selectedModel || "gemini-3.5-flash",
           apiEndpoint: settings.apiEndpoint,
           apiTemperature: settings.apiTemperature,
+          },
+          character: friend,
+          userName: settings.name,
+          cleanText: (text) => cleanOnlineMessage(text, true),
         });
-
-        if (response && response.text) {
-          let cleanedReply = cleanOnlineMessage(response.text.trim(), true);
-          cleanedReply = cleanedReply.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
-
-          // Clean up any existing AI-generated reply prefix to prevent duplication
-          cleanedReply = cleanedReply.replace(/^回复\s*[\(（].*?[\)）]\s*[:：]\s*/, "");
-          cleanedReply = cleanedReply.replace(/^回复\s*.*?\s*[:：]\s*/, "");
-
-          // Since the friend is replying to the user, the prefix must be 回复${settings.name}：
-          const finalReply = `回复${settings.name}：${cleanedReply}`;
-
-          const newComment: MomentComment = {
-            id: `${Date.now()}-reply-${Math.random().toString(36).substr(2, 5)}`,
-            authorName: friend.remark || friend.name,
-            authorAvatar: friend.avatar,
-            content: finalReply,
-            timestamp: Date.now(),
-          };
-          onAddCommentToMoment(momentId, newComment);
-        }
+        if (reply) onAddCommentToMoment(momentId, reply);
       } catch (err) {
         console.error(`Failed to generate reply to user comment for ${friend.name}:`, err);
       }
@@ -4235,61 +4216,21 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         history,
         systemInstruction,
       });
-      const response = await apiChat({
+      const generated = await requestCharacterMoment({
+        requestAi: apiChat,
+        request: {
         ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
         apiTemperature: settings.apiTemperature,
+        },
+        character: friend,
+        ownerIdentityId: activeIdentityId,
+        parseContent: cleanAndExtractMoment,
       });
-
-      if (response && response.text) {
-        let cleanedContent = response.text.trim();
-        cleanedContent = cleanedContent.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
-
-        const parsed = cleanAndExtractMoment(cleanedContent);
-
-        let momentImage: string | undefined = undefined;
-        if (!parsed.imageDescription && friend.album && friend.album.length > 0) {
-          // 40% chance of attaching a photo from their album
-          if (Math.random() < 0.4) {
-            const randomIndex = Math.floor(Math.random() * friend.album.length);
-            momentImage = friend.album[randomIndex];
-          }
-        }
-
-        const newMo: Moment = {
-          id: `${Date.now()}-char-moment-${Math.random().toString(36).substr(2, 5)}`,
-          characterId: friend.id,
-          ownerIdentityId: activeIdentityId,
-          authorName: friend.remark || friend.name,
-          authorAvatar: friend.avatar,
-          content: parsed.content,
-          timestamp: Date.now(),
-          likes: [],
-          comments: parsed.selfComments.map((text, idx) => ({
-            id: `${Date.now()}-self-comment-${idx}-${Math.random().toString(36).substr(2, 4)}`,
-            authorName: friend.remark || friend.name,
-            authorAvatar: friend.avatar,
-            content: text,
-            timestamp: Date.now() + (idx + 1) * 1000,
-          })),
-          image: momentImage,
-          imageType: momentImage ? "photo" : (parsed.imageDescription ? "text" : undefined),
-          imageDescription: parsed.imageDescription,
-        };
-
-        onAddMoment(newMo);
-        const momentMemory: MemoryItem = {
-          id: `${Date.now()}-moment-memory-${Math.random().toString(36).slice(2, 6)}`,
-          characterId: friend.id,
-          content: `【朋友圈动态】${parsed.content}${momentImage ? "（发布时附有配图）" : ""}`,
-          timestamp: Date.now(),
-          importance: 4,
-          isManual: false,
-        };
-        onSaveMemories(MemoryService.mergeMemories(memories || [], [momentMemory]));
-      }
+      if (generated.moment) onAddMoment(generated.moment);
+      if (generated.memory) onSaveMemories(MemoryService.mergeMemories(memories || [], [generated.memory]));
     } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
       const errMsgStr = err?.message || String(err);
