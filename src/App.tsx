@@ -2781,6 +2781,7 @@ export default function App() {
                     }}
                     memories={memories}
                     onSaveMemories={setMemories}
+                    recallSettings={recallSettings}
                   />
                 )}
               </div>

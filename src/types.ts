@@ -327,6 +327,9 @@ export interface OfflineStory {
   archivedMemoryIds?: string[];
   /** Number of story messages already condensed into online memory. */
   lastSyncedMessageCount?: number;
+  memorySyncStatus?: "pending" | "synced" | "failed";
+  lastMemorySyncAt?: number;
+  syncedSourceMessageIds?: string[];
 }
 
 export interface Sticker {

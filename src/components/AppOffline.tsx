@@ -5,10 +5,11 @@ import {
   Settings, Check, RefreshCw, Layers, Eye, BookMarked, Cpu, Pencil
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { Character, Message, OfflineStory, MemoryItem, UserSettings, WorldBookEntry } from "../types";
-import { apiChat } from "../utils/apiHelper";
+import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, UserSettings, WorldBookEntry } from "../types";
+import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
-import { MemoryService } from "../domain/memory/MemoryService";
+import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
+import { getOfflineMemorySourceMessages, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 
@@ -22,6 +23,7 @@ interface AppOfflineProps {
   onNavigateToChat?: (charId: string) => void;
   memories: MemoryItem[];
   onSaveMemories: (mems: MemoryItem[]) => void;
+  recallSettings: MemoryVaultSettings;
   messages?: Message[];
   activeChatCharId?: string | null;
   worldBookEntries?: WorldBookEntry[];
@@ -37,6 +39,7 @@ export default function AppOffline({
   onNavigateToChat,
   memories = [],
   onSaveMemories,
+  recallSettings,
   messages = [],
   activeChatCharId = null,
   worldBookEntries = []
@@ -73,6 +76,7 @@ export default function AppOffline({
   const setInputNarration = (_value: boolean) => undefined;
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const memorySyncInFlightRef = useRef(new Set<string>());
   
   // Toast notifications
   const [toast, setToast] = useState("");
@@ -252,11 +256,7 @@ export default function AppOffline({
     localStorage.setItem(`offline_story_id_${story.characterId}`, story.id);
   };
 
-  const getSyncedMessageCount = (story: OfflineStory) =>
-    story.lastSyncedMessageCount ?? (story.archivedAt ? story.messages.length : 0);
-
-  const hasUnsyncedOnlineProgress = (story: OfflineStory) =>
-    story.messages.length > getSyncedMessageCount(story);
+  const hasUnsyncedOnlineProgress = hasUnsyncedOfflineMemoryProgress;
 
   const clearOfflineSession = (story: OfflineStory) => {
     localStorage.removeItem(`offline_story_id_${story.characterId}`);
@@ -264,14 +264,14 @@ export default function AppOffline({
   };
 
   // Exit story workspace back to list
-  const handleExitStoryWorkspace = () => {
+  const handleExitStoryWorkspace = async () => {
     // Online continuations always archive their newly-written plot immediately
     // on exit, so the next online reply can continue the same topic.
     let completedStory = activeStory;
     if (activeStory
       && (activeStory.sourceChatId || activeStory.mode === "continue")
       && hasUnsyncedOnlineProgress(activeStory)) {
-      completedStory = handleSyncMemoryToBrain(activeStory);
+      completedStory = await handleSyncMemoryToBrain(activeStory);
     }
     if (completedStory) clearOfflineSession(completedStory);
     setActiveStory(null);
@@ -373,63 +373,81 @@ export default function AppOffline({
   };
 
   // Sync memory manually
-  const handleSyncMemoryToBrain = (story: OfflineStory): OfflineStory => {
-    const syncStart = getSyncedMessageCount(story);
-    const messagesToSync = story.messages.slice(syncStart);
-    if (!messagesToSync.length) return story;
-    
-    // Create a summarized memory of this offline development
-    // Keep the archive concise but include the full newly-written segment when
-    // it is short. Long segments retain their latest 12 beats for continuity.
-    const lastMsgs = messagesToSync.slice(-12);
-    const storyCharsList = story.characterIds && story.characterIds.length > 0 
-      ? characters.filter(c => story.characterIds?.includes(c.id))
-      : [selectedChar];
+  const handleSyncMemoryToBrain = async (story: OfflineStory): Promise<OfflineStory> => {
+    if (memorySyncInFlightRef.current.has(story.id)) return story;
+    const sourceMessages = getOfflineMemorySourceMessages(story);
+    if (!hasUnsyncedOnlineProgress(story)) return story;
 
-    const formattedCharsList = storyCharsList.map(c => c.remark || c.name).join("、");
-    const summaryText = lastMsgs
-      .map(m => m.isNarration ? `[旁白描述] ${m.content}` : `[对话] ${m.sender === "user" ? "我" : "角色"}: ${m.content}`)
-      .join(" \n");
+    const character = characters.find((item) => item.id === story.characterId);
+    if (!character || character.isGroupChat) {
+      showToast("当前线下故事没有可同步的单聊角色记忆");
+      return story;
+    }
 
-    const syncMarker = `offline-story:${story.id}:${syncStart}-${story.messages.length}`;
-    const newMemoryContent = `[线下剧本《${story.title}》新增剧情总结（参与者: ${formattedCharsList}）| ${syncMarker}]\n${summaryText}`;
-
-    // Sync to all participating characters
-    const newMemoryItems: MemoryItem[] = [];
-    let syncedCount = 0;
-    storyCharsList.forEach(char => {
-      const isDup = MemoryService.hasMarker(memories, char.id, syncMarker);
-      if (!isDup) {
-        const memoryItem: MemoryItem = {
-          id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          characterId: char.id,
-          content: newMemoryContent,
-          timestamp: Date.now(),
-          importance: 7,
-          isManual: true
-        };
-        newMemoryItems.push(memoryItem);
-        syncedCount++;
-      }
+    const now = Date.now();
+    const markSynced = (memoryIds: string[] = []): OfflineStory => ({
+      ...story,
+      archivedAt: now,
+      archivedMemoryIds: [...(story.archivedMemoryIds || []), ...memoryIds],
+      syncedSourceMessageIds: [...(story.syncedSourceMessageIds || []), ...sourceMessages.map((message) => message.id)],
+      lastSyncedMessageCount: story.messages.length,
+      lastMemorySyncAt: now,
+      memorySyncStatus: "synced",
+      updatedAt: now,
     });
 
-    if (syncedCount > 0) {
-      const newMems = MemoryService.mergeMemories(memories, newMemoryItems);
-      onSaveMemories(newMems);
-      const archivedStory = {
-        ...story,
-        archivedAt: Date.now(),
-        archivedMemoryIds: [...(story.archivedMemoryIds || []), ...newMems.slice(0, syncedCount).map(memory => memory.id)],
-        lastSyncedMessageCount: story.messages.length,
-        updatedAt: Date.now()
-      };
-      onSaveOfflineStory(archivedStory);
-      if (activeStory?.id === story.id) setActiveStory(archivedStory);
-      showToast(`剧情记忆已成功同步至 ${syncedCount} 位参与角色的主大脑！`);
-      return archivedStory;
-    } else {
-      showToast("所有角色的最近进展已同步，无需重复同步");
-      return story;
+    memorySyncInFlightRef.current.add(story.id);
+    try {
+      if (sourceMessages.length === 0) {
+        const syncedStory = markSynced();
+        onSaveOfflineStory(syncedStory);
+        if (activeStory?.id === story.id) setActiveStory(syncedStory);
+        showToast("没有可提取的线下新增剧情，已保留故事内容");
+        return syncedStory;
+      }
+
+      const historyLimit = character.retrievalHistoryLimit || 100;
+      const headerLabel = character.archiveTemplateType === "delicate"
+        ? `【线下剧本《${story.title}》心境归档】`
+        : `【线下剧本《${story.title}》关键剧情归档】`;
+      const result = await MemoryService.extractMemories({
+        character,
+        characterId: story.characterId,
+        recentMessages: sourceMessages.slice(-historyLimit),
+        existingMemories: memories,
+        scenario: "offline",
+        apiKey: settings.apiKey,
+        model: !recallSettings.extractModel || recallSettings.extractModel === "default-chat-model"
+          ? (settings.selectedModel || "gemini-3.5-flash")
+          : recallSettings.extractModel,
+        apiEndpoint: settings.apiEndpoint,
+        templateType: character.archiveTemplateType,
+        createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        currentTime: () => Date.now(),
+        formatContent: (items) => formatExtractedMemorySummary(headerLabel, items),
+      }, apiExtractMemories);
+
+      if (result.apiError) throw new Error(result.apiError);
+      if (result.extractedMemories.length > 0) {
+        onSaveMemories(MemoryService.mergeMemories(memories, result.extractedMemories));
+      }
+
+      const syncedStory = markSynced(result.extractedMemories.map((memory) => memory.id));
+      onSaveOfflineStory(syncedStory);
+      if (activeStory?.id === story.id) setActiveStory(syncedStory);
+      showToast(result.extractedMemories.length > 0
+        ? "线下剧情记忆已同步到当前角色"
+        : "线下剧情未提取到新的记忆，已完成去重同步");
+      return syncedStory;
+    } catch (error) {
+      console.error("Failed to sync offline story memories:", error);
+      const failedStory: OfflineStory = { ...story, memorySyncStatus: "failed", updatedAt: Date.now() };
+      onSaveOfflineStory(failedStory);
+      if (activeStory?.id === story.id) setActiveStory(failedStory);
+      showToast("线下剧情记忆同步失败，故事已保留，可稍后重试");
+      return failedStory;
+    } finally {
+      memorySyncInFlightRef.current.delete(story.id);
     }
   };
 
@@ -922,7 +940,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     <p className="text-[10px] text-slate-400">将此离线剧本空间的当前进展记忆同步并沉淀到角色的长期记忆库中，让他们在后续对话中感知到这些事件。</p>
                     <button
                       type="button"
-                      onClick={() => handleSyncMemoryToBrain(activeStory)}
+                      onClick={() => void handleSyncMemoryToBrain(activeStory)}
                       className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-[16px] border border-indigo-200/50 transition-all text-xs flex items-center justify-center gap-1.5 shadow-sm"
                     >
                       <Cpu className="w-3.5 h-3.5" />
@@ -1181,10 +1199,10 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                 </div>
                 {onNavigateToChat && (
                   <button 
-                    onClick={() => {
+                    onClick={async () => {
                       let completedStory = activeStory;
                       if (hasUnsyncedOnlineProgress(activeStory)) {
-                        completedStory = handleSyncMemoryToBrain(activeStory);
+                        completedStory = await handleSyncMemoryToBrain(activeStory);
                       }
                       clearOfflineSession(completedStory);
                       setActiveStory(null);
