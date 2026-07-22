@@ -11,6 +11,7 @@ import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
+import { formatCharacterKnowledgeBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
 import {
@@ -1914,6 +1915,7 @@ export default function AppChat({
       if (activeCharacter.enableTimeAwareness !== false) {
         groupWbText += `\n【当前现实时间】\n${formatLocalTimeContext()}\n`;
       }
+      groupWbText += `\n${formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id, groupMemberIds: groupMembers.map((member) => member.id) })}\n`;
 
       // Construct a system instruction that contains details about all members and how they should reply
       const membersDefText = groupMembers.map((member, idx) => {
@@ -2609,11 +2611,7 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
         assembledInstructions.push(offlineStoriesContext);
       }
 
-      // 8.7 Real-time group chat memories
-      const groupMemoriesContext = getGroupChatMemories(activeCharacter, characters, messages, settings.name);
-      if (groupMemoriesContext && shouldLoadLongTermMemory) {
-        assembledInstructions.push(groupMemoriesContext);
-      }
+      assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers1 = stickerGroups.flatMap(g => g.stickers);
@@ -3522,11 +3520,7 @@ ${timeLogString}
         assembledInstructions.push(offlineStoriesContextRegen);
       }
 
-      // 8.7 Real-time group chat memories
-      const groupMemoriesContextRegen = getGroupChatMemories(activeCharacter, characters, messages, settings.name);
-      if (groupMemoriesContextRegen) {
-        assembledInstructions.push(groupMemoriesContextRegen);
-      }
+      assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers2 = stickerGroups.flatMap(g => g.stickers);
@@ -3870,6 +3864,7 @@ ${stickerListStr}
       const timeContext = activeCharacter.enableTimeAwareness !== false
         ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
         : "";
+      const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id });
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
@@ -3889,7 +3884,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
 ${proactivePrompt}`;
@@ -4008,6 +4003,7 @@ ${proactivePrompt}`;
       const timeContext = friend.enableTimeAwareness !== false
         ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
         : "";
+      const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: friend.id });
 
       const taskPrompt = customTaskText || "It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.";
 
@@ -4029,7 +4025,7 @@ User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\nPROACTIVE CONTACT TASK:
 ${taskPrompt}
 
 ${instructionsPrompt}`;
