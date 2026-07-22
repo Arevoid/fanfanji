@@ -10,6 +10,7 @@ import { apiChat } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { getRelevantMemories } from "./AppMemory";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
+import { loadMessages } from "../core/storage/repositories/messageRepository";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -296,10 +297,10 @@ export default function AppOffline({
       // Prefer the live app state: it includes the latest message even before a
       // persistence effect has finished. Local storage remains a fallback.
       const liveMessages = messages.filter(m => m.characterId === selectedCharId);
-      const allChatsRaw = liveMessages.length === 0 ? localStorage.getItem("phone_messages_v3") : null;
-      if (liveMessages.length > 0 || allChatsRaw) {
+      const storedMessages = liveMessages.length === 0 ? loadMessages([]) : null;
+      if (liveMessages.length > 0 || storedMessages?.found) {
         try {
-          const parsed = liveMessages.length > 0 ? liveMessages : JSON.parse(allChatsRaw || "[]") as Message[];
+          const parsed = liveMessages.length > 0 ? liveMessages : storedMessages?.value || [];
           const contextLimit = characters.find(c => c.id === selectedCharId)?.contextMemoryLimit || 20;
           const relevantMsgs = parsed
             .filter(m => m.characterId === selectedCharId)
@@ -414,10 +415,6 @@ export default function AppOffline({
 
     if (syncedCount > 0) {
       onSaveMemories(newMems);
-      // Persist before navigation as well as updating React state. This makes an
-      // offline-to-online handoff available immediately, even if the user leaves
-      // the workspace in the same event loop turn.
-      localStorage.setItem("phone_memory_vault_items", JSON.stringify(newMems));
       const archivedStory = {
         ...story,
         archivedAt: Date.now(),
