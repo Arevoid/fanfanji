@@ -9,6 +9,8 @@ import { createCharacterTextMessage, createGroupCharacterMessage, createUserText
 import { requestAiReply } from "../features/chat/services/aiReplyService";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { createRegeneratedReplyCandidates } from "../features/chat/services/regenerateService";
+import { generateGroupReplyCandidates } from "../features/chat/services/groupChatService";
+import { generateProactiveReplyCandidates } from "../features/chat/services/proactiveMessageService";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
@@ -1946,45 +1948,26 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
         history: [],
         systemInstruction,
       });
-      const data = await apiChat({
+      const groupResult = await generateGroupReplyCandidates({
+        requestAi: apiChat,
+        request: {
         ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
         apiTemperature: settings.apiTemperature,
         streamCompatible: settings.streamCompatible,
+        },
+        members: groupMembers,
+        groupId: activeChatCharId,
+        disableBracketActions: activeCharacter.disableBracketActions || false,
+        createId: (index) => `group-reply-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`,
+        currentTime: () => Date.now(),
       });
 
-      if (data && data.text) {
-        // Parse replies
-        const lines = data.text.split("\n");
-        const parsedReplies: { charName: string; content: string }[] = [];
-        let currentReply: { charName: string; content: string } | null = null;
-
-        for (let line of lines) {
-          const senderMatch = line.match(/^\[SENDER_NAME:\s*(.+?)\]/i);
-          if (senderMatch) {
-            if (currentReply && currentReply.content.trim()) {
-              parsedReplies.push(currentReply);
-            }
-            currentReply = { charName: senderMatch[1].trim(), content: "" };
-          } else if (currentReply) {
-            currentReply.content += (currentReply.content ? "\n" : "") + line;
-          }
-        }
-        if (currentReply && currentReply.content.trim()) {
-          parsedReplies.push(currentReply);
-        }
-
-        // Filter and construct messages with sequential typing simulation and bracket action cleaning
+      if (groupResult.messages.length > 0) {
         repliesScheduled = false;
-        const validReplies = parsedReplies.map((reply, idx) => {
-          const member = groupMembers.find(
-            m => m.name.toLowerCase() === reply.charName.toLowerCase() || 
-                 (m.remark && m.remark.toLowerCase() === reply.charName.toLowerCase())
-          );
-          return { reply, member, idx };
-        }).filter(item => !!item.member) as { reply: { charName: string; content: string }; member: Character; idx: number }[];
+        const validReplies = groupResult.messages.map((message, idx) => ({ message, member: groupResult.members[idx], idx }));
 
         if (validReplies.length > 0) {
           repliesScheduled = true;
@@ -2009,18 +1992,8 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
             // Simulate typing for 1500ms
             setTimeout(() => {
-              const cleanedContent = cleanOnlineMessage(currentItem.reply.content.trim(), activeCharacter.disableBracketActions || false);
-              
-              if (cleanedContent) {
-                const charMsg = createGroupCharacterMessage({
-                  id: `group-reply-${Date.now()}-${currentItem.idx}-${Math.random().toString(36).substr(2, 5)}`,
-                  characterId: activeChatCharId, // Save under the Group's ID
-                  senderId: currentItem.member.id, // Keep track of the specific sender
-                  content: cleanedContent,
-                  timestamp: Date.now(),
-                });
-                onSendMessage(charMsg);
-              }
+              currentItem.message.timestamp = Date.now();
+              onSendMessage(currentItem.message);
 
               currentIdx++;
               if (currentIdx < validReplies.length) {
@@ -3820,31 +3793,21 @@ ${proactivePrompt}`;
         })),
         systemInstruction,
       });
-      const data = await apiChat({
-        ...composedPrompt,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature,
-        streamCompatible: settings.streamCompatible,
+      const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+      const proactiveResult = await generateProactiveReplyCandidates({
+        requestAi: apiChat,
+        request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
+        characterId: activeChatCharId,
+        disableBracketActions: activeCharacter.disableBracketActions || false,
+        keepPeriods,
+        createId: (idx) => `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+        currentTime: (idx) => Date.now() + idx,
       });
 
-      if (data && data.text) {
-        const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
-        const textToSplit = cleanedText || data.text;
-        const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
-        const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
-        bubbles.forEach((bubbleText, idx) => {
-          const proactiveMsg = createCharacterTextMessage({
-            id: `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-            characterId: activeChatCharId,
-            content: bubbleText,
-            timestamp: Date.now() + idx,
-          });
-          onSendMessage(proactiveMsg);
-        });
+      if (proactiveResult.data && proactiveResult.data.text) {
+        proactiveResult.messages.forEach(onSendMessage);
       } else {
-        alert(`主动联络失败: ${(data as any).error || "智能体无响应"}`);
+        alert(`主动联络失败: ${(proactiveResult.data as any).error || "智能体无响应"}`);
       }
     } catch (err: any) {
       alert(`主动联络错误: ${err.message || err}`);
@@ -3960,36 +3923,25 @@ ${instructionsPrompt}`;
         })),
         systemInstruction,
       });
-      const data = await apiChat({
-        ...composedPrompt,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature,
-        streamCompatible: settings.streamCompatible,
+      const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
+      const proactiveResult = await generateProactiveReplyCandidates({
+        requestAi: apiChat,
+        request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
+        characterId: charId,
+        disableBracketActions: friend.disableBracketActions || false,
+        keepPeriods,
+        createId: (idx) => `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+        currentTime: (idx) => backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
+        transformBubble: (bubbleText, idx) => {
+          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText);
+          if (!isVoice) return bubbleText;
+          const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
+          return `[语音]|${secs}|${bubbleText}`;
+        },
       });
 
-      if (data && data.text) {
-        const cleanedText = cleanOnlineMessage(data.text, friend.disableBracketActions || false);
-        const textToSplit = cleanedText || data.text;
-        const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
-        const bubbles = splitIntoWeChatBubbles(textToSplit, keepPeriods);
-        bubbles.forEach((bubbleText, idx) => {
-          let finalContent = bubbleText;
-          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText);
-          if (isVoice) {
-            const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
-            finalContent = `[语音]|${secs}|${bubbleText}`;
-          }
-
-          const proactiveMsg = createCharacterTextMessage({
-            id: `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-            characterId: charId,
-            content: finalContent,
-            timestamp: backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
-          });
-          onSendMessage(proactiveMsg);
-        });
+      if (proactiveResult.data && proactiveResult.data.text) {
+        proactiveResult.messages.forEach(onSendMessage);
       }
     } catch (err) {
       console.error("Proactive message auto-trigger error:", err);
