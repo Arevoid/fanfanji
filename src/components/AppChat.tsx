@@ -22,6 +22,9 @@ import { analyzeRecentConversation, formatProactiveConversationGuidance } from "
 import { formatCharacterKnowledgeBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
+import { ChatTopBar } from "../features/chat/components/ChatTopBar";
+import { ContactList } from "../features/chat/components/ContactList";
+import { ConversationList } from "../features/chat/components/ConversationList";
 import {
   MessageSquare,
   Users,
@@ -7461,163 +7464,27 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
           
           {/* TABS: CHATS LIST (聊天首页) */}
           {activeTab === "chats" && (
-            <div className="divide-y divide-slate-100">
-              <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative">
-                <button
-                  onClick={onClose}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-                  title="返回主页"
-                >
-                  <ChevronLeft className="w-4 h-4 text-slate-700" />
-                </button>
-                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">聊天 ({chatThreads.length})</h2>
-                <button
-                  onClick={() => {
-                    setGroupNameInput("");
-                    setSelectedGroupMemberIds([]);
-                    setShowCreateGroupModal(true);
-                  }}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10"
-                  title="发起群聊"
-                >
-                  <Plus className="w-4 h-4 text-slate-700" />
-                </button>
-              </div>
-
-              {chatThreads.length === 0 ? (
-                <div className="text-center py-20 px-4">
-                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-3">
-                    <MessageSquare className="w-6 h-6" />
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-700">暂无任何对话</h4>
-                  <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
-                    您还没有开始任何聊天。请前往底部的“通讯录”，选择一位档案馆中的虚拟伙伴发起首条对话！
-                  </p>
-                </div>
-              ) : (
-                chatThreads.map(({ character, lastMessage, isPinned }) => (
-                  <div
-                    key={character.id}
-                    onClick={() => startChatWith(character.id)}
-                    className={`flex items-center p-3 cursor-pointer transition-colors relative ${
-                      isPinned ? "bg-blue-50/20 hover:bg-blue-50/40" : "hover:bg-slate-50"
-                    }`}
-                  >
-                    {isPinned && (
-                      <Pin className="w-3 h-3 text-blue-500 absolute top-2 right-2 rotate-45 opacity-60" />
-                    )}
-
-                    {/* Avatar */}
-                    <div className="relative shrink-0 mr-3">
-                      <RenderAvatar
-                        src={character.avatar || (character.isGroupChat ? "👥" : "")}
-                        alt={character.name}
-                        name={character.remark || character.name}
-                        className="w-11 h-11 rounded-full object-cover bg-slate-100 border border-slate-100 aspect-square flex items-center justify-center text-xl select-none"
-                      />
-                      {getUnreadCount(character.id) > 0 && (
-                        <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 border border-white shadow-sm">
-                          {getUnreadCount(character.id)}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Last details */}
-                    <div className="flex-1 min-w-0 pr-4">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-slate-800 truncate">
-                          {character.remark || character.name}
-                          {character.isGroupChat && (
-                            <span className="text-slate-400 font-normal ml-1">
-                              ({1 + (character.memberIds?.length || 0)})
-                            </span>
-                          )}
-                        </h4>
-                        {lastMessage && (
-                          <span className="text-[9px] text-slate-400 font-medium">
-                            {new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-500 truncate mt-0.5 leading-normal">
-                        {lastMessage ? (
-                          character.isGroupChat ? (
-                            (() => {
-                              if (lastMessage.sender === "user") {
-                                return `我: ${lastMessage.content}`;
-                              }
-                              const senderChar = characters.find(c => c.id === lastMessage.senderId);
-                              const senderName = senderChar ? (senderChar.remark || senderChar.name) : "成员";
-                              return `${senderName}: ${lastMessage.content}`;
-                            })()
-                          ) : (
-                            lastMessage.content
-                          )
-                        ) : (
-                          ""
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+            <ConversationList
+              threads={chatThreads}
+              onSelect={startChatWith}
+              getUnreadCount={getUnreadCount}
+              renderAvatar={(character) => <RenderAvatar src={character.avatar || (character.isGroupChat ? "👥" : "")} alt={character.name} name={character.remark || character.name} className="w-11 h-11 rounded-full object-cover bg-slate-100 border border-slate-100 aspect-square flex items-center justify-center text-xl select-none" />}
+              getGroupMessageSummary={(message) => {
+                if (message.sender === "user") return `我: ${message.content}`;
+                const senderChar = characters.find((character) => character.id === message.senderId);
+                return `${senderChar ? (senderChar.remark || senderChar.name) : "成员"}: ${message.content}`;
+              }}
+              header={<ChatTopBar title={<>聊天 ({chatThreads.length})</>} leftAction={<button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => { setGroupNameInput(""); setSelectedGroupMemberIds([]); setShowCreateGroupModal(true); }} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10" title="发起群聊"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
+            />
           )}
 
           {/* TABS: CONTACTS LIST (通讯录) */}
           {activeTab === "contacts" && (
-            <div className="divide-y divide-slate-100">
-              <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative">
-                <button
-                  onClick={onClose}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-                  title="返回主页"
-                >
-                  <ChevronLeft className="w-4 h-4 text-slate-700" />
-                </button>
-                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">通讯录 ({friends.length})</h2>
-                <button
-                  onClick={() => setIsShowingAddFriendDialog(true)}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10"
-                  title="添加好友"
-                >
-                  <Plus className="w-4 h-4 text-slate-700" />
-                </button>
-              </div>
-
-              {friends.length === 0 ? (
-                <div className="text-center py-20 px-4">
-                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-3">
-                    <Users className="w-6 h-6" />
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-700">通讯录空空如也</h4>
-                  <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
-                    暂无好友。请点击右上角“+”号直接从档案馆添加已创建的角色，或到桌面打开“档案馆”新建！
-                  </p>
-                </div>
-              ) : (
-                friends.map((char) => (
-                  <div
-                    key={char.id}
-                    onClick={() => startChatWith(char.id)}
-                    className="flex items-center p-3 hover:bg-slate-50 cursor-pointer transition-colors"
-                  >
-                    <img
-                      src={char.avatar}
-                      alt={char.name}
-                      className="w-10 h-10 rounded-full object-cover mr-3 bg-slate-100 border border-slate-100 shrink-0 aspect-square"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-xs font-bold text-slate-800 truncate">
-                        {char.remark || char.name}
-                        {char.remark && <span className="text-[10px] font-normal text-slate-400 ml-1.5">({char.name})</span>}
-                      </h4>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+            <ContactList
+              contacts={friends}
+              onSelect={startChatWith}
+              header={<ChatTopBar title={<>通讯录 ({friends.length})</>} leftAction={<button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setIsShowingAddFriendDialog(true)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10" title="添加好友"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
+            />
           )}
 
           {/* TABS: MOMENTS FEED (朋友圈) */}
