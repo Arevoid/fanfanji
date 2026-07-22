@@ -5,7 +5,9 @@ import type { Character, WorldBookEntry } from "../src/types";
 
 const character = (id: string, name: string, remark?: string): Character => ({ id, name, remark, avatar: "", personality: "", backstory: "" });
 const entry = (id: string, characterId: string | undefined, title: string, category: string, content = ""): WorldBookEntry => ({ id, characterId, title, category, content, timestamp: 1 });
-const options = buildUniqueCharacterOptions([character("a", "同名"), character("a", "同名"), character("b", "同名"), character("c", "原名", "备注")]);
+const contactInstance = { ...character("contact-a", "同名"), isContactInstance: true };
+const group = { ...character("group-a", "群聊"), isGroupChat: true };
+const options = buildUniqueCharacterOptions([character("a", "同名"), character("a", "同名"), character("b", "同名"), character("c", "原名", "备注"), contactInstance, group]);
 assert.equal(options.length, 3); assert.deepEqual(options.map((item) => item.id), ["a", "b", "c"]); assert.equal(options[0].label.includes("a"), true); assert.equal(options[1].label.includes("b"), true); assert.equal(options[2].label, "备注");
 const entries = [entry("a", "a", "东京站", "地点"), entry("b", "b", "错误地点", "地点"), entry("g", "global", "全局公园", "场景", ""), entry("d", "a", "动作", "常规", "位置：站立"), entry("e", "a", "地址", "常规", "地址：东京都千代田区一丁目"), entry("f", "a", "重复", "地点", "")];
 const locations = getWorldBookLocationReferences(entries, "a");

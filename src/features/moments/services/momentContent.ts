@@ -1,8 +1,19 @@
 import type { Moment } from "../../../types";
 
+/**
+ * Moments are text-only. Normalize both legacy and newly generated chat voice
+ * markup at the feature boundary without mutating persisted records.
+ */
+export const stripMomentVoiceMarkup = (content: string) => content
+  .replace(/\[(?:语音|voice)\]\s*\|\s*\d+(?:\s*(?:秒|s))?\s*\|\s*/gi, "")
+  .replace(/\[(?:语音|voice)\s*\|\s*\d+(?:\s*(?:秒|s))?\]\s*/gi, "")
+  .replace(/\[(?:语音|voice)\s*:\s*"([^"]+)"\s*\(\s*\d+(?:秒|s)\s*\)\]/gi, "$1")
+  .replace(/\[(?:语音|voice)\s*:\s*([^\]\n]+?)\s*\(\s*\d+(?:秒|s)\s*\)\]/gi, "$1")
+  .replace(/\[(?:语音|voice)\s*:\s*"([^"]+)"\]/gi, "$1");
+
 /** Normalizes legacy generated Moment text without changing persisted data. */
 export const cleanAndExtractMoment = (content: string) => {
-  let cleanContent = content.trim();
+  let cleanContent = stripMomentVoiceMarkup(content).trim();
   const selfComments: string[] = [];
   let imageDescription: string | undefined;
 
@@ -53,5 +64,7 @@ export const getMomentComments = (moment: Moment) => {
     }
   });
   const deletedCommentIds = new Set(moment.deletedCommentIds || []);
-  return [...moment.comments, ...dynamicComments].filter((comment) => !deletedCommentIds.has(comment.id));
+  return [...moment.comments, ...dynamicComments]
+    .filter((comment) => !deletedCommentIds.has(comment.id))
+    .map((comment) => ({ ...comment, content: stripMomentVoiceMarkup(comment.content).trim() }));
 };

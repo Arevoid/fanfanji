@@ -2,9 +2,14 @@ import type { Character } from "../../types";
 
 export interface CharacterOption { id: string; label: string; character: Character; }
 
+/** Matches the archive's definition of an independently managed character. */
+export function getWorldBookSelectableCharacters(characters: readonly Character[]): Character[] {
+  return characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
+}
+
 export function buildUniqueCharacterOptions(characters: readonly Character[]): CharacterOption[] {
   const unique = new Map<string, Character>();
-  characters.forEach((character) => {
+  getWorldBookSelectableCharacters(characters).forEach((character) => {
     if (!unique.has(character.id)) unique.set(character.id, character);
   });
   const names = new Map<string, number>();

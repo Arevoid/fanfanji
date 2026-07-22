@@ -11,6 +11,7 @@ import { createDirectReplyCandidates } from "../features/chat/services/directCha
 import { createRegeneratedReplyCandidates } from "../features/chat/services/regenerateService";
 import { generateGroupReplyCandidates } from "../features/chat/services/groupChatService";
 import { generateProactiveReplyCandidates } from "../features/chat/services/proactiveMessageService";
+import { isBracketWrappedNarration } from "../features/chat/services/voiceMessageEligibility";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
@@ -36,6 +37,7 @@ import { MomentsApp } from "../features/moments/MomentsApp";
 import { requestCharacterMoment } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
+import { stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
 import {
   MessageSquare,
   Users,
@@ -361,7 +363,7 @@ const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: strin
     .join("\n\n");
 
 const cleanAndExtractMoment = (content: string) => {
-  let cleanContent = content.trim();
+  let cleanContent = stripMomentVoiceMarkup(content).trim();
   const selfComments: string[] = [];
   let imageDescription: string | undefined;
 
@@ -438,7 +440,9 @@ const getMomentComments = (mom: Moment) => {
   });
 
   const deletedCommentIds = new Set(mom.deletedCommentIds || []);
-  return [...mom.comments, ...dynamicComments].filter((comment) => !deletedCommentIds.has(comment.id));
+  return [...mom.comments, ...dynamicComments]
+    .filter((comment) => !deletedCommentIds.has(comment.id))
+    .map((comment) => ({ ...comment, content: stripMomentVoiceMarkup(comment.content).trim() }));
 };
 
 const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ownerName: string) => {
@@ -2083,6 +2087,8 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
   ): boolean => {
     const baseProb = getCharacterBaseVoiceProbability(character);
     if (baseProb === 0) return false;
+
+    if (isBracketWrappedNarration(bubbleText)) return false;
     
     // Exclude non-voice formats
     if (
@@ -4286,7 +4292,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
       ownerIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
-      content: momentInputText.trim(),
+      content: stripMomentVoiceMarkup(momentInputText).trim(),
       timestamp: Date.now(),
       likes: [],
       comments: [],
@@ -4324,7 +4330,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
     const replyingTo = replyingToCommentMap[momentId];
     const prefix = replyingTo ? `回复${replyingTo.authorName}：` : "";
-    const finalContent = `${prefix}${text.trim()}`;
+    const finalContent = `${prefix}${stripMomentVoiceMarkup(text).trim()}`;
 
     const newComment: MomentComment = {
       id: Date.now().toString(),
@@ -4357,7 +4363,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
       ownerIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
-      content: input.content.trim(),
+      content: stripMomentVoiceMarkup(input.content).trim(),
       timestamp: Date.now(),
       likes: [],
       comments: [],
@@ -4375,7 +4381,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
       id: Date.now().toString(),
       authorName: settings.name,
       authorAvatar: settings.avatar,
-      content: `${prefix}${text.trim()}`,
+      content: `${prefix}${stripMomentVoiceMarkup(text).trim()}`,
       timestamp: Date.now(),
     };
     onAddCommentToMoment(momentId, newComment);

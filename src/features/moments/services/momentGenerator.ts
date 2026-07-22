@@ -1,5 +1,6 @@
 import type { Character, MemoryItem, Moment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
+import { stripMomentVoiceMarkup } from "./momentContent";
 
 type ChatRequest = Parameters<typeof apiChat>[0];
 type RequestAi = (request: ChatRequest) => ReturnType<typeof apiChat>;
@@ -17,7 +18,7 @@ export async function requestCharacterMoment(input: {
   if (!response?.text) return {};
   const now = input.now || Date.now;
   const random = input.random || Math.random;
-  const cleanedContent = response.text.trim().replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+  const cleanedContent = stripMomentVoiceMarkup(response.text).trim().replace(/^["'“‘]+|["'”’]+$/g, "").trim();
   const parsed = input.parseContent(cleanedContent);
   let image: string | undefined;
   if (!parsed.imageDescription && input.character.album?.length && random() < 0.4) {
@@ -37,7 +38,7 @@ export async function requestCharacterMoment(input: {
       id: `${timestamp}-self-comment-${index}-${random().toString(36).substr(2, 4)}`,
       authorName: input.character.remark || input.character.name,
       authorAvatar: input.character.avatar,
-      content,
+      content: stripMomentVoiceMarkup(content).trim(),
       timestamp: timestamp + (index + 1) * 1000,
     })),
     image,
