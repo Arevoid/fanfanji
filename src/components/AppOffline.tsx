@@ -9,7 +9,7 @@ import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, User
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { createOfflineStoryHandoffMemory, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
+import { collectOfflineHandoffContent, createOfflineStoryHandoffMemory, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 
@@ -23,6 +23,8 @@ interface AppOfflineProps {
   onNavigateToChat?: (charId: string) => void;
   memories: MemoryItem[];
   onSaveMemories: (mems: MemoryItem[]) => void;
+  /** Resolves only after the offline handoff memories are durably persisted. */
+  onPersistMemories?: (mems: MemoryItem[]) => boolean | Promise<boolean>;
   recallSettings: MemoryVaultSettings;
   messages?: Message[];
   activeChatCharId?: string | null;
@@ -39,6 +41,7 @@ export default function AppOffline({
   onNavigateToChat,
   memories = [],
   onSaveMemories,
+  onPersistMemories,
   recallSettings,
   messages = [],
   activeChatCharId = null,
@@ -51,6 +54,7 @@ export default function AppOffline({
     return characters[0]?.id || "";
   });
   const [activeStory, setActiveStory] = useState<OfflineStory | null>(null);
+  const activeStoryRef = useRef<OfflineStory | null>(null);
   const [lastLoadedCharId, setLastLoadedCharId] = useState<string | null>(null);
   
   // Creation modal state
@@ -77,6 +81,18 @@ export default function AppOffline({
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const memorySyncInFlightRef = useRef(new Set<string>());
+
+  const saveActiveStorySnapshot = (story: OfflineStory) => {
+    activeStoryRef.current = story;
+    onSaveOfflineStory(story);
+    setActiveStory(story);
+    return story;
+  };
+
+  const clearActiveStorySnapshot = () => {
+    activeStoryRef.current = null;
+    setActiveStory(null);
+  };
   
   // Toast notifications
   const [toast, setToast] = useState("");
@@ -107,8 +123,7 @@ export default function AppOffline({
       messages: updatedMessages,
       updatedAt: Date.now()
     };
-    onSaveOfflineStory(updatedStory);
-    setActiveStory(updatedStory);
+    saveActiveStorySnapshot(updatedStory);
     setEditingMessageId(null);
     setEditingText("");
     showToast("修改内容已保存");
@@ -180,8 +195,7 @@ export default function AppOffline({
       updatedAt: Date.now()
     };
 
-    onSaveOfflineStory(updatedStory);
-    setActiveStory(updatedStory);
+    saveActiveStorySnapshot(updatedStory);
     setIsSettingsOpen(false);
     showToast("剧本配置已保存！");
   };
@@ -241,16 +255,18 @@ export default function AppOffline({
       if (savedStoryId) {
         const story = offlineStories.find(s => s.id === savedStoryId);
         if (story) {
+          activeStoryRef.current = story;
           setActiveStory(story);
           return;
         }
       }
-      setActiveStory(null);
+      clearActiveStorySnapshot();
     }
   }, [selectedCharId, offlineStories, lastLoadedCharId]);
 
   // Handle opening a story
   const handleOpenStory = (story: OfflineStory) => {
+    activeStoryRef.current = story;
     setActiveStory(story);
     localStorage.setItem(`offline_mode_active_${story.characterId}`, "true");
     localStorage.setItem(`offline_story_id_${story.characterId}`, story.id);
@@ -267,14 +283,15 @@ export default function AppOffline({
   const handleExitStoryWorkspace = async () => {
     // Online continuations always archive their newly-written plot immediately
     // on exit, so the next online reply can continue the same topic.
-    let completedStory = activeStory;
-    if (activeStory
-      && (activeStory.sourceChatId || activeStory.mode === "continue")
-      && hasUnsyncedOnlineProgress(activeStory)) {
-      completedStory = await handleSyncMemoryToBrain(activeStory);
+    const latestStory = activeStoryRef.current;
+    let completedStory = latestStory;
+    if (latestStory
+      && (latestStory.sourceChatId || latestStory.mode === "continue")
+      && hasUnsyncedOnlineProgress(latestStory)) {
+      completedStory = await handleSyncMemoryToBrain(latestStory);
     }
     if (completedStory) clearOfflineSession(completedStory);
-    setActiveStory(null);
+    clearActiveStorySnapshot();
     setIsSettingsOpen(false);
   };
 
@@ -344,8 +361,7 @@ export default function AppOffline({
       messages: []
     };
 
-    onSaveOfflineStory(newStory);
-    setActiveStory(newStory);
+    saveActiveStorySnapshot(newStory);
     localStorage.setItem(`offline_mode_active_${selectedCharId}`, "true");
     localStorage.setItem(`offline_story_id_${selectedCharId}`, newStory.id);
     setShowCreateModal(false);
@@ -365,8 +381,8 @@ export default function AppOffline({
     e.stopPropagation();
     if (confirm("确定要删除这个线下故事记录吗？此操作无法撤销。")) {
       onDeleteOfflineStory(storyId);
-      if (activeStory?.id === storyId) {
-        setActiveStory(null);
+      if (activeStoryRef.current?.id === storyId) {
+        clearActiveStorySnapshot();
       }
       showToast("故事已删除");
     }
@@ -401,8 +417,8 @@ export default function AppOffline({
     try {
       if (sourceMessages.length === 0) {
         const syncedStory = markSynced();
-        onSaveOfflineStory(syncedStory);
-        if (activeStory?.id === story.id) setActiveStory(syncedStory);
+        if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
+        else onSaveOfflineStory(syncedStory);
         showToast("没有可提取的线下新增剧情，已保留故事内容");
         return syncedStory;
       }
@@ -427,7 +443,10 @@ export default function AppOffline({
           templateType: character.archiveTemplateType,
           createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           currentTime: () => Date.now(),
-          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]`,
+          // Preserve the source transcript alongside the compact extraction.
+          // The next online request can therefore use the user's actual plot
+          // facts even if the extraction model returns an over-short summary.
+          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]\n${collectOfflineHandoffContent(story)}`,
         }, apiExtractMemories);
         if (result.apiError) throw new Error(result.apiError);
         extractedMemories = result.extractedMemories;
@@ -444,11 +463,17 @@ export default function AppOffline({
           id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           timestamp: now,
         })]);
-      if (additions.length > 0) onSaveMemories(MemoryService.mergeMemories(memories, additions));
+      if (additions.length > 0) {
+        const mergedMemories = MemoryService.mergeMemories(memories, additions);
+        const persisted = onPersistMemories
+          ? await onPersistMemories(mergedMemories)
+          : (onSaveMemories(mergedMemories), true);
+        if (!persisted) throw new Error("Offline story handoff memory persistence failed");
+      }
 
       const syncedStory = markSynced(additions.map((memory) => memory.id));
-      onSaveOfflineStory(syncedStory);
-      if (activeStory?.id === story.id) setActiveStory(syncedStory);
+      if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
+      else onSaveOfflineStory(syncedStory);
       showToast(extractedMemories.length > 0
         ? "线下剧情记忆已同步到当前角色"
         : additions.length > 0
@@ -458,8 +483,8 @@ export default function AppOffline({
     } catch (error) {
       console.error("Failed to sync offline story memories:", error);
       const failedStory: OfflineStory = { ...story, memorySyncStatus: "failed", updatedAt: Date.now() };
-      onSaveOfflineStory(failedStory);
-      if (activeStory?.id === story.id) setActiveStory(failedStory);
+      if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(failedStory);
+      else onSaveOfflineStory(failedStory);
       showToast("线下剧情记忆同步失败，故事已保留，可稍后重试");
       return failedStory;
     } finally {
@@ -477,27 +502,27 @@ export default function AppOffline({
         messages: updatedMsgs,
         updatedAt: Date.now()
       };
-      onSaveOfflineStory(updatedStory);
-      setActiveStory(updatedStory);
+      saveActiveStorySnapshot(updatedStory);
       showToast("剧情记录已删除");
     }
   };
 
   // Send message inside workspace
   const handleSendMessage = async (textToSend?: string, forceAIOnly = false) => {
-    if (!activeStory) return;
+    const storyAtSend = activeStoryRef.current ?? activeStory;
+    if (!storyAtSend) return;
     setErrorMsg("");
 
     const text = textToSend !== undefined ? textToSend : inputText.trim();
     if (!text && !forceAIOnly) return;
 
-    let updatedStory = { ...activeStory };
+    let updatedStory = { ...storyAtSend };
     
     // 1. If we have user text to add
     if (text && !forceAIOnly) {
       const userMsg: Message = {
         id: `offline-msg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        characterId: activeStory.characterId,
+        characterId: storyAtSend.characterId,
         sender: "user",
         content: text,
         timestamp: Date.now(),
@@ -505,12 +530,11 @@ export default function AppOffline({
         isNarration: false
       };
       updatedStory = {
-        ...activeStory,
-        messages: [...activeStory.messages, userMsg],
+        ...storyAtSend,
+        messages: [...storyAtSend.messages, userMsg],
         updatedAt: Date.now()
       };
-      onSaveOfflineStory(updatedStory);
-      setActiveStory(updatedStory);
+      saveActiveStorySnapshot(updatedStory);
       setInputText("");
     }
 
@@ -723,7 +747,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
         // inside the entry instead of turning every paragraph into a separate message.
         const newMsgs: Message[] = [{
           id: `offline-reply-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          characterId: activeStory.characterId,
+          characterId: updatedStory.characterId,
           sender: "character",
           content: response.text.trim(),
           timestamp: Date.now(),
@@ -737,8 +761,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
           updatedAt: Date.now()
         };
 
-        onSaveOfflineStory(finalStory);
-        setActiveStory(finalStory);
+        saveActiveStorySnapshot(finalStory);
       }
     } catch (err: any) {
       console.error(err);
@@ -1216,12 +1239,14 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                 {onNavigateToChat && (
                   <button 
                     onClick={async () => {
-                      let completedStory = activeStory;
-                      if (hasUnsyncedOnlineProgress(activeStory)) {
-                        completedStory = await handleSyncMemoryToBrain(activeStory);
+                      const latestStory = activeStoryRef.current;
+                      if (!latestStory) return;
+                      let completedStory = latestStory;
+                      if (hasUnsyncedOnlineProgress(latestStory)) {
+                        completedStory = await handleSyncMemoryToBrain(latestStory);
                       }
                       clearOfflineSession(completedStory);
-                      setActiveStory(null);
+                      clearActiveStorySnapshot();
                       setIsSettingsOpen(false);
                       onNavigateToChat(completedStory.characterId);
                     }}

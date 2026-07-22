@@ -16,6 +16,7 @@ import { getWorldBookLocationReferences } from "../domain/worldbook/locationRefe
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
+import { buildOfflineHandoffPromptBlock } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
@@ -2394,7 +2395,7 @@ ${activeCharacter.disableBracketActions
         && Date.now() - latestOfflineContinuationMemory.timestamp < 2 * 60 * 60 * 1000;
       if (isFreshOfflineHandoff
         && !relevantMemories.some((memory) => memory.id === latestOfflineContinuationMemory.id)) {
-        charDefText += `\n- Latest offline continuation handoff (continue this naturally if relevant):\n  * ${latestOfflineContinuationMemory.content}`;
+        charDefText += buildOfflineHandoffPromptBlock(latestOfflineContinuationMemory);
       }
 
       const userProfileText = `User Profile (interacting with you):

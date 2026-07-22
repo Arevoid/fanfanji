@@ -273,6 +273,7 @@ export default function App() {
   const calendarPersistenceReady = useRef(false);
   const worldBookPersistenceReady = useRef(false);
   const memoriesPersistenceReady = useRef(false);
+  const skipNextMemoriesPersistenceRef = useRef(false);
   const memorySettingsPersistenceReady = useRef(false);
   const offlineStoriesPersistenceReady = useRef(false);
 
@@ -684,6 +685,20 @@ export default function App() {
 
   // Memory Vault (Memory Book) States
   const [memories, setMemories] = useState<MemoryItem[]>(() => loadMemories([]).value);
+
+  // Offline-story handoffs must be persisted before their story is marked as
+  // synced. The ordinary effect remains the single path for every other memory
+  // update, while this callback gives the offline exit flow a durable result.
+  const persistOfflineStoryMemories = (nextMemories: MemoryItem[]): boolean => {
+    const result = saveMemories(nextMemories);
+    if (!result.success) {
+      console.error("Failed to persist offline story memories:", result.error);
+      return false;
+    }
+    skipNextMemoriesPersistenceRef.current = true;
+    setMemories(nextMemories);
+    return true;
+  };
 
   const [recallSettings, setRecallSettings] = useState<MemoryVaultSettings>(() => loadMemorySettings({
     extractModel: "gemini-3.5-flash",
@@ -1442,6 +1457,10 @@ export default function App() {
   useEffect(() => {
     if (!memoriesPersistenceReady.current) {
       memoriesPersistenceReady.current = true;
+      return;
+    }
+    if (skipNextMemoriesPersistenceRef.current) {
+      skipNextMemoriesPersistenceRef.current = false;
       return;
     }
     const result = saveMemories(memories);
@@ -2781,6 +2800,7 @@ export default function App() {
                     }}
                     memories={memories}
                     onSaveMemories={setMemories}
+                    onPersistMemories={persistOfflineStoryMemories}
                     recallSettings={recallSettings}
                   />
                 )}
