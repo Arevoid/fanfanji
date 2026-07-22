@@ -27,6 +27,9 @@ import { ContactList } from "../features/chat/components/ContactList";
 import { ConversationList } from "../features/chat/components/ConversationList";
 import { MessageList } from "../features/chat/components/MessageList";
 import { QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
+import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
+import { ChatComposer } from "../features/chat/components/ChatComposer";
+import { ChatTextInput } from "../features/chat/components/ChatTextInput";
 import {
   MessageSquare,
   Users,
@@ -6466,14 +6469,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
           </MessageList>
 
           {/* Active Chat Footer Input form */}
-          <div className={`${
+          <ChatComposer className={`${
             isFloatingCute 
               ? "mx-3.5 mb-3.5 mt-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area" 
               : activeStylePreset === "liquid-glass"
                 ? "mx-3.5 mb-3.5 mt-1 bg-transparent border-0 shadow-none overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area"
                 : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
-          }`}>
-            {quotedMessage && <QuotedMessagePreview message={quotedMessage} senderName={activeCharacter.remark || activeCharacter.name} onClear={() => setQuotedMessage(null)} closeIcon={<X className="w-3.5 h-3.5" />} />}
+          }`} quotePreview={quotedMessage && <QuotedMessagePreview message={quotedMessage} senderName={activeCharacter.remark || activeCharacter.name} onClear={() => setQuotedMessage(null)} closeIcon={<X className="w-3.5 h-3.5" />} />}>
             
 
 
@@ -6504,7 +6506,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               </button>
 
               {/* Chat Input text box */}
-              <input
+              <ChatTextInput
                 type="text"
                 value={chatInputText}
                 onChange={(e) => setChatInputText(e.target.value)}
@@ -6557,7 +6559,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
             {/* Attach Panel */}
             {showAttachPanel && (
-              <div className={`py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto chat-composer__attachment-panel ${
+              <AttachmentMenu className={`py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto chat-composer__attachment-panel ${
                 activeStylePreset === "liquid-glass"
                   ? "bg-white/60 backdrop-blur-md border-t border-white/40"
                   : "bg-slate-50 border-t border-slate-100"
@@ -6663,7 +6665,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
                 </button>
-              </div>
+              </AttachmentMenu>
             )}
 
             {/* Sticker Selector Panel */}
@@ -6794,7 +6796,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 </div>
               </div>
             )}
-          </div>
+          </ChatComposer>
 
           {/* Voice Text Input Modal Overlay */}
           {activeAttachModal === "voice" && (
