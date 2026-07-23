@@ -35,7 +35,7 @@ import { ChatTextInput } from "../features/chat/components/ChatTextInput";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
 import { MomentsApp } from "../features/moments/MomentsApp";
-import { requestCharacterMoment } from "../features/moments/services/momentGenerator";
+import { requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
 import { stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
@@ -1666,6 +1666,9 @@ export default function AppChat({
 
   // Background proactive check (every minute)
   useEffect(() => {
+    const initialMomentCheck = setTimeout(() => {
+      void checkAndTriggerCharacterMoments();
+    }, 3000);
     const checkProactive = setInterval(() => {
       const now = new Date();
       const hh = now.getHours().toString().padStart(2, "0");
@@ -1747,17 +1750,12 @@ export default function AppChat({
       });
 
       // Run character moments check
-      checkAndTriggerCharacterMoments();
+      void checkAndTriggerCharacterMoments();
     }, 60000);
-    return () => clearInterval(checkProactive);
-  }, [friends, moments]);
-
-  // Run character moments check on mount / tab change
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      checkAndTriggerCharacterMoments();
-    }, 3000);
-    return () => clearTimeout(timeout);
+    return () => {
+      clearTimeout(initialMomentCheck);
+      clearInterval(checkProactive);
+    };
   }, [friends, moments]);
 
   // Calling timer
@@ -4128,7 +4126,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         history,
         systemInstruction,
       });
-      const generated = await requestCharacterMoment({
+      const generated = await requestCharacterMomentOnce({
         requestAi: apiChat,
         request: {
         ...composedPrompt,

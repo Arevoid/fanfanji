@@ -1,6 +1,11 @@
 import type { Character, MemoryItem, Moment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
 import { stripMomentVoiceMarkup } from "./momentContent";
+import {
+  claimCharacterMomentGeneration,
+  completeCharacterMomentGeneration,
+  releaseCharacterMomentGeneration,
+} from "./momentGenerationGuard";
 
 type ChatRequest = Parameters<typeof apiChat>[0];
 type RequestAi = (request: ChatRequest) => ReturnType<typeof apiChat>;
@@ -56,4 +61,31 @@ export async function requestCharacterMoment(input: {
       isManual: false,
     },
   };
+}
+
+export async function requestCharacterMomentOnce(input: Parameters<typeof requestCharacterMoment>[0]): Promise<{
+  moment?: Moment;
+  memory?: MemoryItem;
+  skipped?: boolean;
+}> {
+  const timestamp = (input.now || Date.now)();
+  const generatedAt = new Date(timestamp);
+  const taskKey = claimCharacterMomentGeneration(input.character.id, generatedAt);
+  if (!taskKey) return { skipped: true };
+
+  try {
+    const result = await requestCharacterMoment(input);
+    if (!result.moment) {
+      releaseCharacterMomentGeneration(taskKey);
+      return result;
+    }
+
+    if (!completeCharacterMomentGeneration(taskKey, result.moment, generatedAt)) {
+      console.warn(`[moments] Generated moment task "${taskKey}" could not be persisted; keeping it in memory only.`);
+    }
+    return result;
+  } catch (error) {
+    releaseCharacterMomentGeneration(taskKey);
+    throw error;
+  }
 }
