@@ -84,6 +84,11 @@ const hexToRgba = (hex: string, opacityPercent: number) => {
   return `rgba(${isNaN(r) ? 255 : r}, ${isNaN(g) ? 255 : g}, ${isNaN(b) ? 255 : b}, ${opacityPercent / 100})`;
 };
 
+const isStandalonePwa = () =>
+  typeof window !== "undefined" &&
+  (window.matchMedia("(display-mode: standalone)").matches ||
+    (window.navigator as Navigator & { standalone?: boolean }).standalone === true);
+
 const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
 
 // Default Seed Characters
@@ -272,6 +277,47 @@ export default function App() {
   const [vvTop, setVvTop] = useState<number>(0);
   const [vvLeft, setVvLeft] = useState<number>(0);
   const [vvWidth, setVvWidth] = useState<number>(() => typeof window !== "undefined" ? window.innerWidth : 375);
+  const [isStandaloneMode, setIsStandaloneMode] = useState(isStandalonePwa);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const standaloneQuery = window.matchMedia("(display-mode: standalone)");
+    const updateAppFrame = () => {
+      const standalone = isStandalonePwa();
+      setIsStandaloneMode(standalone);
+
+      // iOS Safari does not always keep 100vh in sync with the standalone app
+      // viewport. Expose a pixel value as a stable fallback for full-screen shells.
+      const visualHeight = window.visualViewport?.height ?? window.innerHeight;
+      const keyboardIsOpen = window.innerHeight - visualHeight > 120;
+      const viewportHeight = standalone && !keyboardIsOpen
+        ? window.innerHeight
+        : visualHeight;
+      document.documentElement.style.setProperty("--app-height", `${Math.round(viewportHeight)}px`);
+    };
+
+    const handleDisplayModeChange = () => updateAppFrame();
+
+    updateAppFrame();
+    window.addEventListener("resize", updateAppFrame);
+    if (standaloneQuery.addEventListener) {
+      standaloneQuery.addEventListener("change", handleDisplayModeChange);
+    } else {
+      standaloneQuery.addListener(handleDisplayModeChange);
+    }
+    window.visualViewport?.addEventListener("resize", updateAppFrame);
+
+    return () => {
+      window.removeEventListener("resize", updateAppFrame);
+      if (standaloneQuery.removeEventListener) {
+        standaloneQuery.removeEventListener("change", handleDisplayModeChange);
+      } else {
+        standaloneQuery.removeListener(handleDisplayModeChange);
+      }
+      window.visualViewport?.removeEventListener("resize", updateAppFrame);
+    };
+  }, []);
 
   // Synchronize mobile keyboard visual state to prevent bounce and shift view cleanly
   useEffect(() => {
@@ -294,8 +340,10 @@ export default function App() {
 
       setVisualViewportHeight(vv.height);
       setVvWidth(vv.width);
-      setVvTop(vv.offsetTop);
-      setVvLeft(vv.offsetLeft);
+      // In a standalone PWA, visualViewport offsets can already include the
+      // status-bar inset. Applying them to the app shell would add that inset twice.
+      setVvTop(isStandalonePwa() ? 0 : vv.offsetTop);
+      setVvLeft(isStandalonePwa() ? 0 : vv.offsetLeft);
 
       // Aggressively clamp window scroll back to 0,0 to counteract Edge and iOS virtual viewport top shift
       if (window.scrollY !== 0 || document.body.scrollTop !== 0 || document.documentElement.scrollTop !== 0) {
@@ -325,9 +373,9 @@ export default function App() {
     };
 
     // Auto-scroll input to center when focused to make sure it is fully visible above keyboard
-    const handleFocusIn = (e: FocusEvent) => {
+    const handleFocusIn = (_e: FocusEvent) => {
       // Disabled to prevent browser from scrolling the layout viewport out of view.
-      // Since container height is visualViewportHeight, the input is naturally positioned above the keyboard.
+      // The app shell follows the current visual viewport while the keyboard is open.
     };
 
     window.visualViewport.addEventListener("resize", handleViewportChange);
@@ -1768,17 +1816,18 @@ export default function App() {
   return (
     <div
       className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
+      data-pwa-standalone={isStandaloneMode ? "true" : "false"}
       style={{
         position: (typeof window !== "undefined" && window.innerWidth < 768) ? "absolute" : "relative",
-        top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvTop}px` : undefined,
-        left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvLeft}px` : undefined,
-        width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvWidth}px` : "100%",
-        height: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : "100vh",
+        top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${isStandaloneMode ? 0 : vvTop}px` : undefined,
+        left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${isStandaloneMode ? 0 : vvLeft}px` : undefined,
+        width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${isStandaloneMode ? window.innerWidth : vvWidth}px` : "100%",
+        height: (typeof window !== "undefined" && window.innerWidth < 768) ? "var(--app-height, 100dvh)" : "100dvh",
         // `min-h-[100dvh]` is useful before the app mounts, but on Android Edge it can
         // retain the layout viewport height after the IME opens. Override it with the
         // visual viewport height so the flex layout keeps the chat composer above the
         // keyboard instead of leaving an empty area below the messages.
-        minHeight: (typeof window !== "undefined" && window.innerWidth < 768) ? `${visualViewportHeight}px` : undefined,
+        minHeight: (typeof window !== "undefined" && window.innerWidth < 768) ? "var(--app-height, 100dvh)" : undefined,
       }}
     >
       
