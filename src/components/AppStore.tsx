@@ -202,11 +202,11 @@ export default function AppStore({
                   >
                     {/* Icon */}
                     <div 
-                      className="w-12 h-12 bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] overflow-hidden shrink-0"
+                      className="app-icon-surface w-12 h-12 bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] overflow-hidden shrink-0"
                       style={{ borderRadius: "var(--app-icon-radius, 35%)" }}
                     >
                       {renderAppIcon ? (
-                        <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                        <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                           {renderAppIcon(app.id, "w-6 h-6")}
                         </div>
                       ) : (

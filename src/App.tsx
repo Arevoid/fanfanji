@@ -33,96 +33,45 @@ import AppNotes from "./components/AppNotes";
 import AppMemory from "./components/AppMemory";
 import AppOffline from "./components/AppOffline";
 import {
-  MessageSquare,
-  User,
   BookOpen,
-  Radio,
-  Calendar,
-  MessageSquareCode,
-  Compass,
+  Bookmark,
+  CalendarDays,
+  Cloud,
+  ContactRound,
+  Images,
+  Layers3,
+  MessageCircle,
+  Music2,
+  NotebookTabs,
+  NotebookText,
+  Palette,
+  PartyPopper,
+  ScanLine,
   Settings as SettingsIcon,
-  HelpCircle,
+  ShoppingBag,
+  WalletCards,
   X
 } from "lucide-react";
 
 const AppIcons = {
-  chat: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M20 11a7 7 0 00-7-7c-3.866 0-7 2.91-7 6.5 0 1.956.91 3.714 2.344 4.904l-.844 2.596 2.825-.826A6.945 6.945 0 0013 18a7 7 0 007-7z" stroke="#18181b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="10" cy="11" r="1.5" fill="#8fa4b9" />
-      <circle cx="15" cy="11" r="1.5" fill="#8fa4b9" />
-    </svg>
-  ),
-  archives: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M5 19c0-3.314 2.686-6 6-6h2c3.314 0 6 2.686 6 6" stroke="#18181b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="12" cy="7.5" r="3" stroke="#8fa4b9" strokeWidth="2" />
-    </svg>
-  ),
-  worldbook: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M4 19a2 2 0 012-2h6v-13H6a2 2 0 00-2 2v13z" stroke="#18181b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M20 19a2 2 0 00-2-2h-6v-13h6a2 2 0 012 2v13z" stroke="#18181b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M12 4v7l2.5-1.5L17 11V4" stroke="#8fa4b9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  ),
-  music: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="12" cy="12" r="8" stroke="#18181b" strokeWidth="2" />
-      <circle cx="12" cy="12" r="2.5" stroke="#8fa4b9" strokeWidth="2" />
-      <path d="M14 6l-2 2v4" stroke="#18181b" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  ),
-  schedule: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="5" y="6" width="14" height="13" rx="2.5" stroke="#18181b" strokeWidth="2" />
-      <line x1="9" y1="4" x2="9" y2="7" stroke="#18181b" strokeWidth="2" strokeLinecap="round" />
-      <line x1="15" y1="4" x2="15" y2="7" stroke="#18181b" strokeWidth="2" strokeLinecap="round" />
-      <path d="M12 11.2c-.4-.4-1-.4-1.4 0a1 1 0 000 1.4l1.4 1.4 1.4-1.4a1 1 0 000-1.4c-.4-.4-1-.4-1.4 0z" fill="#8fa4b9" stroke="#8fa4b9" strokeWidth="0.5" strokeLinejoin="round" />
-    </svg>
-  ),
-  forum: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M8 8a4 4 0 018 0" stroke="#8fa4b9" strokeWidth="2" strokeLinecap="round" fill="none" />
-      <circle cx="9" cy="13" r="1.5" stroke="#18181b" strokeWidth="2" />
-      <circle cx="15" cy="13" r="1.5" stroke="#18181b" strokeWidth="2" />
-      <circle cx="9" cy="17" r="1.5" stroke="#18181b" strokeWidth="2" />
-      <circle cx="15" cy="17" r="1.5" stroke="#18181b" strokeWidth="2" />
-    </svg>
-  ),
-  store: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="12" cy="12" r="8" stroke="#18181b" strokeWidth="2" />
-      <line x1="9.5" y1="14.5" x2="14.5" y2="9.5" stroke="#8fa4b9" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="12" cy="12" r="1" fill="#18181b" />
-    </svg>
-  ),
-  settings: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="12" cy="12" r="4" stroke="#18181b" strokeWidth="2" />
-      <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M19.071 4.929l-1.414 1.414M6.343 17.657l-1.414 1.414M19.071 19.071l-1.414-1.414M6.343 6.343L4.929 4.929" stroke="#18181b" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="12" cy="12" r="1.5" fill="#8fa4b9" />
-    </svg>
-  ),
-  notes: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="3" y="3" width="18" height="18" rx="2" stroke="#18181b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M7 8h10M7 12h10M7 16h6" stroke="#8fa4b9" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  ),
-  memory: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="3" y="3" width="18" height="18" rx="3" stroke="#18181b" strokeWidth="2" />
-      <path d="M12 7c-2.76 0-5 2.24-5 5 0 1.93 1.09 3.6 2.68 4.45L12 19.5l2.32-3.05C15.91 15.6 17 13.93 17 12c0-2.76-2.24-5-5-5z" stroke="#8fa4b9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="1.5" fill="#18181b" />
-    </svg>
-  ),
-  offline: (className = "w-6 h-6") => (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="#18181b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="#8fa4b9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  ),
+  archives: (className = "w-6 h-6") => <ContactRound className={className} strokeWidth={1.8} />,
+  worldbook: (className = "w-6 h-6") => <BookOpen className={className} strokeWidth={1.8} />,
+  chat: (className = "w-6 h-6") => <MessageCircle className={className} strokeWidth={1.8} />,
+  offline: (className = "w-6 h-6") => <Layers3 className={className} strokeWidth={1.8} />,
+  music: (className = "w-6 h-6") => <Music2 className={className} strokeWidth={1.8} />,
+  notes: (className = "w-6 h-6") => <NotebookText className={className} strokeWidth={1.8} />,
+  memory: (className = "w-6 h-6") => <NotebookTabs className={className} strokeWidth={1.8} />,
+  store: (className = "w-6 h-6") => <ShoppingBag className={className} strokeWidth={1.8} />,
+  settings: (className = "w-6 h-6") => <SettingsIcon className={className} strokeWidth={1.8} />,
+  forum: (className = "w-6 h-6") => <Images className={className} strokeWidth={1.8} />,
+  schedule: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
+  timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
+  theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.8} />,
+  activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.8} />,
+  favorites: (className = "w-6 h-6") => <Bookmark className={className} strokeWidth={1.8} />,
+  cloud: (className = "w-6 h-6") => <Cloud className={className} strokeWidth={1.8} />,
+  scan: (className = "w-6 h-6") => <ScanLine className={className} strokeWidth={1.8} />,
+  wallet: (className = "w-6 h-6") => <WalletCards className={className} strokeWidth={1.8} />,
 };
 
 const hexToRgba = (hex: string, opacityPercent: number) => {
@@ -1852,6 +1801,24 @@ export default function App() {
           --app-icon-bg-opacity: ${(settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100) / 100};
           --app-icon-border-width: ${settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1}px;
           --app-icon-border-opacity: ${(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100) / 100};
+          --app-default-icon-color: #1d1d1f;
+          --app-default-icon-surface: #ffffff;
+          --app-default-icon-border: #e5e5e2;
+        }
+        @media (prefers-color-scheme: dark) {
+          :root, .phone-screen-container {
+            --app-default-icon-color: #f3f3f5;
+            --app-default-icon-surface: #17181b;
+            --app-default-icon-border: #2d2e33;
+          }
+        }
+        .phone-screen-container .app-icon-surface {
+          background-color: var(--app-default-icon-surface) !important;
+          border-color: var(--app-default-icon-border) !important;
+          color: var(--app-default-icon-color) !important;
+        }
+        .phone-screen-container .app-icon-surface .app-default-icon {
+          color: inherit !important;
         }
         .phone-screen-container div[style*="--app-icon-radius"],
         .phone-screen-container button[style*="--app-icon-radius"],
@@ -2418,13 +2385,13 @@ export default function App() {
                                             : ""
                                         }`}>
                                           <div 
-                                            className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] transform active:scale-95 transition-all duration-150 overflow-hidden shrink-0"
+                                            className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] transform active:scale-95 transition-all duration-150 overflow-hidden shrink-0"
                                             style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                                           >
                                             {customIconUrl ? (
                                               <img src={customIconUrl} alt={app.name} className="w-full h-full object-cover" />
                                             ) : (
-                                              <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                                              <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                                                 {app.icon}
                                               </div>
                                             )}
@@ -2561,13 +2528,13 @@ export default function App() {
                       {installedAppIds.includes("chat") ? (
                         <button
                           onClick={() => setActiveApp("chat")}
-                          className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                          className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
                           style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
                           {settings.customIcons["chat"] ? (
                             <img src={settings.customIcons["chat"]} alt="" className="w-full h-full object-cover" />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                               {AppIcons.chat()}
                             </div>
                           )}
@@ -2581,13 +2548,13 @@ export default function App() {
                       {installedAppIds.includes("music") ? (
                         <button
                           onClick={() => setActiveApp("music")}
-                          className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                          className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
                           style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
                           {settings.customIcons["music"] ? (
                             <img src={settings.customIcons["music"]} alt="" className="w-full h-full object-cover" />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                               {AppIcons.music()}
                             </div>
                           )}
@@ -2601,13 +2568,13 @@ export default function App() {
                       {installedAppIds.includes("archives") ? (
                         <button
                           onClick={() => setActiveApp("archives")}
-                          className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                          className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
                           style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
                           {settings.customIcons["archives"] ? (
                             <img src={settings.customIcons["archives"]} alt="" className="w-full h-full object-cover" />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                               {AppIcons.archives()}
                             </div>
                           )}
@@ -2620,13 +2587,13 @@ export default function App() {
                     <div className="flex items-center justify-center w-full h-full">
                       <button
                         onClick={() => setActiveApp("settings")}
-                        className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                        className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
                         style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                       >
                         {settings.customIcons["settings"] ? (
                           <img src={settings.customIcons["settings"]} alt="" className="w-full h-full object-cover" />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                          <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                             {AppIcons.settings()}
                           </div>
                         )}
