@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { 
   ArrowLeft, Plus, Trash2, Send, Sparkles, BookOpen, 
   Link2, Calendar, MessageSquare, ChevronRight, HelpCircle, 
-  Settings, Check, RefreshCw, Layers, Eye, BookMarked, Cpu, Pencil
+  Settings, RefreshCw, Layers, Cpu, MoreHorizontal
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, UserSettings, WorldBookEntry } from "../types";
@@ -12,6 +12,11 @@ import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/Me
 import { collectOfflineHandoffContent, createOfflineStoryHandoffMemory, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
+import "./offline/offlineStory.css";
+import { OfflineGuidancePanel } from "./offline/OfflineGuidancePanel";
+import { OfflineReadingPreferences, OfflineReadingSettings } from "./offline/OfflineReadingSettings";
+import { OfflineStoryCard } from "./offline/OfflineStoryCard";
+import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -72,12 +77,8 @@ export default function AppOffline({
   const [newStartFromChat, setNewStartFromChat] = useState<boolean>(false);
   const [newTimeAwareness, setNewTimeAwareness] = useState<boolean>(false);
 
-  // Chat/Editor input state
+  // Story composer input state
   const [inputText, setInputText] = useState("");
-  // Kept as a constant for backward-compatible rendering of older story data.
-  // The composer no longer exposes a narration/speech mode selector.
-  const inputNarration = false;
-  const setInputNarration = (_value: boolean) => undefined;
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const memorySyncInFlightRef = useRef(new Set<string>());
@@ -151,6 +152,19 @@ export default function AppOffline({
   });
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isReadingSettingsOpen, setIsReadingSettingsOpen] = useState(false);
+  const [readingPreferences, setReadingPreferences] = useState<OfflineReadingPreferences>({
+    fontSize: 15,
+    letterSpacing: 0,
+    lineHeight: 1.5,
+    paragraphSpacing: 18,
+    textColor: "#1D1D1F",
+    cardBackground: "#FFFFFF",
+  });
+  const [activeNodeMenuId, setActiveNodeMenuId] = useState<string | null>(null);
+  const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
+  const [isGuidancePanelOpen, setIsGuidancePanelOpen] = useState(false);
+  const [guidanceDraft, setGuidanceDraft] = useState({ oneTime: "", ongoing: "" });
   const [settingsWordLimit, setSettingsWordLimit] = useState("");
   const [settingsPartnerP, setSettingsPartnerP] = useState("third");
   const [settingsUserP, setSettingsUserP] = useState("first");
@@ -238,6 +252,15 @@ export default function AppOffline({
   const visibleStoryMessages = activeStory?.messages.filter((message) =>
     !message.isImportedContext && !message.id.startsWith("offline-import-")
   ) || [];
+  const editingMessage = activeStory?.messages.find((message) => message.id === editingMessageId) || null;
+  const readingStyle = {
+    "--offline-reading-font-size": `${readingPreferences.fontSize}px`,
+    "--offline-reading-letter-spacing": `${readingPreferences.letterSpacing}em`,
+    "--offline-reading-line-height": String(readingPreferences.lineHeight),
+    "--offline-reading-paragraph-gap": `${readingPreferences.paragraphSpacing}px`,
+    "--offline-reading-text": readingPreferences.textColor,
+    "--offline-reading-card": readingPreferences.cardBackground,
+  } as React.CSSProperties;
 
   const workspaceEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -772,7 +795,10 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-slate-50 text-slate-800 relative overflow-hidden font-sans select-none">
+    <div
+      className="offline-page w-full h-full flex flex-col relative overflow-hidden font-sans select-none"
+      style={readingStyle}
+    >
       
       {/* Dynamic Toast */}
       <AnimatePresence>
@@ -1195,402 +1221,103 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
               </div>
             ) : (
               <>
-            {/* Header */}
-            <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm z-10">
-              <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                <button 
-                  onClick={handleExitStoryWorkspace}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors shrink-0"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-xs font-bold text-slate-850 truncate block max-w-[200px]">
-                      {activeStory.title}
-                    </span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-600 border border-indigo-200/60 uppercase font-extrabold shrink-0">
-                      {activeStory.mode === "director" ? "导演" : activeStory.mode === "if" ? "IF线" : "续写"}
-                    </span>
+            <header className="offline-workspace-header">
+              <div className="offline-workspace-title-row">
+                <div className="offline-workspace-title-group">
+                  <button onClick={handleExitStoryWorkspace} className="offline-icon-button" aria-label="返回线下故事列表"><ArrowLeft size={21} /></button>
+                  <div className="offline-title-copy">
+                    <h1>{activeStory.title}<span className="offline-mode-label">{activeStory.mode === "director" ? "导演" : activeStory.mode === "if" ? "IF线" : "续写"}</span></h1>
+                    <p>与「{selectedChar.remark || selectedChar.name}」的离线剧本空间</p>
                   </div>
-                  <p className="text-[10px] text-slate-500 truncate">与「{selectedChar.remark || selectedChar.name}」的离线剧本空间</p>
                 </div>
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex items-center shrink-0">
-                <button
-                  onClick={() => setIsSettingsOpen(true)}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors shrink-0"
-                  title="高级剧本配置"
-                >
-                  <Settings className="w-4 h-4 text-slate-600" />
-                </button>
-              </div>
-            </div>
-
-            {/* Source Reference banner */}
-            {activeStory.sourceChatId && (
-              <div className="px-4 py-2 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between text-xs text-indigo-600">
-                <div className="flex items-center gap-1.5">
-                  <Link2 className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>已关联线上聊天记录 (导入了 {activeStory.sourceChatMsgCount || 0} 条历史对话)</span>
-                </div>
-                {onNavigateToChat && (
-                  <button 
-                    onClick={async () => {
-                      const latestStory = activeStoryRef.current;
-                      if (!latestStory) return;
-                      let completedStory = latestStory;
-                      if (hasUnsyncedOnlineProgress(latestStory)) {
-                        completedStory = await handleSyncMemoryToBrain(latestStory);
-                      }
-                      clearOfflineSession(completedStory);
-                      clearActiveStorySnapshot();
-                      setIsSettingsOpen(false);
-                      onNavigateToChat(completedStory.characterId);
-                    }}
-                    className="text-[10px] underline font-bold hover:text-indigo-700"
+                <div className="offline-workspace-menu-anchor">
+                  <button
+                    type="button"
+                    onClick={() => setIsWorkspaceMenuOpen((open) => !open)}
+                    className="offline-icon-button"
+                    aria-label="打开线下剧情菜单"
                   >
-                    返回线上聊天
+                    <MoreHorizontal size={21} />
                   </button>
+                  {isWorkspaceMenuOpen && (
+                    <div className="offline-workspace-menu" role="menu" aria-label="线下剧情菜单">
+                      <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsReadingSettingsOpen(true); }}>
+                        <span className="offline-workspace-menu-icon" aria-hidden="true">Aa</span>
+                        <span>阅读设置</span>
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsSettingsOpen(true); }}>
+                        <Settings size={16} />
+                        <span>剧本设置</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {activeStory.sourceChatId && (
+                <div className="offline-chat-link-card">
+                  <div><Link2 size={16} /><span>已关联线上聊天记录（导入了 {activeStory.sourceChatMsgCount || 0} 条历史对话）</span></div>
+                  {onNavigateToChat && <button onClick={async () => {
+                    const latestStory = activeStoryRef.current;
+                    if (!latestStory) return;
+                    let completedStory = latestStory;
+                    if (hasUnsyncedOnlineProgress(latestStory)) completedStory = await handleSyncMemoryToBrain(latestStory);
+                    clearOfflineSession(completedStory);
+                    clearActiveStorySnapshot();
+                    setIsSettingsOpen(false);
+                    onNavigateToChat(completedStory.characterId);
+                  }}>返回线上聊天 ›</button>}
+                </div>
+              )}
+
+              {activeStory.mode === "if" && activeStory.ifPrompt && <div className="mt-3 text-xs text-amber-700 flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-amber-500" />IF 假想设定：{activeStory.ifPrompt}</div>}
+
+            </header>
+
+            <main className="offline-story-scroll offline-message-list">
+              {activeStory.customCss && <style dangerouslySetInnerHTML={{ __html: activeStory.customCss }} />}
+              <div className="offline-story-list">
+                {visibleStoryMessages.length > 0 && <div className="offline-story-session"><span>{new Date(activeStory.createdAt).toLocaleDateString()} · 剧情记录</span><span>{visibleStoryMessages.length} 段</span></div>}
+                {visibleStoryMessages.length === 0 && (
+                  <div className="offline-empty-state">
+                    <p>剧本空间已经准备好。写下一个动作、一句对白，或让角色为这一幕打开故事。</p>
+                    <button onClick={() => handleSendMessage(undefined, true)}>让 {selectedChar.remark || selectedChar.name} 开启第一幕</button>
+                  </div>
                 )}
+                {visibleStoryMessages.map((msg) => {
+                  let charToUse = selectedChar;
+                  if (msg.sender !== "user" && activeStory.characterIds?.length) {
+                    const matched = characters.filter((character) => activeStory.characterIds?.includes(character.id)).find((character) => msg.content.includes(character.remark || character.name));
+                    if (matched) charToUse = matched;
+                  }
+                  return <OfflineStoryCard
+                    key={msg.id}
+                    message={msg}
+                    character={charToUse}
+                    settings={settings}
+                    showAvatars={activeStory.showAvatars !== false}
+                    menuOpen={activeNodeMenuId === msg.id}
+                    onMenuToggle={() => setActiveNodeMenuId((current) => current === msg.id ? null : msg.id)}
+                    onEdit={() => { setActiveNodeMenuId(null); handleStartEdit(msg.id, msg.content); }}
+                    onDelete={() => { setActiveNodeMenuId(null); handleDeleteMessage(msg.id); }}
+                    onGuidance={() => { setActiveNodeMenuId(null); setIsGuidancePanelOpen(true); }}
+                  />;
+                })}
+                {isGenerating && <div className="offline-story-status"><RefreshCw size={15} className="animate-spin" />{selectedChar.remark || selectedChar.name} 正在续写这一幕…</div>}
+                {errorMsg && <div className="offline-story-error">{errorMsg}</div>}
+                <div ref={workspaceEndRef} />
               </div>
-            )}
+            </main>
 
-            {/* IF-Line Hypothesis Premise banner */}
-            {activeStory.mode === "if" && activeStory.ifPrompt && (
-              <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700 font-sans flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span>IF假想设定: {activeStory.ifPrompt}</span>
-              </div>
-            )}
-
-            {/* Messaging Workspace Body */}
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-white offline-message-list">
-              
-              {activeStory.customCss && (
-                <style dangerouslySetInnerHTML={{
-                  __html: `
-                    /* Custom CSS from story settings */
-                    ${activeStory.customCss}
-                  `
-                }} />
-              )}
-              
-              {visibleStoryMessages.length > 0 && (
-                /* Elegant session metadata header */
-                <div className="flex items-center justify-between border-b border-slate-150/40 pb-3 mb-6 select-none">
-                  <span className="text-[11px] font-medium tracking-wide text-slate-400 font-mono">
-                    {new Date(activeStory.createdAt).toLocaleDateString()} {new Date(activeStory.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                  </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 border border-slate-200/40">
-                    {activeStory.messages.length} 句
-                  </span>
-                </div>
-              )}
-
-              {visibleStoryMessages.length === 0 && (
-                <div className="py-12 text-center text-slate-500 space-y-3 px-6">
-                  <p className="text-xs leading-relaxed">🎬 剧本空间已就绪！可以先在输入框选择“旁白/描述”或“发言”来开个头，也可以直接点击下方的 “AI 续写” 让 {selectedChar.remark || selectedChar.name} 主动打破僵局并书写一段精美的小说开场白。</p>
-                  <button
-                    onClick={() => handleSendMessage(undefined, true)}
-                    className="px-3.5 py-1.5 rounded-full bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition-all shadow-sm"
-                  >
-                    ✨ 让 {selectedChar.remark || selectedChar.name} 开启第一幕
-                  </button>
-                </div>
-              )}
-
-              {visibleStoryMessages.map((msg) => {
-                const isSelf = msg.sender === "user";
-                const isUserSpoken = isSelf && !msg.isNarration;
-                const showAvatars = activeStory.showAvatars !== false;
-
-                // Determine avatar/name for character messages
-                let charToUse = selectedChar;
-                if (!isSelf && activeStory.characterIds && activeStory.characterIds.length > 0) {
-                  const matched = characters.filter(c => activeStory.characterIds?.includes(c.id)).find(c => {
-                    const nameStr = c.remark || c.name;
-                    return msg.content.includes(nameStr);
-                  });
-                  if (matched) charToUse = matched;
-                }
-
-                const isEditing = editingMessageId === msg.id;
-
-                if (isUserSpoken) {
-                  // User Spoken Dialogue
-                  return (
-                    <div 
-                      key={msg.id}
-                      id={`offline-msg-${msg.id}`}
-                      className="offline-message-item offline-msg-user w-full flex items-start justify-end my-5 gap-3 group relative pr-7 select-text"
-                    >
-                      {/* Edit or Delete Action triggers */}
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-100 transition-all z-10">
-                        <button
-                          onClick={() => handleStartEdit(msg.id, msg.content)}
-                          className="p-1 rounded bg-slate-50 hover:bg-slate-100 text-slate-500 shadow-sm border border-slate-200"
-                          title="编辑该段内容"
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteMessage(msg.id)}
-                          className="p-1 rounded bg-red-50 hover:bg-red-100 text-red-500 shadow-sm border border-slate-200"
-                          title="删除这段发言"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      <div className="flex flex-col items-end max-w-[80%]">
-                        {showAvatars && (
-                          <span className="offline-nickname text-[10px] text-slate-400 mb-1">
-                            {settings.name || "我"}
-                          </span>
-                        )}
-                        
-                        {isEditing ? (
-                          <div className="w-full bg-white p-3 rounded-[16px] border border-slate-100 shadow-lg space-y-3 min-w-[240px]">
-                            <textarea
-                              value={editingText}
-                              onChange={(e) => setEditingText(e.target.value)}
-                              className="w-full p-3 text-xs border border-slate-200 rounded-[8px] focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-slate-50/50 text-slate-800 min-h-[80px] leading-relaxed resize-none text-left"
-                              placeholder="编辑这段文字..."
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <button
-                                onClick={handleCancelEdit}
-                                className="px-3 py-1.5 text-[11px] font-bold rounded-[8px] bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all"
-                              >
-                                取消
-                              </button>
-                              <button
-                                onClick={() => handleSaveEdit(msg.id)}
-                                className="px-3.5 py-1.5 text-[11px] font-bold rounded-[8px] bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1 transition-all"
-                              >
-                                <Check className="w-3 h-3" />
-                                保存
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="offline-bubble relative bg-slate-100 rounded-2xl px-4 py-2.5 border border-slate-200/40 shadow-sm hover:shadow-md transition-all">
-                            <p className="offline-msg-content text-[13.5px] leading-relaxed text-[#5e6672] font-medium font-sans italic whitespace-pre-wrap">
-                              {(() => {
-                                const parts = msg.content.split(/(“[^”]*”|「[^」]*」)/g);
-                                return parts.map((part, index) => {
-                                  if ((part.startsWith('“') && part.endsWith('”')) || (part.startsWith('「') && part.endsWith('」'))) {
-                                    return (
-                                      <span key={index} className="offline-dialogue-text font-medium text-slate-900">
-                                        {part}
-                                      </span>
-                                    );
-                                  }
-                                  return (
-                                    <span key={index} className="offline-narrative-text text-slate-600">
-                                      {part}
-                                    </span>
-                                  );
-                                });
-                              })()}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-
-                      {showAvatars && (
-                        <div className="offline-avatar-container shrink-0">
-                          <img 
-                            src={settings.avatar} 
-                            alt={settings.name || "我"} 
-                            referrerPolicy="no-referrer"
-                            className="offline-avatar w-8 h-8 rounded-full border border-slate-200 object-cover shadow-sm"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  );
-                } else {
-                  // AI Narrative/Dialogue or User Narrative - beautiful flat left-aligned book-style paragraphs
-                  return (
-                    <div 
-                      key={msg.id}
-                      id={`offline-msg-${msg.id}`}
-                      className="offline-message-item offline-msg-character w-full flex items-start my-4 gap-3 group relative pr-7 select-text transition-all duration-200 hover:bg-slate-50/50 rounded-lg py-1 px-1"
-                    >
-                      {showAvatars && (
-                        <div className="offline-avatar-container shrink-0 mt-0.5">
-                          <img 
-                            src={charToUse.avatar} 
-                            alt={charToUse.remark || charToUse.name} 
-                            referrerPolicy="no-referrer"
-                            className="offline-avatar w-8 h-8 rounded-full border border-slate-200 object-cover shadow-sm"
-                          />
-                        </div>
-                      )}
-
-                      <div className="flex-1 flex flex-col min-w-0">
-                        {showAvatars && (
-                          <span className="offline-nickname text-[10px] text-slate-400 mb-1">
-                            {charToUse.remark || charToUse.name}
-                          </span>
-                        )}
-
-                        {isEditing ? (
-                          <div className="w-full bg-white p-3 rounded-[16px] border border-slate-100 shadow-lg space-y-3">
-                            <textarea
-                              value={editingText}
-                              onChange={(e) => setEditingText(e.target.value)}
-                              className="w-full p-3 text-xs border border-slate-200 rounded-[8px] focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-slate-50/50 text-slate-800 min-h-[100px] leading-relaxed resize-none text-left"
-                              placeholder="编辑这段文字..."
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <button
-                                onClick={handleCancelEdit}
-                                className="px-3 py-1.5 text-[11px] font-bold rounded-[8px] bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all"
-                              >
-                                取消
-                              </button>
-                              <button
-                                onClick={() => handleSaveEdit(msg.id)}
-                                className="px-3.5 py-1.5 text-[11px] font-bold rounded-[8px] bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1 transition-all"
-                              >
-                                <Check className="w-3 h-3" />
-                                保存
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="offline-msg-content text-[14px] leading-loose text-slate-700 font-sans tracking-wide text-justify whitespace-pre-wrap">
-                            {(() => {
-                              const parts = msg.content.split(/(“[^”]*”|「[^」]*」)/g);
-                              return parts.map((part, index) => {
-                                if ((part.startsWith('“') && part.endsWith('”')) || (part.startsWith('「') && part.endsWith('」'))) {
-                                  return (
-                                    <span key={index} className="offline-dialogue-text font-medium text-slate-900">
-                                      {part}
-                                    </span>
-                                  );
-                                }
-                                return (
-                                  <span key={index} className="offline-narrative-text text-slate-600">
-                                    {part}
-                                  </span>
-                                );
-                              });
-                            })()}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Edit or Delete Action triggers */}
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-100 transition-all z-10">
-                        <button
-                          onClick={() => handleStartEdit(msg.id, msg.content)}
-                          className="p-1 rounded bg-slate-50 hover:bg-slate-100 text-slate-500 shadow-sm border border-slate-200"
-                          title="编辑这段内容"
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteMessage(msg.id)}
-                          className="p-1 rounded bg-red-50 hover:bg-red-100 text-red-500 shadow-sm border border-slate-200"
-                          title="删除这段剧情"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                }
-              })}
-
-              {/* Typing Indicator */}
-              {isGenerating && (
-                <div className="flex items-center gap-2 text-xs text-indigo-600 font-bold italic px-1 py-2">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>{selectedChar.remark || selectedChar.name} 正在编织剧情走向...</span>
-                </div>
-              )}
-
-              {/* Error indicator */}
-              {errorMsg && (
-                <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600">
-                  {errorMsg}
-                </div>
-              )}
-
-              <div ref={workspaceEndRef} />
-            </div>
-
-            {/* Bottom control & Input bar */}
-            <div className="p-3 bg-white border-t border-slate-100 space-y-2 shadow-inner">
-              <div className="hidden">
-                
-                {/* Input Mode Toggle: Spoken dialogue vs Narrative */}
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-[11px] text-slate-500 uppercase tracking-wide">类型:</span>
-                  <button
-                    onClick={() => setInputNarration(false)}
-                    className={`px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all flex items-center gap-1 shadow-sm ${
-                      !inputNarration 
-                        ? "bg-slate-900 border-slate-900 text-white !text-white" 
-                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    <span className={!inputNarration ? "text-white !text-white" : "text-slate-600"}>💬 发言</span>
-                  </button>
-                  <button
-                    onClick={() => setInputNarration(true)}
-                    className={`px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all flex items-center gap-1 shadow-sm ${
-                      inputNarration 
-                        ? "bg-slate-900 border-slate-900 text-white !text-white" 
-                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    <span className={inputNarration ? "text-white !text-white" : "text-slate-600"}>📖 旁白</span>
-                  </button>
-                </div>
-
-                {/* AI Auto-write button (續寫) */}
-                <button
-                  disabled={isGenerating}
-                  onClick={() => handleSendMessage(undefined, true)}
-                  className="px-3 py-1 rounded bg-slate-50 hover:bg-slate-100 text-indigo-600 font-bold text-[10px] border border-slate-200 transition-all flex items-center gap-1 shadow-sm"
-                >
-                  <Sparkles className="w-3 h-3 text-indigo-500" />
-                  <span>✨ 续写</span>
-                </button>
-              </div>
-
-              {/* Chat Input Field form */}
-              <form 
-                onSubmit={(e) => { e.preventDefault(); handleSendMessage(undefined, !inputText.trim()); }}
-                className="flex items-center gap-2"
-              >
+            <div className="offline-composer-wrap">
+              <form onSubmit={(event) => { event.preventDefault(); handleSendMessage(undefined, !inputText.trim()); }} className="offline-composer">
                 <input
                   type="text"
                   value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  placeholder={
-                    inputNarration 
-                      ? "输入旁白..." 
-                      : activeStory.mode === "director" 
-                        ? "发出简短指令控制后续走向 (例: [突降暴雨，我们躲在桥下])" 
-                        : "输入发言，继续对话剧情..."
-                  }
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-[8px] px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  onChange={(event) => setInputText(event.target.value)}
+                  placeholder={activeStory.mode === "director" ? "继续写下去，或留下这一幕的方向…" : "继续写下去…"}
                 />
-                <button
-                  type="submit"
-                  disabled={isGenerating}
-                  className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center transition-colors shadow-md disabled:opacity-50 shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
+                <button type="submit" disabled={isGenerating} aria-label="发送并继续剧情"><Send size={17} /></button>
               </form>
             </div>
               </>
@@ -1598,6 +1325,39 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
           </motion.div>
         )}
       </AnimatePresence>
+
+      {isReadingSettingsOpen && (
+        <OfflineReadingSettings
+          value={readingPreferences}
+          onChange={setReadingPreferences}
+          onClose={() => setIsReadingSettingsOpen(false)}
+        />
+      )}
+
+      {isGuidancePanelOpen && (
+        <OfflineGuidancePanel
+          initialOneTime={guidanceDraft.oneTime}
+          initialOngoing={guidanceDraft.ongoing}
+          onClose={() => setIsGuidancePanelOpen(false)}
+          onSave={(oneTime, ongoing) => {
+            setGuidanceDraft({ oneTime, ongoing });
+            setIsGuidancePanelOpen(false);
+            showToast("场外指导已暂存（当前不会改变 AI 生成规则）");
+          }}
+        />
+      )}
+
+      {editingMessage && (
+        <OfflineStoryEditor
+          message={editingMessage}
+          character={selectedChar}
+          settings={settings}
+          value={editingText}
+          onChange={setEditingText}
+          onCancel={handleCancelEdit}
+          onSave={() => handleSaveEdit(editingMessage.id)}
+        />
+      )}
 
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>
