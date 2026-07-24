@@ -19,6 +19,10 @@ export function retrieveRelevantMemories(
     queryWords.forEach((word) => {
       if (contentLower.includes(word)) score += word.length;
     });
+    // Importance only breaks otherwise equivalent recall candidates. This
+    // keeps the legacy keyword and recency behavior while letting durable
+    // facts outrank short-lived offline events with the same relevance.
+    score += (memory.importance ?? 5) * 0.01;
     score += memory.timestamp * 0.00000000001;
     return { memory, score };
   });
