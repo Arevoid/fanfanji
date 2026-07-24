@@ -30,7 +30,9 @@ export async function extractMemories(
     characterId: context.characterId,
     content: context.formatContent(validItems),
     timestamp: context.currentTime(),
-    importance: 5,
+    // Offline extraction records a recent event, not a permanent personality
+    // fact. Existing memories retain their stored importance unchanged.
+    importance: context.scenario === "offline" ? 4 : 5,
     isManual: false,
   };
   return isDuplicateMemory(context.existingMemories, candidate)

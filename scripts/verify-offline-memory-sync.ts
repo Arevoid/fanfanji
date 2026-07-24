@@ -33,11 +33,11 @@ const tests: Array<[string, () => void | Promise<void>]> = [
   ["N legacy imported id is excluded", () => assert.equal(getOfflineMemorySourceMessages(story([message("offline-import-x", "old")])).length, 0)],
   ["O synchronization metadata does not change story messages", () => assert.equal(story([message("new", "x")], { syncedSourceMessageIds: ["new"] }).messages.length, 1)],
   ["P no progress means no automatic sync candidate", () => assert.equal(hasUnsyncedOfflineMemoryProgress(story([], { lastSyncedMessageCount: 0 })), false)],
-  ["Q fallback handoff keeps the online marker and current character", () => {
+  ["Q fallback handoff keeps the online marker, current character, and a factual event summary", () => {
     const handoff = createOfflineStoryHandoffMemory({ story: story([message("new", "明天一起去看电影")]), sourceMessages: [message("new", "明天一起去看电影")], characterId: "a", id: "handoff", timestamp: 2 });
     assert.equal(handoff.characterId, "a");
     assert.ok(handoff.content.includes("offline-story:story-a:0-1"));
-    assert.ok(handoff.content.includes("明天一起去看电影"));
+    assert.ok(handoff.content.includes("双方曾讨论或约定一起看电影。"));
   }],
   ["R fallback handoff is retrievable for the next online prompt", () => {
     const handoff = createOfflineStoryHandoffMemory({ story: story([message("new", "明天一起去看电影")]), sourceMessages: [message("new", "明天一起去看电影")], characterId: "a", id: "handoff", timestamp: 2 });

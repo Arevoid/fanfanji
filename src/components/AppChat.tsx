@@ -19,6 +19,7 @@ import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } 
 import { buildOfflineHandoffPromptBlock } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
+import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary } from "../domain/prompt/characterKnowledgeBoundary";
@@ -2150,7 +2151,8 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
       const isCrossDayNewSession = activeCharacter.enableTimeAwareness !== false
         && Boolean(userMsg && latestHistoryMessage)
         && !isSameLocalDay(userMsg!.timestamp, latestHistoryMessage.timestamp);
-      const slicedMsgs = isCrossDayNewSession ? [] : msgsForHistory.slice(-limit);
+      const slicedMsgs = msgsForHistory.slice(-limit);
+      const requestTime = new Date();
 
       const history = slicedMsgs.map((m) => {
         let contentText = m.content;
@@ -2162,7 +2164,9 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
         }
         return {
           role: m.sender === "user" ? "user" : "model",
-          text: contentText,
+          text: activeCharacter.enableTimeAwareness !== false
+            ? formatHistoricalMessageForPrompt(contentText, m.timestamp, requestTime)
+            : contentText,
         };
       });
 
@@ -2196,7 +2200,7 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
             contentSnippet = contentSnippet.slice(0, 25) + "...";
           }
           
-          timeLogLines.push(`- ${senderName}: "${contentSnippet}" (发送于: ${fullTimeStr})`);
+          timeLogLines.push(`- ${senderName}: "${contentSnippet}" (发送于: ${fullTimeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`);
         });
         
         timeLogString = timeLogLines.join("\n");
@@ -2346,7 +2350,7 @@ Answer only the user's newest message as today's opening. Do not resume, answer,
 
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
       if (activeCharacter.enableTimeAwareness !== false) {
-        const timeStr = formatLocalTimeContext();
+        const timeStr = formatLocalTimeContext(requestTime);
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
@@ -3227,10 +3231,13 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
       const slicedMsgs = msgsForHistory.slice(-limit);
 
       // Map history with timestamps for time awareness
+      const requestTime = new Date();
       const history = slicedMsgs.map((m) => {
         return {
           role: m.sender === "user" ? "user" : "model",
-          text: m.content,
+          text: activeCharacter.enableTimeAwareness !== false
+            ? formatHistoricalMessageForPrompt(m.content, m.timestamp, requestTime)
+            : m.content,
         };
       });
 
@@ -3246,7 +3253,7 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
           });
           const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
           const snippet = m.content.length > 20 ? m.content.slice(0, 20) + "..." : m.content;
-          return `- ${senderName}: "${snippet}" (发送于: ${timeStr})`;
+          return `- ${senderName}: "${snippet}" (发送于: ${timeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`;
         }).join("\n");
       }
 
@@ -3325,7 +3332,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // 1.5 Time awareness prompt if enabled
       if (activeCharacter.enableTimeAwareness !== false) {
-        const timeStr = formatLocalTimeContext();
+        const timeStr = formatLocalTimeContext(requestTime);
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
 
