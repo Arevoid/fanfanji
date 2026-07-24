@@ -37,7 +37,7 @@ const tests: Array<[string, () => void | Promise<void>]> = [
     const handoff = createOfflineStoryHandoffMemory({ story: story([message("new", "明天一起去看电影")]), sourceMessages: [message("new", "明天一起去看电影")], characterId: "a", id: "handoff", timestamp: 2 });
     assert.equal(handoff.characterId, "a");
     assert.ok(handoff.content.includes("offline-story:story-a:0-1"));
-    assert.ok(handoff.content.includes("双方曾讨论或约定一起看电影。"));
+    assert.ok(handoff.content.includes("用户与当前角色曾讨论或约定一起看电影。"));
   }],
   ["R fallback handoff is retrievable for the next online prompt", () => {
     const handoff = createOfflineStoryHandoffMemory({ story: story([message("new", "明天一起去看电影")]), sourceMessages: [message("new", "明天一起去看电影")], characterId: "a", id: "handoff", timestamp: 2 });
