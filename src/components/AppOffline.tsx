@@ -9,7 +9,7 @@ import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, User
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { collectOfflineHandoffContent, createOfflineStoryHandoffMemory, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
+import { collectOfflineHandoffContent, createOfflineStoryHandoffMemory, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 
@@ -443,10 +443,9 @@ export default function AppOffline({
           templateType: character.archiveTemplateType,
           createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           currentTime: () => Date.now(),
-          // Preserve the source transcript alongside the compact extraction.
-          // The next online request can therefore use the user's actual plot
-          // facts even if the extraction model returns an over-short summary.
-          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]\n${collectOfflineHandoffContent(story)}`,
+          // Source-derived third-person facts are the authoritative record for
+          // actor/recipient direction; ambiguous extraction text is excluded.
+          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, filterOfflineExtractedFacts(items))}\n[${syncMarker}]\n【确认事件（主体与客体固定）】\n${collectOfflineHandoffContent(story, character.remark || character.name)}`,
         }, apiExtractMemories);
         if (result.apiError) throw new Error(result.apiError);
         extractedMemories = result.extractedMemories;
@@ -460,6 +459,7 @@ export default function AppOffline({
           story,
           sourceMessages,
           characterId: story.characterId,
+          characterName: character.remark || character.name,
           id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           timestamp: now,
         })]);
