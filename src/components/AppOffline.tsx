@@ -75,6 +75,18 @@ export default function AppOffline({
       .filter((relation) => relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId)
       .map((relation) => [`${relation.userIdentityId}\u0000${relation.characterId}`, relation]),
   ).values());
+  const canAccessStoryFromCurrentRelation = (story: OfflineStory) => {
+    const storyCharacter = characters.find((character) => character.id === story.characterId);
+    // Group containers keep their existing shared/group routing semantics.
+    if (storyCharacter?.isGroupChat) return true;
+    // Every direct story must be owned by the selected current relation. A
+    // missing relationId is legacy direct data and is not opened cross-identity.
+    return Boolean(
+      story.relationId
+      && story.relationId === selectedRelationId
+      && relationChoices.some((relation) => relation.id === story.relationId),
+    );
+  };
   const [selectedRelationId, setSelectedRelationId] = useState<string>(() => activeChatRelationId || "");
   useEffect(() => {
     const preferred = activeChatRelationId && relationships.some((relation) => relation.id === activeChatRelationId && relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId)
@@ -126,10 +138,13 @@ export default function AppOffline({
     if (selectedCharId && !selectableCharacterIds.has(selectedCharId)) {
       setSelectedCharId(selectableCharacters[0]?.id || "");
     }
-    if (activeStoryRef.current && !selectableCharacterIds.has(resolveOfflineStoryCharacterId(activeStoryRef.current, characters))) {
+    if (activeStoryRef.current && (
+      !selectableCharacterIds.has(resolveOfflineStoryCharacterId(activeStoryRef.current, characters))
+      || !canAccessStoryFromCurrentRelation(activeStoryRef.current)
+    )) {
       clearActiveStorySnapshot();
     }
-  }, [characters, selectedCharId, activeStory?.id]);
+  }, [characters, selectedCharId, selectedRelationId, activeStory?.id, relationChoices]);
   
   // Toast notifications
   const [toast, setToast] = useState("");
@@ -273,7 +288,7 @@ export default function AppOffline({
 
   const selectedChar = selectableCharacters.find(c => c.id === selectedCharId) || selectableCharacters[0];
   const charStories = offlineStories.filter((story) =>
-    (!selectedRelationId || story.relationId === selectedRelationId)
+    canAccessStoryFromCurrentRelation(story)
     && (resolveOfflineStoryCharacterId(story, characters) === selectedCharId
       || resolveOfflineStoryCharacterIds(story, characters).includes(selectedCharId))
   );
@@ -319,7 +334,7 @@ export default function AppOffline({
       const savedStoryId = selectedRelationId ? localStorage.getItem(getOfflineStoryStorageKey(selectedRelationId)) : null;
       if (savedStoryId) {
         const story = offlineStories.find(s => s.id === savedStoryId);
-        if (story) {
+        if (story && canAccessStoryFromCurrentRelation(story)) {
           activeStoryRef.current = story;
           setActiveStory(story);
           return;
@@ -331,6 +346,10 @@ export default function AppOffline({
 
   // Handle opening a story
   const handleOpenStory = (story: OfflineStory) => {
+    if (!canAccessStoryFromCurrentRelation(story)) {
+      showToast("此线下剧情属于另一个人设关系，不能跨身份进入。");
+      return;
+    }
     activeStoryRef.current = story;
     setActiveStory(story);
     if (story.relationId) {
