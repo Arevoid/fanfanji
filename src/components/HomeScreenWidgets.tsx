@@ -714,7 +714,7 @@ export function DateWidget({ id, isEditing, onRemove, widgetBorderRadius }: Widg
   const textColorKey = `date_widget_text_color_${id}`;
   const [now, setNow] = useState(() => new Date());
   const [backgroundImage, setBackgroundImage] = useState<string | undefined>(() => localStorage.getItem(backgroundKey) || undefined);
-  const [textColor, setTextColor] = useState(() => localStorage.getItem(textColorKey) || "#ffffff");
+  const [textColor, setTextColor] = useState(() => localStorage.getItem(textColorKey) || "#1d1d1f");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draftBackgroundImage, setDraftBackgroundImage] = useState<string | undefined>(backgroundImage);
   const [draftTextColor, setDraftTextColor] = useState(textColor);

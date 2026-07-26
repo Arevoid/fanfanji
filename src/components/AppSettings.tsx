@@ -1227,7 +1227,8 @@ export default function AppSettings({
               {/* 1. 桌面模块 */}
               {beautySubTab === "desktop" && (
                 <div className="space-y-4 animate-fade-in">
-                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                  {/* Legacy welcome-card settings remain persisted for compatibility but are no longer available in the desktop settings UI. */}
+                  <div className="hidden bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
                     <div className="flex items-center justify-between pb-1 border-b border-slate-50">
                       <div>
                         <span className="text-xs font-bold text-slate-700">置顶信息卡</span>

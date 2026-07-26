@@ -2436,6 +2436,43 @@ export default function App() {
                               key={pageIdx}
                               className="w-full h-full flex-shrink-0 flex flex-col select-none px-0"
                             >
+                              {pageIdx === 0 && !settings.hideHomeWelcomeWidget && (
+                                <div className="relative shrink-0 mt-3 mb-3.5" style={{ marginLeft: `${gridPadding}px`, marginRight: `${gridPadding}px` }}>
+                                  <div
+                                    className={`backdrop-blur-md border border-neutral-200/20 p-3.5 rounded-[22px] text-neutral-850 shadow-sm select-none flex items-center gap-3.5 w-full h-full ${
+                                      isEditingHomeScreen ? "animate-jiggle" : ""
+                                    }`}
+                                    style={{
+                                      backgroundColor: `rgba(255, 255, 255, ${(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70) / 100})`,
+                                      borderRadius: settings.widgetBorderRadius !== undefined ? `${settings.widgetBorderRadius}px` : "22px",
+                                    }}
+                                  >
+                                    <img
+                                      src={settings.avatar}
+                                      alt={settings.name}
+                                      className="w-12 h-12 rounded-full object-cover border border-slate-200/20 shadow-sm shrink-0"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <h2 className="text-sm font-extrabold text-neutral-900 tracking-tight leading-tight">{settings.name}</h2>
+                                      <p className="text-[11px] text-neutral-500 mt-1 line-clamp-1 leading-relaxed">{settings.signature}</p>
+                                    </div>
+                                  </div>
+                                  {isEditingHomeScreen && (
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setSettings((current) => ({ ...current, hideHomeWelcomeWidget: true }));
+                                      }}
+                                      className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-stone-900/90 hover:bg-stone-950 text-white rounded-full flex items-center justify-center text-xs font-black shadow z-30 transition-transform active:scale-90"
+                                      aria-label="隐藏置顶欢迎卡"
+                                    >
+                                      −
+                                    </button>
+                                  )}
+                                </div>
+                              )}
                               {/* The grid of apps and widgets for this page */}
                               <div 
                                 ref={pageIdx === currentPage ? pageContainerRef : undefined}
@@ -2705,7 +2742,8 @@ export default function App() {
                 </div>
               )}
 
-              {isEditingHomeWelcomeCard && (
+              {/* Legacy editor remains only for persisted-data compatibility; the welcome card has no desktop entry point. */}
+              {false && isEditingHomeWelcomeCard && (
                 <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-5" onClick={() => setIsEditingHomeWelcomeCard(false)}>
                   <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
                     <div className="mb-4 flex items-center justify-between">
