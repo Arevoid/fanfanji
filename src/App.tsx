@@ -712,7 +712,7 @@ export default function App() {
       defaultIdentityId: DEFAULT_IDENTITY_ID,
       now: Date.now(),
     });
-    const relationshipsChanged = result.createdRelationshipCount || result.repairedRelationshipCount || result.deduplicatedRelationshipCount;
+    const relationshipsChanged = result.createdRelationshipCount || result.deduplicatedRelationshipCount;
     if (relationshipsChanged) setRelationships(result.relationships);
     if (result.migratedMessageCount || result.deduplicatedRelationshipCount) setMessages(result.messages);
     if (result.migratedMemoryCount || result.deduplicatedRelationshipCount) setMemories(result.memories);

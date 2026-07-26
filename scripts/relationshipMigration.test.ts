@@ -35,8 +35,8 @@ assert.equal(second.migratedMessageCount, 0);
 assert.equal(second.migratedMemoryCount, 0);
 assert.equal(second.migratedStoryCount, 0);
 
-// Legacy default relations are always owned by the historical primary
-// identity, even if the app previously launched while another identity was active.
+// Existing relationships retain their stored owner. A legacy-looking ID is
+// not enough evidence to reassign an identity's data.
 const wronglyOwnedDefault = createRelationship({
   id: "relation_default_char_001",
   characterId: character.id,
@@ -45,6 +45,7 @@ const wronglyOwnedDefault = createRelationship({
 });
 const repairedDefault = migrateLegacyRelationshipData({
   ...input,
+  legacyFriendIds: [],
   relationships: [wronglyOwnedDefault],
   messages: [{ ...message, relationId: wronglyOwnedDefault.id, conversationId: wronglyOwnedDefault.conversationId }],
   memories: [{ ...memory, relationId: wronglyOwnedDefault.id }],
@@ -52,8 +53,7 @@ const repairedDefault = migrateLegacyRelationshipData({
   defaultIdentityId: "identity-fanfan",
 });
 assert.equal(repairedDefault.relationships.length, 1);
-assert.equal(repairedDefault.repairedRelationshipCount, 1);
-assert.equal(repairedDefault.relationships[0].userIdentityId, "identity-1");
+assert.equal(repairedDefault.relationships[0].userIdentityId, "identity-fanfan");
 assert.equal(repairedDefault.messages[0].relationId, "relation_default_char_001");
 
 // A corrupted duplicate identity+character relation is merged without losing

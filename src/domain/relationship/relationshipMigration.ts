@@ -19,7 +19,6 @@ export interface RelationshipMigrationResult {
   memories: MemoryItem[];
   offlineStories: OfflineStory[];
   createdRelationshipCount: number;
-  repairedRelationshipCount: number;
   deduplicatedRelationshipCount: number;
   relationIdRemaps: Record<string, string>;
   migratedMessageCount: number;
@@ -32,18 +31,14 @@ export interface RelationshipMigrationResult {
  * idempotent so app startup can safely call it more than once.
  */
 export function migrateLegacyRelationshipData(input: RelationshipMigrationInput): RelationshipMigrationResult {
-  // Historical records existed before identity selection. They must always
-  // migrate to the primary legacy identity, not the identity active at launch.
+  // Truly unscoped historical records predate identity selection and belong
+  // to the primary legacy identity. Existing relationships keep their stored
+  // owner; a relation_default_* ID alone is not evidence that it belongs to a
+  // different identity.
   const defaultIdentityId = DEFAULT_IDENTITY_ID;
   const available = getAvailableCanonicalCharacterIds(input.characters);
   const canonical = (characterId: string) => resolveCanonicalCharacterId(characterId, input.characters);
   const directIds = new Set<string>();
-  // Include existing deterministic legacy relations so a previously
-  // mis-owned relation_default_* can be repaired even after old friend IDs
-  // and unscoped records have already been migrated away.
-  input.relationships
-    .filter((relation) => relation.id === getDefaultRelationId(relation.characterId))
-    .forEach((relation) => directIds.add(canonical(relation.characterId)));
   input.legacyFriendIds.forEach((id) => directIds.add(canonical(id)));
   input.messages.filter((message) => !message.relationId && !input.characters.find((character) => character.id === message.characterId)?.isGroupChat)
     .forEach((message) => directIds.add(canonical(message.characterId)));
@@ -53,23 +48,13 @@ export function migrateLegacyRelationshipData(input: RelationshipMigrationInput)
 
   const relationships = [...input.relationships];
   let createdRelationshipCount = 0;
-  let repairedRelationshipCount = 0;
   for (const characterId of directIds) {
     if (!available.has(characterId)) continue;
-    const defaultRelationId = getDefaultRelationId(characterId);
-    const defaultRelationIndex = relationships.findIndex((relation) => relation.id === defaultRelationId);
-    // A prior build could have created relation_default_* while another
-    // identity was active. Its deterministic ID means it is unquestionably
-    // legacy data, so repair its owner without touching any normal rel-* data.
-    if (defaultRelationIndex >= 0 && relationships[defaultRelationIndex].userIdentityId !== defaultIdentityId) {
-      relationships[defaultRelationIndex] = {
-        ...relationships[defaultRelationIndex],
-        userIdentityId: defaultIdentityId,
-        updatedAt: input.now,
-      };
-      repairedRelationshipCount += 1;
-    }
     if (relationships.some((relation) => relation.userIdentityId === defaultIdentityId && relation.characterId === characterId)) continue;
+    const baseDefaultRelationId = getDefaultRelationId(characterId);
+    const defaultRelationId = relationships.some((relation) => relation.id === baseDefaultRelationId)
+      ? `${baseDefaultRelationId}__${defaultIdentityId}`
+      : baseDefaultRelationId;
     relationships.push(createRelationship({ id: defaultRelationId, characterId, userIdentityId: defaultIdentityId, now: input.now }));
     createdRelationshipCount += 1;
   }
@@ -176,5 +161,5 @@ export function migrateLegacyRelationshipData(input: RelationshipMigrationInput)
       messages: story.messages.map((message) => message.relationId ? message : ({ ...message, characterId: relation.characterId, relationId: relation.id, conversationId: relation.conversationId })),
     };
   });
-  return { relationships: normalizedRelationships, messages, memories, offlineStories, createdRelationshipCount, repairedRelationshipCount, deduplicatedRelationshipCount, relationIdRemaps, migratedMessageCount, migratedMemoryCount, migratedStoryCount };
+  return { relationships: normalizedRelationships, messages, memories, offlineStories, createdRelationshipCount, deduplicatedRelationshipCount, relationIdRemaps, migratedMessageCount, migratedMemoryCount, migratedStoryCount };
 }
