@@ -712,11 +712,20 @@ export default function App() {
       defaultIdentityId: DEFAULT_IDENTITY_ID,
       now: Date.now(),
     });
-    if (result.createdRelationshipCount || result.repairedRelationshipCount) setRelationships(result.relationships);
-    if (result.migratedMessageCount) setMessages(result.messages);
-    if (result.migratedMemoryCount) setMemories(result.memories);
-    if (result.migratedStoryCount) setOfflineStories(result.offlineStories);
-  }, [characters]);
+    const relationshipsChanged = result.createdRelationshipCount || result.repairedRelationshipCount || result.deduplicatedRelationshipCount;
+    if (relationshipsChanged) setRelationships(result.relationships);
+    if (result.migratedMessageCount || result.deduplicatedRelationshipCount) setMessages(result.messages);
+    if (result.migratedMemoryCount || result.deduplicatedRelationshipCount) setMemories(result.memories);
+    if (result.migratedStoryCount || result.deduplicatedRelationshipCount) setOfflineStories(result.offlineStories);
+    Object.entries(result.relationIdRemaps).forEach(([fromRelationId, toRelationId]) => {
+      const sourceStoryId = localStorage.getItem(getOfflineStoryStorageKey(fromRelationId));
+      if (sourceStoryId && !localStorage.getItem(getOfflineStoryStorageKey(toRelationId))) {
+        localStorage.setItem(getOfflineStoryStorageKey(toRelationId), sourceStoryId);
+      }
+      localStorage.removeItem(getOfflineStoryStorageKey(fromRelationId));
+      localStorage.removeItem(getOfflineModeStorageKey(fromRelationId));
+    });
+  }, [characters, relationships, messages, memories, offlineStories]);
 
   // Keep legacy contact copies readable, while canonicalizing dependent data so
   // every feature sees one archive character for the same identity.

@@ -56,6 +56,24 @@ assert.equal(repairedDefault.repairedRelationshipCount, 1);
 assert.equal(repairedDefault.relationships[0].userIdentityId, "identity-1");
 assert.equal(repairedDefault.messages[0].relationId, "relation_default_char_001");
 
+// A corrupted duplicate identity+character relation is merged without losing
+// its messages, memories, or stories, and no duplicate relationship remains.
+const duplicatePrimary = createRelationship({ id: "relation_default_char_001", characterId: character.id, userIdentityId: "identity-1", now: 1 });
+const duplicateSecondary = createRelationship({ id: "rel-duplicate", characterId: character.id, userIdentityId: "identity-1", now: 2 });
+const deduplicated = migrateLegacyRelationshipData({
+  ...input,
+  relationships: [duplicatePrimary, duplicateSecondary],
+  messages: [{ ...message, id: "duplicate-message", relationId: duplicateSecondary.id, conversationId: duplicateSecondary.conversationId }],
+  memories: [{ ...memory, id: "duplicate-memory", relationId: duplicateSecondary.id }],
+  offlineStories: [{ ...story, id: "duplicate-story", relationId: duplicateSecondary.id, conversationId: duplicateSecondary.conversationId }],
+});
+assert.equal(deduplicated.relationships.length, 1);
+assert.equal(deduplicated.deduplicatedRelationshipCount, 1);
+assert.equal(deduplicated.relationIdRemaps[duplicateSecondary.id], duplicatePrimary.id);
+assert.equal(deduplicated.messages[0].relationId, duplicatePrimary.id);
+assert.equal(deduplicated.memories[0].relationId, duplicatePrimary.id);
+assert.equal(deduplicated.offlineStories[0].relationId, duplicatePrimary.id);
+
 // A historical contact copy resolves to its archive's canonical character before migration.
 const contactMigration = migrateLegacyRelationshipData({
   ...input,

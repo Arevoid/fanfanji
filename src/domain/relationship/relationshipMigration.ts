@@ -20,6 +20,8 @@ export interface RelationshipMigrationResult {
   offlineStories: OfflineStory[];
   createdRelationshipCount: number;
   repairedRelationshipCount: number;
+  deduplicatedRelationshipCount: number;
+  relationIdRemaps: Record<string, string>;
   migratedMessageCount: number;
   migratedMemoryCount: number;
   migratedStoryCount: number;
@@ -71,9 +73,54 @@ export function migrateLegacyRelationshipData(input: RelationshipMigrationInput)
     relationships.push(createRelationship({ id: defaultRelationId, characterId, userIdentityId: defaultIdentityId, now: input.now }));
     createdRelationshipCount += 1;
   }
-  const defaultRelationFor = (characterId: string) => relationships.find((relation) => relation.userIdentityId === defaultIdentityId && relation.characterId === canonical(characterId));
+
+  // The relationship invariant is exactly one relation for a user identity
+  // and canonical character. Older builds could create duplicates during
+  // startup migration. Merge them without dropping any scoped data.
+  const relationIdRemaps: Record<string, string> = {};
+  const relationshipGroups = new Map<string, CharacterRelationship[]>();
+  relationships.forEach((relation) => {
+    const canonicalCharacterId = canonical(relation.characterId);
+    const normalized = canonicalCharacterId === relation.characterId ? relation : { ...relation, characterId: canonicalCharacterId };
+    const key = `${normalized.userIdentityId}\u0000${normalized.characterId}`;
+    relationshipGroups.set(key, [...(relationshipGroups.get(key) || []), normalized]);
+  });
+  const normalizedRelationships: CharacterRelationship[] = [];
+  let deduplicatedRelationshipCount = 0;
+  relationshipGroups.forEach((group) => {
+    const ordered = [...group].sort((left, right) => {
+      const leftIsDefault = left.id === getDefaultRelationId(left.characterId) ? 0 : 1;
+      const rightIsDefault = right.id === getDefaultRelationId(right.characterId) ? 0 : 1;
+      return leftIsDefault - rightIsDefault || left.createdAt - right.createdAt || left.id.localeCompare(right.id);
+    });
+    const primary = ordered[0];
+    const merged = ordered.slice(1).reduce<CharacterRelationship>((current, duplicate) => ({
+      ...current,
+      compressedMemory: current.compressedMemory || duplicate.compressedMemory,
+      lastActiveTime: Math.max(current.lastActiveTime || 0, duplicate.lastActiveTime || 0) || undefined,
+      scheduledProactiveTime: Math.max(current.scheduledProactiveTime || 0, duplicate.scheduledProactiveTime || 0) || undefined,
+      lastImmediateSummaryMsgId: current.lastImmediateSummaryMsgId || duplicate.lastImmediateSummaryMsgId,
+      updatedAt: Math.max(current.updatedAt, duplicate.updatedAt),
+    }), primary);
+    normalizedRelationships.push(merged);
+    ordered.slice(1).forEach((duplicate) => {
+      relationIdRemaps[duplicate.id] = primary.id;
+      deduplicatedRelationshipCount += 1;
+    });
+  });
+  const relationshipById = new Map(normalizedRelationships.map((relation) => [relation.id, relation]));
+  const relationForId = (relationId: string | undefined) => relationId ? relationshipById.get(relationIdRemaps[relationId] || relationId) : undefined;
+  const defaultRelationFor = (characterId: string) => normalizedRelationships.find((relation) => relation.userIdentityId === defaultIdentityId && relation.characterId === canonical(characterId));
   let migratedMessageCount = 0;
   const messages = input.messages.map((message) => {
+    const scopedRelation = relationForId(message.relationId);
+    if (scopedRelation) {
+      const relationId = scopedRelation.id;
+      const conversationId = scopedRelation.conversationId || getConversationId(relationId);
+      return message.relationId === relationId && message.conversationId === conversationId && message.characterId === scopedRelation.characterId
+        ? message
+        : { ...message, characterId: scopedRelation.characterId, relationId, conversationId };
+    }
     if (message.relationId || input.characters.find((character) => character.id === message.characterId)?.isGroupChat) return message;
     const relation = defaultRelationFor(message.characterId);
     if (!relation) return message;
@@ -82,6 +129,12 @@ export function migrateLegacyRelationshipData(input: RelationshipMigrationInput)
   });
   let migratedMemoryCount = 0;
   const memories = input.memories.map((memory) => {
+    const scopedRelation = relationForId(memory.relationId);
+    if (scopedRelation) {
+      return memory.relationId === scopedRelation.id && memory.characterId === scopedRelation.characterId
+        ? memory
+        : { ...memory, characterId: scopedRelation.characterId, relationId: scopedRelation.id };
+    }
     if (memory.relationId) return memory;
     const relation = defaultRelationFor(memory.characterId);
     if (!relation) return memory;
@@ -90,6 +143,26 @@ export function migrateLegacyRelationshipData(input: RelationshipMigrationInput)
   });
   let migratedStoryCount = 0;
   const offlineStories = input.offlineStories.map((story) => {
+    const scopedRelation = relationForId(story.relationId);
+    if (scopedRelation) {
+      const relationId = scopedRelation.id;
+      const conversationId = scopedRelation.conversationId || getConversationId(relationId);
+      return {
+        ...story,
+        characterId: scopedRelation.characterId,
+        relationId,
+        conversationId,
+        messages: story.messages.map((message) => {
+          const messageRelation = relationForId(message.relationId) || scopedRelation;
+          return {
+            ...message,
+            characterId: messageRelation.characterId,
+            relationId: messageRelation.id,
+            conversationId: messageRelation.conversationId || getConversationId(messageRelation.id),
+          };
+        }),
+      };
+    }
     if (story.relationId || input.characters.find((character) => character.id === story.characterId)?.isGroupChat) return story;
     const relation = defaultRelationFor(story.characterId);
     if (!relation) return story;
@@ -103,5 +176,5 @@ export function migrateLegacyRelationshipData(input: RelationshipMigrationInput)
       messages: story.messages.map((message) => message.relationId ? message : ({ ...message, characterId: relation.characterId, relationId: relation.id, conversationId: relation.conversationId })),
     };
   });
-  return { relationships, messages, memories, offlineStories, createdRelationshipCount, repairedRelationshipCount, migratedMessageCount, migratedMemoryCount, migratedStoryCount };
+  return { relationships: normalizedRelationships, messages, memories, offlineStories, createdRelationshipCount, repairedRelationshipCount, deduplicatedRelationshipCount, relationIdRemaps, migratedMessageCount, migratedMemoryCount, migratedStoryCount };
 }

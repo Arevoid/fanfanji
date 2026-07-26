@@ -134,6 +134,11 @@ export default function AppMemory({
     const characterId = normalizeCharacterId(item.characterId);
     return characterId === item.characterId ? item : { ...item, characterId };
   });
+  const selectedCharacterRelations = Array.from(new Map(
+    relationships
+      .filter((relation) => relation.characterId === normalizeCharacterId(selectedCharacterId))
+      .map((relation) => [`${relation.userIdentityId}\u0000${relation.characterId}`, relation]),
+  ).values());
 
   const filteredMemories = normalizedMemories.filter(item => {
     const matchesChar = selectedCharacterId === "all" || item.characterId === normalizeCharacterId(selectedCharacterId);
@@ -414,7 +419,7 @@ export default function AppMemory({
           {selectedCharacterId !== "all" && (
             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
               <button onClick={() => setSelectedRelationId("all")} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === "all" ? "bg-slate-700 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>全部关系</button>
-              {relationships.filter((relation) => relation.characterId === normalizeCharacterId(selectedCharacterId)).map((relation) => (
+              {selectedCharacterRelations.map((relation) => (
                 <button key={relation.id} onClick={() => setSelectedRelationId(relation.id)} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === relation.id ? "bg-slate-700 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
                   {relation.userIdentityId}
                 </button>

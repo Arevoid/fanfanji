@@ -70,7 +70,11 @@ export default function AppOffline({
     return selectableCharacters[0]?.id || "";
   });
   const activeIdentityId = settings.activeIdentityId || "identity-1";
-  const relationChoices = relationships.filter((relation) => relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId);
+  const relationChoices = Array.from(new Map(
+    relationships
+      .filter((relation) => relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId)
+      .map((relation) => [`${relation.userIdentityId}\u0000${relation.characterId}`, relation]),
+  ).values());
   const [selectedRelationId, setSelectedRelationId] = useState<string>(() => activeChatRelationId || "");
   useEffect(() => {
     const preferred = activeChatRelationId && relationships.some((relation) => relation.id === activeChatRelationId && relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId)
