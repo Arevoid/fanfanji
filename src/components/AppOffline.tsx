@@ -18,6 +18,7 @@ import { OfflineReadingPreferences, OfflineReadingSettings } from "./offline/Off
 import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
+import { AppHeader, ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -179,7 +180,9 @@ export default function AppOffline({
     cardBackground: "#FFFFFF",
   });
   const [activeNodeMenuId, setActiveNodeMenuId] = useState<string | null>(null);
+  const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
   const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
+  const workspaceMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const [isGuidancePanelOpen, setIsGuidancePanelOpen] = useState(false);
   const [guidanceDraft, setGuidanceDraft] = useState({ oneTime: "", ongoing: "" });
   const [settingsWordLimit, setSettingsWordLimit] = useState("");
@@ -534,16 +537,14 @@ export default function AppOffline({
   // Delete individual plot record
   const handleDeleteMessage = (msgId: string) => {
     if (!activeStory) return;
-    if (confirm("确定要删除这段剧情记录吗？")) {
-      const updatedMsgs = activeStory.messages.filter(m => m.id !== msgId);
-      const updatedStory = {
-        ...activeStory,
-        messages: updatedMsgs,
-        updatedAt: Date.now()
-      };
-      saveActiveStorySnapshot(updatedStory);
-      showToast("剧情记录已删除");
-    }
+    const updatedMsgs = activeStory.messages.filter(m => m.id !== msgId);
+    const updatedStory = {
+      ...activeStory,
+      messages: updatedMsgs,
+      updatedAt: Date.now()
+    };
+    saveActiveStorySnapshot(updatedStory);
+    showToast("剧情记录已删除");
   };
 
   // Send message inside workspace
@@ -1238,37 +1239,18 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
             ) : (
               <>
             <header className="offline-workspace-header">
-              <div className="offline-workspace-title-row">
-                <div className="offline-workspace-title-group">
-                  <button onClick={handleExitStoryWorkspace} className="offline-icon-button" aria-label="返回线下故事列表"><ArrowLeft size={21} /></button>
-                  <div className="offline-title-copy">
-                    <h1>{activeStory.title}<span className="offline-mode-label">{activeStory.mode === "director" ? "导演" : activeStory.mode === "if" ? "IF线" : "续写"}</span></h1>
-                    <p>与「{selectedChar.remark || selectedChar.name}」的离线剧本空间</p>
-                  </div>
-                </div>
-                <div className="offline-workspace-menu-anchor">
-                  <button
-                    type="button"
-                    onClick={() => setIsWorkspaceMenuOpen((open) => !open)}
-                    className="offline-icon-button"
-                    aria-label="打开线下剧情菜单"
-                  >
-                    <MoreHorizontal size={21} />
-                  </button>
-                  {isWorkspaceMenuOpen && (
-                    <div className="offline-workspace-menu" role="menu" aria-label="线下剧情菜单">
-                      <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsReadingSettingsOpen(true); }}>
-                        <span className="offline-workspace-menu-icon" aria-hidden="true">Aa</span>
-                        <span>阅读设置</span>
-                      </button>
-                      <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsSettingsOpen(true); }}>
-                        <Settings size={16} />
-                        <span>剧本设置</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <AppHeader
+                title={<>{activeStory.title}<span className="offline-mode-label">{activeStory.mode === "director" ? "导演" : activeStory.mode === "if" ? "IF线" : "续写"}</span></>}
+                subtitle={<>与「{selectedChar.remark || selectedChar.name}」的离线剧本空间</>}
+                left={<IconButton icon={<ArrowLeft size={24} />} variant="surface" onClick={handleExitStoryWorkspace} aria-label="返回线下故事列表" />}
+                right={<>
+                  <IconButton ref={workspaceMenuTriggerRef} icon={<MoreHorizontal size={22} />} variant="surface" onClick={() => setIsWorkspaceMenuOpen((open) => !open)} aria-label="打开线下剧情菜单" />
+                  <PopoverMenu open={isWorkspaceMenuOpen} onClose={() => setIsWorkspaceMenuOpen(false)} anchorRef={workspaceMenuTriggerRef} placement="bottom-end" ariaLabel="线下剧情菜单" className="offline-workspace-menu">
+                    <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsReadingSettingsOpen(true); }}><span className="offline-workspace-menu-icon" aria-hidden="true">Aa</span><span>阅读设置</span></button>
+                    <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsSettingsOpen(true); }}><Settings size={16} /><span>剧本设置</span></button>
+                  </PopoverMenu>
+                </>}
+              />
 
               {activeStory.sourceChatId && (
                 <div className="offline-chat-link-card">
@@ -1315,7 +1297,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     menuOpen={activeNodeMenuId === msg.id}
                     onMenuToggle={() => setActiveNodeMenuId((current) => current === msg.id ? null : msg.id)}
                     onEdit={() => { setActiveNodeMenuId(null); handleStartEdit(msg.id, msg.content); }}
-                    onDelete={() => { setActiveNodeMenuId(null); handleDeleteMessage(msg.id); }}
+                    onDelete={() => { setActiveNodeMenuId(null); setPendingDeleteMessageId(msg.id); }}
                     onGuidance={() => { setActiveNodeMenuId(null); setIsGuidancePanelOpen(true); }}
                   />;
                 })}
@@ -1327,13 +1309,15 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
 
             <div className="offline-composer-wrap">
               <form onSubmit={(event) => { event.preventDefault(); handleSendMessage(undefined, !inputText.trim()); }} className="offline-composer">
-                <input
+                <Input
                   type="text"
                   value={inputText}
                   onChange={(event) => setInputText(event.target.value)}
                   placeholder={activeStory.mode === "director" ? "继续写下去，或留下这一幕的方向…" : "继续写下去…"}
+                  className="offline-composer-input"
+                  inputClassName="offline-composer-input-field"
                 />
-                <button type="submit" disabled={isGenerating} aria-label="发送并继续剧情"><Send size={17} /></button>
+                <IconButton type="submit" disabled={isGenerating} aria-label="发送并继续剧情" icon={<Send size={17} />} className="offline-composer-submit" />
               </form>
             </div>
               </>
@@ -1374,6 +1358,19 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
           onSave={() => handleSaveEdit(editingMessage.id)}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingDeleteMessageId !== null}
+        title="删除当前剧情节点？"
+        description="删除后无法恢复这一段剧情文字。"
+        tone="danger"
+        confirmLabel="删除"
+        onClose={() => setPendingDeleteMessageId(null)}
+        onConfirm={() => {
+          if (pendingDeleteMessageId) handleDeleteMessage(pendingDeleteMessageId);
+          setPendingDeleteMessageId(null);
+        }}
+      />
 
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>

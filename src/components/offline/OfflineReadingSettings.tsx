@@ -1,4 +1,5 @@
-import { Palette, SlidersHorizontal, Type, X } from "lucide-react";
+import { Palette, SlidersHorizontal, Type } from "lucide-react";
+import { BottomSheet, Input } from "../../components/ui";
 
 export type OfflineReadingPreferences = {
   fontSize: number;
@@ -36,42 +37,19 @@ function isColorValue(value: string) {
   return /^#[\da-fA-F]{3,8}$/.test(value.trim()) || /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|0?\.\d+|1))?\s*\)$/.test(value.trim());
 }
 
-function ColorControl({
-  title,
-  value,
-  onChange,
-}: {
-  title: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
+function ColorControl({ title, value, onChange }: { title: string; value: string; onChange: (value: string) => void }) {
   const update = (nextValue: string) => {
     if (isColorValue(nextValue)) onChange(nextValue.trim());
   };
+  const isHex = value.startsWith("#");
 
   return (
     <section className="offline-reading-color-section">
       <div className="offline-reading-color-title"><Palette size={16} /><span>{title}</span></div>
       <div className="offline-reading-color-preview" style={{ backgroundColor: value }} aria-label={`${title}当前预览`} />
       <div className="offline-reading-color-inputs">
-        <label>
-          <span>HEX</span>
-          <input
-            type="text"
-            defaultValue={value.startsWith("#") ? value : ""}
-            placeholder="#1D1D1F"
-            onChange={(event) => update(event.target.value)}
-          />
-        </label>
-        <label>
-          <span>RGB</span>
-          <input
-            type="text"
-            defaultValue={value.startsWith("rgb") ? value : ""}
-            placeholder="rgb(29,29,31)"
-            onChange={(event) => update(event.target.value)}
-          />
-        </label>
+        <label><span>HEX</span><Input type="text" value={isHex ? value : ""} placeholder="#1D1D1F" onChange={(event) => update(event.target.value)} /></label>
+        <label><span>RGB</span><Input type="text" value={!isHex ? value : ""} placeholder="rgb(29,29,31)" onChange={(event) => update(event.target.value)} /></label>
       </div>
       <p>支持 HEX 或 RGB，输入合法颜色后即时预览。</p>
     </section>
@@ -79,43 +57,19 @@ function ColorControl({
 }
 
 export function OfflineReadingSettings({ value, onChange, onClose }: OfflineReadingSettingsProps) {
-  const update = <T extends keyof OfflineReadingPreferences>(field: T, nextValue: OfflineReadingPreferences[T]) => {
-    onChange({ ...value, [field]: nextValue });
-  };
+  const update = <T extends keyof OfflineReadingPreferences>(field: T, nextValue: OfflineReadingPreferences[T]) => onChange({ ...value, [field]: nextValue });
 
   return (
-    <div className="offline-reading-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="offline-reading-panel" role="dialog" aria-modal="true" aria-label="阅读设置" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="offline-panel-handle" />
-        <header className="offline-panel-header">
-          <div>
-            <p className="offline-panel-eyebrow">READING</p>
-            <h2>阅读设置</h2>
-          </div>
-          <button type="button" className="offline-icon-button" onClick={onClose} aria-label="关闭阅读设置"><X size={20} /></button>
-        </header>
-
-        <div className="offline-reading-panel-content">
-          {RANGE_SETTINGS.map(({ field, title, icon: Icon, min, max, step, format }) => (
-            <section className="offline-reading-range-row" key={field}>
-              <div className="offline-reading-range-heading"><span><Icon size={16} />{title}</span><output>{format(value[field])}</output></div>
-              <input
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={value[field]}
-                onChange={(event) => update(field, Number(event.target.value))}
-                aria-label={title}
-              />
-              <div className="offline-reading-range-endpoints"><span>{format(min)}</span><span>{format(max)}</span></div>
-            </section>
-          ))}
-
-          <ColorControl title="文字颜色" value={value.textColor} onChange={(nextValue) => update("textColor", nextValue)} />
-          <ColorControl title="卡片背景" value={value.cardBackground} onChange={(nextValue) => update("cardBackground", nextValue)} />
-        </div>
-      </section>
-    </div>
+    <BottomSheet open title="阅读设置" description="调整当前剧情的阅读呈现。" onClose={onClose} showCloseButton ariaLabel="阅读设置" className="offline-reading-sheet" contentClassName="offline-reading-panel-content">
+      {RANGE_SETTINGS.map(({ field, title, icon: Icon, min, max, step, format }) => (
+        <section className="offline-reading-range-row" key={field}>
+          <div className="offline-reading-range-heading"><span><Icon size={16} />{title}</span><output>{format(value[field])}</output></div>
+          <input type="range" min={min} max={max} step={step} value={value[field]} onChange={(event) => update(field, Number(event.target.value))} aria-label={title} />
+          <div className="offline-reading-range-endpoints"><span>{format(min)}</span><span>{format(max)}</span></div>
+        </section>
+      ))}
+      <ColorControl title="文字颜色" value={value.textColor} onChange={(nextValue) => update("textColor", nextValue)} />
+      <ColorControl title="卡片背景" value={value.cardBackground} onChange={(nextValue) => update("cardBackground", nextValue)} />
+    </BottomSheet>
   );
 }
