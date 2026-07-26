@@ -1080,13 +1080,21 @@ export default function AppChat({
     setActiveChatRelationId(null);
   };
 
-  // Never leave an old identity's private thread open after switching profiles.
+  // Never leave an old identity's direct or group thread open after switching
+  // profiles. Otherwise the next profile can temporarily render and act on
+  // the previous profile's relation-scoped history.
   useEffect(() => {
-    if (activeChatCharId && activeCharacter && activeCharacter.isGroupChat && !belongsToActiveIdentity(activeCharacter.ownerIdentityId)) {
+    const isForeignDirectRelation = Boolean(
+      activeRelationship && !activeCharacter?.isGroupChat && activeRelationship.userIdentityId !== activeIdentityId,
+    );
+    const isForeignGroup = Boolean(
+      activeChatCharId && activeCharacter?.isGroupChat && !belongsToActiveIdentity(activeCharacter.ownerIdentityId),
+    );
+    if (isForeignDirectRelation || isForeignGroup) {
       setActiveChatCharId(null);
       setActiveChatRelationId(null);
     }
-  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId, activeCharacter?.isGroupChat]);
+  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId, activeCharacter?.isGroupChat, activeRelationship?.id, activeRelationship?.userIdentityId]);
 
   useEffect(() => {
     if (activeChatCharId && (!activeCharacter || activeCharacter.isContactInstance)) {

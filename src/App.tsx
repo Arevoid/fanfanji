@@ -17,7 +17,7 @@ import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/Mem
 import { migrateLegacyCharacterIdentityData } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
-import { getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import { DEFAULT_IDENTITY_ID, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory } from "./types";
 import { 
   AlbumWidget, 
@@ -706,10 +706,13 @@ export default function App() {
       messages,
       memories,
       offlineStories,
-      defaultIdentityId: settings.activeIdentityId || "identity-1",
+      // Legacy records predate identity-scoped relationships. They always
+      // belong to the historical primary identity, never whichever identity
+      // happens to be active when the app starts.
+      defaultIdentityId: DEFAULT_IDENTITY_ID,
       now: Date.now(),
     });
-    if (result.createdRelationshipCount) setRelationships(result.relationships);
+    if (result.createdRelationshipCount || result.repairedRelationshipCount) setRelationships(result.relationships);
     if (result.migratedMessageCount) setMessages(result.messages);
     if (result.migratedMemoryCount) setMemories(result.memories);
     if (result.migratedStoryCount) setOfflineStories(result.offlineStories);
