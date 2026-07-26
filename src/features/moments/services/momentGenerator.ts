@@ -1,6 +1,6 @@
 import type { Character, MemoryItem, Moment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
-import { stripMomentVoiceMarkup } from "./momentContent";
+import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "./momentContent";
 import {
   claimCharacterMomentGeneration,
   completeCharacterMomentGeneration,
@@ -24,7 +24,7 @@ export async function requestCharacterMoment(input: {
   const now = input.now || Date.now;
   const random = input.random || Math.random;
   const cleanedContent = stripMomentVoiceMarkup(response.text).trim().replace(/^["'“‘]+|["'”’]+$/g, "").trim();
-  const parsed = input.parseContent(cleanedContent);
+  const parsed = input.parseContent(sanitizeMomentPublishText(cleanedContent));
   let image: string | undefined;
   if (!parsed.imageDescription && input.character.album?.length && random() < 0.4) {
     image = input.character.album[Math.floor(random() * input.character.album.length)];

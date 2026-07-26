@@ -9,7 +9,7 @@ import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, User
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { collectOfflineHandoffContent, createOfflineStoryHandoffMemory, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
+import { collectOfflineHandoffContent, createOfflineStoryHandoffMemory, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 import "./offline/offlineStory.css";
@@ -17,6 +17,7 @@ import { OfflineGuidancePanel } from "./offline/OfflineGuidancePanel";
 import { OfflineReadingPreferences, OfflineReadingSettings } from "./offline/OfflineReadingSettings";
 import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
+import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -52,11 +53,13 @@ export default function AppOffline({
   activeChatCharId = null,
   worldBookEntries = []
 }: AppOfflineProps) {
+  const selectableCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
+  const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
   const [selectedCharId, setSelectedCharId] = useState<string>(() => {
-    if (activeChatCharId && characters.some(c => c.id === activeChatCharId)) {
+    if (activeChatCharId && selectableCharacters.some(c => c.id === activeChatCharId)) {
       return activeChatCharId;
     }
-    return characters[0]?.id || "";
+    return selectableCharacters[0]?.id || "";
   });
   const [activeStory, setActiveStory] = useState<OfflineStory | null>(null);
   const activeStoryRef = useRef<OfflineStory | null>(null);
@@ -94,6 +97,18 @@ export default function AppOffline({
     activeStoryRef.current = null;
     setActiveStory(null);
   };
+
+  // A deleted archive profile may leave historical story records behind. Keep
+  // those records intact, but do not leave the deleted character selectable or
+  // an orphaned story open as an active workspace.
+  useEffect(() => {
+    if (selectedCharId && !selectableCharacterIds.has(selectedCharId)) {
+      setSelectedCharId(selectableCharacters[0]?.id || "");
+    }
+    if (activeStoryRef.current && !selectableCharacterIds.has(activeStoryRef.current.characterId)) {
+      clearActiveStorySnapshot();
+    }
+  }, [characters, selectedCharId, activeStory?.id]);
   
   // Toast notifications
   const [toast, setToast] = useState("");
@@ -295,8 +310,6 @@ export default function AppOffline({
     localStorage.setItem(`offline_story_id_${story.characterId}`, story.id);
   };
 
-  const hasUnsyncedOnlineProgress = hasUnsyncedOfflineMemoryProgress;
-
   const clearOfflineSession = (story: OfflineStory) => {
     localStorage.removeItem(`offline_story_id_${story.characterId}`);
     localStorage.setItem(`offline_mode_active_${story.characterId}`, "false");
@@ -304,13 +317,12 @@ export default function AppOffline({
 
   // Exit story workspace back to list
   const handleExitStoryWorkspace = async () => {
-    // Online continuations always archive their newly-written plot immediately
-    // on exit, so the next online reply can continue the same topic.
+    // Only an explicitly linked online continuation may write a handoff on
+    // exit. Director and IF stories remain isolated, even when they imported
+    // chat history as writing reference.
     const latestStory = activeStoryRef.current;
     let completedStory = latestStory;
-    if (latestStory
-      && (latestStory.sourceChatId || latestStory.mode === "continue")
-      && hasUnsyncedOnlineProgress(latestStory)) {
+    if (latestStory && shouldAutoSyncOnlineContinuation(latestStory)) {
       completedStory = await handleSyncMemoryToBrain(latestStory);
     }
     if (completedStory) clearOfflineSession(completedStory);
@@ -414,8 +426,8 @@ export default function AppOffline({
   // Sync memory manually
   const handleSyncMemoryToBrain = async (story: OfflineStory): Promise<OfflineStory> => {
     if (memorySyncInFlightRef.current.has(story.id)) return story;
+    if (!hasUnsyncedOfflineMemoryProgress(story)) return story;
     const sourceMessages = getOfflineMemorySourceMessages(story);
-    if (!hasUnsyncedOnlineProgress(story)) return story;
 
     const character = characters.find((item) => item.id === story.characterId);
     if (!character || character.isGroupChat) {
@@ -854,7 +866,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
             <div className="p-3 bg-white border-b border-slate-100">
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">选择人物剧本空间</p>
               <div className="flex items-center gap-3 overflow-x-auto pb-1 no-scrollbar">
-                {characters.map(char => {
+                {selectableCharacters.map(char => {
                   const isSel = char.id === selectedCharId;
                   const charStoriesCount = offlineStories.filter(s => s.characterId === char.id).length;
                   return (
@@ -1261,7 +1273,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     const latestStory = activeStoryRef.current;
                     if (!latestStory) return;
                     let completedStory = latestStory;
-                    if (hasUnsyncedOnlineProgress(latestStory)) completedStory = await handleSyncMemoryToBrain(latestStory);
+                    if (shouldAutoSyncOnlineContinuation(latestStory)) completedStory = await handleSyncMemoryToBrain(latestStory);
                     clearOfflineSession(completedStory);
                     clearActiveStorySnapshot();
                     setIsSettingsOpen(false);

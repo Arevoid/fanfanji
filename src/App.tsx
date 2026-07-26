@@ -1534,6 +1534,8 @@ export default function App() {
       setCharacters((prev) => prev.filter((c) => c.id !== id));
       setMessages((prev) => prev.filter((m) => m.characterId !== id));
       setMoments((prev) => prev.filter((m) => m.characterId !== id));
+      setActiveChatCharId((current) => current === id ? null : current);
+      setGlobalNotification((current) => current?.characterId === id ? null : current);
     }
   };
 

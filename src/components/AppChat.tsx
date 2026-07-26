@@ -22,7 +22,8 @@ import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
-import { formatCharacterKnowledgeBoundary } from "../domain/prompt/characterKnowledgeBoundary";
+import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
+import { getAvailableCanonicalCharacterIds, pruneUnavailableCharacterRelations, resolveCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
 import { ChatTopBar } from "../features/chat/components/ChatTopBar";
@@ -39,7 +40,7 @@ import { MomentsApp } from "../features/moments/MomentsApp";
 import { requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
-import { stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
+import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
 import {
   MessageSquare,
   Users,
@@ -1006,9 +1007,28 @@ export default function AppChat({
     }
   }, [friendIds]);
 
-  const friends = characters.filter((c) =>
-    friendIds.includes(c.id) && !c.isGroupChat && belongsToActiveIdentity(c.ownerIdentityId)
-  );
+  // Contacts reference their archive profile instead of creating a copied
+  // Character. Resolve legacy contact copies to the same source profile.
+  const resolvedFriendIds = resolveCanonicalCharacterIds(friendIds, characters);
+  const availableCharacterIds = getAvailableCanonicalCharacterIds(characters);
+  const directCharacters = characters.filter((character) => !character.isGroupChat);
+  const isFriendCharacter = (character: Character) => {
+    return !character.isGroupChat
+      && !character.isContactInstance
+      && availableCharacterIds.has(character.id)
+      && belongsToActiveIdentity(character.ownerIdentityId)
+      && resolvedFriendIds.has(character.id);
+  };
+  const friends = characters.filter(isFriendCharacter);
+
+  // Archive deletion may leave a legacy contact ID in local storage. Remove
+  // only that relationship reference; old messages/stories remain untouched.
+  useEffect(() => {
+    setFriendIds((previous) => {
+      const next = pruneUnavailableCharacterRelations(previous, directCharacters);
+      return next.length === previous.length ? previous : next;
+    });
+  }, [characters, availableCharacterIds]);
 
   const handleDeleteFriend = () => {
     if (!activeCharacter || activeCharacter.isGroupChat || !onDeleteCharacter) return;
@@ -1044,6 +1064,12 @@ export default function AppChat({
       setActiveChatCharId(null);
     }
   }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId]);
+
+  useEffect(() => {
+    if (activeChatCharId && (!activeCharacter || activeCharacter.isContactInstance)) {
+      setActiveChatCharId(null);
+    }
+  }, [activeChatCharId, activeCharacter, setActiveChatCharId]);
 
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
@@ -2479,6 +2505,7 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
       }
 
       assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
+      assembledInstructions.push(formatOnlineChatSpatialBoundary());
       assembledInstructions.push(CHARACTER_MEDIA_USAGE_RULES);
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
@@ -3384,6 +3411,7 @@ ${timeLogString}
       }
 
       assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
+      assembledInstructions.push(formatOnlineChatSpatialBoundary());
       assembledInstructions.push(CHARACTER_MEDIA_USAGE_RULES);
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
@@ -4274,7 +4302,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
       ownerIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
-      content: stripMomentVoiceMarkup(input.content).trim(),
+      content: sanitizeMomentPublishText(input.content),
       timestamp: Date.now(),
       likes: [],
       comments: [],
@@ -4282,6 +4310,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
       imageType: input.image ? "photo" : (input.imageDescription.trim() ? "text" : undefined),
       imageDescription: input.imageDescription.trim() || undefined,
     };
+    if (!newMo.content && !newMo.image && !newMo.imageDescription) {
+      showToast("朋友圈不支持聊天表情包，请发布文字或图片内容");
+      return;
+    }
     onAddMoment(newMo);
     handleAutoCommentOnUserMoment(newMo);
   };
@@ -4319,7 +4351,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         const isActive = char.id === activeChatCharId;
         return hasMessages || isInitiated || isActive;
       }
-      if (!friendIds.includes(char.id)) return false;
+      if (!isFriendCharacter(char)) return false;
       const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
       const hasMessages = threadMsgs.length > 0;
       const isInitiated = initiatedChatIds.includes(char.id);
@@ -8890,22 +8922,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           <button
                             onClick={() => {
                               const sourceId = char.profileSourceId || char.id;
-                              const contactId = `contact-${activeIdentityId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-                              // Contacts are copies bound to one user identity. This allows the
-                              // same archive profile to be independently added by another identity.
-                              onSaveCharacter({
-                                ...char,
-                                id: contactId,
-                                ownerIdentityId: activeIdentityId,
-                                isContactInstance: true,
-                                profileSourceId: sourceId,
-                                isPinned: false,
-                                isGroupChat: false,
-                                memberIds: undefined,
-                                lastActiveTime: undefined,
-                                scheduledProactiveTime: undefined,
-                              });
-                              setFriendIds((prev) => [...prev, contactId]);
+                              // A friend is a relationship to the existing archive profile,
+                              // never a copied Character with a second ID.
+                              setFriendIds((prev) => prev.includes(sourceId) ? prev : [...prev, sourceId]);
                             }}
                             className="px-2.5 py-1 bg-neutral-950 hover:bg-neutral-900 text-white rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
                           >

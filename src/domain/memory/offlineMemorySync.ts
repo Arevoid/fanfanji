@@ -100,6 +100,21 @@ export function hasUnsyncedOfflineMemoryProgress(story: OfflineStory): boolean {
 }
 
 /**
+ * Only a story deliberately opened as a continuation of an online chat may
+ * feed its new facts back into that chat's memory. Director and IF stories can
+ * import history as reference, but remain independent branches by design.
+ */
+export function isOnlineContinuationStory(story: OfflineStory): boolean {
+  return story.mode === "continue"
+    && Boolean(story.sourceChatId)
+    && Boolean(story.sourceChatMsgCount || story.importedContext?.messages.length);
+}
+
+export function shouldAutoSyncOnlineContinuation(story: OfflineStory): boolean {
+  return isOnlineContinuationStory(story) && hasUnsyncedOfflineMemoryProgress(story);
+}
+
+/**
  * Keeps a concise, deterministic handoff when AI extraction has no result or
  * is unavailable. The marker is intentionally shared with the online prompt's
  * immediate-return handoff check.

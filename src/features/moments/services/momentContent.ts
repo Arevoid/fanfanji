@@ -11,9 +11,17 @@ export const stripMomentVoiceMarkup = (content: string) => content
   .replace(/\[(?:语音|voice)\s*:\s*([^\]\n]+?)\s*\(\s*\d+(?:秒|s)\s*\)\]/gi, "$1")
   .replace(/\[(?:语音|voice)\s*:\s*"([^"]+)"\]/gi, "$1");
 
+/** Removes chat-only sticker markup while preserving ordinary Unicode emoji. */
+export const stripMomentStickerMarkup = (content: string) => content
+  .replace(/\[(?:表情包|表情|贴纸|sticker|emoji[-\s]?sticker)(?:\s*[|:：][^\]\n]*)?\]\s*/gi, "");
+
+/** Normalizes user publishing input at the Moments feature boundary. */
+export const sanitizeMomentPublishText = (content: string) =>
+  stripMomentStickerMarkup(stripMomentVoiceMarkup(content)).trim();
+
 /** Normalizes legacy generated Moment text without changing persisted data. */
 export const cleanAndExtractMoment = (content: string) => {
-  let cleanContent = stripMomentVoiceMarkup(content).trim();
+  let cleanContent = sanitizeMomentPublishText(content);
   const selfComments: string[] = [];
   let imageDescription: string | undefined;
 
