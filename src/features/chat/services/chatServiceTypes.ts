@@ -9,6 +9,8 @@ export interface ReplyCandidateContext {
   disableBracketActions: boolean;
   keepPeriods: boolean;
   characterId: string;
+  relationId?: string;
+  conversationId?: string;
   createId: (index: number) => string;
   currentTime: (index: number) => number;
   transformBubble?: (bubbleText: string, index: number) => string;

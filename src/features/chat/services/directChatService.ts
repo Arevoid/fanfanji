@@ -11,6 +11,8 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
     messages: bubbles.map((bubbleText, index) => createCharacterTextMessage({
       id: context.createId(index),
       characterId: context.characterId,
+      relationId: context.relationId,
+      conversationId: context.conversationId,
       content: context.transformBubble ? context.transformBubble(bubbleText, index) : bubbleText,
       timestamp: context.currentTime(index),
     })),

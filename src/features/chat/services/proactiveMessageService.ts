@@ -9,6 +9,8 @@ export async function generateProactiveReplyCandidates(input: {
   requestAi: typeof apiChat;
   request: AiChatRequest;
   characterId: string;
+  relationId?: string;
+  conversationId?: string;
   disableBracketActions: boolean;
   keepPeriods: boolean;
   createId: (index: number) => string;
@@ -22,7 +24,10 @@ export async function generateProactiveReplyCandidates(input: {
   return {
     data,
     messages: bubbles.map((bubbleText, index) => createCharacterTextMessage({
-      id: input.createId(index), characterId: input.characterId,
+      id: input.createId(index),
+      characterId: input.characterId,
+      relationId: input.relationId,
+      conversationId: input.conversationId,
       content: input.transformBubble ? input.transformBubble(bubbleText, index) : bubbleText,
       timestamp: input.currentTime(index),
     })),

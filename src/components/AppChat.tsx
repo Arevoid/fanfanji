@@ -1281,7 +1281,7 @@ export default function AppChat({
     // the whole configured context window so the offline scene has a real handoff.
     const contextLimit = activeCharacter.contextMemoryLimit || 20;
     const recentOnlineMessages = messages
-      .filter((item) => item.characterId === activeChatCharId && !item.isOffline)
+      .filter((item) => isMessageInActiveConversation(item) && !item.isOffline)
       .slice(-contextLimit * 2);
     const sourceMessages = recentOnlineMessages.length > 0 ? recentOnlineMessages : [msg];
     const snapshotTimestamp = Date.now();
@@ -1294,7 +1294,11 @@ export default function AppChat({
     const importedContext: OfflineStory["importedContext"] = {
       messages: importedMessages,
       memories: memories
-        .filter((memory) => memory.characterId === activeChatCharId || offlineParticipantSet.has(memory.characterId))
+        .filter((memory) => (
+          memory.relationId
+            ? memory.relationId === activeRelationId
+            : memory.characterId === activeChatCharId || offlineParticipantSet.has(memory.characterId)
+        ))
         .map((memory) => memory.content),
       worldBook: getLatestWorldBookEntries(worldBookEntries || [])
         .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId))
@@ -1305,6 +1309,7 @@ export default function AppChat({
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: activeChatCharId,
+      relationId: activeRelationId,
       // A group is only a container; the actual offline actors are its members.
       characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
       title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
@@ -1687,6 +1692,8 @@ export default function AppChat({
         const charMsg: Message = {
           id: `msg-greeting-${Date.now()}`,
           characterId: activeChatCharId,
+          relationId: activeRelationId,
+          conversationId: activeChatCharId,
           sender: "character",
           content: activeCharacter.greeting!.trim(),
           timestamp: Date.now(),
@@ -1895,6 +1902,8 @@ export default function AppChat({
     onSendMessageRaw({
       id: `call-record-${Date.now()}`,
       characterId: activeChatCharId,
+      relationId: activeRelationId,
+      conversationId: activeChatCharId,
       sender: "user",
       content: `[通话记录]|语音通话|${mins}:${secs}|${encodeURIComponent(JSON.stringify(callTranscript))}`,
       timestamp: Date.now(),
@@ -2179,6 +2188,8 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
         const claimNotification: Message = {
           id: `claim-notification-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           characterId: activeChatCharId,
+          relationId: activeRelationId,
+          conversationId: activeChatCharId,
           sender: "character",
           content: `${partnerName}已拆开并领受了你的红包`,
           timestamp: Date.now(),
@@ -2195,6 +2206,8 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
         ? callTranscript.map((item) => ({
             id: item.id,
             characterId: activeChatCharId,
+            relationId: activeRelationId,
+            conversationId: activeChatCharId,
             sender: item.sender,
             content: item.content,
             timestamp: item.timestamp,
@@ -2372,7 +2385,10 @@ ${activeCharacter.disableBracketActions
       // handoff. Surface the newest one on the immediate return to online chat,
       // even when a short greeting is too vague for semantic retrieval.
       const latestOfflineContinuationMemory = [...(memories || [])]
-        .filter((memory) => memory.characterId === activeChatCharId && memory.content.includes("offline-story:"))
+        .filter((memory) => (
+          memory.content.includes("offline-story:")
+          && (memory.relationId ? memory.relationId === activeRelationId : memory.characterId === activeChatCharId)
+        ))
         .sort((a, b) => b.timestamp - a.timestamp)[0];
       const isFreshOfflineHandoff = latestOfflineContinuationMemory
         // The handoff must be newer than the last online message. This keeps an
@@ -2694,6 +2710,8 @@ ${stickerListStr}
             newMsgs = paragraphs.map((para, pIdx) => ({
               id: `offline-reply-${Date.now()}-${pIdx}-${Math.random().toString(36).substr(2, 5)}`,
               characterId: activeChatCharId,
+              relationId: activeRelationId,
+              conversationId: activeChatCharId,
               sender: "character",
               content: para,
               timestamp: Date.now() + pIdx,
@@ -2708,6 +2726,8 @@ ${stickerListStr}
             newMsgs = [{
               id: (Date.now() + 1).toString(),
               characterId: activeChatCharId,
+              relationId: activeRelationId,
+              conversationId: activeChatCharId,
               sender: "character",
               content: finalContent,
               timestamp: Date.now(),
@@ -2752,6 +2772,8 @@ ${stickerListStr}
             disableBracketActions: activeCharacter.disableBracketActions || false,
             keepPeriods,
             characterId: activeChatCharId,
+            relationId: activeRelationId,
+            conversationId: activeChatCharId,
             createId: (idx) => `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
             currentTime: () => Date.now(),
             transformBubble: (bubbleText, idx) => {
@@ -2841,6 +2863,8 @@ ${stickerListStr}
         const errMsg: Message = {
           id: (Date.now() + 1).toString(),
           characterId: activeChatCharId,
+          relationId: activeRelationId,
+          conversationId: activeChatCharId,
           sender: "character",
           content: `⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`,
           timestamp: Date.now(),
@@ -2860,6 +2884,8 @@ ${stickerListStr}
       const errMsg: Message = {
         id: (Date.now() + 1).toString(),
         characterId: activeChatCharId,
+        relationId: activeRelationId,
+        conversationId: activeChatCharId,
         sender: "character",
         content: isQuotaOrKeyError 
           ? `⚠️ [连接错误]：智能体响应失败 (${errMsgStr})。请检查 API Key 是否正确、是否过期或余额不足。`
@@ -2877,6 +2903,8 @@ ${stickerListStr}
     const userMsg = createUserTextMessage({
       id: Date.now().toString(),
       characterId: activeChatCharId,
+      relationId: activeRelationId,
+      conversationId: activeChatCharId,
       content: contentString,
       timestamp: Date.now(),
     });
@@ -2892,6 +2920,8 @@ ${stickerListStr}
     const charRedPacketMsg: Message = {
       id: `char-rp-${Date.now()}`,
       characterId: activeChatCharId,
+      relationId: activeRelationId,
+      conversationId: activeChatCharId,
       sender: "character",
       content: `[红包]|${amount}|${greeting}`,
       timestamp: Date.now(),
@@ -2930,6 +2960,8 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
         const textMsg: Message = {
           id: `char-rp-text-${Date.now()}`,
           characterId: activeChatCharId,
+          relationId: activeRelationId,
+          conversationId: activeChatCharId,
           sender: "character",
           content: cleanedText || data.text,
           timestamp: Date.now() + 100,
@@ -3529,6 +3561,8 @@ ${stickerListStr}
           disableBracketActions: activeCharacter.disableBracketActions || false,
           keepPeriods,
           characterId: activeChatCharId,
+          relationId: activeRelationId,
+          conversationId: activeChatCharId,
           createId: (idx) => `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
           currentTime: (idx) => Date.now() + idx,
         });
@@ -3821,6 +3855,8 @@ ${proactivePrompt}`;
         requestAi: apiChat,
         request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
         characterId: activeChatCharId,
+        relationId: activeRelationId,
+        conversationId: activeChatCharId,
         disableBracketActions: activeCharacter.disableBracketActions || false,
         keepPeriods,
         createId: (idx) => `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
@@ -3901,7 +3937,12 @@ ${proactivePrompt}`;
         instructionsPrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
-      const charMsgs = messagesRef.current.filter(m => m.characterId === charId);
+      const friendRelationId = deriveRelationId(friend, friend.ownerIdentityId || activeIdentityId);
+      const charMsgs = messagesRef.current.filter((message) => isMessageInConversationRelation(message, {
+        characterId: charId,
+        relationId: friendRelationId,
+        allowLegacyCharacterMessages: Boolean(friend.isContactInstance),
+      }));
       const recentConversation = analyzeRecentConversation(charMsgs, charId);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
@@ -3951,6 +3992,8 @@ ${instructionsPrompt}`;
         requestAi: apiChat,
         request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
         characterId: charId,
+        relationId: friendRelationId,
+        conversationId: charId,
         disableBracketActions: friend.disableBracketActions || false,
         keepPeriods,
         createId: (idx) => `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
@@ -9434,6 +9477,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   const oocMemory: MemoryItem = {
                     id: "ooc-" + Date.now(),
                     characterId: activeChatCharId || "",
+                    relationId: activeRelationId,
                     content: `[OOC 修正记录] 原回答：“${showOocCommentModal.content}” 被指出不符合人设。用户修正意见：${oocCommentText.trim()}`,
                     timestamp: Date.now(),
                     importance: 8,
