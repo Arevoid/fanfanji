@@ -1,6 +1,6 @@
 import type { Character, MomentComment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
-import { stripMomentVoiceMarkup } from "./momentContent";
+import { sanitizeMomentPublishText } from "./momentContent";
 import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
 
 type ChatRequest = Parameters<typeof apiChat>[0];
@@ -20,7 +20,7 @@ export async function requestMomentCommentReply(input: {
   if (!response?.text) return undefined;
   const now = input.now || Date.now;
   const random = input.random || Math.random;
-  let content = stripMomentVoiceMarkup(input.cleanText(response.text.trim())).replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+  let content = sanitizeMomentPublishText(input.cleanText(response.text.trim())).replace(/^["'“‘]+|["'”’]+$/g, "").trim();
   content = content.replace(/^回复\s*[\(（].*?[\)）]\s*[:：]\s*/, "").replace(/^回复\s*.*?\s*[:：]\s*/, "");
   if (input.temporalContext && findMomentTemporalConflicts(content, input.temporalContext, input.character).length > 0) {
     console.warn("[moments] Rejected temporally inconsistent generated reply.");

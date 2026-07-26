@@ -4287,14 +4287,18 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
   const handlePublishMoment = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!momentInputText.trim() && !momentAttachedImage && !momentTextImageDescription.trim()) return;
+    const content = sanitizeMomentPublishText(momentInputText);
+    if (!content && !momentAttachedImage && !momentTextImageDescription.trim()) {
+      showToast("朋友圈不支持聊天表情包，请发布文字或图片内容");
+      return;
+    }
 
     const newMo: Moment = {
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
-      content: stripMomentVoiceMarkup(momentInputText).trim(),
+      content,
       timestamp: Date.now(),
       likes: [],
       comments: [],
@@ -4332,7 +4336,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
     const replyingTo = replyingToCommentMap[momentId];
     const prefix = replyingTo ? `回复${replyingTo.authorName}：` : "";
-    const finalContent = `${prefix}${stripMomentVoiceMarkup(text).trim()}`;
+    const finalContent = `${prefix}${sanitizeMomentPublishText(text)}`;
+    if (!finalContent.trim()) return;
 
     const newComment: MomentComment = {
       id: Date.now().toString(),
@@ -4383,11 +4388,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
   const publishMomentCommentFromFeature = (momentId: string, text: string, replyingTo?: MomentComment) => {
     const prefix = replyingTo ? `回复${replyingTo.authorName}：` : "";
+    const content = `${prefix}${sanitizeMomentPublishText(text)}`;
+    if (!content.trim()) return;
     const newComment: MomentComment = {
       id: Date.now().toString(),
       authorName: settings.name,
       authorAvatar: settings.avatar,
-      content: `${prefix}${stripMomentVoiceMarkup(text).trim()}`,
+      content,
       timestamp: Date.now(),
     };
     onAddCommentToMoment(momentId, newComment);
