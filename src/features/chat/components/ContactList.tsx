@@ -2,10 +2,12 @@ import type { ReactNode } from "react";
 import { Users } from "lucide-react";
 import type { Character } from "../../../types";
 
+export interface ContactListItem { id: string; character: Character; subtitle?: string; }
+
 interface ContactListProps {
   header: ReactNode;
-  contacts: readonly Character[];
-  onSelect: (characterId: string) => void;
+  contacts: readonly ContactListItem[];
+  onSelect: (relationId: string) => void;
 }
 
 export function ContactList({ header, contacts, onSelect }: ContactListProps) {
@@ -23,13 +25,14 @@ export function ContactList({ header, contacts, onSelect }: ContactListProps) {
           </p>
         </div>
       ) : (
-        contacts.map((character) => (
-          <div key={character.id} onClick={() => onSelect(character.id)} className="flex items-center p-3 hover:bg-slate-50 cursor-pointer transition-colors">
+        contacts.map(({ id, character, subtitle }) => (
+          <div key={id} onClick={() => onSelect(id)} className="flex items-center p-3 hover:bg-slate-50 cursor-pointer transition-colors">
             <img src={character.avatar} alt={character.name} className="w-10 h-10 rounded-full object-cover mr-3 bg-slate-100 border border-slate-100 shrink-0 aspect-square" referrerPolicy="no-referrer" />
             <div className="flex-1 min-w-0">
               <h4 className="text-xs font-bold text-slate-800 truncate">
                 {character.remark || character.name}
                 {character.remark && <span className="text-[10px] font-normal text-slate-400 ml-1.5">({character.name})</span>}
+                {subtitle && <span className="text-[10px] font-normal text-slate-400 ml-1.5">{subtitle}</span>}
               </h4>
             </div>
           </div>

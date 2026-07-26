@@ -28,6 +28,7 @@ export async function extractMemories(
   const candidate: MemoryItem = {
     id: context.createId(),
     characterId: context.characterId,
+    ...(context.relationId ? { relationId: context.relationId } : {}),
     content: context.formatContent(validItems),
     timestamp: context.currentTime(),
     // Offline extraction records a recent event, not a permanent personality

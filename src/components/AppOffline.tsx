@@ -18,16 +18,18 @@ import { OfflineReadingPreferences, OfflineReadingSettings } from "./offline/Off
 import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
+import { getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { AppHeader, ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
 
 interface AppOfflineProps {
   characters: Character[];
+  relationships: CharacterRelationship[];
   settings: UserSettings;
   offlineStories: OfflineStory[];
   onSaveOfflineStory: (story: OfflineStory) => void;
   onDeleteOfflineStory: (storyId: string) => void;
   onClose: () => void;
-  onNavigateToChat?: (charId: string) => void;
+  onNavigateToChat?: (charId: string, relationId?: string) => void;
   memories: MemoryItem[];
   onSaveMemories: (mems: MemoryItem[]) => void;
   /** Resolves only after the offline handoff memories are durably persisted. */
@@ -35,11 +37,13 @@ interface AppOfflineProps {
   recallSettings: MemoryVaultSettings;
   messages?: Message[];
   activeChatCharId?: string | null;
+  activeChatRelationId?: string | null;
   worldBookEntries?: WorldBookEntry[];
 }
 
 export default function AppOffline({
   characters = [],
+  relationships = [],
   settings,
   offlineStories = [],
   onSaveOfflineStory,
@@ -52,6 +56,7 @@ export default function AppOffline({
   recallSettings,
   messages = [],
   activeChatCharId = null,
+  activeChatRelationId = null,
   worldBookEntries = []
 }: AppOfflineProps) {
   const selectableCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
@@ -64,9 +69,18 @@ export default function AppOffline({
     }
     return selectableCharacters[0]?.id || "";
   });
+  const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const relationChoices = relationships.filter((relation) => relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId);
+  const [selectedRelationId, setSelectedRelationId] = useState<string>(() => activeChatRelationId || "");
+  useEffect(() => {
+    const preferred = activeChatRelationId && relationships.some((relation) => relation.id === activeChatRelationId && relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId)
+      ? activeChatRelationId
+      : relationChoices[0]?.id || "";
+    if (preferred !== selectedRelationId) setSelectedRelationId(preferred);
+  }, [activeChatRelationId, selectedCharId, activeIdentityId, relationships]);
   const [activeStory, setActiveStory] = useState<OfflineStory | null>(null);
   const activeStoryRef = useRef<OfflineStory | null>(null);
-  const [lastLoadedCharId, setLastLoadedCharId] = useState<string | null>(null);
+  const [lastLoadedStoryScope, setLastLoadedStoryScope] = useState<string | null>(null);
   
   // Creation modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -254,9 +268,10 @@ export default function AppOffline({
   };
 
   const selectedChar = selectableCharacters.find(c => c.id === selectedCharId) || selectableCharacters[0];
-  const charStories = offlineStories.filter(s => 
-    resolveOfflineStoryCharacterId(s, characters) === selectedCharId
-      || resolveOfflineStoryCharacterIds(s, characters).includes(selectedCharId)
+  const charStories = offlineStories.filter((story) =>
+    (!selectedRelationId || story.relationId === selectedRelationId)
+    && (resolveOfflineStoryCharacterId(story, characters) === selectedCharId
+      || resolveOfflineStoryCharacterIds(story, characters).includes(selectedCharId))
   );
 
   const storyChars = activeStory 
@@ -291,11 +306,13 @@ export default function AppOffline({
     }
   }, [activeStory?.messages, isGenerating]);
 
-  // Load selected character's saved story on select or mount
+  // Direct workspaces are scoped by Character → Relationship. Group stories
+  // retain their legacy relation-less container route.
   useEffect(() => {
-    if (selectedCharId && selectedCharId !== lastLoadedCharId) {
-      setLastLoadedCharId(selectedCharId);
-      const savedStoryId = localStorage.getItem(`offline_story_id_${selectedCharId}`);
+    const scopeKey = selectedRelationId || `legacy:${selectedCharId}`;
+    if (selectedCharId && scopeKey !== lastLoadedStoryScope) {
+      setLastLoadedStoryScope(scopeKey);
+      const savedStoryId = selectedRelationId ? localStorage.getItem(getOfflineStoryStorageKey(selectedRelationId)) : null;
       if (savedStoryId) {
         const story = offlineStories.find(s => s.id === savedStoryId);
         if (story) {
@@ -306,20 +323,23 @@ export default function AppOffline({
       }
       clearActiveStorySnapshot();
     }
-  }, [selectedCharId, offlineStories, lastLoadedCharId]);
+  }, [selectedCharId, selectedRelationId, offlineStories, lastLoadedStoryScope]);
 
   // Handle opening a story
   const handleOpenStory = (story: OfflineStory) => {
     activeStoryRef.current = story;
     setActiveStory(story);
-    const canonicalCharacterId = resolveOfflineStoryCharacterId(story, characters);
-    localStorage.setItem(`offline_mode_active_${canonicalCharacterId}`, "true");
-    localStorage.setItem(`offline_story_id_${canonicalCharacterId}`, story.id);
+    if (story.relationId) {
+      localStorage.setItem(getOfflineModeStorageKey(story.relationId), "true");
+      localStorage.setItem(getOfflineStoryStorageKey(story.relationId), story.id);
+    }
   };
 
   const clearOfflineSession = (story: OfflineStory) => {
-    localStorage.removeItem(`offline_story_id_${story.characterId}`);
-    localStorage.setItem(`offline_mode_active_${story.characterId}`, "false");
+    if (story.relationId) {
+      localStorage.removeItem(getOfflineStoryStorageKey(story.relationId));
+      localStorage.setItem(getOfflineModeStorageKey(story.relationId), "false");
+    }
   };
 
   // Exit story workspace back to list
@@ -343,6 +363,11 @@ export default function AppOffline({
       showToast("请先选择一个角色！");
       return;
     }
+    const relationship = relationChoices.find((relation) => relation.id === selectedRelationId);
+    if (!relationship) {
+      showToast("Please select the current identity's relationship first.");
+      return;
+    }
 
     const storyCharsList = characters.filter(c => selectedCharIds.includes(c.id));
     const charsLabel = storyCharsList.map(c => c.remark || c.name).join("、");
@@ -355,14 +380,14 @@ export default function AppOffline({
     if (newStartFromChat) {
       // Prefer the live app state: it includes the latest message even before a
       // persistence effect has finished. Local storage remains a fallback.
-      const liveMessages = messages.filter(m => m.characterId === selectedCharId);
+      const liveMessages = messages.filter(m => m.relationId === selectedRelationId);
       const storedMessages = liveMessages.length === 0 ? loadMessages([]) : null;
       if (liveMessages.length > 0 || storedMessages?.found) {
         try {
           const parsed = liveMessages.length > 0 ? liveMessages : storedMessages?.value || [];
           const contextLimit = characters.find(c => c.id === selectedCharId)?.contextMemoryLimit || 20;
           const relevantMsgs = parsed
-            .filter(m => m.characterId === selectedCharId)
+            .filter(m => m.relationId === selectedRelationId)
             .slice(-contextLimit * 2); // preserve the configured number of dialogue rounds
           
           const importedMessages = relevantMsgs.map(m => ({
@@ -372,7 +397,7 @@ export default function AppOffline({
           }));
           importedContext = {
             messages: importedMessages,
-            memories: memories.filter(m => m.characterId === selectedCharId).map(m => m.content),
+            memories: memories.filter(m => m.relationId === selectedRelationId).map(m => m.content),
             worldBook: getLatestWorldBookEntries(worldBookEntries || [])
               .filter(entry => !entry.characterId || entry.characterId === selectedCharId)
               .map(entry => `${entry.title}: ${entry.content}`),
@@ -387,7 +412,9 @@ export default function AppOffline({
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: selectedCharId,
-      characterIds: selectedCharIds.length > 0 ? selectedCharIds : [selectedCharId],
+      relationId: relationship.id,
+      conversationId: relationship.conversationId || getConversationId(relationship.id),
+      characterIds: [selectedCharId],
       title: titleToUse,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -404,8 +431,8 @@ export default function AppOffline({
     };
 
     saveActiveStorySnapshot(newStory);
-    localStorage.setItem(`offline_mode_active_${selectedCharId}`, "true");
-    localStorage.setItem(`offline_story_id_${selectedCharId}`, newStory.id);
+    localStorage.setItem(getOfflineModeStorageKey(relationship.id), "true");
+    localStorage.setItem(getOfflineStoryStorageKey(relationship.id), newStory.id);
     setShowCreateModal(false);
 
     // Reset fields
@@ -422,6 +449,8 @@ export default function AppOffline({
   const handleDeleteStory = (storyId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm("确定要删除这个线下故事记录吗？此操作无法撤销。")) {
+      const story = offlineStories.find((item) => item.id === storyId);
+      if (story) clearOfflineSession(story);
       onDeleteOfflineStory(storyId);
       if (activeStoryRef.current?.id === storyId) {
         clearActiveStorySnapshot();
@@ -474,6 +503,7 @@ export default function AppOffline({
         const result = await MemoryService.extractMemories({
           character,
           characterId: story.characterId,
+          relationId: story.relationId,
           recentMessages: sourceMessages.slice(-historyLimit),
           existingMemories: memories,
           scenario: "offline",
@@ -497,10 +527,11 @@ export default function AppOffline({
 
       const additions = extractedMemories.length > 0
         ? extractedMemories
-        : (MemoryService.hasMarker(memories, story.characterId, syncMarker) ? [] : [createOfflineStoryHandoffMemory({
+        : (MemoryService.hasMarker(memories, story.characterId, story.relationId, syncMarker) ? [] : [createOfflineStoryHandoffMemory({
           story,
           sourceMessages,
           characterId: story.characterId,
+          relationId: story.relationId,
           characterName: character.remark || character.name,
           id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           timestamp: now,
@@ -563,6 +594,8 @@ export default function AppOffline({
       const userMsg: Message = {
         id: `offline-msg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         characterId: storyAtSend.characterId,
+        relationId: storyAtSend.relationId,
+        conversationId: storyAtSend.conversationId,
         sender: "user",
         content: text,
         timestamp: Date.now(),
@@ -628,7 +661,7 @@ export default function AppOffline({
 - 年龄：${char.age || "未知"}
 - 语气/性格特点：${char.personality}
 - 背景设定：${char.backstory}
-- 互通的线上记忆：${char.compressedMemory || "暂无"}
+- 当前关系摘要：${(updatedStory.relationId ? relationships.find((relation) => relation.id === updatedStory.relationId)?.compressedMemory : char.compressedMemory) || "暂无"}
 \n`;
       });
 
@@ -788,6 +821,8 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
         const newMsgs: Message[] = [{
           id: `offline-reply-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           characterId: updatedStory.characterId,
+          relationId: updatedStory.relationId,
+          conversationId: updatedStory.conversationId,
           sender: "character",
           content: response.text.trim(),
           timestamp: Date.now(),
@@ -893,6 +928,14 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                   );
                 })}
               </div>
+              {relationChoices.length > 0 && (
+                <div className="mt-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                  {relationChoices.map((relation) => {
+                    const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
+                    return <button key={relation.id} onClick={() => setSelectedRelationId(relation.id)} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === relation.id ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{identity?.name || relation.userIdentityId}</button>;
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Stories Directory Content */}
@@ -1263,7 +1306,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     clearOfflineSession(completedStory);
                     clearActiveStorySnapshot();
                     setIsSettingsOpen(false);
-                    onNavigateToChat(completedStory.characterId);
+                    onNavigateToChat(completedStory.characterId, completedStory.relationId);
                   }}>返回线上聊天 ›</button>}
                 </div>
               )}
@@ -1397,6 +1440,32 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
               </div>
 
               <div className="space-y-3.5 text-xs">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">角色</label>
+                  <select
+                    value={selectedCharId}
+                    onChange={(event) => setSelectedCharId(event.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                  >
+                    {selectableCharacters.map((character) => <option key={character.id} value={character.id}>{character.remark || character.name}</option>)}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">当前身份关系</label>
+                  <select
+                    value={selectedRelationId}
+                    onChange={(event) => setSelectedRelationId(event.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">选择关系</option>
+                    {relationChoices.map((relation) => {
+                      const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
+                      return <option key={relation.id} value={relation.id}>{identity?.name || relation.userIdentityId}</option>;
+                    })}
+                  </select>
+                </div>
+
                 {/* Title input */}
                 <div className="space-y-1">
                   <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">故事名称 (选填)</label>

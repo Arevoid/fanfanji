@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask } from "../types";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
+import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { 
   ArrowLeft, 
   ChevronLeft,
@@ -23,13 +24,14 @@ import {
 
 interface AppMemoryProps {
   characters: Character[];
+  relationships: CharacterRelationship[];
   memories: MemoryItem[];
   onSaveMemories: (updated: MemoryItem[]) => void;
   recallSettings: MemoryVaultSettings;
   onSaveRecallSettings: (updated: MemoryVaultSettings) => void;
   onUpdateCharacter?: (char: Character) => void;
   immediateSummaryTask?: ImmediateSummaryTask;
-  onStartImmediateSummary?: (characterId: string, rounds: number) => Promise<void>;
+  onStartImmediateSummary?: (characterId: string, rounds: number, relationId?: string, conversationId?: string) => Promise<void>;
   onResetImmediateSummary?: () => void;
   onClose: () => void;
   selectedModel?: string;
@@ -37,6 +39,7 @@ interface AppMemoryProps {
 }
 export default function AppMemory({
   characters,
+  relationships,
   memories,
   onSaveMemories,
   recallSettings,
@@ -53,6 +56,7 @@ export default function AppMemory({
   const normalizeCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>("all");
+  const [selectedRelationId, setSelectedRelationId] = useState<string>("all");
   
   // Modals / Dialog States
   const [showMenu, setShowMenu] = useState(false);
@@ -98,6 +102,7 @@ export default function AppMemory({
   // Immediate Summary States
   const [showImmediateModal, setShowImmediateModal] = useState(false);
   const [immediateCharId, setImmediateCharId] = useState<string>("");
+  const [immediateRelationId, setImmediateRelationId] = useState<string>("");
   const [immediateRounds, setImmediateRounds] = useState<number>(15);
 
   const openImmediateSummaryModal = () => {
@@ -114,6 +119,7 @@ export default function AppMemory({
 
   // Manual Add Form States
   const [newCharId, setNewCharId] = useState("");
+  const [newRelationId, setNewRelationId] = useState("");
   const [newContent, setNewContent] = useState("");
   const [newImportance, setNewImportance] = useState(5);
 
@@ -132,13 +138,14 @@ export default function AppMemory({
   const filteredMemories = normalizedMemories.filter(item => {
     const matchesChar = selectedCharacterId === "all" || item.characterId === normalizeCharacterId(selectedCharacterId);
     const matchesSearch = searchQuery.trim() === "" || item.content.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesChar && matchesSearch;
+    const matchesRelation = selectedRelationId === "all" || item.relationId === selectedRelationId;
+    return matchesChar && matchesRelation && matchesSearch;
   });
 
   // Handle Add Memory
   const handleAddMemory = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCharId || !newContent.trim()) {
+    if (!newCharId || !newRelationId || !newContent.trim()) {
       alert("请选择角色并输入记忆内容！");
       return;
     }
@@ -146,6 +153,7 @@ export default function AppMemory({
     const newItem: MemoryItem = {
       id: Date.now().toString(),
       characterId: normalizeCharacterId(newCharId),
+      relationId: newRelationId,
       content: newContent.trim(),
       timestamp: Date.now(),
       importance: newImportance,
@@ -155,6 +163,7 @@ export default function AppMemory({
     onSaveMemories([newItem, ...normalizedMemories]);
     setIsAddingItem(false);
     setNewCharId("");
+    setNewRelationId("");
     setNewContent("");
     setNewImportance(5);
   };
@@ -402,6 +411,16 @@ export default function AppMemory({
               </button>
             ))}
           </div>
+          {selectedCharacterId !== "all" && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+              <button onClick={() => setSelectedRelationId("all")} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === "all" ? "bg-slate-700 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>全部关系</button>
+              {relationships.filter((relation) => relation.characterId === normalizeCharacterId(selectedCharacterId)).map((relation) => (
+                <button key={relation.id} onClick={() => setSelectedRelationId(relation.id)} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === relation.id ? "bg-slate-700 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+                  {relation.userIdentityId}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Memories List */}
@@ -567,7 +586,7 @@ export default function AppMemory({
                   </label>
                   <select
                     value={newCharId}
-                    onChange={(e) => setNewCharId(e.target.value)}
+                    onChange={(e) => { setNewCharId(e.target.value); setNewRelationId(""); }}
                     required
                     className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
                   >
@@ -576,6 +595,12 @@ export default function AppMemory({
                       <option key={char.id} value={char.id}>
                         {char.name}
                       </option>
+                    ))}
+                  </select>
+                  <select value={newRelationId} onChange={(e) => setNewRelationId(e.target.value)} disabled={!newCharId} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs">
+                    <option value="">选择关系身份</option>
+                    {relationships.filter((relation) => relation.characterId === normalizeCharacterId(newCharId)).map((relation) => (
+                      <option key={relation.id} value={relation.id}>{relation.userIdentityId}</option>
                     ))}
                   </select>
                 </div>
@@ -946,6 +971,20 @@ export default function AppMemory({
                         </select>
                       </div>
 
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">关系身份</label>
+                        <select
+                          value={immediateRelationId}
+                          onChange={(e) => setImmediateRelationId(e.target.value)}
+                          className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-bold"
+                        >
+                          <option value="">选择关系（旧数据兼容）</option>
+                          {relationships.filter((relation) => relation.characterId === normalizeCharacterId(immediateCharId)).map((relation) => (
+                            <option key={relation.id} value={relation.id}>{relation.userIdentityId}</option>
+                          ))}
+                        </select>
+                      </div>
+
                       {/* Manual Interval Round count */}
                       <div className="space-y-1.5">
                         <div className="flex justify-between">
@@ -987,7 +1026,8 @@ export default function AppMemory({
                         <button
                           onClick={async () => {
                             if (onStartImmediateSummary && immediateCharId) {
-                              await onStartImmediateSummary(immediateCharId, immediateRounds);
+                              const relation = relationships.find((item) => item.id === immediateRelationId);
+                              await onStartImmediateSummary(immediateCharId, immediateRounds, relation?.id, relation?.conversationId);
                             }
                           }}
                           className="flex-1 py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"

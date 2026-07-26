@@ -10,10 +10,14 @@ import { recordDeletedCharacterMoment } from "./features/moments/services/moment
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
+import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { migrateLegacyCharacterIdentityData } from "./domain/character/characterIdentity";
+import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
+import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
+import { getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory } from "./types";
 import { 
   AlbumWidget, 
@@ -219,6 +223,8 @@ export default function App() {
   // Navigation State
   const [activeApp, setActiveApp] = useState<string | null>(null);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
+  const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
+  const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
 
   // Offline Stories State & Handlers
   const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => loadOfflineStories([]).value);
@@ -233,6 +239,7 @@ export default function App() {
   const characterIdentityMigrationLogRef = useRef(new Set<string>());
   const memorySettingsPersistenceReady = useRef(false);
   const offlineStoriesPersistenceReady = useRef(false);
+  const relationshipsPersistenceReady = useRef(false);
 
   const handleSaveOfflineStory = (story: OfflineStory) => {
     setOfflineStories((prev) => {
@@ -686,6 +693,28 @@ export default function App() {
   // Memory Vault (Memory Book) States
   const [memories, setMemories] = useState<MemoryItem[]>(() => loadMemories([]).value);
 
+  // A one-time, idempotent bridge from character-keyed legacy data to the
+  // default historical relationship. New direct data is always relation keyed.
+  useEffect(() => {
+    const rawFriendIds = (() => {
+      try { return JSON.parse(localStorage.getItem("phone_friend_ids") || "[]") as string[]; } catch { return []; }
+    })();
+    const result = migrateLegacyRelationshipData({
+      characters,
+      relationships,
+      legacyFriendIds: rawFriendIds,
+      messages,
+      memories,
+      offlineStories,
+      defaultIdentityId: settings.activeIdentityId || "identity-1",
+      now: Date.now(),
+    });
+    if (result.createdRelationshipCount) setRelationships(result.relationships);
+    if (result.migratedMessageCount) setMessages(result.messages);
+    if (result.migratedMemoryCount) setMemories(result.memories);
+    if (result.migratedStoryCount) setOfflineStories(result.offlineStories);
+  }, [characters]);
+
   // Keep legacy contact copies readable, while canonicalizing dependent data so
   // every feature sees one archive character for the same identity.
   useEffect(() => {
@@ -767,9 +796,11 @@ export default function App() {
     localStorage.setItem("phone_immediate_summary_task", JSON.stringify(immediateSummaryTask));
   }, [immediateSummaryTask]);
 
-  const handleStartImmediateSummary = async (characterId: string, rounds: number) => {
+  const handleStartImmediateSummary = async (characterId: string, rounds: number, relationId?: string, conversationId?: string) => {
     setImmediateSummaryTask({
       characterId,
+      relationId,
+      conversationId,
       status: "summarizing",
       rounds,
       extractedCount: 0,
@@ -783,7 +814,9 @@ export default function App() {
       }
 
       const retrievalLimit = char.retrievalHistoryLimit || 100;
-      const charMsgs = messages.filter(m => m.characterId === characterId).slice(-retrievalLimit);
+      const charMsgs = messages.filter((message) => relationId
+        ? message.relationId === relationId
+        : message.characterId === characterId).slice(-retrievalLimit);
       if (charMsgs.length === 0) {
         setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "暂无与该角色的聊天记录，无法进行总结" }));
         return;
@@ -797,6 +830,7 @@ export default function App() {
       const result = await MemoryService.summarizeConversation({
         character: char,
         characterId,
+        relationId,
         recentMessages: msgsToSummarize,
         existingMemories: memories,
         scenario: "immediate-summary",
@@ -823,18 +857,20 @@ export default function App() {
 
       setImmediateSummaryTask({
         characterId,
+        relationId,
+        conversationId,
         status: "completed",
         rounds,
         extractedCount: addedCount,
       });
 
-      // Save last summarized message ID to character so auto-summary can skip them
+      // Direct-chat summary markers belong to the relationship. Character keeps no
+      // cross-identity conversation state.
       const lastMsg = msgsToSummarize[msgsToSummarize.length - 1];
-      if (lastMsg) {
-        handleSaveCharacter({
-          ...char,
-          lastImmediateSummaryMsgId: lastMsg.id,
-        });
+      if (lastMsg && relationId) {
+        setRelationships((previous) => previous.map((relation) => relation.id === relationId
+          ? { ...relation, lastImmediateSummaryMsgId: lastMsg.id, updatedAt: Date.now() }
+          : relation));
       }
     } catch (err: any) {
       setImmediateSummaryTask(prev => ({
@@ -1522,6 +1558,15 @@ export default function App() {
     if (!result.success) console.error("Failed to save offline stories to localStorage:", result.error);
   }, [offlineStories]);
 
+  useEffect(() => {
+    if (!relationshipsPersistenceReady.current) {
+      relationshipsPersistenceReady.current = true;
+      return;
+    }
+    const result = saveRelationships(relationships);
+    if (!result.success) console.error("Failed to save relationships to localStorage:", result.error);
+  }, [relationships]);
+
   // Global Scroll Event Capture to handle show-on-scroll custom thin scrollbars
   useEffect(() => {
     const scrollTimeoutMap = new Map<HTMLElement, any>();
@@ -1570,23 +1615,49 @@ export default function App() {
 
   const handleDeleteCharacter = (id: string, skipConfirm = false) => {
     if (skipConfirm || confirm("确定要删除这名角色人设吗？删除后其相关聊天和动态也将被清空。")) {
+      const relationIds = relationships.filter((relation) => relation.characterId === id).map((relation) => relation.id);
+      const cleaned = removeCanonicalCharacterData({ relationships, messages, memories, offlineStories }, id);
       setCharacters((prev) => prev.filter((c) => c.id !== id));
-      setMessages((prev) => prev.filter((m) => m.characterId !== id));
+      setRelationships(cleaned.relationships);
+      setMessages(cleaned.messages);
+      setMemories(cleaned.memories);
+      setOfflineStories(cleaned.offlineStories);
+      relationIds.forEach((relationId) => {
+        localStorage.removeItem(getOfflineModeStorageKey(relationId));
+        localStorage.removeItem(getOfflineStoryStorageKey(relationId));
+      });
+      // Relation-aware UI state is intentionally stored as maps keyed by the
+      // relation ID. Remove only the deleted character's relation entries.
+      ["phone_initiated_chat_ids", "phone_last_read_timestamps"].forEach((key) => {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          const next = Array.isArray(parsed)
+            ? parsed.filter((value) => !relationIds.includes(value))
+            : Object.fromEntries(Object.entries(parsed).filter(([relationId]) => !relationIds.includes(relationId)));
+          localStorage.setItem(key, JSON.stringify(next));
+        } catch (error) {
+          console.warn(`Unable to clear relationship state from ${key}:`, error);
+        }
+      });
       setMoments((prev) => prev.filter((m) => m.characterId !== id));
       setActiveChatCharId((current) => current === id ? null : current);
+      setActiveChatRelationId((current) => current && relationIds.includes(current) ? null : current);
       setGlobalNotification((current) => current?.characterId === id ? null : current);
     }
   };
 
-  const handleClearMessages = (characterId: string, keepLastCount?: number) => {
+  const handleClearMessages = (characterId: string, keepLastCount?: number, relationId?: string) => {
     setMessages((prev) => {
-      const charMsgs = prev.filter((m) => m.characterId === characterId);
+      const matches = (message: Message) => relationId ? message.relationId === relationId : message.characterId === characterId;
+      const charMsgs = prev.filter(matches);
       if (typeof keepLastCount === "number" && keepLastCount > 0) {
         const toKeep = charMsgs.slice(-keepLastCount);
-        const others = prev.filter((m) => m.characterId !== characterId);
+        const others = prev.filter((m) => !matches(m));
         return [...others, ...toKeep];
       }
-      return prev.filter((m) => m.characterId !== characterId);
+      return prev.filter((m) => !matches(m));
     });
   };
 
@@ -1595,11 +1666,9 @@ export default function App() {
     setMessages((prev) => [...prev, msg]);
 
     // Update character's last active time on message exchange
-    setCharacters((prev) =>
-      prev.map((c) =>
-        c.id === msg.characterId ? { ...c, lastActiveTime: Date.now() } : c
-      )
-    );
+      if (msg.relationId) {
+        setRelationships((previous) => previous.map((relation) => relation.id === msg.relationId ? { ...relation, lastActiveTime: Date.now(), updatedAt: Date.now() } : relation));
+      }
 
     // Check if auto-translation is enabled and the message needs translation
     const char = characters.find((c) => c.id === msg.characterId);
@@ -2718,6 +2787,7 @@ export default function App() {
                 <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
                   <AppChat
                     characters={characters}
+                    relationships={relationships}
                     settings={settings}
                     messages={messages}
                     moments={moments}
@@ -2741,6 +2811,9 @@ export default function App() {
                     recallSettings={recallSettings}
                     activeChatCharId={activeChatCharId}
                     setActiveChatCharId={setActiveChatCharId}
+                    activeChatRelationId={activeChatRelationId}
+                    setActiveChatRelationId={setActiveChatRelationId}
+                    onSaveRelationships={setRelationships}
                     offlineStories={offlineStories}
                     onSaveOfflineStory={handleSaveOfflineStory}
                     onDeleteOfflineStory={handleDeleteOfflineStory}
@@ -2833,6 +2906,7 @@ export default function App() {
                 {activeApp === "memory" && (
                   <AppMemory
                     characters={characters}
+                    relationships={relationships}
                     memories={memories}
                     onSaveMemories={setMemories}
                     recallSettings={recallSettings}
@@ -2850,6 +2924,7 @@ export default function App() {
                 {activeApp === "offline" && (
                   <AppOffline
                     characters={characters}
+                    relationships={relationships}
                     settings={settings}
                     offlineStories={offlineStories}
                     messages={messages}
@@ -2858,8 +2933,10 @@ export default function App() {
                     onSaveOfflineStory={handleSaveOfflineStory}
                     onDeleteOfflineStory={handleDeleteOfflineStory}
                     onClose={() => setActiveApp(null)}
-                    onNavigateToChat={(charId) => {
+                    activeChatRelationId={activeChatRelationId}
+                    onNavigateToChat={(charId, relationId) => {
                       setActiveChatCharId(charId);
+                      setActiveChatRelationId(relationId || null);
                       setActiveApp("chat");
                     }}
                     memories={memories}

@@ -6,8 +6,9 @@ export function retrieveRelevantMemories(
   characterId: string,
   userQuery: string,
   topK: number = 5,
+  relationId?: string,
 ): MemoryItem[] {
-  const characterMemories = memories.filter((memory) => memory.characterId === characterId);
+  const characterMemories = memories.filter((memory) => memory.characterId === characterId && (!relationId || memory.relationId === relationId));
   if (characterMemories.length === 0) return [];
 
   if (!userQuery.trim()) return characterMemories.slice(0, topK);

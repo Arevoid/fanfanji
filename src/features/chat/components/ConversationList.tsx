@@ -3,9 +3,11 @@ import { MessageSquare, Pin } from "lucide-react";
 import type { Character, Message } from "../../../types";
 
 export interface ConversationThread {
+  id: string;
   character: Character;
   lastMessage: Message | null;
   isPinned: boolean;
+  subtitle?: string;
 }
 
 interface ConversationListProps {
@@ -39,12 +41,12 @@ export function ConversationList({
           </p>
         </div>
       ) : (
-        threads.map(({ character, lastMessage, isPinned }) => {
-          const unreadCount = getUnreadCount(character.id);
+        threads.map(({ id, character, lastMessage, isPinned, subtitle }) => {
+          const unreadCount = getUnreadCount(id);
           return (
             <div
-              key={character.id}
-              onClick={() => onSelect(character.id)}
+              key={id}
+              onClick={() => onSelect(id)}
               className={`flex items-center p-3 cursor-pointer transition-colors relative ${
                 isPinned ? "bg-blue-50/20 hover:bg-blue-50/40" : "hover:bg-slate-50"
               }`}
@@ -62,6 +64,7 @@ export function ConversationList({
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-slate-800 truncate">
                     {character.remark || character.name}
+                    {subtitle && <span className="text-slate-400 font-normal ml-1">· {subtitle}</span>}
                     {character.isGroupChat && <span className="text-slate-400 font-normal ml-1">({1 + (character.memberIds?.length || 0)})</span>}
                   </h4>
                   {lastMessage && <span className="text-[9px] text-slate-400 font-medium">{new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}

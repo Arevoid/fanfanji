@@ -23,7 +23,8 @@ import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
-import { getAvailableCanonicalCharacterIds, pruneUnavailableCharacterRelations, resolveCanonicalCharacterIds } from "../domain/character/characterIdentity";
+import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
+import { createRelationship, findRelationship, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
 import { ChatTopBar } from "../features/chat/components/ChatTopBar";
@@ -331,6 +332,7 @@ const RenderAvatar = ({
 
 interface AppChatProps {
   characters: Character[];
+  relationships: CharacterRelationship[];
   settings: UserSettings;
   messages: Message[];
   moments: Moment[];
@@ -348,12 +350,15 @@ interface AppChatProps {
   onSaveSettings: (settings: UserSettings) => void;
   onNavigateToApp: (appId: string) => void;
   worldBookEntries?: WorldBookEntry[];
-  onClearMessages?: (charId: string, keepLastCount?: number) => void;
+  onClearMessages?: (charId: string, keepLastCount?: number, relationId?: string) => void;
   memories: MemoryItem[];
   onSaveMemories: (updated: MemoryItem[]) => void;
   recallSettings: MemoryVaultSettings;
   activeChatCharId: string | null;
   setActiveChatCharId: (id: string | null) => void;
+  activeChatRelationId: string | null;
+  setActiveChatRelationId: (id: string | null) => void;
+  onSaveRelationships: (relationships: CharacterRelationship[]) => void;
   offlineStories?: OfflineStory[];
   onSaveOfflineStory?: (story: OfflineStory) => void;
   onDeleteOfflineStory?: (storyId: string) => void;
@@ -362,8 +367,8 @@ interface AppChatProps {
 
 const PRESEED_MOMENTS: Moment[] = [];
 
-const isOfflineStoryActiveFor = (characterId: string) =>
-  localStorage.getItem(`offline_mode_active_${characterId}`) === "true";
+const isOfflineStoryActiveFor = (relationId: string) =>
+  localStorage.getItem(getOfflineModeStorageKey(relationId)) === "true";
 
 const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: string) =>
   getLatestWorldBookEntries(entries)
@@ -580,6 +585,7 @@ const getCharacterLastMomentTimestamp = (moments: Moment[], charId: string) => {
 
 export default function AppChat({
   characters,
+  relationships,
   settings,
   messages,
   moments,
@@ -603,6 +609,9 @@ export default function AppChat({
   recallSettings,
   activeChatCharId,
   setActiveChatCharId,
+  activeChatRelationId,
+  setActiveChatRelationId,
+  onSaveRelationships,
   offlineStories = [],
   onSaveOfflineStory,
   onDeleteOfflineStory,
@@ -874,7 +883,9 @@ export default function AppChat({
       return;
     }
 
-    onSendMessageRaw(msg);
+    onSendMessageRaw(activeRelationship && !activeCharacter?.isGroupChat && !msg.relationId
+      ? { ...msg, relationId: activeRelationship.id, conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id) }
+      : msg);
 
     // Normal chat remains manual-play only.
   };
@@ -929,10 +940,11 @@ export default function AppChat({
 
   // Keep track of initiated chats when a chat is opened
   useEffect(() => {
-    if (activeChatCharId && !initiatedChatIds.includes(activeChatCharId)) {
-      setInitiatedChatIds((prev) => [...prev, activeChatCharId]);
+    const chatKey = activeChatRelationId || activeChatCharId;
+    if (chatKey && !initiatedChatIds.includes(chatKey)) {
+      setInitiatedChatIds((prev) => [...prev, chatKey]);
     }
-  }, [activeChatCharId, initiatedChatIds]);
+  }, [activeChatCharId, activeChatRelationId, initiatedChatIds]);
 
   // Unread messages tracking
   const [lastReadTimestamps, setLastReadTimestamps] = useState<Record<string, number>>(() => {
@@ -953,33 +965,55 @@ export default function AppChat({
   }, [lastReadTimestamps]);
 
   useEffect(() => {
-    if (activeChatCharId) {
+    const chatKey = activeChatRelationId || activeChatCharId;
+    if (chatKey) {
       setLastReadTimestamps((prev) => ({
         ...prev,
-        [activeChatCharId]: Date.now(),
+        [chatKey]: Date.now(),
       }));
     }
-  }, [activeChatCharId, messages.length]);
+  }, [activeChatCharId, activeChatRelationId, messages.length]);
 
-  const getUnreadCount = (charId: string) => {
-    if (activeChatCharId === charId) return 0;
-    const lastRead = lastReadTimestamps[charId] || 0;
+  const getUnreadCount = (chatKey: string) => {
+    if (activeChatRelationId === chatKey || (!activeChatRelationId && activeChatCharId === chatKey)) return 0;
+    const lastRead = lastReadTimestamps[chatKey] || 0;
     const charMsgs = messages.filter(
-      (m) => m.characterId === charId && m.sender === "character" && !m.isOffline && m.timestamp > lastRead
+      (m) => (m.relationId === chatKey || (!m.relationId && m.characterId === chatKey)) && m.sender === "character" && !m.isOffline && m.timestamp > lastRead
     );
     return charMsgs.length;
   };
 
-  const startChatWith = (charId: string) => {
-    setActiveChatCharId(charId);
-    if (!initiatedChatIds.includes(charId)) {
-      setInitiatedChatIds((prev) => [...prev, charId]);
+  const startChatWith = (relationId: string) => {
+    const relation = relationships.find((item) => item.id === relationId);
+    if (!relation) {
+      const directRelation = relationForCharacter(relationId);
+      if (directRelation) {
+        setActiveChatRelationId(directRelation.id);
+        setActiveChatCharId(directRelation.characterId);
+        if (!initiatedChatIds.includes(directRelation.id)) setInitiatedChatIds((previous) => [...previous, directRelation.id]);
+        return;
+      }
+      // Group containers retain their pre-existing navigation contract.
+      const group = characters.find((character) => character.id === relationId && character.isGroupChat);
+      if (!group) return;
+      setActiveChatRelationId(null);
+      setActiveChatCharId(group.id);
+      if (!initiatedChatIds.includes(group.id)) setInitiatedChatIds((previous) => [...previous, group.id]);
+      return;
+    }
+    setActiveChatRelationId(relation.id);
+    setActiveChatCharId(relation.characterId);
+    if (!initiatedChatIds.includes(relation.id)) {
+      setInitiatedChatIds((prev) => [...prev, relation.id]);
     }
   };
   
   // Navigation State
+  const activeRelationship = activeChatRelationId ? relationships.find((relation) => relation.id === activeChatRelationId) : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
-  const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
+  const currentChatMessages = messages.filter((m) => !m.isOffline && (activeRelationship
+    ? m.relationId === activeRelationship.id
+    : m.characterId === activeChatCharId && activeCharacter?.isGroupChat));
   const activeStylePreset = (activeCharacter?.chatStylePreset) || (settings.globalChatStylePreset) || "default";
   const isFloatingCute = activeStylePreset === "floating-cute";
   const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
@@ -994,42 +1028,16 @@ export default function AppChat({
   const [singleCharacterMomentsId, setSingleCharacterMomentsId] = useState<string | null>(null);
   const [isShowingAddFriendDialog, setIsShowingAddFriendDialog] = useState(false);
 
-  const [friendIds, setFriendIds] = useState<string[]>(() => {
-    const raw = localStorage.getItem("phone_friend_ids");
-    if (raw) return JSON.parse(raw);
-    return characters.map(c => c.id);
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("phone_friend_ids", JSON.stringify(friendIds));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [friendIds]);
-
-  // Contacts reference their archive profile instead of creating a copied
-  // Character. Resolve legacy contact copies to the same source profile.
-  const resolvedFriendIds = resolveCanonicalCharacterIds(friendIds, characters);
   const availableCharacterIds = getAvailableCanonicalCharacterIds(characters);
-  const directCharacters = characters.filter((character) => !character.isGroupChat);
-  const isFriendCharacter = (character: Character) => {
-    return !character.isGroupChat
-      && !character.isContactInstance
-      && availableCharacterIds.has(character.id)
-      && belongsToActiveIdentity(character.ownerIdentityId)
-      && resolvedFriendIds.has(character.id);
-  };
-  const friends = characters.filter(isFriendCharacter);
-
-  // Archive deletion may leave a legacy contact ID in local storage. Remove
-  // only that relationship reference; old messages/stories remain untouched.
-  useEffect(() => {
-    setFriendIds((previous) => {
-      const next = pruneUnavailableCharacterRelations(previous, directCharacters);
-      return next.length === previous.length ? previous : next;
-    });
-  }, [characters, availableCharacterIds]);
+  const activeRelationships = relationships.filter((relation) => relation.userIdentityId === activeIdentityId && availableCharacterIds.has(relation.characterId));
+  const friendIds = activeRelationships.map((relation) => relation.id);
+  const relationForCharacter = (characterId: string) => activeRelationships.find((relation) => relation.characterId === characterId);
+  const isFriendCharacter = (character: Character) => !character.isGroupChat && !character.isContactInstance && Boolean(relationForCharacter(character.id));
+  const friends = activeRelationships.map((relation) => characters.find((character) => character.id === relation.characterId)).filter((character): character is Character => Boolean(character));
+  const friendContacts = activeRelationships.map((relation) => {
+    const character = characters.find((item) => item.id === relation.characterId)!;
+    return { id: relation.id, character, subtitle: settings.identities?.find((identity) => identity.id === relation.userIdentityId)?.name };
+  }).filter((item) => Boolean(item.character));
 
   const handleDeleteFriend = () => {
     if (!activeCharacter || activeCharacter.isGroupChat || !onDeleteCharacter) return;
@@ -1039,11 +1047,16 @@ export default function AppChat({
       return;
     }
 
+    if (!activeRelationship) return;
     const friendId = activeCharacter.id;
-    setFriendIds((prev) => prev.filter((id) => id !== friendId));
-    onSaveMemories(memories.filter((memory) => memory.characterId !== friendId));
+    const relationId = activeRelationship.id;
+    // A contact deletion removes only this identity's direct relationship. The
+    // canonical Character and sibling relationships must remain untouched.
+    onClearMessages?.(friendId, undefined, relationId);
+    onSaveRelationships(relationships.filter((relation) => relation.id !== relationId));
+    onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
     offlineStories
-      .filter((story) => story.characterId === friendId || story.characterIds?.includes(friendId))
+      .filter((story) => story.relationId === relationId)
       .forEach((story) => onDeleteOfflineStory?.(story.id));
     characters
       .filter((character) => character.isGroupChat && character.memberIds?.includes(friendId))
@@ -1052,19 +1065,28 @@ export default function AppChat({
         memberIds: group.memberIds?.filter((memberId) => memberId !== friendId),
       }));
 
-    localStorage.removeItem(`offline_mode_active_${friendId}`);
-    localStorage.removeItem(`offline_story_id_${friendId}`);
-    onDeleteCharacter(friendId, true);
+    localStorage.removeItem(getOfflineModeStorageKey(relationId));
+    localStorage.removeItem(getOfflineStoryStorageKey(relationId));
+    proactiveCallCooldownRef.current[relationId] = 0;
+    proactiveMessageInFlightRef.current.delete(relationId);
+    setInitiatedChatIds((previous) => previous.filter((id) => id !== relationId));
+    setLastReadTimestamps((previous) => {
+      const next = { ...previous };
+      delete next[relationId];
+      return next;
+    });
     setIsShowingCardModal(false);
     setActiveChatCharId(null);
+    setActiveChatRelationId(null);
   };
 
   // Never leave an old identity's private thread open after switching profiles.
   useEffect(() => {
-    if (activeChatCharId && activeCharacter && !belongsToActiveIdentity(activeCharacter.ownerIdentityId)) {
+    if (activeChatCharId && activeCharacter && activeCharacter.isGroupChat && !belongsToActiveIdentity(activeCharacter.ownerIdentityId)) {
       setActiveChatCharId(null);
+      setActiveChatRelationId(null);
     }
-  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId]);
+  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId, activeCharacter?.isGroupChat]);
 
   useEffect(() => {
     if (activeChatCharId && (!activeCharacter || activeCharacter.isContactInstance)) {
@@ -1228,7 +1250,9 @@ export default function AppChat({
     // the whole configured context window so the offline scene has a real handoff.
     const contextLimit = activeCharacter.contextMemoryLimit || 20;
     const recentOnlineMessages = messages
-      .filter((item) => item.characterId === activeChatCharId && !item.isOffline)
+      .filter((item) => !item.isOffline && (activeRelationship
+        ? item.relationId === activeRelationship.id
+        : item.characterId === activeChatCharId && activeCharacter?.isGroupChat))
       .slice(-contextLimit * 2);
     const sourceMessages = recentOnlineMessages.length > 0 ? recentOnlineMessages : [msg];
     const snapshotTimestamp = Date.now();
@@ -1241,7 +1265,9 @@ export default function AppChat({
     const importedContext: OfflineStory["importedContext"] = {
       messages: importedMessages,
       memories: memories
-        .filter((memory) => memory.characterId === activeChatCharId || offlineParticipantSet.has(memory.characterId))
+        .filter((memory) => activeRelationship
+          ? memory.relationId === activeRelationship.id
+          : offlineParticipantSet.has(memory.characterId))
         .map((memory) => memory.content),
       worldBook: getLatestWorldBookEntries(worldBookEntries || [])
         .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId))
@@ -1252,6 +1278,8 @@ export default function AppChat({
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: activeChatCharId,
+      relationId: activeRelationship?.id,
+      conversationId: activeRelationship?.conversationId,
       // A group is only a container; the actual offline actors are its members.
       characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
       title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
@@ -1270,8 +1298,10 @@ export default function AppChat({
       onSaveOfflineStory(newStory);
     }
     
-    localStorage.setItem(`offline_mode_active_${activeChatCharId}`, "true");
-    localStorage.setItem(`offline_story_id_${activeChatCharId}`, newStory.id);
+    if (activeRelationship) {
+      localStorage.setItem(getOfflineModeStorageKey(activeRelationship.id), "true");
+      localStorage.setItem(getOfflineStoryStorageKey(activeRelationship.id), newStory.id);
+    }
     
     showToast("已无痛切换到线下故事模式");
 
@@ -1395,14 +1425,16 @@ export default function AppChat({
     const personaLength = (activeCharacter.name || "").length + 
                           (activeCharacter.backstory || "").length + 
                           (activeCharacter.personality || "").length +
-                          (activeCharacter.compressedMemory || "").length;
+                          (activeRelationship?.compressedMemory || "").length;
     
     // 3. Short term context (using current settings draft state for real-time update!)
     const slicedMsgsForPreview = currentChatMessages.slice(-draftContextMemoryLimit);
     const historyTextLength = slicedMsgsForPreview.reduce((sum, m) => sum + m.content.length, 0);
     
     // 4. Memory Vault items
-    const activeMemories = (memories || []).filter(m => m.characterId === activeCharacter.id);
+    const activeMemories = (memories || []).filter((memory) => activeRelationship
+      ? memory.relationId === activeRelationship.id
+      : memory.characterId === activeCharacter.id && activeCharacter.isGroupChat);
     const topK = recallSettings?.recallCount || 5;
     const memoryCount = Math.min(topK, activeMemories.length);
     const memoryLength = activeMemories.slice(0, memoryCount).reduce((sum, m) => sum + m.content.length, 0);
@@ -1601,32 +1633,30 @@ export default function AppChat({
   // Sync editing memory text
   useEffect(() => {
     if (activeCharacter) {
-      setEditingMemoryText(activeCharacter.compressedMemory || "");
+      setEditingMemoryText(activeRelationship?.compressedMemory || "");
     }
-  }, [activeCharacter, isShowingCardModal]);
+  }, [activeCharacter, activeRelationship, isShowingCardModal]);
 
-  // Update character's last active time when user interacts with chat
+  // Relationship activity is persisted by the message boundary; never write it
+  // back to the canonical character for a direct chat.
   useEffect(() => {
-    if (activeChatCharId && activeCharacter) {
-      onSaveCharacter({
-        ...activeCharacter,
-        lastActiveTime: Date.now(),
-      });
-    }
-  }, [activeChatCharId]);
+    if (!activeRelationship) return;
+    onSaveRelationships(relationships.map((relation) => relation.id === activeRelationship.id ? { ...relation, lastActiveTime: Date.now(), updatedAt: Date.now() } : relation));
+  }, [activeChatRelationId]);
 
   // Send character's custom opening speech / greeting if there are no messages in the chat history
   useEffect(() => {
-    if (!activeChatCharId || !activeCharacter) return;
-    if (isOfflineStoryActiveFor(activeChatCharId)) return;
+    if (!activeChatCharId || !activeCharacter || (!activeCharacter.isGroupChat && !activeRelationship)) return;
+    const chatKey = activeRelationship?.id || activeChatCharId;
+    if (isOfflineStoryActiveFor(chatKey)) return;
     
-    const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
+    const currentChatMessages = messages.filter((message) => !message.isOffline && (activeCharacter.isGroupChat ? message.characterId === activeChatCharId : message.relationId === activeRelationship?.id));
     if (currentChatMessages.length > 0) return;
 
     if (activeCharacter.greeting && activeCharacter.greeting.trim()) {
-      if (sentGreetings.includes(activeChatCharId)) return;
+      if (sentGreetings.includes(chatKey)) return;
       
-      setSentGreetings(prev => [...prev, activeChatCharId]);
+      setSentGreetings(prev => [...prev, chatKey]);
       
       // Simulate realistic typing for the greeting message
       setIsTyping(true);
@@ -1634,6 +1664,8 @@ export default function AppChat({
         const charMsg: Message = {
           id: `msg-greeting-${Date.now()}`,
           characterId: activeChatCharId,
+          relationId: activeRelationship?.id,
+          conversationId: activeRelationship?.conversationId,
           sender: "character",
           content: activeCharacter.greeting!.trim(),
           timestamp: Date.now(),
@@ -1650,47 +1682,45 @@ export default function AppChat({
       // No custom greeting set. According to user instruction:
       // 如果没有开场白，则不主动发第一条信息，也不显示正在输入中。
     }
-  }, [activeChatCharId, activeCharacter, messages, onSendMessage, sentGreetings]);
+  }, [activeChatCharId, activeRelationship, activeCharacter, messages, onSendMessage, sentGreetings]);
+
+  const updateRelationshipSession = (relationId: string, patch: Partial<CharacterRelationship>) => {
+    onSaveRelationships(relationships.map((relation) => relation.id === relationId
+      ? { ...relation, ...patch, updatedAt: Date.now() }
+      : relation));
+  };
 
   // Proactive contact catch-up on load (supports background clear / offline delivery)
   useEffect(() => {
-    if (friends.length === 0) return;
+    if (activeRelationships.length === 0) return;
 
-    friends.forEach((friend) => {
+    activeRelationships.forEach((relation) => {
+      const friend = characters.find((character) => character.id === relation.characterId);
+      if (!friend || friend.isGroupChat) return;
       if (!friend.enableProactiveChat) return;
-      if (isOfflineStoryActiveFor(friend.id)) return;
+      if (isOfflineStoryActiveFor(relation.id)) return;
 
-      // Only execute catch-up once per character per app session to avoid duplicates
-      if (processedCatchupsRef.current[friend.id]) return;
-      processedCatchupsRef.current[friend.id] = true;
+      // Only execute catch-up once per relationship per app session to avoid duplicates.
+      if (processedCatchupsRef.current[relation.id]) return;
+      processedCatchupsRef.current[relation.id] = true;
 
-      const sched = friend.scheduledProactiveTime;
+      const sched = relation.scheduledProactiveTime;
       const now = Date.now();
 
       if (!sched) {
-        // No scheduled time yet, calculate and save a new one!
-        const nextTime = scheduleNextProactiveMessage(friend);
-        onSaveCharacter({
-          ...friend,
-          scheduledProactiveTime: nextTime,
-        });
+        updateRelationshipSession(relation.id, { scheduledProactiveTime: scheduleNextProactiveMessage(friend) });
       } else if (sched < now) {
-        // Scheduled proactive time was missed while offline/cleared background!
         const nextTime = scheduleNextProactiveMessage(friend);
-        onSaveCharacter({
-          ...friend,
-          scheduledProactiveTime: nextTime,
-          lastActiveTime: now,
-        });
+        updateRelationshipSession(relation.id, { scheduledProactiveTime: nextTime, lastActiveTime: now });
 
         // Trigger the missed proactive message, backdated to the scheduled timestamp
         const missedTimeStr = new Date(sched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const catchupPrompt = `This is a catchup/missed message that was scheduled to be sent to the user at exactly ${missedTimeStr} today while they were offline/away. You are proactively initiating contact to check in on them, share something interesting about your day/life, or show your warmth. Keep it perfectly natural, spontaneous, and matching your character profile.`;
         
-        triggerProactiveFor(friend.id, catchupPrompt, sched);
+        triggerProactiveFor(relation.id, catchupPrompt, sched);
       }
     });
-  }, [friends, onSaveCharacter]);
+  }, [activeRelationships, characters, relationships]);
 
   // Background proactive check (every minute)
   useEffect(() => {
@@ -1703,24 +1733,22 @@ export default function AppChat({
       const mm = now.getMinutes().toString().padStart(2, "0");
       const currentHM = `${hh}:${mm}`;
 
-      friends.forEach((friend) => {
+      activeRelationships.forEach((relation) => {
+        const friend = characters.find((character) => character.id === relation.characterId);
+        if (!friend || friend.isGroupChat) return;
         if (!friend.enableProactiveChat) return;
-        if (isOfflineStoryActiveFor(friend.id)) return;
+        if (isOfflineStoryActiveFor(relation.id)) return;
 
         // 0. Guaranteed scheduled proactive contact check
-        if (friend.scheduledProactiveTime && Date.now() >= friend.scheduledProactiveTime) {
+        if (relation.scheduledProactiveTime && Date.now() >= relation.scheduledProactiveTime) {
           const nextTime = scheduleNextProactiveMessage(friend);
-          onSaveCharacter({
-            ...friend,
-            scheduledProactiveTime: nextTime,
-            lastActiveTime: Date.now(),
-          });
-          triggerProactiveFor(friend.id);
+          updateRelationshipSession(relation.id, { scheduledProactiveTime: nextTime, lastActiveTime: Date.now() });
+          triggerProactiveFor(relation.id);
           return; // Skip other checks
         }
 
         // 1. Check for agreed scheduled contact time FIRST
-        const charMsgs = messagesRef.current.filter((m) => m.characterId === friend.id);
+        const charMsgs = messagesRef.current.filter((message) => message.relationId === relation.id);
         const schedule = getScheduledContactTime(charMsgs, settings.name);
 
         if (schedule) {
@@ -1730,15 +1758,11 @@ export default function AppChat({
           // If the scheduled time has arrived AND no messages have been sent after the scheduled time, AND the user/character has been quiet for 2 minutes
           if (Date.now() >= schedule.triggerTime && (!lastMsg || lastMsg.timestamp < schedule.triggerTime) && isSilent) {
             const nextTime = scheduleNextProactiveMessage(friend);
-            onSaveCharacter({
-              ...friend,
-              scheduledProactiveTime: nextTime,
-              lastActiveTime: Date.now(),
-            });
+            updateRelationshipSession(relation.id, { scheduledProactiveTime: nextTime, lastActiveTime: Date.now() });
 
             const customTaskText = `You and the user previously agreed that you would contact or chat with them after a certain amount of time (which has now passed). You are proactively initiating contact exactly as promised/agreed. Please follow up on what they went to do (e.g., if they went to eat lunch, ask how the food was or what they ate, or follow up on whatever other topic you were discussing), show concern, or start a fresh, warm conversation as promised, keeping it spontaneous, natural, and perfectly matching your character profile.`;
 
-            triggerProactiveFor(friend.id, customTaskText);
+            triggerProactiveFor(relation.id, customTaskText);
             return; // Skip standard random proactive check for this friend
           }
         }
@@ -1759,7 +1783,7 @@ export default function AppChat({
 
         if (!isWithinRange) return;
 
-        const lastActive = friend.lastActiveTime || (Date.now() - 4 * 60 * 60 * 1000);
+        const lastActive = relation.lastActiveTime || (Date.now() - 4 * 60 * 60 * 1000);
         const cooldownMs = 2 * 60 * 60 * 1000; // 2 hours minimum cooldown since last conversation
         
         // Random probability: 0.5% chance per minute (approx once every 3.3 hours on average)
@@ -1768,12 +1792,8 @@ export default function AppChat({
         if (Date.now() - lastActive >= cooldownMs && isRandomTrigger) {
           // Reset timer/lastActiveTime first to avoid flooding
           const nextTime = scheduleNextProactiveMessage(friend);
-          onSaveCharacter({
-            ...friend,
-            scheduledProactiveTime: nextTime,
-            lastActiveTime: Date.now(),
-          });
-          triggerProactiveFor(friend.id);
+          updateRelationshipSession(relation.id, { scheduledProactiveTime: nextTime, lastActiveTime: Date.now() });
+          triggerProactiveFor(relation.id);
         }
       });
 
@@ -1784,7 +1804,7 @@ export default function AppChat({
       clearTimeout(initialMomentCheck);
       clearInterval(checkProactive);
     };
-  }, [friends, moments]);
+  }, [activeRelationships, characters, moments, relationships]);
 
   // Calling timer
   useEffect(() => {
@@ -1877,9 +1897,10 @@ export default function AppChat({
     if (!activeChatCharId || !activeCharacter || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
     const timer = setInterval(() => {
       if (activeAttachModal || isOfflineStoryActiveFor(activeChatCharId)) return;
-      const lastCallAt = proactiveCallCooldownRef.current[activeChatCharId] || 0;
+      const callCooldownKey = activeRelationship?.id || activeChatCharId;
+      const lastCallAt = proactiveCallCooldownRef.current[callCooldownKey] || 0;
       if (Date.now() - lastCallAt < 5 * 60 * 1000 || Math.random() >= 0.18) return;
-      proactiveCallCooldownRef.current[activeChatCharId] = Date.now();
+      proactiveCallCooldownRef.current[callCooldownKey] = Date.now();
       beginVoiceCall(true);
     }, 60 * 1000);
     return () => clearInterval(timer);
@@ -2300,14 +2321,15 @@ ${activeCharacter.disableBracketActions
       const shouldLoadLongTermMemory = (!isConnectedVoiceCall || callTopicShiftDetected)
         && !isCrossDayNewSession;
 
-      if (activeCharacter.compressedMemory && shouldLoadLongTermMemory) {
-        charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeCharacter.compressedMemory}`;
+      const legacyDefaultMemory = activeRelationship?.id === `relation_default_${activeCharacter.id}` ? activeCharacter.compressedMemory : undefined;
+      if ((activeRelationship?.compressedMemory || legacyDefaultMemory) && shouldLoadLongTermMemory) {
+        charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeRelationship?.compressedMemory || legacyDefaultMemory}`;
       }
 
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = shouldLoadLongTermMemory
-        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", queryText: userMsg ? userMsg.content : "", existingMemories: memories || [], limit: topK, scenario: "chat" })
+        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: userMsg ? userMsg.content : "", existingMemories: memories || [], limit: topK, scenario: "chat" })
         : [];
       if (relevantMemories.length > 0) {
         charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n");
@@ -2317,7 +2339,7 @@ ${activeCharacter.disableBracketActions
       // handoff. Surface the newest one on the immediate return to online chat,
       // even when a short greeting is too vague for semantic retrieval.
       const latestOfflineContinuationMemory = [...(memories || [])]
-        .filter((memory) => memory.characterId === activeChatCharId && memory.content.includes("offline-story:"))
+        .filter((memory) => memory.relationId === activeRelationship?.id && memory.content.includes("offline-story:"))
         .sort((a, b) => b.timestamp - a.timestamp)[0];
       const isFreshOfflineHandoff = latestOfflineContinuationMemory
         // The handoff must be newer than the last online message. This keeps an
@@ -2333,6 +2355,9 @@ ${activeCharacter.disableBracketActions
       const userProfileText = `User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
+      const relationshipContext = activeRelationship
+        ? `\n[Current direct relationship]\n- Relationship state: ${activeRelationship.relationship}\n- This is the only user-identity relationship whose chat history and memories may be used.`
+        : "";
 
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
       const scanContextParts = [
@@ -2352,6 +2377,7 @@ ${activeCharacter.disableBracketActions
 
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
+      if (relationshipContext) assembledInstructions.push(relationshipContext);
 
       // 1.2 Red Packet Reaction Prompt
       if (isRedPacket && userMsg) {
@@ -2740,8 +2766,8 @@ ${stickerListStr}
             const currentMsgs = userMsg ? [...currentChatMessages, userMsg, ...createdMessages] : [...currentChatMessages, ...createdMessages];
             
             let eligibleMsgs = currentMsgs;
-            if (activeCharacter.lastImmediateSummaryMsgId) {
-              const idx = currentMsgs.findIndex(m => m.id === activeCharacter.lastImmediateSummaryMsgId);
+            if (activeRelationship?.lastImmediateSummaryMsgId) {
+              const idx = currentMsgs.findIndex(m => m.id === activeRelationship.lastImmediateSummaryMsgId);
               if (idx !== -1) {
                 eligibleMsgs = currentMsgs.slice(idx + 1);
               }
@@ -2756,10 +2782,7 @@ ${stickerListStr}
                   // Save the last summarized message ID to character so auto-summary can skip them next time
                   const lastMsg = eligibleMsgs[eligibleMsgs.length - 1];
                   if (lastMsg) {
-                    onSaveCharacter({
-                      ...activeCharacter,
-                      lastImmediateSummaryMsgId: lastMsg.id,
-                    });
+                    if (activeRelationship) onSaveRelationships(relationships.map((relation) => relation.id === activeRelationship.id ? { ...relation, lastImmediateSummaryMsgId: lastMsg.id, updatedAt: Date.now() } : relation));
                   }
                 }
               }, 200);
@@ -2848,7 +2871,9 @@ ${stickerListStr}
     setIsTyping(true);
     try {
       const history = messages
-        .filter((m) => m.characterId === activeChatCharId && !m.isOffline)
+        .filter((message) => !message.isOffline && (activeRelationship
+          ? message.relationId === activeRelationship.id
+          : message.characterId === activeChatCharId && activeCharacter.isGroupChat))
         .slice(-15)
         .map((m) => ({
           role: m.sender === "user" ? "user" as const : "model" as const,
@@ -3078,7 +3103,9 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     const container = scrollContainerRef.current;
     if (!activeChatCharId || !container) return;
 
-    const currentChatMsgs = messages.filter(m => m.characterId === activeChatCharId && !m.isOffline);
+    const currentChatMsgs = messages.filter((message) => !message.isOffline && (activeRelationship
+      ? message.relationId === activeRelationship.id
+      : message.characterId === activeChatCharId && activeCharacter?.isGroupChat));
     const msgCount = currentChatMsgs.length;
     
     const isFreshOpen = lastActiveCharIdRef.current !== activeChatCharId;
@@ -3100,7 +3127,7 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
         }
       }, 50);
     }
-  }, [messages.length, activeChatCharId, isTyping]);
+  }, [messages.length, activeChatCharId, activeChatRelationId, isTyping]);
 
   // The app shell owns the visual viewport height. Keep the latest message visible
   // without sizing this nested overlay independently during keyboard transitions.
@@ -3315,8 +3342,9 @@ ${activeCharacter.disableBracketActions
 1. 归档精炼总结优先：以下“先前背景与归档总结”及“召回深度记忆”为历史最高优先级真实记忆，你必须绝对优先根据它们来保持角色认同、长久羁绊和态度。
 2. 历史检索及短期上下文：你的短期上下文聊天记录已按照用户的限制进行了智能截断，以节省 Token 开销。请勿认为你忘记了先前对话，一切先前细节请完全基于归档精炼总结中包含的信息。`;
 
-      if (activeCharacter.compressedMemory) {
-        charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeCharacter.compressedMemory}`;
+      const legacyDefaultMemory = activeRelationship?.id === `relation_default_${activeCharacter.id}` ? activeCharacter.compressedMemory : undefined;
+      if (activeRelationship?.compressedMemory || legacyDefaultMemory) {
+        charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeRelationship?.compressedMemory || legacyDefaultMemory}`;
       }
 
       // Add OOC comment correction as high priority instruction
@@ -3327,7 +3355,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // Recall memories
       const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", queryText: lastUserMsg.content, existingMemories: memories || [], limit: topK, scenario: "chat" });
+      const relevantMemories = MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: lastUserMsg.content, existingMemories: memories || [], limit: topK, scenario: "chat" });
       if (relevantMemories.length > 0) {
         charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories / 召回深度记忆:\n");
       }
@@ -3499,8 +3527,8 @@ ${stickerListStr}
     if (activeCharacter) {
       const isEnablingAutoTranslate = draftEnableAutoTranslate && !activeCharacter.enableAutoTranslate;
 
-      let nextScheduledTime = activeCharacter.scheduledProactiveTime;
-      if (draftEnableProactiveChat && (!activeCharacter.enableProactiveChat || !nextScheduledTime)) {
+      let nextScheduledTime = activeRelationship?.scheduledProactiveTime;
+      if (!activeCharacter.isGroupChat && draftEnableProactiveChat && (!activeCharacter.enableProactiveChat || !nextScheduledTime)) {
         const draftFriend: Character = {
           ...activeCharacter,
           proactiveStartTime: draftProactiveStartTime,
@@ -3508,8 +3536,12 @@ ${stickerListStr}
           enableProactiveChat: draftEnableProactiveChat,
         };
         nextScheduledTime = scheduleNextProactiveMessage(draftFriend);
-      } else if (!draftEnableProactiveChat) {
+      } else if (!draftEnableProactiveChat && !activeCharacter.isGroupChat) {
         nextScheduledTime = undefined;
+      }
+
+      if (activeRelationship) {
+        updateRelationshipSession(activeRelationship.id, { scheduledProactiveTime: nextScheduledTime });
       }
 
       onSaveCharacter({
@@ -3528,7 +3560,6 @@ ${stickerListStr}
         proactiveChatInterval: draftProactiveChatInterval,
         proactiveStartTime: draftProactiveStartTime,
         proactiveEndTime: draftProactiveEndTime,
-        scheduledProactiveTime: nextScheduledTime,
         disableBracketActions: draftDisableBracketActions,
         historyMemoryLimit: draftHistoryMemoryLimit,
         contextMemoryLimit: draftContextMemoryLimit,
@@ -3548,7 +3579,8 @@ ${stickerListStr}
       // Automatically translate existing non-Chinese messages in current chat
       if (isEnablingAutoTranslate && onUpdateMessage) {
         const currentChatMessages = messages.filter(
-          (m) => m.characterId === activeCharacter.id && m.sender === "character" && !m.isNarration && !m.translation
+          (m) => (activeRelationship ? m.relationId === activeRelationship.id : m.characterId === activeCharacter.id && activeCharacter.isGroupChat)
+            && m.sender === "character" && !m.isNarration && !m.translation
         );
 
         currentChatMessages.forEach((msg) => {
@@ -3672,6 +3704,7 @@ ${stickerListStr}
       const result = await MemoryService.extractMemories({
         character: activeCharacter,
         characterId: activeChatCharId,
+        relationId: activeRelationship?.id,
         recentMessages: messagesToCompress,
         existingMemories: memories || [],
         scenario: "chat",
@@ -3699,9 +3732,10 @@ ${stickerListStr}
 
   // Manual Trigger Proactive Message simulation
   const handleTriggerProactiveMessage = async () => {
-    if (!activeChatCharId || !activeCharacter || activeCharacter.isGroupChat || proactiveMessageInFlightRef.current.has(activeChatCharId)) return;
+    if (!activeChatCharId || !activeRelationship || !activeCharacter || activeCharacter.isGroupChat || proactiveMessageInFlightRef.current.has(activeRelationship.id)) return;
 
-    proactiveMessageInFlightRef.current.add(activeChatCharId);
+    const relationId = activeRelationship.id;
+    proactiveMessageInFlightRef.current.add(relationId);
     setIsTriggeringProactive(true);
     setIsTyping(true);
     try {
@@ -3715,7 +3749,7 @@ ${stickerListStr}
         proactivePrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
-      const charMsgs = messages.filter(m => m.characterId === activeChatCharId);
+      const charMsgs = messages.filter((message) => message.relationId === relationId);
       const recentConversation = analyzeRecentConversation(charMsgs, activeChatCharId);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
@@ -3738,7 +3772,7 @@ Roleplay Profile:
 - Personality & Behavior: ${activeCharacter.personality}
 - Background Story: ${activeCharacter.backstory}
 
-${activeCharacter.compressedMemory ? `Compressed Memories (Important context from previous conversations): ${activeCharacter.compressedMemory}` : ""}
+${activeRelationship.compressedMemory ? `Compressed Memories (Important context from previous conversations): ${activeRelationship.compressedMemory}` : ""}
 
 User Profile (interacting with you):
 - Nickname: ${settings.name}
@@ -3770,14 +3804,18 @@ ${proactivePrompt}`;
       });
 
       if (proactiveResult.data && proactiveResult.data.text) {
-        proactiveResult.messages.forEach(onSendMessage);
+        proactiveResult.messages.forEach((message) => onSendMessage({
+          ...message,
+          relationId,
+          conversationId: activeRelationship.conversationId || getConversationId(relationId),
+        }));
       } else {
         alert(`主动联络失败: ${(proactiveResult.data as any).error || "智能体无响应"}`);
       }
     } catch (err: any) {
       alert(`主动联络错误: ${err.message || err}`);
     } finally {
-      proactiveMessageInFlightRef.current.delete(activeChatCharId);
+      proactiveMessageInFlightRef.current.delete(relationId);
       setIsTriggeringProactive(false);
       setIsTyping(false);
     }
@@ -3826,12 +3864,13 @@ ${proactivePrompt}`;
   };
 
   // Automated background proactive message generator for any character
-  const triggerProactiveFor = async (charId: string, customTaskText?: string, backdateTimestamp?: number) => {
-    if (isOfflineStoryActiveFor(charId) || proactiveMessageInFlightRef.current.has(charId)) return;
-    const friend = characters.find((c) => c.id === charId);
+  const triggerProactiveFor = async (relationId: string, customTaskText?: string, backdateTimestamp?: number) => {
+    if (isOfflineStoryActiveFor(relationId) || proactiveMessageInFlightRef.current.has(relationId)) return;
+    const relationship = relationships.find((relation) => relation.id === relationId);
+    const friend = relationship && characters.find((character) => character.id === relationship.characterId);
     if (!friend || friend.isGroupChat) return;
 
-    proactiveMessageInFlightRef.current.add(charId);
+    proactiveMessageInFlightRef.current.add(relationId);
     try {
       let instructionsPrompt = `Instructions:
 1. Speak in Chinese. Maintain character role-play thoroughly.
@@ -3843,11 +3882,11 @@ ${proactivePrompt}`;
         instructionsPrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
-      const charMsgs = messagesRef.current.filter(m => m.characterId === charId);
-      const recentConversation = analyzeRecentConversation(charMsgs, charId);
+      const charMsgs = messagesRef.current.filter((message) => message.relationId === relationId);
+      const recentConversation = analyzeRecentConversation(charMsgs, friend.id);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
-      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], charId, scanText);
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, scanText);
       const wbPrompt = wbBlocks.formattedAll;
       const timeContext = friend.enableTimeAwareness !== false
         ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
@@ -3868,7 +3907,7 @@ Roleplay Profile:
 - Personality & Behavior: ${friend.personality}
 - Background Story: ${friend.backstory}
 
-${friend.compressedMemory ? `Compressed Memories (Important context from previous conversations): ${friend.compressedMemory}` : ""}
+${relationship.compressedMemory ? `Compressed Memories (Important context from previous conversations): ${relationship.compressedMemory}` : ""}
 
 User Profile (interacting with you):
 - Nickname: ${settings.name}
@@ -3892,7 +3931,7 @@ ${instructionsPrompt}`;
       const proactiveResult = await generateProactiveReplyCandidates({
         requestAi: apiChat,
         request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
-        characterId: charId,
+        characterId: friend.id,
         disableBracketActions: friend.disableBracketActions || false,
         keepPeriods,
         createId: (idx) => `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
@@ -3906,33 +3945,37 @@ ${instructionsPrompt}`;
       });
 
       if (proactiveResult.data && proactiveResult.data.text) {
-        proactiveResult.messages.forEach(onSendMessage);
+        proactiveResult.messages.forEach((message) => onSendMessage({
+          ...message,
+          relationId,
+          conversationId: relationship.conversationId || getConversationId(relationId),
+        }));
       }
     } catch (err) {
       console.error("Proactive message auto-trigger error:", err);
     } finally {
-      proactiveMessageInFlightRef.current.delete(charId);
+      proactiveMessageInFlightRef.current.delete(relationId);
     }
   };
 
   const handleAutoCommentOnUserMoment = async (newMo: Moment) => {
-    if (friends.length === 0) return;
+    if (activeRelationships.length === 0) return;
 
-    let commentingFriends = friends.filter(() => Math.random() < 0.6);
-    if (commentingFriends.length === 0 && friends.length > 0) {
-      const randomFriend = friends[Math.floor(Math.random() * friends.length)];
-      commentingFriends = [randomFriend];
+    let commentingRelationships = activeRelationships.filter(() => Math.random() < 0.6);
+    if (commentingRelationships.length === 0) {
+      commentingRelationships = [activeRelationships[Math.floor(Math.random() * activeRelationships.length)]];
     }
 
-    // Limit to max 3 friends
-    commentingFriends = commentingFriends.slice(0, 3);
+    commentingRelationships = commentingRelationships.slice(0, 3);
 
-    for (const friend of commentingFriends) {
+    for (const relationship of commentingRelationships) {
+      const friend = characters.find((character) => character.id === relationship.characterId);
+      if (!friend || friend.isGroupChat) continue;
       const delay = Math.random() * 8000 + 4000; // 4 to 12 seconds delay
       setTimeout(async () => {
         try {
           const friendMsgs = messages
-            .filter((m) => m.characterId === friend.id)
+            .filter((message) => message.relationId === relationship.id)
             .sort((a, b) => a.timestamp - b.timestamp);
           const slicedMsgs = friendMsgs.slice(-60); // 30 rounds of dialogue
 
@@ -4029,12 +4072,14 @@ Your task: Write a short, natural comment on this Moment.
     if (!targetChar) return;
 
     const friend = targetChar;
+    const relationship = activeRelationships.find((relation) => relation.characterId === friend.id);
+    if (!relationship) return;
     const delay = Math.random() * 5000 + 3000; // 3 to 8 seconds delay
     
     setTimeout(async () => {
       try {
         const friendMsgs = messages
-          .filter((m) => m.characterId === friend.id)
+          .filter((message) => message.relationId === relationship.id)
           .sort((a, b) => a.timestamp - b.timestamp);
         const slicedMsgs = friendMsgs.slice(-40);
 
@@ -4113,16 +4158,17 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
     }, delay);
   };
 
-  const generateCharacterMoment = async (friend: Character) => {
-    if (isOfflineStoryActiveFor(friend.id)) return;
+  const generateCharacterMoment = async (relationship: CharacterRelationship) => {
+    const friend = characters.find((character) => character.id === relationship.characterId);
+    if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return;
     try {
       const friendMsgs = messages
-        .filter((m) => m.characterId === friend.id)
+        .filter((message) => message.relationId === relationship.id)
         .sort((a, b) => a.timestamp - b.timestamp);
       const contextLimit = friend.contextMemoryLimit || 20;
       const slicedMsgs = friendMsgs.slice(-contextLimit * 2);
       const archivedMemories = (memories || [])
-        .filter((memory) => memory.characterId === friend.id)
+        .filter((memory) => memory.relationId === relationship.id)
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, recallSettings?.recallCount || 5);
       const historicalFallback = friendMsgs.slice(-(friend.retrievalHistoryLimit || 100));
@@ -4191,7 +4237,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         temporalContext,
       });
       if (generated.moment) onAddMoment(generated.moment);
-      if (generated.memory) onSaveMemories(MemoryService.mergeMemories(memories || [], [generated.memory]));
+      if (generated.memory) onSaveMemories(MemoryService.mergeMemories(memories || [], [{ ...generated.memory, relationId: relationship.id }]));
     } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
       const errMsgStr = err?.message || String(err);
@@ -4209,16 +4255,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
   };
 
   const checkAndTriggerCharacterMoments = async () => {
-    if (friends.length === 0) return;
+    if (activeRelationships.length === 0) return;
 
-    for (const friend of friends) {
-      if (isOfflineStoryActiveFor(friend.id)) continue;
+    for (const relationship of activeRelationships) {
+      const friend = characters.find((character) => character.id === relationship.characterId);
+      if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) continue;
       const lastPostTime = getCharacterLastMomentTimestamp(moments, friend.id);
       const interval = getPostIntervalMs(friend);
       const timeElapsed = Date.now() - lastPostTime;
 
       if (timeElapsed >= interval) {
-        await generateCharacterMoment(friend);
+        await generateCharacterMoment(relationship);
         // Break to avoid generating multiple moments simultaneously
         break;
       }
@@ -4357,32 +4404,19 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
   };
 
   // Active chat threads list builder
-  const chatThreads = characters
-    .filter((char) => {
-      if (char.isGroupChat) {
-        if (!belongsToActiveIdentity(char.ownerIdentityId)) return false;
-        const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
-        const hasMessages = threadMsgs.length > 0;
-        const isInitiated = initiatedChatIds.includes(char.id);
-        const isActive = char.id === activeChatCharId;
-        return hasMessages || isInitiated || isActive;
-      }
-      if (!isFriendCharacter(char)) return false;
-      const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
-      const hasMessages = threadMsgs.length > 0;
-      const isInitiated = initiatedChatIds.includes(char.id);
-      const isActive = char.id === activeChatCharId;
-      return hasMessages || isInitiated || isActive;
-    })
-    .map((char) => {
-      const threadMsgs = messages.filter((m) => m.characterId === char.id && !m.isOffline);
-      const lastMsg = threadMsgs.length > 0 ? threadMsgs[threadMsgs.length - 1] : null;
-      return {
-        character: char,
-        lastMessage: lastMsg,
-        isPinned: char.isPinned || false,
-      };
-    }).sort((a, b) => {
+  const directThreads = activeRelationships.map((relation) => {
+    const character = characters.find((item) => item.id === relation.characterId);
+    if (!character) return null;
+    const threadMsgs = messages.filter((message) => message.relationId === relation.id && !message.isOffline);
+    if (!threadMsgs.length && !initiatedChatIds.includes(relation.id) && activeChatRelationId !== relation.id) return null;
+    return { id: relation.id, character, lastMessage: threadMsgs.at(-1) || null, isPinned: character.isPinned || false, subtitle: settings.identities?.find((identity) => identity.id === relation.userIdentityId)?.name };
+  }).filter((thread): thread is NonNullable<typeof thread> => Boolean(thread));
+  const groupThreads = characters.filter((character) => character.isGroupChat && belongsToActiveIdentity(character.ownerIdentityId)).map((character) => {
+    const threadMsgs = messages.filter((message) => message.characterId === character.id && !message.isOffline);
+    if (!threadMsgs.length && !initiatedChatIds.includes(character.id) && activeChatCharId !== character.id) return null;
+    return { id: character.id, character, lastMessage: threadMsgs.at(-1) || null, isPinned: character.isPinned || false };
+  }).filter((thread): thread is NonNullable<typeof thread> => Boolean(thread));
+  const chatThreads = [...directThreads, ...groupThreads].sort((a, b) => {
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
       return (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0);
@@ -5538,7 +5572,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           const count = await handleExtractMemories();
                           // Step 2: Clear messages
                           if (onClearMessages) {
-                            onClearMessages(activeChatCharId);
+                            onClearMessages(activeChatCharId, undefined, activeRelationship?.id);
                           }
                           // Reset greeting checked state so a new proactive greeting can be generated immediately
                           setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
@@ -5555,7 +5589,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           if (window.confirm("确定要直接清空所有对话记录吗？该操作不可撤销，且不会保存任何新记忆。")) {
                             setShowClearHistoryModal(false);
                             if (onClearMessages) {
-                              onClearMessages(activeChatCharId);
+                              onClearMessages(activeChatCharId, undefined, activeRelationship?.id);
                             }
                             // Reset greeting checked state so a new proactive greeting can be generated immediately
                             setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
@@ -7350,7 +7384,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
           {/* TABS: CONTACTS LIST (通讯录) */}
           {activeTab === "contacts" && (
             <ContactList
-              contacts={friends}
+              contacts={friendContacts}
               onSelect={startChatWith}
               header={<ChatTopBar title={<>通讯录 ({friends.length})</>} leftAction={<button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setIsShowingAddFriendDialog(true)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10" title="添加好友"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
             />
@@ -8356,7 +8390,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             <div className="relative">
               <MessageSquare className="w-5 h-5" />
               {(() => {
-                const totalUnreadCount = friendIds.reduce((sum, id) => sum + getUnreadCount(id), 0);
+                const totalUnreadCount = friendIds.reduce((sum, relationId) => sum + messages.filter((message) => message.relationId === relationId && message.sender === "character" && !message.isOffline).length, 0);
                 return totalUnreadCount > 0 ? (
                   <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] bg-red-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-0.5 border border-white">
                     {totalUnreadCount}
@@ -8937,10 +8971,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           </div>
                           <button
                             onClick={() => {
-                              const sourceId = char.profileSourceId || char.id;
-                              // A friend is a relationship to the existing archive profile,
-                              // never a copied Character with a second ID.
-                              setFriendIds((prev) => prev.includes(sourceId) ? prev : [...prev, sourceId]);
+                              const characterId = char.profileSourceId || char.id;
+                              if (findRelationship(relationships, activeIdentityId, characterId)) return;
+                              const relationId = `rel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                              onSaveRelationships([...relationships, createRelationship({ id: relationId, characterId, userIdentityId: activeIdentityId, now: Date.now() })]);
                             }}
                             className="px-2.5 py-1 bg-neutral-950 hover:bg-neutral-900 text-white rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
                           >

@@ -81,6 +81,10 @@ export interface Character {
 export interface Message {
   id: string;
   characterId: string;
+  /** Direct-chat relationship. Undefined keeps legacy and group records compatible. */
+  relationId?: string;
+  /** Stable direct-chat thread ID. Group records retain their existing container ID semantics. */
+  conversationId?: string;
   sender: "user" | "character";
   senderId?: string;
   content: string;
@@ -273,6 +277,8 @@ export interface HomeScreenItem {
 export interface MemoryItem {
   id: string;
   characterId: string;
+  /** The direct relationship that owns this remembered interaction. */
+  relationId?: string;
   content: string;
   timestamp: number;
   importance?: number; // 1-10, default 5
@@ -288,6 +294,8 @@ export interface MemoryVaultSettings {
 
 export interface ImmediateSummaryTask {
   characterId: string;
+  relationId?: string;
+  conversationId?: string;
   status: "idle" | "summarizing" | "completed" | "error";
   rounds: number;
   extractedCount: number;
@@ -297,6 +305,9 @@ export interface ImmediateSummaryTask {
 export interface OfflineStory {
   id: string;
   characterId: string;
+  /** Direct relationship that owns this story. Group stories intentionally leave this unset. */
+  relationId?: string;
+  conversationId?: string;
   characterIds?: string[];
   title: string;
   createdAt: number;
