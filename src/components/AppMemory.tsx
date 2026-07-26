@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask } from "../types";
+import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { 
   ArrowLeft, 
   ChevronLeft,
@@ -48,6 +49,8 @@ export default function AppMemory({
   selectedModel = "gemini-3.5-flash",
   apiEndpoint = ""
 }: AppMemoryProps) {
+  const displayCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
+  const normalizeCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>("all");
   
@@ -65,8 +68,9 @@ export default function AppMemory({
   const [modalArchiveTemplateType, setModalArchiveTemplateType] = useState<"refined" | "delicate">("refined");
 
   const handleSelectCharForAutoSummary = (charId: string) => {
-    setSelectedCharForAutoSummary(charId);
-    const char = characters.find(c => c.id === charId);
+    const canonicalCharacterId = normalizeCharacterId(charId);
+    setSelectedCharForAutoSummary(canonicalCharacterId);
+    const char = displayCharacters.find(c => c.id === canonicalCharacterId);
     if (char) {
       setModalEnableAutoSummary(char.enableAutoSummary === true); // Default to false
       setModalSummaryTriggerRound(char.summaryTriggerRound || 15); // Default to 15
@@ -75,7 +79,7 @@ export default function AppMemory({
   };
 
   const openAutoSummaryModal = () => {
-    const firstChar = characters[0];
+    const firstChar = displayCharacters[0];
     if (firstChar) {
       setSelectedCharForAutoSummary(firstChar.id);
       setModalEnableAutoSummary(firstChar.enableAutoSummary === true);
@@ -97,7 +101,7 @@ export default function AppMemory({
   const [immediateRounds, setImmediateRounds] = useState<number>(15);
 
   const openImmediateSummaryModal = () => {
-    const firstChar = characters[0];
+    const firstChar = displayCharacters[0];
     if (firstChar) {
       setImmediateCharId(firstChar.id);
     } else {
@@ -120,8 +124,13 @@ export default function AppMemory({
   const [editContent, setEditContent] = useState("");
 
   // Filter memories
-  const filteredMemories = memories.filter(item => {
-    const matchesChar = selectedCharacterId === "all" || item.characterId === selectedCharacterId;
+  const normalizedMemories = memories.map((item) => {
+    const characterId = normalizeCharacterId(item.characterId);
+    return characterId === item.characterId ? item : { ...item, characterId };
+  });
+
+  const filteredMemories = normalizedMemories.filter(item => {
+    const matchesChar = selectedCharacterId === "all" || item.characterId === normalizeCharacterId(selectedCharacterId);
     const matchesSearch = searchQuery.trim() === "" || item.content.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesChar && matchesSearch;
   });
@@ -136,14 +145,14 @@ export default function AppMemory({
 
     const newItem: MemoryItem = {
       id: Date.now().toString(),
-      characterId: newCharId,
+      characterId: normalizeCharacterId(newCharId),
       content: newContent.trim(),
       timestamp: Date.now(),
       importance: newImportance,
       isManual: true
     };
 
-    onSaveMemories([newItem, ...memories]);
+    onSaveMemories([newItem, ...normalizedMemories]);
     setIsAddingItem(false);
     setNewCharId("");
     setNewContent("");
@@ -281,7 +290,7 @@ export default function AppMemory({
               <Loader2 className="w-4 h-4 animate-spin text-neutral-300 shrink-0" />
               <div className="min-w-0">
                 <p className="text-xs font-bold truncate">
-                  正在为 {characters.find(c => c.id === immediateSummaryTask.characterId)?.name || "角色"} 提炼记忆...
+                  正在为 {displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name || "角色"} 提炼记忆...
                 </p>
                 <p className="text-[10px] text-slate-400">已选取最近 {immediateSummaryTask.rounds} 轮对话</p>
               </div>
@@ -301,7 +310,7 @@ export default function AppMemory({
               <div className="min-w-0">
                 <p className="text-xs font-bold truncate">记忆提炼完成！</p>
                 <p className="text-[10px] text-emerald-600">
-                  成功为 {characters.find(c => c.id === immediateSummaryTask.characterId)?.name || "角色"} 提炼了 {immediateSummaryTask.extractedCount} 条新记忆
+                  成功为 {displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name || "角色"} 提炼了 {immediateSummaryTask.extractedCount} 条新记忆
                 </p>
               </div>
             </div>
@@ -373,7 +382,7 @@ export default function AppMemory({
               <User className="w-3.5 h-3.5" />
               全部角色
             </button>
-            {characters.map((char) => (
+            {displayCharacters.map((char) => (
               <button
                 key={char.id}
                 onClick={() => setSelectedCharacterId(char.id)}
@@ -419,7 +428,7 @@ export default function AppMemory({
               </motion.div>
             ) : (
               filteredMemories.map((item) => {
-                const char = characters.find(c => c.id === item.characterId);
+                const char = displayCharacters.find(c => c.id === item.characterId);
                 const isEditing = editingItem?.id === item.id;
 
                 return (
@@ -563,7 +572,7 @@ export default function AppMemory({
                     className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
                   >
                     <option value="">-- 请选择关联角色 --</option>
-                    {characters.map((char) => (
+                    {displayCharacters.map((char) => (
                       <option key={char.id} value={char.id}>
                         {char.name}
                       </option>
@@ -714,7 +723,7 @@ export default function AppMemory({
                 </button>
               </div>
 
-              {characters.length === 0 ? (
+              {displayCharacters.length === 0 ? (
                 <div className="text-xs text-slate-400 py-6 text-center font-medium">
                   暂无关联角色，请先创建角色。
                 </div>
@@ -730,7 +739,7 @@ export default function AppMemory({
                       onChange={(e) => handleSelectCharForAutoSummary(e.target.value)}
                       className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-bold"
                     >
-                      {characters.map((char) => (
+                      {displayCharacters.map((char) => (
                         <option key={char.id} value={char.id}>
                           {char.name}
                         </option>
@@ -820,7 +829,7 @@ export default function AppMemory({
 
                   <button
                     onClick={() => {
-                      const char = characters.find(c => c.id === selectedCharForAutoSummary);
+                      const char = displayCharacters.find(c => c.id === normalizeCharacterId(selectedCharForAutoSummary));
                       if (char && onUpdateCharacter) {
                         onUpdateCharacter({
                           ...char,
@@ -873,7 +882,7 @@ export default function AppMemory({
                   <div>
                     <h4 className="text-sm font-bold text-slate-800">正在提炼记忆中...</h4>
                     <p className="text-xs text-slate-400 mt-1">
-                      正在深入分析与 <span className="font-semibold text-slate-700">{characters.find(c => c.id === immediateSummaryTask.characterId)?.name}</span> 的对话记录
+                      正在深入分析与 <span className="font-semibold text-slate-700">{displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name}</span> 的对话记录
                     </p>
                   </div>
                   <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden mt-2">
@@ -898,7 +907,7 @@ export default function AppMemory({
                   <div>
                     <h4 className="text-sm font-bold text-slate-800">总结提炼完成！</h4>
                     <p className="text-xs text-emerald-600 mt-1">
-                      成功为 <span className="font-semibold text-slate-700">{characters.find(c => c.id === immediateSummaryTask.characterId)?.name}</span> 提炼了 <span className="font-bold">{immediateSummaryTask.extractedCount}</span> 条新记忆。
+                      成功为 <span className="font-semibold text-slate-700">{displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name}</span> 提炼了 <span className="font-bold">{immediateSummaryTask.extractedCount}</span> 条新记忆。
                     </p>
                   </div>
                   <button
@@ -913,7 +922,7 @@ export default function AppMemory({
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {characters.length === 0 ? (
+                  {displayCharacters.length === 0 ? (
                     <div className="text-xs text-slate-400 py-6 text-center font-medium">
                       暂无可用角色，无法进行总结。
                     </div>
@@ -929,7 +938,7 @@ export default function AppMemory({
                           onChange={(e) => setImmediateCharId(e.target.value)}
                           className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-bold"
                         >
-                          {characters.map((char) => (
+                          {displayCharacters.map((char) => (
                             <option key={char.id} value={char.id}>
                               {char.name}
                             </option>

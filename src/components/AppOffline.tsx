@@ -17,7 +17,7 @@ import { OfflineGuidancePanel } from "./offline/OfflineGuidancePanel";
 import { OfflineReadingPreferences, OfflineReadingSettings } from "./offline/OfflineReadingSettings";
 import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
-import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
+import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -55,9 +55,11 @@ export default function AppOffline({
 }: AppOfflineProps) {
   const selectableCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
   const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
+  const resolveCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
   const [selectedCharId, setSelectedCharId] = useState<string>(() => {
-    if (activeChatCharId && selectableCharacters.some(c => c.id === activeChatCharId)) {
-      return activeChatCharId;
+    const canonicalActiveChatId = activeChatCharId ? resolveCharacterId(activeChatCharId) : null;
+    if (canonicalActiveChatId && selectableCharacters.some(c => c.id === canonicalActiveChatId)) {
+      return canonicalActiveChatId;
     }
     return selectableCharacters[0]?.id || "";
   });
@@ -105,7 +107,7 @@ export default function AppOffline({
     if (selectedCharId && !selectableCharacterIds.has(selectedCharId)) {
       setSelectedCharId(selectableCharacters[0]?.id || "");
     }
-    if (activeStoryRef.current && !selectableCharacterIds.has(activeStoryRef.current.characterId)) {
+    if (activeStoryRef.current && !selectableCharacterIds.has(resolveOfflineStoryCharacterId(activeStoryRef.current, characters))) {
       clearActiveStorySnapshot();
     }
   }, [characters, selectedCharId, activeStory?.id]);
@@ -248,14 +250,15 @@ export default function AppOffline({
     showToast("文风保存为预设成功！");
   };
 
-  const selectedChar = characters.find(c => c.id === selectedCharId) || characters[0];
+  const selectedChar = selectableCharacters.find(c => c.id === selectedCharId) || selectableCharacters[0];
   const charStories = offlineStories.filter(s => 
-    s.characterId === selectedCharId || (s.characterIds && s.characterIds.includes(selectedCharId))
+    resolveOfflineStoryCharacterId(s, characters) === selectedCharId
+      || resolveOfflineStoryCharacterIds(s, characters).includes(selectedCharId)
   );
 
   const storyChars = activeStory 
     ? (activeStory.characterIds && activeStory.characterIds.length > 0 
-        ? characters.filter(c => activeStory.characterIds?.includes(c.id))
+        ? selectableCharacters.filter(c => resolveOfflineStoryCharacterIds(activeStory, characters).includes(c.id))
         : [selectedChar])
     : [selectedChar];
 
@@ -306,8 +309,9 @@ export default function AppOffline({
   const handleOpenStory = (story: OfflineStory) => {
     activeStoryRef.current = story;
     setActiveStory(story);
-    localStorage.setItem(`offline_mode_active_${story.characterId}`, "true");
-    localStorage.setItem(`offline_story_id_${story.characterId}`, story.id);
+    const canonicalCharacterId = resolveOfflineStoryCharacterId(story, characters);
+    localStorage.setItem(`offline_mode_active_${canonicalCharacterId}`, "true");
+    localStorage.setItem(`offline_story_id_${canonicalCharacterId}`, story.id);
   };
 
   const clearOfflineSession = (story: OfflineStory) => {
@@ -605,9 +609,9 @@ export default function AppOffline({
 
       // We can collect worldbook blocks for all story characters
       const storyCharsList = updatedStory.characterIds && updatedStory.characterIds.length > 0 
-        ? characters.filter(c => updatedStory.characterIds?.includes(c.id))
+        ? selectableCharacters.filter(c => resolveOfflineStoryCharacterIds(updatedStory, characters).includes(c.id))
         : [selectedChar];
-      const sourceChat = characters.find(c => c.id === updatedStory.sourceChatId);
+      const sourceChat = characters.find(c => c.id === (updatedStory.sourceChatId ? resolveCharacterId(updatedStory.sourceChatId) : undefined));
       const isImportedGroupStory = Boolean(sourceChat?.isGroupChat);
 
       const wbPrompts = updatedStory.importedContext?.worldBook.length

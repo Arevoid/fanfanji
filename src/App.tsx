@@ -13,6 +13,7 @@ import { loadOfflineStories, saveOfflineStories } from "./core/storage/repositor
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
+import { migrateLegacyCharacterIdentityData } from "./domain/character/characterIdentity";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory } from "./types";
 import { 
   AlbumWidget, 
@@ -229,6 +230,7 @@ export default function App() {
   const worldBookPersistenceReady = useRef(false);
   const memoriesPersistenceReady = useRef(false);
   const skipNextMemoriesPersistenceRef = useRef(false);
+  const characterIdentityMigrationLogRef = useRef(new Set<string>());
   const memorySettingsPersistenceReady = useRef(false);
   const offlineStoriesPersistenceReady = useRef(false);
 
@@ -683,6 +685,43 @@ export default function App() {
 
   // Memory Vault (Memory Book) States
   const [memories, setMemories] = useState<MemoryItem[]>(() => loadMemories([]).value);
+
+  // Keep legacy contact copies readable, while canonicalizing dependent data so
+  // every feature sees one archive character for the same identity.
+  useEffect(() => {
+    const migration = migrateLegacyCharacterIdentityData({
+      characters,
+      memories,
+      moments,
+      offlineStories,
+    });
+    if (migration.idMap.size === 0) return;
+
+    const logMigration = (message: string) => {
+      if (characterIdentityMigrationLogRef.current.has(message)) return;
+      characterIdentityMigrationLogRef.current.add(message);
+      console.info(`[character identity migration] ${message}`);
+    };
+    migration.duplicateLogs.forEach(logMigration);
+    if (migration.migratedMemoryCount > 0) {
+      logMigration(`Migrated memory records: ${migration.migratedMemoryCount}.`);
+    }
+    if (migration.migratedMomentCount > 0) {
+      logMigration(`Migrated moment author records: ${migration.migratedMomentCount}.`);
+    }
+    if (migration.referencedOfflineStoryCount > 0) {
+      logMigration(`Offline stories retaining legacy references: ${migration.referencedOfflineStoryCount}.`);
+    }
+
+    const memoriesChanged = migration.memories.some((memory, index) =>
+      memory.characterId !== memories[index]?.characterId,
+    );
+    const momentsChanged = migration.moments.some((moment, index) =>
+      moment.characterId !== moments[index]?.characterId,
+    );
+    if (memoriesChanged) setMemories(migration.memories);
+    if (momentsChanged) setMoments(migration.moments);
+  }, [characters, memories, moments, offlineStories]);
 
   // Offline-story handoffs must be persisted before their story is marked as
   // synced. The ordinary effect remains the single path for every other memory
