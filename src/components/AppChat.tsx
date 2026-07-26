@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
 import { splitTextToOfflineSegments, compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles as splitIntoWeChatBubbles, type CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
@@ -23,7 +23,13 @@ import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary } from "../domain/prompt/characterKnowledgeBoundary";
+import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
+import { deriveRelationId, resolveRelationId } from "../domain/relationship/relationshipService";
+import { isMessageInConversationRelation } from "../features/chat/services/conversationRelationScope";
+import { listInnerVoicesByRelation, updateInnerVoiceRecord } from "../core/storage/repositories/innerVoiceRepository";
+import { getOrCreateInnerVoice } from "../features/chat/services/innerVoiceService";
 import StickerSettings from "./StickerSettings";
+import { Modal } from "./ui/Modal";
 import ChatIcon from "./ChatIcon";
 import { ChatTopBar } from "../features/chat/components/ChatTopBar";
 import { ContactList } from "../features/chat/components/ContactList";
@@ -977,20 +983,94 @@ export default function AppChat({
   
   // Navigation State
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
-  const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
+  const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const activeRelationId = activeCharacter
+    ? deriveRelationId(activeCharacter, activeCharacter.ownerIdentityId || activeIdentityId)
+    : undefined;
+  const isMessageInActiveConversation = (message: Message) => Boolean(activeChatCharId) && isMessageInConversationRelation(message, {
+    characterId: activeChatCharId,
+    relationId: activeRelationId,
+    allowLegacyCharacterMessages: Boolean(activeCharacter?.isContactInstance),
+  });
+  const currentChatMessages = messages.filter((message) => isMessageInActiveConversation(message) && !message.isOffline);
   const activeStylePreset = (activeCharacter?.chatStylePreset) || (settings.globalChatStylePreset) || "default";
   const isFloatingCute = activeStylePreset === "floating-cute";
   const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
   const globalChatIcons = sanitizeChatIcons(settings.chatIcons);
   const getChatIcon = (key: ChatIconKey): string | undefined => characterChatIcons[key] || globalChatIcons[key];
-  const activeIdentityId = settings.activeIdentityId || "identity-1";
   const belongsToActiveIdentity = (ownerIdentityId?: string) =>
     (ownerIdentityId || "identity-1") === activeIdentityId;
 
   const [momentsFilterCharId, setMomentsFilterCharId] = useState<string | null>(null);
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
   const [singleCharacterMomentsId, setSingleCharacterMomentsId] = useState<string | null>(null);
+  const [innerVoiceModal, setInnerVoiceModal] = useState<{
+    character: Character;
+    relationId: string;
+    record: InnerVoiceRecord | null;
+    loading: boolean;
+    error: string | null;
+    view: "current" | "history";
+  } | null>(null);
+  const [innerVoiceHistory, setInnerVoiceHistory] = useState<InnerVoiceRecord[]>([]);
   const [isShowingAddFriendDialog, setIsShowingAddFriendDialog] = useState(false);
+
+  const translateInnerVoiceIfNeeded = async (record: InnerVoiceRecord, character: Character): Promise<InnerVoiceRecord> => {
+    if (!character.enableAutoTranslate || record.translation) return record;
+    try {
+      const translated = await apiTranslate({
+        text: record.content,
+        apiKey: settings.apiKey || "",
+        model: settings.selectedModel,
+        apiEndpoint: settings.apiEndpoint,
+      });
+      const translation = translated.text?.trim();
+      if (!translation || translation === record.content) return record;
+      const updated = { ...record, translation };
+      updateInnerVoiceRecord(updated);
+      return updated;
+    } catch (error) {
+      console.warn("Inner voice translation failed:", error);
+      return record;
+    }
+  };
+
+  const openInnerVoice = async (character: Character | undefined, triggerMessage: Message) => {
+    if (!character || triggerMessage.sender !== "character" || !activeChatCharId) return;
+
+    const relationId = resolveRelationId(character, character.ownerIdentityId || activeIdentityId);
+    const relevantMemories = MemoryService.retrieveRelevantMemories({
+      characterId: character.id,
+      relationId,
+      queryText: triggerMessage.content,
+      existingMemories: memories || [],
+      limit: 5,
+      scenario: "chat",
+    });
+    setInnerVoiceModal({ character, relationId, record: null, loading: true, error: null, view: "current" });
+    try {
+      const record = await getOrCreateInnerVoice({
+        character,
+        triggerMessage,
+        recentMessages: currentChatMessages,
+        relevantMemories,
+        relationId,
+        conversationId: activeChatCharId,
+        settings,
+        requestAi: apiChat,
+      });
+      if (!record) {
+        setInnerVoiceModal((current) => current ? { ...current, loading: false, error: "本次心声未能生成，请稍后再试。" } : current);
+        return;
+      }
+      const displayRecord = await translateInnerVoiceIfNeeded(record, character);
+      setInnerVoiceHistory(listInnerVoicesByRelation(relationId));
+      setInnerVoiceModal((current) => current ? { ...current, record: displayRecord, loading: false, error: null } : current);
+    } catch (error) {
+      console.error("Failed to generate inner voice:", error);
+      setInnerVoiceModal((current) => current ? { ...current, loading: false, error: "心声生成失败，不影响正常聊天。" } : current);
+    }
+  };
 
   const [friendIds, setFriendIds] = useState<string[]>(() => {
     const raw = localStorage.getItem("phone_friend_ids");
@@ -1593,7 +1673,7 @@ export default function AppChat({
     if (!activeChatCharId || !activeCharacter) return;
     if (isOfflineStoryActiveFor(activeChatCharId)) return;
     
-    const currentChatMessages = messages.filter((m) => m.characterId === activeChatCharId && !m.isOffline);
+    const currentChatMessages = messages.filter((message) => isMessageInActiveConversation(message) && !message.isOffline);
     if (currentChatMessages.length > 0) return;
 
     if (activeCharacter.greeting && activeCharacter.greeting.trim()) {
@@ -1834,6 +1914,8 @@ export default function AppChat({
     const userMsg: Message = {
       id: Date.now().toString(),
       characterId: activeChatCharId,
+      relationId: activeRelationId,
+      conversationId: activeChatCharId,
       sender: "user",
       content: text,
       timestamp: Date.now(),
@@ -2280,7 +2362,7 @@ ${activeCharacter.disableBracketActions
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = shouldLoadLongTermMemory
-        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", queryText: userMsg ? userMsg.content : "", existingMemories: memories || [], limit: topK, scenario: "chat" })
+        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationId, queryText: userMsg ? userMsg.content : "", existingMemories: memories || [], limit: topK, scenario: "chat" })
         : [];
       if (relevantMemories.length > 0) {
         charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n");
@@ -2820,7 +2902,7 @@ ${stickerListStr}
     setIsTyping(true);
     try {
       const history = messages
-        .filter((m) => m.characterId === activeChatCharId && !m.isOffline)
+        .filter((message) => isMessageInActiveConversation(message) && !message.isOffline)
         .slice(-15)
         .map((m) => ({
           role: m.sender === "user" ? "user" as const : "model" as const,
@@ -3050,7 +3132,7 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     const container = scrollContainerRef.current;
     if (!activeChatCharId || !container) return;
 
-    const currentChatMsgs = messages.filter(m => m.characterId === activeChatCharId && !m.isOffline);
+    const currentChatMsgs = messages.filter((message) => isMessageInActiveConversation(message) && !message.isOffline);
     const msgCount = currentChatMsgs.length;
     
     const isFreshOpen = lastActiveCharIdRef.current !== activeChatCharId;
@@ -3124,6 +3206,8 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     const userMsg = createUserTextMessage({
       id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       characterId: activeChatCharId,
+      relationId: activeRelationId,
+      conversationId: activeChatCharId,
       content: userMsgText,
       timestamp: Date.now(),
       isOffline: isOfflineModeActive ? true : undefined,
@@ -3179,6 +3263,8 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     const userMsg = createUserTextMessage({
       id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       characterId: activeChatCharId,
+      relationId: activeRelationId,
+      conversationId: activeChatCharId,
       content: userMsgText,
       timestamp: Date.now(),
       isOffline: isOfflineModeActive ? true : undefined,
@@ -3299,7 +3385,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // Recall memories
       const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", queryText: lastUserMsg.content, existingMemories: memories || [], limit: topK, scenario: "chat" });
+      const relevantMemories = MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationId, queryText: lastUserMsg.content, existingMemories: memories || [], limit: topK, scenario: "chat" });
       if (relevantMemories.length > 0) {
         charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories / 召回深度记忆:\n");
       }
@@ -3643,6 +3729,7 @@ ${stickerListStr}
       const result = await MemoryService.extractMemories({
         character: activeCharacter,
         characterId: activeChatCharId,
+        relationId: activeRelationId,
         recentMessages: messagesToCompress,
         existingMemories: memories || [],
         scenario: "chat",
@@ -3686,7 +3773,7 @@ ${stickerListStr}
         proactivePrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
-      const charMsgs = messages.filter(m => m.characterId === activeChatCharId);
+      const charMsgs = messages.filter((message) => isMessageInActiveConversation(message));
       const recentConversation = analyzeRecentConversation(charMsgs, activeChatCharId);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
@@ -4397,13 +4484,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 overflow: visible !important;
               }
 
-              ${settings.avatarBorderRadius !== undefined ? `
+              ${`
                 #conv-screen .avatar, 
                 #conv-screen .user-avatar, 
                 #conv-screen .ai-avatar {
-                  border-radius: ${settings.avatarBorderRadius}px !important;
+                  border-radius: ${settings.avatarBorderRadius ?? 12}px !important;
                 }
-              ` : ''}
+              `}
 
               ${settings.avatarBorderEnabled ? `
                 #conv-screen .avatar, 
@@ -4441,19 +4528,19 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 }
               `}
 
-              ${settings.otherBubbleRadius !== undefined ? `
+              ${`
                 #conv-screen .chat-bubble-other,
                 #conv-screen .voice-message-bar.chat-bubble-other {
-                  border-radius: ${settings.otherBubbleRadius}px !important;
+                  border-radius: ${settings.otherBubbleRadius ?? 6}px !important;
                 }
-              ` : ''}
+              `}
 
-              ${settings.selfBubbleRadius !== undefined ? `
+              ${`
                 #conv-screen .chat-bubble-self,
                 #conv-screen .voice-message-bar.chat-bubble-self {
-                  border-radius: ${settings.selfBubbleRadius}px !important;
+                  border-radius: ${settings.selfBubbleRadius ?? 6}px !important;
                 }
-              ` : ''}
+              `}
 
               ${settings.bubbleTailEnabled ? `
                 #conv-screen .chat-bubble-self::after {
@@ -4846,7 +4933,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   <img
                     src={activeCharacter.avatar}
                     alt=""
-                    className="w-5 h-5 rounded-full object-cover shrink-0 border border-white/50 header-title-avatar"
+                    onClick={() => {
+                      const latestCharacterMessage = [...currentChatMessages].reverse().find((message) => message.sender === "character");
+                      if (latestCharacterMessage) openInnerVoice(activeCharacter, latestCharacterMessage);
+                    }}
+                    className="w-5 h-5 cursor-pointer rounded-full border border-white/50 object-cover shrink-0 header-title-avatar"
                   />
                 )}
                 <h2 className="text-[13px] font-bold text-slate-800 tracking-tight truncate header-title-name chat-header__name">
@@ -6185,7 +6276,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           name={isSelf ? settings.name : msgName}
                           onClick={() => {
                             if (!isSelf) {
-                              setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
+                              openInnerVoice(groupSenderChar || activeCharacter, msg);
                             }
                           }}
                           className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
@@ -6193,7 +6284,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
                         />
                         <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header`}>
-                          {!isSelf && !settings.hideNicknames && (
+                          {!isSelf && settings.hideNicknames === false && (
                             <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
                               <span>🖤</span>
                               <span>{msgName}</span>
@@ -6227,7 +6318,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         name={isSelf ? settings.name : msgName}
                         onClick={() => {
                           if (!isSelf) {
-                            setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
+                            openInnerVoice(groupSenderChar || activeCharacter, msg);
                           }
                         }}
                         className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
@@ -6240,7 +6331,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
                     {/* Meta Header + Message Bubble Column */}
                     <div className={`flex flex-col max-w-[80%] ${isSelf ? "items-end" : "items-start"}`}>
-                      {showAvatar && !settings.hideNicknames && (
+                      {showAvatar && settings.hideNicknames === false && (
                         <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 mb-1 space-y-0.5 msg-meta-header`}>
                           {!isSelf && (
                             <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
@@ -8358,6 +8449,93 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         </div>
 
       </div>
+
+      <Modal
+        open={Boolean(innerVoiceModal)}
+        title={innerVoiceModal?.view === "history" ? "历史心声" : "角色心声"}
+        ariaLabel="角色心声"
+        onClose={() => {
+          setInnerVoiceModal(null);
+          setInnerVoiceHistory([]);
+        }}
+        footer={innerVoiceModal ? (
+          innerVoiceModal.view === "history" ? (
+            <button
+              type="button"
+              onClick={() => setInnerVoiceModal((current) => current ? { ...current, view: "current" } : current)}
+              className="inline-flex h-10 min-w-[128px] items-center justify-center whitespace-nowrap rounded-lg bg-slate-100 px-4 text-sm font-semibold leading-none text-slate-700 transition-colors hover:bg-slate-200"
+              style={{ color: "#334155" }}
+            >
+              <span style={{ color: "#334155" }}>返回当前心声</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setInnerVoiceHistory(listInnerVoicesByRelation(innerVoiceModal.relationId));
+                setInnerVoiceModal((current) => current ? { ...current, view: "history" } : current);
+              }}
+              className="inline-flex h-10 min-w-[128px] items-center justify-center whitespace-nowrap rounded-lg bg-slate-950 px-4 text-sm font-semibold leading-none text-white transition-colors hover:bg-slate-800"
+              style={{ color: "#ffffff" }}
+            >
+              <span style={{ color: "#ffffff" }}>查看历史心声</span>
+            </button>
+          )
+        ) : undefined}
+      >
+        {innerVoiceModal && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <img
+                src={innerVoiceModal.character.avatar}
+                alt=""
+                className="h-11 w-11 rounded-full border border-slate-200 bg-slate-100 object-cover"
+                referrerPolicy="no-referrer"
+              />
+              <div className="min-w-0">
+                <p className="truncate text-[15px] font-semibold text-slate-800">{innerVoiceModal.character.remark || innerVoiceModal.character.name}</p>
+                <p className="mt-0.5 text-xs text-slate-500">此内容仅用于当前聊天体验，不会写入记忆库。</p>
+              </div>
+            </div>
+
+            {innerVoiceModal.view === "current" ? (
+              innerVoiceModal.loading ? (
+                <div className="flex min-h-32 items-center justify-center text-sm text-slate-500">正在聆听 Ta 的心声…</div>
+              ) : innerVoiceModal.error ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">{innerVoiceModal.error}</div>
+              ) : innerVoiceModal.record ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm">
+                    当前状态：{innerVoiceModal.record.state}
+                  </div>
+                  <p className="whitespace-pre-wrap text-[15px] leading-7 text-slate-800">{innerVoiceModal.record.content}</p>
+                  {innerVoiceModal.record.translation && (
+                    <div className="mt-4 border-t border-slate-200 pt-3">
+                      <p className="mb-1 text-xs font-medium text-slate-500">中文翻译</p>
+                      <p className="whitespace-pre-wrap text-[15px] leading-7 text-slate-700">{innerVoiceModal.record.translation}</p>
+                    </div>
+                  )}
+                </div>
+              ) : null
+            ) : (
+              <div className="space-y-3">
+                {innerVoiceHistory.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-slate-500">还没有可查看的历史心声。</p>
+                ) : innerVoiceHistory.map((record) => (
+                  <article key={record.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between gap-3 text-xs text-slate-500">
+                      <span>{new Date(record.createdAt).toLocaleString("zh-CN", { hour12: false })}</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">{record.state}</span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{record.content}</p>
+                    {record.translation && <p className="mt-3 border-t border-slate-100 pt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">中文翻译：{record.translation}</p>}
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       {singleCharacterMomentsId && (
         <div className="absolute inset-0 z-50 bg-white flex flex-col h-full animate-slide-up">

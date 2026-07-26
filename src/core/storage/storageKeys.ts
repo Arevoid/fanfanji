@@ -6,6 +6,8 @@ export const storageKeys = {
   legacyMessages: "phone_messages",
   moments: "phone_moments_v3",
   momentGenerationTasks: "phone_moment_generation_tasks",
+  innerVoiceRecords: "phone_inner_voice_records",
+  characterRelationships: "phone_character_relationships",
   worldBookEntries: "phone_worldbook_entries",
   memoryVaultItems: "phone_memory_vault_items",
   offlineStories: "phone_offline_stories",
@@ -15,5 +17,7 @@ export const storageKeys = {
   dataSchemaVersion: "phone_data_schema_version",
   offlineModeActive: (characterId: string) => `offline_mode_active_${characterId}`,
   offlineStoryId: (characterId: string) => `offline_story_id_${characterId}`,
+  offlineModeActiveByRelation: (relationId: string) => `offline_mode_active_${relationId}`,
+  offlineStoryIdByRelation: (relationId: string) => `offline_story_id_${relationId}`,
   albumWidgetPhotos: (id: string) => `album_widget_photos_${id}`,
 } as const;

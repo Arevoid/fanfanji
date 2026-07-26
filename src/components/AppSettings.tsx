@@ -198,25 +198,31 @@ export default function AppSettings({
   const [iconBorderWidth, setIconBorderWidth] = useState(settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1);
   const [iconBorderOpacity, setIconBorderOpacity] = useState(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100);
   const [hideAppNames, setHideAppNames] = useState(!!settings.hideAppNames);
+  const [desktopTextColor, setDesktopTextColor] = useState(settings.desktopTextColor || "#1d1d1f");
+  const [desktopIconMode, setDesktopIconMode] = useState<"light" | "dark">(settings.desktopIconMode || "light");
+  const [homeWelcomeName, setHomeWelcomeName] = useState(settings.homeWelcomeName ?? settings.name);
+  const [homeWelcomeSignature, setHomeWelcomeSignature] = useState(settings.homeWelcomeSignature ?? settings.signature);
+  const [homeWelcomeAvatar, setHomeWelcomeAvatar] = useState(settings.homeWelcomeAvatar ?? settings.avatar);
+  const [homeWelcomeTextColor, setHomeWelcomeTextColor] = useState(settings.homeWelcomeTextColor || "#1d1d1f");
 
   // Beginner-friendly manual styling states
   const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
   const [otherBubbleBg, setOtherBubbleBg] = useState(settings.otherBubbleBg || "#f4f4f5");
   const [otherBubbleColor, setOtherBubbleColor] = useState(settings.otherBubbleColor || "#18181b");
-  const [otherBubbleRadius, setOtherBubbleRadius] = useState(settings.otherBubbleRadius !== undefined ? settings.otherBubbleRadius : 18);
+  const [otherBubbleRadius, setOtherBubbleRadius] = useState(settings.otherBubbleRadius !== undefined ? settings.otherBubbleRadius : 6);
   const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100);
   const [selfBubbleBg, setSelfBubbleBg] = useState(settings.selfBubbleBg || "#18181b");
   const [selfBubbleColor, setSelfBubbleColor] = useState(settings.selfBubbleColor || "#ffffff");
-  const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.selfBubbleRadius !== undefined ? settings.selfBubbleRadius : 18);
+  const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.selfBubbleRadius !== undefined ? settings.selfBubbleRadius : 6);
   const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100);
   const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
-  const [hideNicknames, setHideNicknames] = useState(!!settings.hideNicknames);
+  const [hideNicknames, setHideNicknames] = useState(settings.hideNicknames !== false);
 
   // New beauty settings states
   const [dockBorderRadius, setDockBorderRadius] = useState(settings.dockBorderRadius !== undefined ? settings.dockBorderRadius : 26);
   const [widgetBorderRadius, setWidgetBorderRadius] = useState(settings.widgetBorderRadius !== undefined ? settings.widgetBorderRadius : 22);
   const [iconBorderEnabled, setIconBorderEnabled] = useState(settings.iconBorderEnabled !== false);
-  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(settings.bubbleTailEnabled !== false);
+  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(!!settings.bubbleTailEnabled);
   const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(settings.bubbleTailVertical || "top");
   const [bubblePosition, setBubblePosition] = useState<"side" | "above">(settings.bubblePosition === "above" ? "above" : "side");
   
@@ -575,6 +581,18 @@ export default function AppSettings({
       } catch (err) {
         console.error("Wallpaper compression failed:", err);
       }
+    }
+  };
+
+  const handleHomeWelcomeAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImage(file, 400, 400, 0.75);
+      setHomeWelcomeAvatar(compressed);
+      handleSave({ homeWelcomeAvatar: compressed });
+    } catch (err) {
+      console.error("Home welcome avatar compression failed:", err);
     }
   };
 
@@ -1209,6 +1227,69 @@ export default function AppSettings({
               {/* 1. 桌面模块 */}
               {beautySubTab === "desktop" && (
                 <div className="space-y-4 animate-fade-in">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-50">
+                      <div>
+                        <span className="text-xs font-bold text-slate-700">置顶信息卡</span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">单独调整桌面顶部的头像和文字，不影响个人资料。</p>
+                      </div>
+                      <button type="button" onClick={() => {
+                        setHomeWelcomeName(settings.name);
+                        setHomeWelcomeSignature(settings.signature);
+                        setHomeWelcomeAvatar(settings.avatar);
+                        setHomeWelcomeTextColor("#1d1d1f");
+                        handleSave({ homeWelcomeName: undefined, homeWelcomeSignature: undefined, homeWelcomeAvatar: undefined, homeWelcomeTextColor: undefined });
+                      }} className="text-[10px] text-slate-400 hover:text-neutral-950 font-semibold">
+                        恢复个人资料
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-3 py-1">
+                      <label className="relative shrink-0 cursor-pointer group">
+                        <img src={homeWelcomeAvatar} alt="置顶信息卡头像" className="w-12 h-12 rounded-full object-cover border border-slate-200" />
+                        <span className="absolute inset-0 rounded-full bg-black/40 text-white text-[9px] font-bold opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">更换</span>
+                        <input type="file" accept="image/*" onChange={handleHomeWelcomeAvatarUpload} className="hidden" />
+                      </label>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">点击头像上传独立图片；不会替换个人资料头像。</p>
+                    </div>
+
+                    <label className="block space-y-1">
+                      <span className="text-[10px] font-semibold text-slate-500">标题</span>
+                      <input value={homeWelcomeName} onChange={(e) => {
+                        const value = e.target.value;
+                        setHomeWelcomeName(value);
+                        handleSave({ homeWelcomeName: value });
+                      }} placeholder="置顶信息卡标题" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-neutral-950" />
+                    </label>
+
+                    <label className="block space-y-1">
+                      <span className="text-[10px] font-semibold text-slate-500">副标题</span>
+                      <input value={homeWelcomeSignature} onChange={(e) => {
+                        const value = e.target.value;
+                        setHomeWelcomeSignature(value);
+                        handleSave({ homeWelcomeSignature: value });
+                      }} placeholder="置顶信息卡副标题" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-neutral-950" />
+                    </label>
+
+                    <div className="flex items-center justify-between gap-4 pt-1">
+                      <div>
+                        <span className="text-xs font-bold text-slate-700">文字颜色</span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">标题和副标题统一使用。</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <input type="color" value={homeWelcomeTextColor} onChange={(e) => {
+                          const value = e.target.value;
+                          setHomeWelcomeTextColor(value);
+                          handleSave({ homeWelcomeTextColor: value });
+                        }} className="w-8 h-8 rounded-md border border-slate-200 bg-white cursor-pointer p-0.5" aria-label="置顶信息卡文字颜色" />
+                        <input value={homeWelcomeTextColor} onChange={(e) => {
+                          const value = e.target.value;
+                          setHomeWelcomeTextColor(value);
+                          if (/^#[0-9a-fA-F]{6}$/.test(value)) handleSave({ homeWelcomeTextColor: value });
+                        }} className="w-20 px-2 py-1.5 rounded-md border border-slate-200 bg-slate-50 text-[10px] font-mono text-slate-600 focus:outline-none focus:ring-1 focus:ring-neutral-950" aria-label="置顶信息卡文字颜色 HEX 值" />
+                      </div>
+                    </div>
+                  </div>
                   {/* 手机壁纸设置 */}
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <div className="flex justify-between items-center pb-1 border-b border-slate-50">
@@ -1461,6 +1542,68 @@ export default function AppSettings({
                         </div>
                       </>
                     )}
+
+                    <div className="flex items-center justify-between gap-4 py-2 border-t border-slate-50">
+                      <div>
+                        <span className="text-xs font-bold text-slate-700">桌面文字颜色</span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">用于桌面应用名称，适合深色壁纸时手动调整。</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <input
+                          type="color"
+                          value={desktopTextColor}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setDesktopTextColor(value);
+                            handleSave({ desktopTextColor: value });
+                          }}
+                          className="w-8 h-8 rounded-md border border-slate-200 bg-white cursor-pointer p-0.5"
+                          aria-label="桌面文字颜色"
+                        />
+                        <input
+                          type="text"
+                          value={desktopTextColor}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setDesktopTextColor(value);
+                            if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+                              handleSave({ desktopTextColor: value });
+                            }
+                          }}
+                          className="w-20 px-2 py-1.5 rounded-md border border-slate-200 bg-slate-50 text-[10px] font-mono text-slate-600 focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                          aria-label="桌面文字颜色 HEX 值"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="py-2 border-t border-slate-50">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <span className="text-xs font-bold text-slate-700">默认图标模式</span>
+                          <p className="text-[10px] text-slate-400 mt-0.5">浅色适合明亮壁纸；深色模式会使用深色图标底和白色线条。</p>
+                        </div>
+                        <div className="flex shrink-0 rounded-lg bg-slate-100 p-0.5">
+                          {(["light", "dark"] as const).map((mode) => {
+                            const selected = desktopIconMode === mode;
+                            return (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => {
+                                  setDesktopIconMode(mode);
+                                  handleSave({ desktopIconMode: mode });
+                                }}
+                                className={`px-2.5 py-1.5 rounded-md text-[10px] font-bold transition-colors ${
+                                  selected ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                }`}
+                              >
+                                {mode === "light" ? "浅色图标" : "深色图标"}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* 隐藏应用名称 */}

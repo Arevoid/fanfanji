@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiExtractMemories, apiTranslate } from "./utils/apiHelper";
 import { audioDb } from "./utils/audioDb";
+import { compressImage } from "./utils/pngParser";
 import { loadSettings, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
@@ -12,12 +13,17 @@ import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } fr
 import { loadOfflineStories, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
+import { deleteInnerVoicesByCharacter, deleteInnerVoicesByRelation } from "./core/storage/repositories/innerVoiceRepository";
+import { resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
+import { deleteRelationshipById, deleteRelationshipsByCharacter, deriveRelationId, isRelationshipScopedRecord, listRelationshipsByCharacter, resolveRelationId } from "./domain/relationship/relationshipService";
+import { LEGACY_PRIMARY_IDENTITY_ID } from "./domain/relationship/relationshipTypes";
 import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory } from "./types";
 import { 
   AlbumWidget, 
   MusicWidget, 
   AnniversaryWidget, 
+  DateWidget,
   TodoWidget, 
   AddWidgetSheet 
 } from "./components/HomeScreenWidgets";
@@ -222,9 +228,18 @@ const DEFAULT_SETTINGS: UserSettings = {
   dockBorderRadius: 26,
   widgetBorderRadius: 22,
   iconBorderEnabled: true,
-  bubbleTailEnabled: true,
+  desktopTextColor: "#1d1d1f",
+  desktopIconMode: "light",
+  avatarBorderRadius: 12,
+  otherBubbleRadius: 6,
+  selfBubbleRadius: 6,
+  collapseConsecutiveAvatars: true,
+  hideNicknames: true,
+  avatarBorderEnabled: false,
+  bubbleTailEnabled: false,
   bubbleTailVertical: "top",
-  bubblePosition: "side"
+  bubblePosition: "side",
+  bubbleBorderEnabled: false
 };
 
 const DEFAULT_MESSAGES: Message[] = [];
@@ -829,6 +844,8 @@ export default function App() {
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const [isShowingAddWidget, setIsShowingAddWidget] = useState(false);
+  // Retained only for legacy persisted settings; the pinned card is no longer rendered.
+  const [isEditingHomeWelcomeCard, setIsEditingHomeWelcomeCard] = useState(false);
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const pageSwitchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -1313,7 +1330,18 @@ export default function App() {
     }
   };
 
-  const handleAddWidget = (widgetType: "album" | "music" | "anniversary" | "todo" | "album_1x4" | "album_2x4" | "welcome") => {
+  const handleHomeWelcomeAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImage(file, 400, 400, 0.75);
+      setSettings((current) => ({ ...current, homeWelcomeAvatar: compressed }));
+    } catch (error) {
+      console.error("Home welcome avatar compression failed:", error);
+    }
+  };
+
+  const handleAddWidget = (widgetType: "album" | "music" | "anniversary" | "todo" | "date" | "album_1x4" | "album_2x4" | "welcome") => {
     if (widgetType === "welcome") {
       setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: false }));
       setIsShowingAddWidget(false);
@@ -1322,7 +1350,7 @@ export default function App() {
 
     setHomeScreenItems((current) => {
       let size: "1x1" | "2x2" | "1x4" | "2x4" = "2x2";
-      let actualWidgetType: "album" | "music" | "anniversary" | "todo" = "todo";
+      let actualWidgetType: "album" | "music" | "anniversary" | "todo" | "date" = "todo";
 
       if (widgetType === "album_1x4") {
         size = "1x4";
@@ -1333,9 +1361,12 @@ export default function App() {
       } else if (widgetType === "album") {
         size = "2x2";
         actualWidgetType = "album";
+      } else if (widgetType === "date") {
+        size = "2x4";
+        actualWidgetType = "date";
       } else {
         size = "2x2";
-        actualWidgetType = widgetType as any;
+        actualWidgetType = widgetType;
       }
 
       const targetPage = findPageForNewItem(current, { type: "widget", size }, currentPage);
@@ -1365,6 +1396,7 @@ export default function App() {
       case "album": return AlbumWidget;
       case "music": return MusicWidget;
       case "anniversary": return AnniversaryWidget;
+      case "date": return DateWidget;
       case "todo": default: return TodoWidget;
     }
   };
@@ -1534,9 +1566,35 @@ export default function App() {
 
   const handleDeleteCharacter = (id: string, skipConfirm = false) => {
     if (skipConfirm || confirm("确定要删除这名角色人设吗？删除后其相关聊天和动态也将被清空。")) {
-      setCharacters((prev) => prev.filter((c) => c.id !== id));
-      setMessages((prev) => prev.filter((m) => m.characterId !== id));
+      const character = characters.find((item) => item.id === id);
+      const canonicalCharacterId = character ? resolveCanonicalCharacterId(character) : id;
+      const isContactInstance = Boolean(character?.isContactInstance);
+      const relatedCharacters = isContactInstance
+        ? characters.filter((item) => item.id === id)
+        : characters.filter((item) => resolveCanonicalCharacterId(item) === canonicalCharacterId);
+      const relatedCharacterIds = new Set<string>(relatedCharacters.map((item: Character) => item.id));
+      const relationIds = new Set<string>([
+        ...listRelationshipsByCharacter(canonicalCharacterId).map((relationship) => relationship.id),
+        ...relatedCharacters.map((item) => deriveRelationId(item, item.ownerIdentityId || LEGACY_PRIMARY_IDENTITY_ID)),
+      ]);
+      if (!isContactInstance) {
+        deleteRelationshipsByCharacter(canonicalCharacterId);
+        deleteInnerVoicesByCharacter(canonicalCharacterId);
+      } else {
+        relationIds.forEach((relationId) => {
+          deleteRelationshipById(relationId);
+          deleteInnerVoicesByRelation(relationId);
+        });
+      }
+      setCharacters((prev) => prev.filter((item) => !relatedCharacterIds.has(item.id)));
+      const relationshipDataScope: { characterIds: string[]; relationIds: string[] } = {
+        characterIds: [...relatedCharacterIds],
+        relationIds: [...relationIds],
+      };
+      setMessages((prev) => prev.filter((message) => !isRelationshipScopedRecord(message, relationshipDataScope)));
       setMoments((prev) => prev.filter((m) => m.characterId !== id));
+      setMemories((prev) => prev.filter((memory) => !isRelationshipScopedRecord(memory, relationshipDataScope)));
+      setOfflineStories((prev) => prev.filter((story) => !isRelationshipScopedRecord(story, relationshipDataScope)));
     }
   };
 
@@ -1554,17 +1612,26 @@ export default function App() {
 
   // Chat message send handler
   const handleSendMessage = (msg: Message) => {
-    setMessages((prev) => [...prev, msg]);
+    const targetCharacter = characters.find((character) => character.id === msg.characterId);
+    const relationId = msg.relationId || (targetCharacter
+      ? resolveRelationId(targetCharacter, targetCharacter.ownerIdentityId || settings.activeIdentityId || LEGACY_PRIMARY_IDENTITY_ID)
+      : undefined);
+    const scopedMessage: Message = {
+      ...msg,
+      ...(relationId ? { relationId } : {}),
+      ...(msg.conversationId ? {} : { conversationId: msg.characterId }),
+    };
+    setMessages((prev) => [...prev, scopedMessage]);
 
     // Update character's last active time on message exchange
     setCharacters((prev) =>
       prev.map((c) =>
-        c.id === msg.characterId ? { ...c, lastActiveTime: Date.now() } : c
+        c.id === scopedMessage.characterId ? { ...c, lastActiveTime: Date.now() } : c
       )
     );
 
     // Check if auto-translation is enabled and the message needs translation
-    const char = characters.find((c) => c.id === msg.characterId);
+    const char = characters.find((c) => c.id === scopedMessage.characterId);
     if (
       char &&
       char.enableAutoTranslate &&
@@ -1816,9 +1883,26 @@ export default function App() {
     }
   ];
 
+  // Built-in gradients are the old desktop shell, not a user wallpaper. Render
+  // them as a clean canvas; uploaded and explicitly selected wallpapers remain
+  // visible across the home screen.
+  const usesBuiltInDesktopBackground = [
+    "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
+    "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)",
+  ].includes(settings.wallpaper);
+  const screenBackground = usesBuiltInDesktopBackground
+    ? "#ffffff"
+      : settings.wallpaper.startsWith("linear-gradient")
+        ? settings.wallpaper
+        : `url(${settings.wallpaper}) center/cover no-repeat`;
+  const desktopWelcomeName = settings.homeWelcomeName ?? settings.name;
+  const desktopWelcomeSignature = settings.homeWelcomeSignature ?? settings.signature;
+  const desktopWelcomeAvatar = settings.homeWelcomeAvatar ?? settings.avatar;
+  const desktopWelcomeTextColor = settings.homeWelcomeTextColor || "#1d1d1f";
+
   return (
     <div
-      className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
+      className="min-h-[100dvh] md:min-h-screen w-full bg-white flex items-start md:items-center justify-center p-0 md:p-6 select-none overflow-hidden"
       style={{
         position: (typeof window !== "undefined" && window.innerWidth < 768) ? "absolute" : "relative",
         top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${vvTop}px` : undefined,
@@ -1852,6 +1936,7 @@ export default function App() {
           --app-icon-bg-opacity: ${(settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100) / 100};
           --app-icon-border-width: ${settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1}px;
           --app-icon-border-opacity: ${(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100) / 100};
+          --desktop-text-color: ${settings.desktopTextColor || "#1d1d1f"};
         }
         .phone-screen-container div[style*="--app-icon-radius"],
         .phone-screen-container button[style*="--app-icon-radius"],
@@ -1861,6 +1946,14 @@ export default function App() {
           border-width: var(--app-icon-border-width, 1px) !important;
           border-color: rgba(240, 240, 243, var(--app-icon-border-opacity, 1)) !important;
           border-style: solid !important;
+        }
+        .phone-screen-container .desktop-app-icon[data-icon-mode="dark"] {
+          background-color: #16181d !important;
+          border-color: rgba(255, 255, 255, 0.22) !important;
+          box-shadow: 0 3px 10px rgba(0, 0, 0, 0.26) !important;
+        }
+        .phone-screen-container .desktop-app-icon[data-icon-mode="dark"] .desktop-default-icon {
+          filter: grayscale(1) brightness(0) invert(1);
         }
         body, button, input, textarea, select, div, p, span, h1, h2, h3, h4, h5, h6 {
           font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif !important;
@@ -2005,6 +2098,10 @@ export default function App() {
           font-weight: 600 !important;
         }
 
+        /* Desktop labels deliberately follow the user's wallpaper-contrast setting. */
+        .phone-screen-container .desktop-app-label {
+          color: var(--desktop-text-color) !important;
+        }
         /* Unified Form Field Labels: size 11px, color #52525b */
         .phone-screen-container label,
         .phone-screen-container .block.text-xs.font-semibold.text-slate-500,
@@ -2220,9 +2317,7 @@ export default function App() {
         ref={phoneScreenRef}
         className="w-full md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl overflow-hidden relative flex flex-col bg-slate-100 border-none phone-screen-container"
         style={{
-          background: settings.wallpaper.startsWith("linear-gradient")
-            ? settings.wallpaper
-            : `url(${settings.wallpaper}) center/cover no-repeat`,
+          background: screenBackground,
           position: "relative",
           height: (typeof window !== "undefined" && window.innerWidth < 768) ? "100%" : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
@@ -2341,48 +2436,6 @@ export default function App() {
                               key={pageIdx}
                               className="w-full h-full flex-shrink-0 flex flex-col select-none px-0"
                             >
-                              {/* Home Widget Card (Clock / Welcoming Card) inside Page 0 only */}
-                              {pageIdx === 0 && !settings.hideHomeWelcomeWidget && (
-                                <div className="relative shrink-0 mt-3 mb-3.5" style={{ marginLeft: `${gridPadding}px`, marginRight: `${gridPadding}px` }}>
-                                  <div 
-                                    className={`backdrop-blur-md border border-neutral-200/20 p-3.5 rounded-[22px] text-neutral-850 shadow-sm select-none flex items-center gap-3.5 w-full h-full ${
-                                      isEditingHomeScreen ? "animate-jiggle" : ""
-                                    }`}
-                                    style={{
-                                      backgroundColor: `rgba(255, 255, 255, ${(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70) / 100})`,
-                                      borderRadius: settings.widgetBorderRadius !== undefined ? `${settings.widgetBorderRadius}px` : "22px"
-                                    }}
-                                  >
-                                    <img
-                                      src={settings.avatar}
-                                      alt={settings.name}
-                                      className="w-12 h-12 rounded-full object-cover border border-slate-200/20 shadow-sm shrink-0"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                      <h2 className="text-sm font-extrabold text-neutral-900 tracking-tight leading-tight">
-                                        {settings.name}
-                                      </h2>
-                                      <p className="text-[11px] text-neutral-500 mt-1 line-clamp-1 leading-relaxed">
-                                        {settings.signature}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  {isEditingHomeScreen && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: true }));
-                                      }}
-                                      className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-stone-900/90 hover:bg-stone-950 text-white rounded-full flex items-center justify-center text-xs font-black shadow z-30 transition-transform active:scale-90"
-                                    >
-                                      -
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-
                               {/* The grid of apps and widgets for this page */}
                               <div 
                                 ref={pageIdx === currentPage ? pageContainerRef : undefined}
@@ -2418,19 +2471,20 @@ export default function App() {
                                             : ""
                                         }`}>
                                           <div 
-                                            className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] transform active:scale-95 transition-all duration-150 overflow-hidden shrink-0"
+                                            className="desktop-app-icon bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] transform active:scale-95 transition-all duration-150 overflow-hidden shrink-0"
+                                            data-icon-mode={settings.desktopIconMode || "light"}
                                             style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                                           >
                                             {customIconUrl ? (
                                               <img src={customIconUrl} alt={app.name} className="w-full h-full object-cover" />
                                             ) : (
-                                              <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                                              <div className="desktop-default-icon w-full h-full flex items-center justify-center scale-90 text-stone-800">
                                                 {app.icon}
                                               </div>
                                             )}
                                           </div>
                                           {!isHiddenNames && (
-                                            <span className="text-[10px] font-extrabold mt-1 text-neutral-800 truncate w-[72px] -mx-3.5 block select-none tracking-tight font-sans text-center">
+                                            <span className="desktop-app-label text-[10px] font-extrabold mt-1 truncate w-[72px] -mx-3.5 block select-none tracking-tight font-sans text-center" style={{ color: "var(--desktop-text-color)" }}>
                                               {app.name}
                                             </span>
                                           )}
@@ -2561,13 +2615,14 @@ export default function App() {
                       {installedAppIds.includes("chat") ? (
                         <button
                           onClick={() => setActiveApp("chat")}
-                          className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                          className="desktop-app-icon bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                          data-icon-mode={settings.desktopIconMode || "light"}
                           style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
                           {settings.customIcons["chat"] ? (
                             <img src={settings.customIcons["chat"]} alt="" className="w-full h-full object-cover" />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                            <div className="desktop-default-icon w-full h-full flex items-center justify-center scale-90 text-stone-800">
                               {AppIcons.chat()}
                             </div>
                           )}
@@ -2581,13 +2636,14 @@ export default function App() {
                       {installedAppIds.includes("music") ? (
                         <button
                           onClick={() => setActiveApp("music")}
-                          className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                          className="desktop-app-icon bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                          data-icon-mode={settings.desktopIconMode || "light"}
                           style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
                           {settings.customIcons["music"] ? (
                             <img src={settings.customIcons["music"]} alt="" className="w-full h-full object-cover" />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                            <div className="desktop-default-icon w-full h-full flex items-center justify-center scale-90 text-stone-800">
                               {AppIcons.music()}
                             </div>
                           )}
@@ -2601,13 +2657,14 @@ export default function App() {
                       {installedAppIds.includes("archives") ? (
                         <button
                           onClick={() => setActiveApp("archives")}
-                          className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                          className="desktop-app-icon bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                          data-icon-mode={settings.desktopIconMode || "light"}
                           style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
                           {settings.customIcons["archives"] ? (
                             <img src={settings.customIcons["archives"]} alt="" className="w-full h-full object-cover" />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                            <div className="desktop-default-icon w-full h-full flex items-center justify-center scale-90 text-stone-800">
                               {AppIcons.archives()}
                             </div>
                           )}
@@ -2620,13 +2677,14 @@ export default function App() {
                     <div className="flex items-center justify-center w-full h-full">
                       <button
                         onClick={() => setActiveApp("settings")}
-                        className="bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                        className="desktop-app-icon bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
+                        data-icon-mode={settings.desktopIconMode || "light"}
                         style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                       >
                         {settings.customIcons["settings"] ? (
                           <img src={settings.customIcons["settings"]} alt="" className="w-full h-full object-cover" />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                          <div className="desktop-default-icon w-full h-full flex items-center justify-center scale-90 text-stone-800">
                             {AppIcons.settings()}
                           </div>
                         )}
@@ -2644,6 +2702,58 @@ export default function App() {
                     onClose={() => setIsShowingAddWidget(false)} 
                     settings={settings}
                   />
+                </div>
+              )}
+
+              {isEditingHomeWelcomeCard && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-5" onClick={() => setIsEditingHomeWelcomeCard(false)}>
+                  <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+                    <div className="mb-4 flex items-center justify-between">
+                      <div>
+                        <h2 className="text-base font-bold text-neutral-900">编辑置顶信息卡</h2>
+                        <p className="mt-1 text-[11px] text-neutral-500">仅影响桌面顶部的信息卡。</p>
+                      </div>
+                      <button type="button" onClick={() => setIsEditingHomeWelcomeCard(false)} className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-100 text-lg text-neutral-500">×</button>
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-3">
+                        <span className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full border border-neutral-200 bg-neutral-100">
+                          <img src={desktopWelcomeAvatar} alt="置顶信息卡头像" className="h-full w-full object-cover" />
+                        </span>
+                        <span className="flex-1 text-[11px] leading-relaxed text-neutral-500">设置独立头像，不会替换个人资料。</span>
+                        <span className="relative shrink-0 overflow-hidden rounded-lg bg-neutral-900 px-3 py-2 text-[11px] font-semibold text-white">
+                          更换
+                          <input type="file" accept="image/*" onChange={handleHomeWelcomeAvatarUpload} className="absolute inset-0 cursor-pointer opacity-0" />
+                        </span>
+                      </label>
+
+                      <label className="block text-[11px] font-semibold text-neutral-600">
+                        标题
+                        <input value={desktopWelcomeName} onChange={(event) => setSettings((current) => ({ ...current, homeWelcomeName: event.target.value }))} className="mt-1.5 w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm font-normal text-neutral-900 outline-none focus:border-neutral-500" />
+                      </label>
+
+                      <label className="block text-[11px] font-semibold text-neutral-600">
+                        副标题
+                        <input value={desktopWelcomeSignature} onChange={(event) => setSettings((current) => ({ ...current, homeWelcomeSignature: event.target.value }))} className="mt-1.5 w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm font-normal text-neutral-900 outline-none focus:border-neutral-500" />
+                      </label>
+
+                      <div className="flex items-center justify-between gap-3 text-[11px] font-semibold text-neutral-600">
+                        <span>文字颜色</span>
+                        <div className="flex items-center gap-2">
+                          <input type="color" value={desktopWelcomeTextColor} onChange={(event) => setSettings((current) => ({ ...current, homeWelcomeTextColor: event.target.value }))} className="h-8 w-8 cursor-pointer rounded-md border border-neutral-200 bg-white p-0.5" aria-label="置顶信息卡文字颜色" />
+                          <input value={desktopWelcomeTextColor} onChange={(event) => {
+                            const value = event.target.value;
+                            if (/^#[0-9a-fA-F]{6}$/.test(value)) setSettings((current) => ({ ...current, homeWelcomeTextColor: value }));
+                          }} className="w-20 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-[11px] font-mono font-normal text-neutral-700 outline-none" aria-label="置顶信息卡文字颜色 HEX 值" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 flex justify-end gap-2">
+                      <button type="button" onClick={() => setIsEditingHomeWelcomeCard(false)} className="rounded-lg bg-neutral-900 px-4 py-2 text-xs font-semibold text-white">完成</button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -2818,8 +2928,8 @@ export default function App() {
           {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) - Overlaid absolutely on top of everything */}
           {(() => {
             const activeChar = characters.find(c => c.id === activeChatCharId);
-            const activeWallpaper = (activeApp === "chat" && activeChar && activeChar.chatBg) 
-              ? activeChar.chatBg 
+            const activeWallpaper = (activeApp === "chat" && activeChar && activeChar.chatBg)
+              ? activeChar.chatBg
               : settings.wallpaper;
             return <StatusBar wallpaper={activeWallpaper} />;
           })()}
@@ -2838,7 +2948,8 @@ export default function App() {
             {draggedItem.type === "app" ? (
               <div className="flex flex-col items-center">
                 <div 
-                  className="bg-white border border-[#f0f0f3] flex items-center justify-center overflow-hidden shrink-0 shadow-lg" 
+                  className="desktop-app-icon bg-white border border-[#f0f0f3] flex items-center justify-center overflow-hidden shrink-0 shadow-lg"
+                  data-icon-mode={settings.desktopIconMode || "light"}
                   style={{ 
                     borderRadius: "var(--app-icon-radius, 35%)",
                     width: settings.hideAppNames ? "52px" : "44px",
@@ -2848,13 +2959,13 @@ export default function App() {
                   {settings.customIcons[draggedItem.id] ? (
                     <img src={settings.customIcons[draggedItem.id]} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
+                    <div className="desktop-default-icon w-full h-full flex items-center justify-center scale-90 text-stone-800">
                       {desktopApps.find(a => a.id === draggedItem.id)?.icon}
                     </div>
                   )}
                 </div>
                 {!settings.hideAppNames && (
-                  <span className="text-[10px] font-black mt-1 text-neutral-800">
+                  <span className="text-[10px] font-black mt-1" style={{ color: "var(--desktop-text-color)" }}>
                     {desktopApps.find(a => a.id === draggedItem.id)?.name}
                   </span>
                 )}

@@ -81,6 +81,10 @@ export interface Character {
 export interface Message {
   id: string;
   characterId: string;
+  /** Optional relationship scope for multi-identity chat isolation. */
+  relationId?: string;
+  /** Stable conversation reference; legacy messages use characterId. */
+  conversationId?: string;
   sender: "user" | "character";
   senderId?: string;
   content: string;
@@ -94,6 +98,23 @@ export interface Message {
   audioUrl?: string;
   audioDuration?: number;
   isVoiceMessage?: boolean;
+}
+
+/** A private, on-demand reflection for one character message. It is not chat history or memory. */
+export interface InnerVoiceRecord {
+  id: string;
+  /** Always the stable source profile id when this is a contact instance. */
+  characterId: string;
+  /** Relationship scope for one user identity and one canonical character. */
+  relationId?: string;
+  messageId: string;
+  conversationId: string;
+  triggerMessageSummary: string;
+  state: string;
+  content: string;
+  /** Optional Chinese translation when this character enables automatic translation. */
+  translation?: string;
+  createdAt: number;
 }
 
 export interface MomentComment {
@@ -202,6 +223,15 @@ export interface UserSettings {
   iconBorderWidth?: number;
   iconBorderOpacity?: number;
   hideAppNames?: boolean;
+  /** Foreground color for desktop application labels. */
+  desktopTextColor?: string;
+  /** Visual treatment for built-in desktop app icons. */
+  desktopIconMode?: "light" | "dark";
+  /** Optional overrides for the pinned desktop information card. */
+  homeWelcomeName?: string;
+  homeWelcomeSignature?: string;
+  homeWelcomeAvatar?: string;
+  homeWelcomeTextColor?: string;
   enableTimeAwareness?: boolean;
   homeButtonPosition?: { x: number; y: number };
   identities?: UserIdentity[];
@@ -265,7 +295,7 @@ export interface StylePreset {
 export interface HomeScreenItem {
   id: string;
   type: "app" | "widget";
-  widgetType?: "album" | "music" | "anniversary" | "todo";
+  widgetType?: "album" | "music" | "anniversary" | "todo" | "date";
   size: "1x1" | "2x2" | "1x4" | "2x4";
   page: number;
 }
@@ -273,6 +303,8 @@ export interface HomeScreenItem {
 export interface MemoryItem {
   id: string;
   characterId: string;
+  /** Optional relationship scope; records without it remain legacy-compatible. */
+  relationId?: string;
   content: string;
   timestamp: number;
   importance?: number; // 1-10, default 5
@@ -297,6 +329,8 @@ export interface ImmediateSummaryTask {
 export interface OfflineStory {
   id: string;
   characterId: string;
+  /** Optional relationship scope; records without it remain legacy-compatible. */
+  relationId?: string;
   characterIds?: string[];
   title: string;
   createdAt: number;

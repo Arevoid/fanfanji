@@ -100,7 +100,7 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
   return (
     <div className="relative w-full h-full group">
       <div 
-        className="w-full h-full rounded-2xl overflow-hidden shadow-md border border-white/20 bg-stone-900/10 cursor-pointer select-none"
+        className="desktop-widget-glass-frame w-full h-full rounded-2xl overflow-hidden cursor-pointer select-none"
         style={{
           borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined
         }}
@@ -151,11 +151,11 @@ export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, 
             onOpenApp("music");
           }
         }}
-        className={`w-full h-full rounded-2xl p-3 flex flex-col justify-between backdrop-blur-md border border-white/30 shadow-md text-stone-800 text-left relative overflow-hidden select-none ${
+        className={`desktop-widget-glass w-full h-full rounded-2xl p-3 flex flex-col justify-between text-stone-800 text-left relative overflow-hidden select-none ${
           !isEditing ? "cursor-pointer hover:bg-white/50 active:scale-[0.98] transition-all duration-200" : ""
         }`}
         style={{
-          backgroundColor: widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)",
+          "--desktop-widget-glass-alpha": (widgetOpacity !== undefined ? widgetOpacity / 100 : 0.32) as number,
           borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined
         }}
       >
@@ -363,10 +363,10 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
         }
       `}</style>
       <div 
-        className="w-full h-full rounded-2xl p-3 flex flex-col justify-between backdrop-blur-md border border-white/30 shadow-md text-left relative overflow-hidden cursor-pointer transition-transform duration-150 active:scale-[0.98]"
+        className="desktop-widget-glass w-full h-full rounded-2xl p-3 flex flex-col justify-between text-left relative overflow-hidden cursor-pointer transition-transform duration-150 active:scale-[0.98]"
         onClick={handleOuterClick}
         style={{
-          backgroundColor: bgImage ? undefined : (widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)"),
+          "--desktop-widget-glass-alpha": (widgetOpacity !== undefined ? widgetOpacity / 100 : 0.32) as number,
           backgroundImage: bgImage ? `url(${bgImage})` : undefined,
           backgroundSize: "cover",
           backgroundPosition: "center",
@@ -374,8 +374,6 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
         }}
       >
         {/* Dark overlay for readability on user background images */}
-        {bgImage && <div className="absolute inset-0 bg-black/40 z-0 pointer-events-none" />}
-
         <div className="w-full h-full flex flex-col justify-between z-10">
           {/* Top Row: Title on Left */}
           <div className="flex justify-between items-start w-full">
@@ -710,6 +708,146 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
   );
 }
 
+/** A full-width desktop date card. Its content always follows the device's local date. */
+export function DateWidget({ id, isEditing, onRemove, widgetBorderRadius }: WidgetProps) {
+  const backgroundKey = `date_widget_background_${id}`;
+  const textColorKey = `date_widget_text_color_${id}`;
+  const [now, setNow] = useState(() => new Date());
+  const [backgroundImage, setBackgroundImage] = useState<string | undefined>(() => localStorage.getItem(backgroundKey) || undefined);
+  const [textColor, setTextColor] = useState(() => localStorage.getItem(textColorKey) || "#ffffff");
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [draftBackgroundImage, setDraftBackgroundImage] = useState<string | undefined>(backgroundImage);
+  const [draftTextColor, setDraftTextColor] = useState(textColor);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let timer: number | undefined;
+    const scheduleNextDay = () => {
+      const current = new Date();
+      const nextDay = new Date(current);
+      nextDay.setHours(24, 0, 1, 0);
+      timer = window.setTimeout(() => {
+        setNow(new Date());
+        scheduleNextDay();
+      }, nextDay.getTime() - current.getTime());
+    };
+    scheduleNextDay();
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isSettingsOpen) {
+      setDraftBackgroundImage(backgroundImage);
+      setDraftTextColor(textColor);
+    }
+  }, [backgroundImage, isSettingsOpen, textColor]);
+
+  const handleBackgroundUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") setDraftBackgroundImage(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const saveSettings = () => {
+    const resolvedTextColor = /^#[0-9a-fA-F]{6}$/.test(draftTextColor) ? draftTextColor : "#ffffff";
+    setBackgroundImage(draftBackgroundImage);
+    setTextColor(resolvedTextColor);
+    if (draftBackgroundImage) localStorage.setItem(backgroundKey, draftBackgroundImage);
+    else localStorage.removeItem(backgroundKey);
+    localStorage.setItem(textColorKey, resolvedTextColor);
+    setIsSettingsOpen(false);
+  };
+
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(now).toUpperCase();
+  const monthDay = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric" }).format(now);
+  const backgroundStyle = backgroundImage ? { backgroundImage: `url(${backgroundImage})` } : undefined;
+
+  return (
+    <div className="relative h-full w-full group">
+      <button
+        type="button"
+        aria-label="设置日期小组件"
+        className="desktop-widget-glass relative h-full w-full overflow-hidden text-left transition-transform duration-150 active:scale-[0.985]"
+        onClick={() => !isEditing && setIsSettingsOpen(true)}
+        style={{
+          ...(backgroundStyle || {}),
+          "--desktop-widget-glass-alpha": 0.32,
+          backgroundPosition: "center",
+          backgroundSize: "cover",
+          borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "16px",
+        }}
+      >
+        <span
+          className="date-widget-typeface absolute bottom-4 left-5 z-10 flex flex-col"
+          style={{ "--date-widget-text-color": textColor } as React.CSSProperties}
+        >
+          <span className="date-widget-weekday text-[26px] font-semibold leading-tight tracking-wide">{weekday}</span>
+          <span className="date-widget-month-day text-[21px] leading-tight">{monthDay}</span>
+        </span>
+      </button>
+
+      {isEditing && onRemove && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+          className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md"
+          aria-label="删除小组件"
+        >
+          ×
+        </button>
+      )}
+
+      {isSettingsOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" onClick={() => setIsSettingsOpen(false)}>
+          <section className="w-full max-w-sm rounded-[24px] border border-stone-100 bg-white p-5 text-left text-stone-800 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between border-b border-stone-100 pb-3">
+              <div>
+                <h4 className="text-sm font-black">日期小组件</h4>
+                <p className="mt-0.5 text-[11px] font-medium text-stone-400">日期会按设备本地时间自动更新</p>
+              </div>
+              <button type="button" onClick={() => setIsSettingsOpen(false)} className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-100 text-lg text-stone-500" aria-label="关闭">×</button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-[11px] font-bold text-stone-500">背景图片</label>
+                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
+                <div className="flex items-center gap-3 rounded-2xl border border-stone-200 bg-stone-50 p-2">
+                  <div className="h-12 w-16 shrink-0 rounded-xl bg-slate-200 bg-cover bg-center" style={draftBackgroundImage ? { backgroundImage: `url(${draftBackgroundImage})` } : undefined} />
+                  <div className="flex flex-1 gap-2">
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-[11px] font-bold text-stone-700">上传图片</button>
+                    {draftBackgroundImage && <button type="button" onClick={() => setDraftBackgroundImage(undefined)} className="rounded-xl border border-stone-200 px-3 py-2 text-[11px] font-bold text-stone-500">恢复默认</button>}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[11px] font-bold text-stone-500">星期、月、日文字颜色</label>
+                <div className="flex items-center gap-3 rounded-2xl border border-stone-200 bg-stone-50 p-2">
+                  <input type="color" value={draftTextColor} onChange={(event) => setDraftTextColor(event.target.value)} className="h-9 w-11 cursor-pointer rounded-lg border-0 bg-transparent p-0" aria-label="选择日期文字颜色" />
+                  <input type="text" value={draftTextColor} onChange={(event) => setDraftTextColor(event.target.value)} maxLength={7} className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-semibold uppercase outline-none focus:border-stone-500" aria-label="星期、月、日文字颜色 HEX" />
+                </div>
+              </div>
+            </div>
+            <div className="mt-5 flex gap-2 border-t border-stone-100 pt-4">
+              <button type="button" onClick={() => setIsSettingsOpen(false)} className="flex-1 rounded-xl bg-stone-100 py-2.5 text-xs font-black text-stone-700">取消</button>
+              <button type="button" onClick={saveSettings} className="flex-1 rounded-xl bg-stone-900 py-2.5 text-xs font-black text-white">保存</button>
+            </div>
+          </section>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds, widgetOpacity, widgetBorderRadius }: WidgetProps) {
   const [todos, setTodos] = useState<{ id: string; text: string; checked: boolean }[]>([]);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
@@ -753,7 +891,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
   return (
     <div className="relative w-full h-full group">
       <div 
-        className="w-full h-full rounded-2xl p-3 flex flex-col justify-between backdrop-blur-md border border-white/30 shadow-md text-stone-800 text-left relative cursor-pointer overflow-hidden"
+        className="desktop-widget-glass w-full h-full rounded-2xl p-3 flex flex-col justify-between text-stone-800 text-left relative cursor-pointer overflow-hidden"
         onClick={() => {
           if (!isEditing && onOpenApp) {
             const isInstalled = installedAppIds 
@@ -780,7 +918,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
           }
         }}
         style={{
-          backgroundColor: widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)",
+          "--desktop-widget-glass-alpha": (widgetOpacity !== undefined ? widgetOpacity / 100 : 0.32) as number,
           borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined
         }}
       >
@@ -852,7 +990,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
 
 // Bottom sheet selector for preset widgets
 interface AddWidgetSheetProps {
-  onAdd: (widgetType: "album" | "music" | "anniversary" | "todo" | "album_1x4" | "album_2x4" | "welcome") => void;
+  onAdd: (widgetType: "album" | "music" | "anniversary" | "todo" | "date" | "album_1x4" | "album_2x4" | "welcome") => void;
   onClose: () => void;
   settings?: UserSettings;
 }
@@ -913,6 +1051,20 @@ export function AddWidgetSheet({ onAdd, onClose, settings }: AddWidgetSheetProps
           <div>
             <h4 className="text-xs font-black text-stone-800">精美相册 (2×4)</h4>
             <p className="text-[10px] text-stone-400 font-medium mt-0.5">大屏宽画幅焦点壁纸</p>
+          </div>
+        </button>
+
+        {/* Date 2x4 */}
+        <button
+          onClick={() => onAdd("date")}
+          className="flex items-center gap-3 p-3 bg-stone-50 hover:bg-stone-100 border border-stone-200/60 rounded-2xl text-left transition-all hover:scale-[1.02] active:scale-95"
+        >
+          <div className="w-10 h-10 rounded-xl bg-sky-50 flex items-center justify-center text-sky-600 shrink-0">
+            <Calendar className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-black text-stone-800">日期卡片 (2×4)</h4>
+            <p className="text-[10px] text-stone-400 font-medium mt-0.5">显示真实日期，可自定义背景与文字颜色</p>
           </div>
         </button>
 

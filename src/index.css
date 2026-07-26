@@ -1,6 +1,40 @@
 @import "tailwindcss";
 @import "./features/chat/components/SpecialMessage/specialMessage.css";
 
+@font-face {
+  font-family: "New Athena Unicode";
+  src: url("/fonts/new-athena-unicode/newathu5_8.woff") format("woff");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+/* The date widget deliberately opts out of the app-wide system-font override. */
+.date-widget-typeface,
+.date-widget-typeface * {
+  font-family: "New Athena Unicode", Georgia, serif !important;
+}
+
+.phone-screen-container .date-widget-typeface .date-widget-weekday,
+.phone-screen-container .date-widget-typeface .date-widget-month-day {
+  color: var(--date-widget-text-color) !important;
+}
+
+/* Desktop widgets share a translucent, blurred liquid-glass base. */
+.phone-screen-container .desktop-widget-glass {
+  background-color: rgba(255, 255, 255, var(--desktop-widget-glass-alpha, 0.32)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.56) !important;
+  box-shadow: 0 14px 34px rgba(61, 72, 88, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.48) !important;
+  backdrop-filter: blur(24px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(145%) !important;
+}
+
+/* Image widgets keep their photo crisp while using the same glass frame. */
+.phone-screen-container .desktop-widget-glass-frame {
+  border: 1px solid rgba(255, 255, 255, 0.68) !important;
+  box-shadow: 0 14px 34px rgba(61, 72, 88, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.42) !important;
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;

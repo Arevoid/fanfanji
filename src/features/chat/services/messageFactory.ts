@@ -5,6 +5,8 @@ export function createUserTextMessage(input: UserMessageInput): Message {
   return {
     id: input.id,
     characterId: input.characterId,
+    ...(input.relationId ? { relationId: input.relationId } : {}),
+    ...(input.conversationId ? { conversationId: input.conversationId } : {}),
     sender: "user",
     content: input.content,
     timestamp: input.timestamp,
@@ -17,6 +19,8 @@ export function createCharacterTextMessage(input: CharacterMessageInput): Messag
   return {
     id: input.id,
     characterId: input.characterId,
+    ...(input.relationId ? { relationId: input.relationId } : {}),
+    ...(input.conversationId ? { conversationId: input.conversationId } : {}),
     sender: "character",
     ...(input.senderId ? { senderId: input.senderId } : {}),
     content: input.content,

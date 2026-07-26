@@ -11,6 +11,7 @@ export type MemoryScenario =
 
 export interface MemoryRetrievalContext {
   characterId: string;
+  relationId?: string;
   queryText: string;
   existingMemories: readonly MemoryItem[];
   limit?: number;
@@ -20,6 +21,7 @@ export interface MemoryRetrievalContext {
 export interface MemoryExtractionContext {
   character: Character;
   characterId: string;
+  relationId?: string;
   recentMessages: readonly Message[];
   existingMemories: readonly MemoryItem[];
   scenario: "chat" | "offline" | "manual-summary" | "immediate-summary";

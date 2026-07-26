@@ -12,6 +12,15 @@ import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/Me
 import { collectOfflineHandoffContent, createOfflineStoryHandoffMemory, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress } from "../domain/memory/offlineMemorySync";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
+import {
+  clearOfflineStorySession,
+  loadLegacyOfflineStorySessionId,
+  loadOfflineStorySessionId,
+  saveOfflineStorySession,
+} from "../core/storage/repositories/offlineRepository";
+import { deriveRelationId, getOrCreateRelationship } from "../domain/relationship/relationshipService";
+import { LEGACY_PRIMARY_IDENTITY_ID } from "../domain/relationship/relationshipTypes";
+import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -55,7 +64,7 @@ export default function AppOffline({
   });
   const [activeStory, setActiveStory] = useState<OfflineStory | null>(null);
   const activeStoryRef = useRef<OfflineStory | null>(null);
-  const [lastLoadedCharId, setLastLoadedCharId] = useState<string | null>(null);
+  const [lastLoadedRelationId, setLastLoadedRelationId] = useState<string | null>(null);
   
   // Creation modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -220,9 +229,17 @@ export default function AppOffline({
   };
 
   const selectedChar = characters.find(c => c.id === selectedCharId) || characters[0];
-  const charStories = offlineStories.filter(s => 
-    s.characterId === selectedCharId || (s.characterIds && s.characterIds.includes(selectedCharId))
-  );
+  const activeIdentityId = settings.activeIdentityId || LEGACY_PRIMARY_IDENTITY_ID;
+  const getRelationIdForCharacter = (character: Character | undefined) => character
+    ? deriveRelationId(character, character.ownerIdentityId || activeIdentityId)
+    : undefined;
+  const selectedRelationId = getRelationIdForCharacter(selectedChar);
+  const getRelationIdForStory = (story: OfflineStory) => story.relationId
+    || getRelationIdForCharacter(characters.find((character) => character.id === story.characterId));
+  const storyMatchesSelectedRelation = (story: OfflineStory) => story.relationId
+    ? story.relationId === selectedRelationId
+    : story.characterId === selectedCharId || (story.characterIds?.includes(selectedCharId) ?? false);
+  const charStories = offlineStories.filter(storyMatchesSelectedRelation);
 
   const storyChars = activeStory 
     ? (activeStory.characterIds && activeStory.characterIds.length > 0 
@@ -249,12 +266,14 @@ export default function AppOffline({
 
   // Load selected character's saved story on select or mount
   useEffect(() => {
-    if (selectedCharId && selectedCharId !== lastLoadedCharId) {
-      setLastLoadedCharId(selectedCharId);
-      const savedStoryId = localStorage.getItem(`offline_story_id_${selectedCharId}`);
+    if (selectedCharId && selectedRelationId && selectedRelationId !== lastLoadedRelationId) {
+      setLastLoadedRelationId(selectedRelationId);
+      const relationSession = loadOfflineStorySessionId(selectedRelationId);
+      const legacySession = relationSession.found ? null : loadLegacyOfflineStorySessionId(selectedCharId);
+      const savedStoryId = relationSession.value || legacySession?.value;
       if (savedStoryId) {
         const story = offlineStories.find(s => s.id === savedStoryId);
-        if (story) {
+        if (story && storyMatchesSelectedRelation(story)) {
           activeStoryRef.current = story;
           setActiveStory(story);
           return;
@@ -262,21 +281,21 @@ export default function AppOffline({
       }
       clearActiveStorySnapshot();
     }
-  }, [selectedCharId, offlineStories, lastLoadedCharId]);
+  }, [selectedCharId, selectedRelationId, offlineStories, lastLoadedRelationId]);
 
   // Handle opening a story
   const handleOpenStory = (story: OfflineStory) => {
     activeStoryRef.current = story;
     setActiveStory(story);
-    localStorage.setItem(`offline_mode_active_${story.characterId}`, "true");
-    localStorage.setItem(`offline_story_id_${story.characterId}`, story.id);
+    const relationId = getRelationIdForStory(story);
+    if (relationId) saveOfflineStorySession(relationId, story.id);
   };
 
   const hasUnsyncedOnlineProgress = hasUnsyncedOfflineMemoryProgress;
 
   const clearOfflineSession = (story: OfflineStory) => {
-    localStorage.removeItem(`offline_story_id_${story.characterId}`);
-    localStorage.setItem(`offline_mode_active_${story.characterId}`, "false");
+    const relationId = getRelationIdForStory(story);
+    if (relationId) clearOfflineStorySession(relationId);
   };
 
   // Exit story workspace back to list
@@ -330,7 +349,11 @@ export default function AppOffline({
           }));
           importedContext = {
             messages: importedMessages,
-            memories: memories.filter(m => m.characterId === selectedCharId).map(m => m.content),
+            memories: memories
+              .filter((memory) => memory.characterId === selectedCharId)
+              .filter((memory) => memory.relationId === selectedRelationId
+                || (!memory.relationId && selectedRelationId?.endsWith(":identity-1")))
+              .map(m => m.content),
             worldBook: getLatestWorldBookEntries(worldBookEntries || [])
               .filter(entry => !entry.characterId || entry.characterId === selectedCharId)
               .map(entry => `${entry.title}: ${entry.content}`),
@@ -342,9 +365,14 @@ export default function AppOffline({
       }
     }
 
+    const relationId = getOrCreateRelationship(
+      resolveCanonicalCharacterId(selectedChar),
+      selectedChar.ownerIdentityId || activeIdentityId,
+    ).id;
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: selectedCharId,
+      relationId,
       characterIds: selectedCharIds.length > 0 ? selectedCharIds : [selectedCharId],
       title: titleToUse,
       createdAt: Date.now(),
@@ -362,8 +390,7 @@ export default function AppOffline({
     };
 
     saveActiveStorySnapshot(newStory);
-    localStorage.setItem(`offline_mode_active_${selectedCharId}`, "true");
-    localStorage.setItem(`offline_story_id_${selectedCharId}`, newStory.id);
+    saveOfflineStorySession(relationId, newStory.id);
     setShowCreateModal(false);
 
     // Reset fields
@@ -401,6 +428,7 @@ export default function AppOffline({
     }
 
     const now = Date.now();
+    const relationId = getRelationIdForStory(story);
     const syncMarker = getOfflineStorySyncMarker(story);
     const markSynced = (memoryIds: string[] = []): OfflineStory => ({
       ...story,
@@ -432,6 +460,7 @@ export default function AppOffline({
         const result = await MemoryService.extractMemories({
           character,
           characterId: story.characterId,
+          relationId,
           recentMessages: sourceMessages.slice(-historyLimit),
           existingMemories: memories,
           scenario: "offline",
@@ -455,10 +484,11 @@ export default function AppOffline({
 
       const additions = extractedMemories.length > 0
         ? extractedMemories
-        : (MemoryService.hasMarker(memories, story.characterId, syncMarker) ? [] : [createOfflineStoryHandoffMemory({
+        : (MemoryService.hasMarker(memories, story.characterId, syncMarker, relationId) ? [] : [createOfflineStoryHandoffMemory({
           story,
           sourceMessages,
           characterId: story.characterId,
+          relationId,
           characterName: character.remark || character.name,
           id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           timestamp: now,
@@ -830,7 +860,10 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
               <div className="flex items-center gap-3 overflow-x-auto pb-1 no-scrollbar">
                 {characters.map(char => {
                   const isSel = char.id === selectedCharId;
-                  const charStoriesCount = offlineStories.filter(s => s.characterId === char.id).length;
+                  const charRelationId = getRelationIdForCharacter(char);
+                  const charStoriesCount = offlineStories.filter((story) => story.relationId
+                    ? story.relationId === charRelationId
+                    : story.characterId === char.id || (story.characterIds?.includes(char.id) ?? false)).length;
                   return (
                     <button
                       key={char.id}

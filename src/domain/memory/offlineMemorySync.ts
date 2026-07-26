@@ -108,6 +108,7 @@ export function createOfflineStoryHandoffMemory(input: {
   story: OfflineStory;
   sourceMessages: readonly Message[];
   characterId: string;
+  relationId?: string;
   characterName?: string;
   id: string;
   timestamp: number;
@@ -115,6 +116,7 @@ export function createOfflineStoryHandoffMemory(input: {
   return {
     id: input.id,
     characterId: input.characterId,
+    ...(input.relationId ? { relationId: input.relationId } : {}),
     content: `【线下剧本《${input.story.title}》线上交接】\n[${getOfflineStorySyncMarker(input.story)}]\n${collectOfflineHandoffContent(input.story, input.characterName)}`,
     timestamp: input.timestamp,
     // A handoff is intentionally short-lived context, not a permanent trait.

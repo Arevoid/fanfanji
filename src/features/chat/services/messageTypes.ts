@@ -6,6 +6,8 @@ export type CallTranscriptItem = Pick<Message, "id" | "sender" | "content" | "ti
 export interface CharacterMessageInput {
   id: string;
   characterId: string;
+  relationId?: string;
+  conversationId?: string;
   content: string;
   timestamp: number;
   senderId?: string;
@@ -16,6 +18,8 @@ export interface CharacterMessageInput {
 export interface UserMessageInput {
   id: string;
   characterId: string;
+  relationId?: string;
+  conversationId?: string;
   content: string;
   timestamp: number;
   isOffline?: boolean;

@@ -4,10 +4,19 @@ import type { MemoryItem } from "../../types";
 export function retrieveRelevantMemories(
   memories: readonly MemoryItem[],
   characterId: string,
+  relationId: string | undefined,
   userQuery: string,
   topK: number = 5,
 ): MemoryItem[] {
-  const characterMemories = memories.filter((memory) => memory.characterId === characterId);
+  const characterMemories = memories.filter((memory) => {
+    if (memory.characterId !== characterId) return false;
+    // New records are strictly relation-scoped. Legacy records retain their
+    // character scope so existing data remains readable by its default relation.
+    return relationId
+      ? memory.relationId === relationId
+        || (!memory.relationId && relationId.endsWith(":identity-1"))
+      : true;
+  });
   if (characterMemories.length === 0) return [];
 
   if (!userQuery.trim()) return characterMemories.slice(0, topK);
