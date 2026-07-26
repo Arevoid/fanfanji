@@ -1,6 +1,7 @@
 import type { Character, MemoryItem, Moment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
 import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "./momentContent";
+import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
 import {
   claimCharacterMomentGeneration,
   completeCharacterMomentGeneration,
@@ -18,6 +19,7 @@ export async function requestCharacterMoment(input: {
   parseContent: (content: string) => { content: string; selfComments: string[]; imageDescription?: string };
   now?: () => number;
   random?: () => number;
+  temporalContext?: MomentTemporalContext;
 }): Promise<{ moment?: Moment; memory?: MemoryItem }> {
   const response = await input.requestAi(input.request);
   if (!response?.text) return {};
@@ -25,6 +27,13 @@ export async function requestCharacterMoment(input: {
   const random = input.random || Math.random;
   const cleanedContent = stripMomentVoiceMarkup(response.text).trim().replace(/^["'“‘]+|["'”’]+$/g, "").trim();
   const parsed = input.parseContent(sanitizeMomentPublishText(cleanedContent));
+  const temporalConflicts = input.temporalContext
+    ? findMomentTemporalConflicts(parsed.content, input.temporalContext, input.character)
+    : [];
+  if (temporalConflicts.length > 0) {
+    console.warn("[moments] Rejected temporally inconsistent generated post:", temporalConflicts);
+    return {};
+  }
   let image: string | undefined;
   if (!parsed.imageDescription && input.character.album?.length && random() < 0.4) {
     image = input.character.album[Math.floor(random() * input.character.album.length)];

@@ -41,6 +41,7 @@ import { requestCharacterMomentOnce } from "../features/moments/services/momentG
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
 import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
+import { createMomentTemporalContext, formatMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
 import {
   MessageSquare,
   Users,
@@ -3942,8 +3943,12 @@ ${instructionsPrompt}`;
 
           const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, newMo.content || "");
           const wbPrompt = wbBlocks.formattedAll;
+          const temporalContext = createMomentTemporalContext(new Date());
+          const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
-          const systemInstruction = `You are roleplaying as "${friend.name}".
+          const systemInstruction = `${momentTimeContext}
+
+You are roleplaying as "${friend.name}".
 Character Profile:
 - Personality: ${friend.personality}
 - Background: ${friend.backstory}
@@ -3984,6 +3989,7 @@ Your task: Write a short, natural comment on this Moment.
             },
             character: friend,
             cleanText: (text) => cleanOnlineMessage(text, true),
+            temporalContext,
           });
           if (comment) onAddCommentToMoment(newMo.id, comment);
         } catch (err) {
@@ -4043,8 +4049,12 @@ Your task: Write a short, natural comment on this Moment.
 
         const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, userCommentText || "");
         const wbPrompt = wbBlocks.formattedAll;
+        const temporalContext = createMomentTemporalContext(new Date());
+        const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
-        const systemInstruction = `You are roleplaying as "${friend.name}".
+        const systemInstruction = `${momentTimeContext}
+
+You are roleplaying as "${friend.name}".
 Character Profile:
 - Personality: ${friend.personality}
 - Background: ${friend.backstory}
@@ -4094,6 +4104,7 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
           character: friend,
           userName: settings.name,
           cleanText: (text) => cleanOnlineMessage(text, true),
+          temporalContext,
         });
         if (reply) onAddCommentToMoment(momentId, reply);
       } catch (err) {
@@ -4116,13 +4127,17 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
         .slice(0, recallSettings?.recallCount || 5);
       const historicalFallback = friendMsgs.slice(-(friend.retrievalHistoryLimit || 100));
       const fullWorldBook = getFullCharacterWorldBook(worldBookEntries || [], friend.id);
+      const temporalContext = createMomentTemporalContext(new Date());
+      const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
       const history = slicedMsgs.map((m) => ({
         role: m.sender === "user" ? "user" : "model",
         text: m.content,
       }));
 
-      const systemInstruction = `You are roleplaying as "${friend.name}".
+      const systemInstruction = `${momentTimeContext}
+
+You are roleplaying as "${friend.name}".
 Character Profile:
 - Personality: ${friend.personality}
 - Background: ${friend.backstory}
@@ -4173,6 +4188,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         character: friend,
         ownerIdentityId: activeIdentityId,
         parseContent: cleanAndExtractMoment,
+        temporalContext,
       });
       if (generated.moment) onAddMoment(generated.moment);
       if (generated.memory) onSaveMemories(MemoryService.mergeMemories(memories || [], [generated.memory]));
