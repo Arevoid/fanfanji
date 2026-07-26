@@ -25,7 +25,7 @@ assert.equal(julyContext.currentSolarTerm, "大暑");
 assert.match(formatMomentTemporalContext(julyContext, character), /2026-07-26/);
 assert.match(formatMomentTemporalContext(julyContext, character), /大暑/);
 
-for (const invalidContent of ["今天立冬，生日。", "初雪落下了", "圣诞快乐", "春节的烟花真热闹", "寒潮来了"]) {
+for (const invalidContent of ["今天立冬，生日。", "初雪落下了", "冬季的第一场雨", "圣诞快乐", "春节的烟花真热闹", "寒潮来了"]) {
   assert.ok(
     findMomentTemporalConflicts(invalidContent, julyContext, character).length > 0,
     `${invalidContent} must be rejected in July`,
@@ -50,6 +50,18 @@ const rejected = await requestCharacterMoment({
   temporalContext: julyContext,
 });
 assert.deepEqual(rejected, {}, "an invalid generated post must never be persisted");
+
+const rejectedSelfComment = await requestCharacterMoment({
+  requestAi: async () => ({ text: "盛夏散步真舒服" }),
+  request,
+  character,
+  ownerIdentityId: "identity-1",
+  parseContent: (content) => ({ content, selfComments: ["今天立冬，生日。"] }),
+  now: () => july26.getTime(),
+  random: () => 0.1,
+  temporalContext: julyContext,
+});
+assert.deepEqual(rejectedSelfComment, {}, "an invalid generated self-comment must never be persisted");
 
 const rejectedComment = await requestAutomaticMomentComment({
   requestAi: async () => ({ text: "立冬快乐" }),

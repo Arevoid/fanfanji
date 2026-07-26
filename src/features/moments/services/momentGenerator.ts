@@ -28,7 +28,8 @@ export async function requestCharacterMoment(input: {
   const cleanedContent = sanitizeMomentPublishText(response.text).replace(/^["'“‘]+|["'”’]+$/g, "").trim();
   const parsed = input.parseContent(sanitizeMomentPublishText(cleanedContent));
   const temporalConflicts = input.temporalContext
-    ? findMomentTemporalConflicts(parsed.content, input.temporalContext, input.character)
+    ? [parsed.content, ...parsed.selfComments]
+      .flatMap((content) => findMomentTemporalConflicts(content, input.temporalContext!, input.character))
     : [];
   if (temporalConflicts.length > 0) {
     console.warn("[moments] Rejected temporally inconsistent generated post:", temporalConflicts);

@@ -19,18 +19,21 @@ const SOLAR_TERMS = [
 ] as const;
 
 const SEASONAL_WORDS: Record<MomentSeason, readonly string[]> = {
-  春季: ["春天", "春日", "春风", "春暖", "花开", "踏青", "樱花"],
-  夏季: ["夏天", "盛夏", "暑假", "高温", "酷暑", "雨季", "蝉鸣"],
-  秋季: ["秋天", "秋日", "凉爽", "落叶", "桂花"],
-  冬季: ["冬天", "立冬", "初雪", "寒潮", "年末", "雪天"],
+  春季: ["春天", "春日", "春风", "春暖", "花开", "踏青", "樱花", "春季"],
+  夏季: ["夏天", "盛夏", "暑假", "高温", "酷暑", "雨季", "蝉鸣", "夏季"],
+  秋季: ["秋天", "秋日", "凉爽", "落叶", "桂花", "秋季"],
+  冬季: ["冬天", "寒冬", "冬日", "冬季", "立冬", "初雪", "寒潮", "年末", "雪天", "冰雪"],
 };
 
 const HOLIDAY_MONTHS: Record<string, readonly number[]> = {
   春节: [1, 2],
-  元旦: [1],
-  圣诞: [12],
-  圣诞节: [12],
   年末: [12],
+};
+
+const FIXED_HOLIDAYS: Record<string, { month: number; day: number }> = {
+  元旦: { month: 1, day: 1 },
+  圣诞: { month: 12, day: 25 },
+  圣诞节: { month: 12, day: 25 },
 };
 
 const HISTORICAL_REFERENCE = /(?:去年|前年|曾经|那年|回忆|小时候|过去|当时|以前)/;
@@ -133,6 +136,15 @@ export function findMomentTemporalConflicts(
   for (const [holiday, allowedMonths] of Object.entries(HOLIDAY_MONTHS)) {
     const index = content.indexOf(holiday);
     if (index >= 0 && !allowedMonths.includes(context.generatedAt.getMonth() + 1) && !isExplicitHistoricalReference(content, index)) {
+      conflicts.push(`holiday "${holiday}" is not current`);
+    }
+  }
+
+  for (const [holiday, expectedDate] of Object.entries(FIXED_HOLIDAYS)) {
+    const index = content.indexOf(holiday);
+    const isCurrentDate = context.generatedAt.getMonth() + 1 === expectedDate.month
+      && context.generatedAt.getDate() === expectedDate.day;
+    if (index >= 0 && !isCurrentDate && !isExplicitHistoricalReference(content, index)) {
       conflicts.push(`holiday "${holiday}" is not current`);
     }
   }
