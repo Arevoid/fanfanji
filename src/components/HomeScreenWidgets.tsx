@@ -189,10 +189,23 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
   const [draftBackgroundImage, setDraftBackgroundImage] = useState(backgroundImage);
   const [draftFontColor, setDraftFontColor] = useState(fontColor);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const dateTextRefs = useRef<Array<HTMLSpanElement | null>>([]);
 
   const today = new Date();
   const weekday = today.toLocaleDateString("en-US", { weekday: "long" }).toUpperCase();
   const monthAndDay = today.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+
+  // The application theme uses global !important text rules. Set these styles
+  // as inline !important declarations so the saved widget colour and bundled
+  // font cannot be overridden by a theme or user-provided global CSS.
+  useEffect(() => {
+    dateTextRefs.current.forEach((element) => {
+      if (!element) return;
+      element.style.setProperty("color", fontColor, "important");
+      element.style.setProperty("font-family", '"Athena Unicode", serif', "important");
+      element.style.setProperty("font-weight", "700", "important");
+    });
+  }, [fontColor]);
 
   const handleBackgroundUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -240,8 +253,8 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
         <div
           className="absolute left-4 bottom-3 flex flex-col leading-[0.9]"
         >
-          <span className="calendar-album-date text-[18px] font-semibold tracking-[-0.03em]">{weekday}</span>
-          <span className="calendar-album-date mt-1 text-[21px] font-semibold tracking-[-0.04em]">{monthAndDay}</span>
+          <span ref={(element) => { dateTextRefs.current[0] = element; }} className="calendar-album-date text-[24px] font-semibold tracking-[-0.03em]">{weekday}</span>
+          <span ref={(element) => { dateTextRefs.current[1] = element; }} className="calendar-album-date mt-1 text-[25px] font-semibold tracking-[-0.04em]">{monthAndDay}</span>
         </div>
       </button>
 
@@ -271,8 +284,8 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
             <div className="space-y-4 overflow-y-auto px-5 py-4">
             <div className="relative h-28 overflow-hidden rounded-2xl border border-stone-100" style={{ backgroundImage: `url(${draftBackgroundImage})`, backgroundSize: "cover", backgroundPosition: "center" }}>
               <div className="calendar-album-preview-date absolute bottom-3 left-3 flex flex-col leading-[0.9]" style={{ "--calendar-album-date-color": normalizeWidgetTextColor(draftFontColor, fontColor) } as React.CSSProperties}>
-                <span className="text-sm font-semibold">{weekday}</span>
-                <span className="mt-1 text-base font-semibold">{monthAndDay}</span>
+                <span className="text-base font-semibold">{weekday}</span>
+                <span className="mt-1 text-lg font-semibold">{monthAndDay}</span>
               </div>
             </div>
             <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />

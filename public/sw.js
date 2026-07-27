@@ -1,4 +1,4 @@
-const CACHE_NAME = "fanfan-phone-v1";
+const CACHE_NAME = "fanfan-phone-v2";
 const ASSETS_TO_CACHE = [
   "/",
   "/index.html",
@@ -45,6 +45,25 @@ self.addEventListener("fetch", (event) => {
 
   // Bypass hot-reload or non-http protocols (like chrome-extension)
   if (event.request.method !== "GET" || !event.request.url.startsWith("http")) {
+    return;
+  }
+
+  // The HTML entry point must reflect the latest deployment immediately.  A
+  // stale index.html keeps referencing the previous hashed CSS/JS bundle, so
+  // visual updates such as bundled fonts and widget colours never reach an
+  // already-installed phone app.
+  if (event.request.mode === "navigate" || event.request.headers.get("accept")?.includes("text/html")) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request).then((response) => response || caches.match("/")))
+    );
     return;
   }
 
