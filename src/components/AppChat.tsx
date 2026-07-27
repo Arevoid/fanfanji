@@ -993,7 +993,7 @@ export default function AppChat({
       const directRelation = relationForCharacter(relationId);
       if (directRelation) {
         setActiveChatRelationId(directRelation.id);
-        setActiveChatCharId(directRelation.characterId);
+        setActiveChatCharId(resolveCanonicalCharacterId(directRelation.characterId, characters));
         if (!initiatedChatIds.includes(directRelation.id)) setInitiatedChatIds((previous) => [...previous, directRelation.id]);
         return;
       }
@@ -1006,7 +1006,9 @@ export default function AppChat({
       return;
     }
     setActiveChatRelationId(relation.id);
-    setActiveChatCharId(relation.characterId);
+    // Some older data still points at a contact-copy ID. Keep the relationship
+    // as the conversation boundary, but always open its canonical profile.
+    setActiveChatCharId(resolveCanonicalCharacterId(relation.characterId, characters));
     if (!initiatedChatIds.includes(relation.id)) {
       setInitiatedChatIds((prev) => [...prev, relation.id]);
     }
@@ -1133,7 +1135,10 @@ export default function AppChat({
   };
 
   const availableCharacterIds = getAvailableCanonicalCharacterIds(characters);
-  const activeRelationships = relationships.filter((relation) => relation.userIdentityId === activeIdentityId && availableCharacterIds.has(relation.characterId));
+  const activeRelationships = relationships.filter((relation) =>
+    relation.userIdentityId === activeIdentityId
+    && availableCharacterIds.has(resolveCanonicalCharacterId(relation.characterId, characters)),
+  );
   const friendIds = activeRelationships.map((relation) => relation.id);
   const relationForCharacter = (characterId: string) => findRelationshipForCanonicalCharacter(
     relationships,
@@ -1142,9 +1147,11 @@ export default function AppChat({
     characters,
   );
   const isFriendCharacter = (character: Character) => !character.isGroupChat && !character.isContactInstance && Boolean(relationForCharacter(character.id));
-  const friends = activeRelationships.map((relation) => characters.find((character) => character.id === relation.characterId)).filter((character): character is Character => Boolean(character));
+  const friends = activeRelationships.map((relation) =>
+    characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters)),
+  ).filter((character): character is Character => Boolean(character));
   const friendContacts = activeRelationships.map((relation) => {
-    const character = characters.find((item) => item.id === relation.characterId)!;
+    const character = characters.find((item) => item.id === resolveCanonicalCharacterId(relation.characterId, characters))!;
     return { id: relation.id, character, subtitle: settings.identities?.find((identity) => identity.id === relation.userIdentityId)?.name };
   }).filter((item) => Boolean(item.character));
 
@@ -1220,10 +1227,20 @@ export default function AppChat({
   }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId, activeCharacter?.isGroupChat, activeRelationship?.id, activeRelationship?.userIdentityId]);
 
   useEffect(() => {
-    if (activeChatCharId && (!activeCharacter || activeCharacter.isContactInstance)) {
+    if (!activeChatCharId) return;
+    if (!activeCharacter) {
+      setActiveChatCharId(null);
+      return;
+    }
+    if (activeCharacter.isContactInstance) {
+      const canonicalCharacterId = resolveCanonicalCharacterId(activeCharacter.id, characters);
+      if (canonicalCharacterId !== activeCharacter.id) {
+        setActiveChatCharId(canonicalCharacterId);
+        return;
+      }
       setActiveChatCharId(null);
     }
-  }, [activeChatCharId, activeCharacter, setActiveChatCharId]);
+  }, [activeChatCharId, activeCharacter, characters, setActiveChatCharId]);
 
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
@@ -1826,7 +1843,7 @@ export default function AppChat({
     if (activeRelationships.length === 0) return;
 
     activeRelationships.forEach((relation) => {
-      const friend = characters.find((character) => character.id === relation.characterId);
+      const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters));
       if (!friend || friend.isGroupChat) return;
       if (!friend.enableProactiveChat) return;
       if (isOfflineStoryActiveFor(relation.id)) return;
@@ -1865,7 +1882,7 @@ export default function AppChat({
       const currentHM = `${hh}:${mm}`;
 
       activeRelationships.forEach((relation) => {
-        const friend = characters.find((character) => character.id === relation.characterId);
+        const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters));
         if (!friend || friend.isGroupChat) return;
         if (!friend.enableProactiveChat) return;
         if (isOfflineStoryActiveFor(relation.id)) return;
@@ -4203,7 +4220,9 @@ Your task: Write a short, natural comment on this Moment.
     if (!targetChar) return;
 
     const friend = targetChar;
-    const relationship = activeRelationships.find((relation) => relation.characterId === friend.id);
+    const relationship = activeRelationships.find((relation) =>
+      resolveCanonicalCharacterId(relation.characterId, characters) === friend.id,
+    );
     if (!relationship) return;
     const delay = Math.random() * 5000 + 3000; // 3 to 8 seconds delay
     
@@ -4389,7 +4408,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
     if (activeRelationships.length === 0) return;
 
     for (const relationship of activeRelationships) {
-      const friend = characters.find((character) => character.id === relationship.characterId);
+      const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relationship.characterId, characters));
       if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) continue;
       const lastPostTime = getCharacterLastMomentTimestamp(moments, friend.id);
       const interval = getPostIntervalMs(friend);
@@ -4543,7 +4562,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
   // Active chat threads list builder
   const directThreads = activeRelationships.map((relation) => {
-    const character = characters.find((item) => item.id === relation.characterId);
+    const character = characters.find((item) => item.id === resolveCanonicalCharacterId(relation.characterId, characters));
     if (!character) return null;
     const threadMsgs = messages.filter((message) => message.relationId === relation.id && !message.isOffline);
     if (!threadMsgs.length && !initiatedChatIds.includes(relation.id) && activeChatRelationId !== relation.id) return null;
