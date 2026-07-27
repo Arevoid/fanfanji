@@ -1,5 +1,12 @@
-const EXPLICIT_IMAGE_REQUEST = /(?:给我|给咱|发我|发张|发一张|看看|生成|拍).{0,16}(?:照片|图片|图像|自拍|相片)|(?:照片|图片|图像|自拍|相片).{0,12}(?:给我|发我|看看|生成)/i;
-const NEGATED_OR_QUOTED = /(?:不要|别|无需|不用|禁止|不想|别再).{0,10}(?:照片|图片|图像|自拍|相片)|(?:“|"|《).{0,30}(?:发张照片|生成一张|给我看看图片)/;
+const IMAGE_NOUN = "(?:照片|图片|图像|相片|自拍(?:照)?)";
+const EXPLICIT_IMAGE_REQUEST = new RegExp(
+  `(?:给我|给咱|发我|来|拍|生成).{0,18}${IMAGE_NOUN}|(?:发|拍|生成).{0,10}${IMAGE_NOUN}.{0,12}(?:给我|给咱|发我|看看)|${IMAGE_NOUN}.{0,12}(?:给我|给咱|发我|看看|来一张|生成)`,
+  "i",
+);
+const NEGATED_OR_QUOTED = new RegExp(
+  `(?:不要|别|无需|不用|禁止|不想|别再|没让你|我没让你|并非|不是).{0,18}(?:发|拍|生成)?.{0,12}${IMAGE_NOUN}|(?:“|"|《).{0,40}(?:发.{0,8}${IMAGE_NOUN}|生成.{0,8}${IMAGE_NOUN})`,
+  "i",
+);
 
 /** Conservative by design: uncertainty never spends image quota. */
 export function isExplicitImageRequest(text: string): boolean {

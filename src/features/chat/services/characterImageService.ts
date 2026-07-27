@@ -12,6 +12,36 @@ function activePreset(settings: UserSettings): ImageApiPreset | undefined {
   return settings.imageApiPresets?.find((preset) => preset.id === settings.activeImageApiPresetId);
 }
 
+export function assertImageGenerationConfiguration(settings: UserSettings, character: Character): ImageApiPreset {
+  if (!settings.enableImageGeneration || !character.enableImageGeneration) {
+    throw new Error("图片生成未启用：请同时开启全局图片生成和该角色的图片生成开关。");
+  }
+  const preset = activePreset(settings);
+  if (!preset?.apiEndpoint.trim() || !preset.apiKey.trim() || !preset.selectedModel.trim()) {
+    throw new Error("图片 API 配置不完整：请填写地址、API Key 和图片模型。");
+  }
+  return preset;
+}
+
+export function createGeneratedImageMessages(input: {
+  messageId: string;
+  characterId: string;
+  imageAssetId: string;
+  imageMimeType: string;
+  trigger: "manual" | "explicit-user-text";
+  scope: ImageScope;
+  timestamp: number;
+}): { message: Message; record: ImageGenerationRecord } {
+  const common = { id: input.messageId, characterId: input.characterId, sender: "character" as const, content: "[图片]", imageAssetId: input.imageAssetId, imageMimeType: input.imageMimeType, imageSource: "generated" as const, timestamp: input.timestamp };
+  const message: Message = input.scope.kind === "direct"
+    ? { ...common, relationId: input.scope.relationId, conversationId: input.scope.conversationId }
+    : { ...common, characterId: input.scope.groupId, senderId: input.characterId, conversationId: input.scope.conversationId };
+  const record: ImageGenerationRecord = input.scope.kind === "direct"
+    ? { id: `image-record-${input.messageId}`, messageId: input.messageId, characterId: input.characterId, relationId: input.scope.relationId, conversationId: input.scope.conversationId, imageAssetId: input.imageAssetId, trigger: input.trigger, createdAt: input.timestamp }
+    : { id: `image-record-${input.messageId}`, messageId: input.messageId, characterId: input.characterId, groupId: input.scope.groupId, conversationId: input.scope.conversationId, imageAssetId: input.imageAssetId, trigger: input.trigger, createdAt: input.timestamp };
+  return { message, record };
+}
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -39,13 +69,7 @@ export async function generateCharacterImage(input: {
   createId: () => string;
 }): Promise<{ message: Message; record: ImageGenerationRecord }> {
   assertImageGenerationTrigger(input.trigger, input.userText);
-  if (!input.settings.enableImageGeneration || !input.character.enableImageGeneration) {
-    throw new Error("图片生成未开启：请同时开启全局图片生成和该角色的图片生成开关。");
-  }
-  const preset = activePreset(input.settings);
-  if (!preset?.apiEndpoint.trim() || !preset.apiKey.trim() || !preset.selectedModel.trim()) {
-    throw new Error("请先在“图片 API 设置”中完成 OpenAI Images compatible 配置。");
-  }
+  const preset = assertImageGenerationConfiguration(input.settings, input.character);
 
   const reference = input.character.imageReferenceAssetId
     ? await imageAssetDb.getImage(input.character.imageReferenceAssetId)
@@ -72,24 +96,5 @@ export async function generateCharacterImage(input: {
   const imageAssetId = `generated-image-${messageId}`;
   const imageBlob = dataUrlToBlob(data.dataUrl);
   await imageAssetDb.saveImage(imageAssetId, imageBlob);
-  const timestamp = Date.now();
-  const common = {
-    id: messageId,
-    characterId: input.character.id,
-    sender: "character" as const,
-    content: "[图片]",
-    imageAssetId,
-    imageMimeType: imageBlob.type,
-    imageSource: "generated" as const,
-    timestamp,
-  };
-  const message: Message = input.scope.kind === "direct"
-    ? { ...common, relationId: input.scope.relationId, conversationId: input.scope.conversationId }
-    // Group Message.characterId remains the group container. senderId retains
-    // the canonical character who generated the image.
-    : { ...common, characterId: input.scope.groupId, senderId: input.character.id, conversationId: input.scope.conversationId };
-  const record: ImageGenerationRecord = input.scope.kind === "direct"
-    ? { id: `image-record-${messageId}`, messageId, characterId: input.character.id, relationId: input.scope.relationId, conversationId: input.scope.conversationId, imageAssetId, trigger: input.trigger, createdAt: timestamp }
-    : { id: `image-record-${messageId}`, messageId, characterId: input.character.id, groupId: input.scope.groupId, conversationId: input.scope.conversationId, imageAssetId, trigger: input.trigger, createdAt: timestamp };
-  return { message, record };
+  return createGeneratedImageMessages({ messageId, characterId: input.character.id, imageAssetId, imageMimeType: imageBlob.type, trigger: input.trigger, scope: input.scope, timestamp: Date.now() });
 }

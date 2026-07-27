@@ -4,7 +4,9 @@ import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatService
 
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const cleanedText = normalizePaymentMarkup(cleanAiReplyText(context.rawText, context.disableBracketActions));
-  const bubbles = splitAiReplyBubbles(cleanedText || context.rawText, context.keepPeriods);
+  // Never fall back to rawText here: it may consist solely of a model's fake
+  // “sent a photo” claim that the parser intentionally removed.
+  const bubbles = cleanedText ? splitAiReplyBubbles(cleanedText, context.keepPeriods) : [];
   return {
     cleanedText,
     bubbleTexts: bubbles,

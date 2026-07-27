@@ -3,7 +3,17 @@ import type { ChatMessageVisualType, CallTranscriptItem } from "./messageTypes";
 
 export type { CallTranscriptItem } from "./messageTypes";
 
-export const cleanAiReplyText = cleanOnlineMessage;
+/** A text model cannot create a real image Message. Remove any claim that it
+ * sent one; only characterImageService may create an actual image resource. */
+export function removeFakeImageNarration(text: string): string {
+  const image = "(?:图片|照片|图像|相片|自拍(?:照)?)";
+  const parenthesized = new RegExp(`[（(]\\s*(?:(?:给你)?(?:发送|发来|发出|传来|拍了?|给你拍了?).{0,14}${image}|(?:一张|张).{0,8}${image})[^）)]*[）)]`, "gi");
+  const plainClaim = new RegExp(`(?:我|角色)?(?:已经|已)?(?:给你)?(?:发送|发来|发出|传了|拍了?)了?(?:一张|张)?(?:我的|你要的)?.{0,6}${image}(?:给你|了)?`, "gi");
+  return text.replace(parenthesized, "").replace(plainClaim, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export const cleanAiReplyText = (text: string, disableBracketActions: boolean): string =>
+  removeFakeImageNarration(cleanOnlineMessage(removeFakeImageNarration(text), disableBracketActions));
 export const splitAiReplyBubbles = splitIntoWeChatBubbles;
 
 export const normalizePaymentMarkup = (content: string): string => content

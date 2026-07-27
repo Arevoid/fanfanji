@@ -15,5 +15,6 @@ const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 assert.match(server, /\/images\/generations/);
 assert.match(server, /\/images\/edits/);
 assert.match(server, /trigger !== "manual"/);
+assert.match(server, /没让你/);
 assert.doesNotMatch(server, /apiChat\(.*image/s);
 console.log("imageApiPayload.test passed");

@@ -14,8 +14,9 @@ async function startServer() {
   app.use(express.json({ limit: "15mb" }));
 
   const explicitImageRequest = (text: string) => {
-    const request = /(?:给我|给咱|发我|发张|发一张|看看|生成|拍).{0,16}(?:照片|图片|图像|自拍|相片)|(?:照片|图片|图像|自拍|相片).{0,12}(?:给我|发我|看看|生成)/i;
-    const blocked = /(?:不要|别|无需|不用|禁止|不想|别再).{0,10}(?:照片|图片|图像|自拍|相片)|(?:“|"|《).{0,30}(?:发张照片|生成一张|给我看看图片)/;
+    const image = "(?:照片|图片|图像|相片|自拍(?:照)?)";
+    const request = new RegExp(`(?:给我|给咱|发我|来|拍|生成).{0,18}${image}|(?:发|拍|生成).{0,10}${image}.{0,12}(?:给我|给咱|发我|看看)|${image}.{0,12}(?:给我|给咱|发我|看看|来一张|生成)`, "i");
+    const blocked = new RegExp(`(?:不要|别|无需|不用|禁止|不想|别再|没让你|我没让你|并非|不是).{0,18}(?:发|拍|生成)?.{0,12}${image}|(?:“|"|《).{0,40}(?:发.{0,8}${image}|生成.{0,8}${image})`, "i");
     return Boolean(text?.trim()) && !blocked.test(text) && request.test(text);
   };
   const imageBaseUrl = (endpoint: string) => endpoint.trim().replace(/\/+$/, "").replace(/\/(?:images\/(?:generations|edits)|chat\/completions)$/, "");
