@@ -1040,16 +1040,27 @@ export default function AppChat({
   }).filter((item) => Boolean(item.character));
 
   const handleDeleteFriend = () => {
-    if (!activeCharacter || activeCharacter.isGroupChat || !onDeleteCharacter) return;
+    if (!activeCharacter || activeCharacter.isGroupChat) return;
 
     const friendName = activeCharacter.remark || activeCharacter.name;
     if (!window.confirm(`确定删除好友“${friendName}”吗？与该好友的聊天、朋友圈、记忆和线下剧本将一并删除，且无法恢复。`)) {
       return;
     }
 
-    if (!activeRelationship) return;
+    // Recovery path: a previously merged/deleted relationship can leave an
+    // open direct-chat entry with only its relation ID in navigation state.
+    // It must still be removable without deleting the canonical Character.
+    const currentIdentityRelation = relationForCharacter(activeCharacter.id);
+    const relationToDelete = activeRelationship?.userIdentityId === activeIdentityId
+      ? activeRelationship
+      : currentIdentityRelation;
+    const orphanRelationId = !relationToDelete && !activeRelationship && activeChatRelationId ? activeChatRelationId : undefined;
+    if (!relationToDelete && !orphanRelationId) {
+      showToast("找不到当前身份的好友关系，无法执行安全清理。");
+      return;
+    }
     const friendId = activeCharacter.id;
-    const relationId = activeRelationship.id;
+    const relationId = relationToDelete?.id || orphanRelationId!;
     // A contact deletion removes only this identity's direct relationship. The
     // canonical Character and sibling relationships must remain untouched.
     onClearMessages?.(friendId, undefined, relationId);
@@ -1059,7 +1070,7 @@ export default function AppChat({
       .filter((story) => story.relationId === relationId)
       .forEach((story) => onDeleteOfflineStory?.(story.id));
     characters
-      .filter((character) => character.isGroupChat && character.memberIds?.includes(friendId))
+      .filter((character) => character.isGroupChat && belongsToActiveIdentity(character.ownerIdentityId) && character.memberIds?.includes(friendId))
       .forEach((group) => onSaveCharacter({
         ...group,
         memberIds: group.memberIds?.filter((memberId) => memberId !== friendId),
