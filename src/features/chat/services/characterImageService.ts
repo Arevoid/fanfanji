@@ -2,6 +2,7 @@ import type { Character, ImageApiPreset, ImageGenerationRecord, Message, UserSet
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { buildCharacterImagePrompt } from "../../../domain/prompt/characterImagePrompt";
 import { assertImageGenerationTrigger } from "./imageGenerationIntent";
+import { assertReferenceImageCapability, resolveImageProtocol } from "./imageProtocol";
 import { imageAssetDb } from "../../../utils/imageAssetDb";
 
 type ImageScope =
@@ -74,6 +75,7 @@ export async function generateCharacterImage(input: {
   const reference = input.character.imageReferenceAssetId
     ? await imageAssetDb.getImage(input.character.imageReferenceAssetId)
     : null;
+  assertReferenceImageCapability(preset, Boolean(reference));
   const response = await fetch("/api/image/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -81,6 +83,9 @@ export async function generateCharacterImage(input: {
       apiKey: preset.apiKey,
       apiEndpoint: preset.apiEndpoint,
       model: preset.selectedModel,
+      protocol: resolveImageProtocol(preset),
+      geminiAuthMode: preset.geminiAuthMode || "x-goog-api-key",
+      referenceImageSupported: preset.referenceImageSupported === true,
       prompt: buildCharacterImagePrompt({ ...input, userRequest: input.userText }),
       trigger: input.trigger,
       userText: input.userText,

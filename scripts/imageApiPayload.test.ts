@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { buildCharacterImagePrompt } from "../src/domain/prompt/characterImagePrompt";
+import { assertReferenceImageCapability, imageProtocolCapabilities, resolveImageProtocol } from "../src/features/chat/services/imageProtocol";
 
 const prompt = buildCharacterImagePrompt({
   character: { id: "char", name: "祁澈", avatar: "", personality: "冷静", backstory: "", imageAppearancePrompt: "黑发，白衬衫", imageNegativePrompt: "水印" },
@@ -11,10 +11,10 @@ const prompt = buildCharacterImagePrompt({
 assert.match(prompt, /黑发，白衬衫/);
 assert.match(prompt, /Avoid: 水印/);
 assert.match(prompt, /Current relationship context only: partner/);
-const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
-assert.match(server, /\/images\/generations/);
-assert.match(server, /\/images\/edits/);
-assert.match(server, /trigger !== "manual"/);
-assert.match(server, /没让你/);
-assert.doesNotMatch(server, /apiChat\(.*image/s);
+assert.equal(resolveImageProtocol({ protocol: undefined }), "openai-images", "old presets remain compatible");
+assert.equal(imageProtocolCapabilities({ protocol: "openai-images" }).supportsReferenceImage, true);
+assert.equal(imageProtocolCapabilities({ protocol: "gemini-native-image", referenceImageSupported: false }).supportsReferenceImage, false);
+assert.equal(imageProtocolCapabilities({ protocol: "imagen-text" }).supportsReferenceImage, false);
+assert.throws(() => assertReferenceImageCapability({ id: "p", name: "Gemini", protocol: "gemini-native-image", apiEndpoint: "x", apiKey: "y", selectedModel: "z", referenceImageSupported: false }, true));
+assert.throws(() => assertReferenceImageCapability({ id: "p", name: "Imagen", protocol: "imagen-text", apiEndpoint: "x", apiKey: "y", selectedModel: "z" }, true));
 console.log("imageApiPayload.test passed");

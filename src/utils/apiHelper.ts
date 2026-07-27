@@ -356,7 +356,12 @@ export async function apiFetchModels(params: {
 
 /** Image endpoints intentionally have no browser-direct fallback: keys and
  * trigger validation must always pass through server.ts. */
-export async function apiFetchImageModels(params: { apiKey: string; apiEndpoint: string }): Promise<string[]> {
+export async function apiFetchImageModels(params: {
+  apiKey: string;
+  apiEndpoint: string;
+  protocol?: "openai-images" | "gemini-native-image" | "imagen-text";
+  geminiAuthMode?: "x-goog-api-key" | "bearer";
+}): Promise<string[]> {
   const response = await fetch("/api/image/models", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -369,7 +374,13 @@ export async function apiFetchImageModels(params: { apiKey: string; apiEndpoint:
   return data.models;
 }
 
-export async function apiTestImageConnection(params: { apiKey: string; apiEndpoint: string; selectedModel: string }): Promise<{ success: boolean; message: string }> {
+export async function apiTestImageConnection(params: {
+  apiKey: string;
+  apiEndpoint: string;
+  selectedModel: string;
+  protocol?: "openai-images" | "gemini-native-image" | "imagen-text";
+  geminiAuthMode?: "x-goog-api-key" | "bearer";
+}): Promise<{ success: boolean; message: string }> {
   const response = await fetch("/api/image/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

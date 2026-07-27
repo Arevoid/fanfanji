@@ -112,14 +112,21 @@ export interface Message {
   imageSource?: "uploaded" | "generated";
 }
 
+export type ImageApiProtocol = "openai-images" | "gemini-native-image" | "imagen-text";
+export type GeminiImageAuthMode = "x-goog-api-key" | "bearer";
+
 export interface ImageApiPreset {
   id: string;
   name: string;
-  /** First release deliberately supports only OpenAI Images compatible endpoints. */
-  protocol: "openai-images";
+  /** Missing on old records means OpenAI Images compatible. */
+  protocol?: ImageApiProtocol;
   apiEndpoint: string;
   apiKey: string;
   selectedModel: string;
+  /** Gemini middleboxes differ; user selects the authentication header they support. */
+  geminiAuthMode?: GeminiImageAuthMode;
+  /** Must be enabled only when the selected Gemini middlebox/model explicitly accepts image input. */
+  referenceImageSupported?: boolean;
 }
 
 export interface ImageGenerationRecord {
