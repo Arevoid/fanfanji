@@ -1989,7 +1989,7 @@ export default function App() {
         }
 
         /* Ensure all card/panel containers are white */
-        .phone-screen-container div.bg-white,
+        .phone-screen-container div.bg-white:not(.app-icon-surface),
         .phone-screen-container div.bg-stone-50,
         .phone-screen-container div.bg-slate-50 {
           background-color: #ffffff !important;

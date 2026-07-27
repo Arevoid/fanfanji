@@ -16,5 +16,6 @@ assert.match(app, /--desktop-app-text-color: \$\{settings\.desktopAppTextColor \
 assert.match(app, /desktop-app-label/);
 assert.match(app, /font-extrabold:not\(\.desktop-app-label\)/);
 assert.match(app, /:not\(\.app-icon-surface\)/);
+assert.match(app, /div\.bg-white:not\(\.app-icon-surface\)/);
 
 console.log("desktopAppAppearance.test passed");
