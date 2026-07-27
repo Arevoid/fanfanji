@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { migrateLegacyRelationshipData } from "../src/domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData, removeRelationshipData } from "../src/domain/relationship/relationshipCleanup";
-import { createRelationship } from "../src/domain/relationship/characterRelationship";
+import { createRelationship, findRelationshipForCanonicalCharacter } from "../src/domain/relationship/characterRelationship";
 import type { Character, MemoryItem, Message, OfflineStory } from "../src/types";
 
 const character: Character = { id: "char_001", name: "Qi Che", avatar: "q.png", personality: "", backstory: "" };
@@ -89,6 +89,19 @@ assert.equal(contactMigration.relationships[0].characterId, character.id);
 assert.equal(contactMigration.messages[0].characterId, character.id);
 assert.equal(contactMigration.memories[0].characterId, character.id);
 assert.equal(contactMigration.offlineStories[0].characterId, character.id);
+
+// A relation left against the legacy contact-copy ID is still removable from
+// the canonical profile for its own identity.
+const legacyRelation = createRelationship({ id: "legacy-contact-relation", characterId: legacyContact.id, userIdentityId: "identity-fanfan", now: 1 });
+assert.equal(
+  findRelationshipForCanonicalCharacter([legacyRelation], "identity-fanfan", character.id, [character, legacyContact])?.id,
+  legacyRelation.id,
+);
+assert.equal(
+  findRelationshipForCanonicalCharacter([legacyRelation], "identity-other", character.id, [character, legacyContact]),
+  undefined,
+  "canonical recovery never crosses identity boundaries",
+);
 
 // The same canonical character can have isolated relationships for two identities.
 const relA = createRelationship({ id: "rel_little_flower", characterId: character.id, userIdentityId: "identity-little-flower", now: 1 });

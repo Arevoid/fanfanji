@@ -25,7 +25,7 @@ import { analyzeRecentConversation, formatProactiveConversationGuidance } from "
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
-import { createRelationship, findRelationship, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords, type InnerVoiceScope } from "../core/storage/repositories/innerVoiceRepository";
 import { generateInnerVoice } from "../features/chat/services/innerVoiceService";
 import { Button, Card, Modal } from "./ui";
@@ -1135,7 +1135,12 @@ export default function AppChat({
   const availableCharacterIds = getAvailableCanonicalCharacterIds(characters);
   const activeRelationships = relationships.filter((relation) => relation.userIdentityId === activeIdentityId && availableCharacterIds.has(relation.characterId));
   const friendIds = activeRelationships.map((relation) => relation.id);
-  const relationForCharacter = (characterId: string) => activeRelationships.find((relation) => relation.characterId === characterId);
+  const relationForCharacter = (characterId: string) => findRelationshipForCanonicalCharacter(
+    relationships,
+    activeIdentityId,
+    characterId,
+    characters,
+  );
   const isFriendCharacter = (character: Character) => !character.isGroupChat && !character.isContactInstance && Boolean(relationForCharacter(character.id));
   const friends = activeRelationships.map((relation) => characters.find((character) => character.id === relation.characterId)).filter((character): character is Character => Boolean(character));
   const friendContacts = activeRelationships.map((relation) => {

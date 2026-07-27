@@ -33,6 +33,24 @@ export function findRelationship(
   return relationships.find((relation) => relation.userIdentityId === userIdentityId && relation.characterId === characterId);
 }
 
+/**
+ * Recovers a relationship that was persisted against an old contact-copy ID.
+ * Identity remains the isolation boundary; canonicalization only reconciles
+ * the character reference left behind by an earlier bad merge.
+ */
+export function findRelationshipForCanonicalCharacter(
+  relationships: readonly CharacterRelationship[],
+  userIdentityId: string,
+  characterId: string,
+  characters: readonly Character[],
+): CharacterRelationship | undefined {
+  const canonicalCharacterId = resolveCanonicalCharacterId(characterId, characters);
+  return relationships.find((relation) =>
+    relation.userIdentityId === userIdentityId
+    && resolveCanonicalCharacterId(relation.characterId, characters) === canonicalCharacterId,
+  );
+}
+
 export function createRelationship(input: {
   id: string;
   characterId: string;
