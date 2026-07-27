@@ -4,7 +4,7 @@ import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from ".
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
 import { splitTextToOfflineSegments, compressImage } from "../utils/pngParser";
-import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles as splitIntoWeChatBubbles, type CallTranscriptItem } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles as splitIntoWeChatBubbles, stripInternalDeliveryMarkers, type CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { requestAiReply } from "../features/chat/services/aiReplyService";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
@@ -1050,6 +1050,11 @@ export default function AppChat({
   const currentChatMessages = messages.filter((m) => !m.isOffline && (activeRelationship
     ? m.relationId === activeRelationship.id
     : m.characterId === activeChatCharId && activeCharacter?.isGroupChat));
+  // Old records may contain model-facing scheduling metadata. Never render it
+  // as a chat bubble, but retain the underlying history record untouched.
+  const visibleChatMessages = currentChatMessages
+    .map((message) => ({ ...message, content: stripInternalDeliveryMarkers(message.content) }))
+    .filter((message) => Boolean(message.content.trim()));
   const activeStylePreset = (activeCharacter?.chatStylePreset) || (settings.globalChatStylePreset) || "default";
   const isFloatingCute = activeStylePreset === "floating-cute";
   const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
@@ -1580,6 +1585,7 @@ export default function AppChat({
   const [showImageGenerator, setShowImageGenerator] = useState(false);
   const [imageRequestText, setImageRequestText] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [imageGenerationError, setImageGenerationError] = useState<string | null>(null);
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
@@ -2845,6 +2851,7 @@ ${stickerListStr}
         // Clean any accidental "[发送时间: ...]" prefixes
         data.text = data.text.replace(/\[\s*发送时间\s*:\s*[^\]]+\]/gi, "").trim();
 
+        data.text = stripInternalDeliveryMarkers(data.text);
         if (isOfflineModeActive) {
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
           const paragraphs = data.text.split("\n").map(p => {
@@ -3049,8 +3056,8 @@ ${stickerListStr}
 
   /** This is the only AppChat path that imports the image-generation service.
    * Normal reply, proactive, memory, Moment and Inner Voice paths never call it. */
-  const generateAndSendCharacterImage = async (trigger: "manual" | "explicit-user-text", userText: string) => {
-    if (!activeCharacter) return;
+  const generateAndSendCharacterImage = async (trigger: "manual" | "explicit-user-text", userText: string): Promise<boolean> => {
+    if (!activeCharacter) return false;
     const target = activeCharacter.isGroupChat
       ? (() => {
           const lastSender = [...currentChatMessages].reverse().find((message) => message.sender === "character" && message.senderId);
@@ -3059,10 +3066,11 @@ ${stickerListStr}
       : activeCharacter;
     if (!target) {
       showToast("群聊图片需要先有一位角色发言，以确定生成图片的角色。");
-      return;
+      return false;
     }
-    if (!activeCharacter.isGroupChat && !activeRelationship) return;
+    if (!activeCharacter.isGroupChat && !activeRelationship) return false;
     setIsGeneratingImage(true);
+    setImageGenerationError(null);
     try {
       const scope = activeCharacter.isGroupChat
         ? { kind: "group" as const, groupId: activeCharacter.id, conversationId: `group:${activeCharacter.id}` }
@@ -3079,8 +3087,12 @@ ${stickerListStr}
       saveImageGenerationRecords([...records, generated.record]);
       setShowImageGenerator(false);
       showToast("角色图片已生成并发送。");
+      return true;
     } catch (error: any) {
-      showToast(error.message || "图片生成失败，请检查图片 API 配置。");
+      const message = error.message || "图片生成失败，请检查图片 API 配置。";
+      setImageGenerationError(message);
+      showToast(message);
+      return false;
     } finally {
       setIsGeneratingImage(false);
     }
@@ -3486,9 +3498,14 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
 
     onSendMessage(userMsg);
 
-    // Deliberately independent from generateResponseForUserMessage: no model
-    // output can ask for, trigger, or reach the image API.
-    if (shouldGenerateExplicitImage) void generateAndSendCharacterImage("explicit-user-text", rawUserRequest);
+    // An explicit image request is an image-only turn: the real image must be
+    // persisted before any character text is allowed. On failure the visible
+    // toast carries the sanitized proxy error; never fall through to a fake
+    // “sending a photo” text reply.
+    if (shouldGenerateExplicitImage) {
+      await generateAndSendCharacterImage("explicit-user-text", rawUserRequest);
+      return;
+    }
 
     let currentMessagesWithNewUser = currentChatMessages;
     if (isOfflineModeActive && activeOfflineStoryId && onSaveOfflineStory) {
@@ -6142,7 +6159,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
           {/* Active Chat Messages body */}
 
           <MessageList
-            messages={currentChatMessages}
+            messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
             className="flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list chat-message-list"
             style={{
@@ -6160,7 +6177,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   showWeChatDivider = true;
                   dividerText = formatWeChatTimestamp(msg.timestamp);
                 } else {
-                  const prevMsg = currentChatMessages[idx - 1];
+                  const prevMsg = visibleChatMessages[idx - 1];
                   if (prevMsg) {
                     const prevDate = new Date(prevMsg.timestamp);
                     const currDate = new Date(msg.timestamp);
@@ -6293,7 +6310,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               }
 
               const isSelf = msg.sender === "user";
-              const prevMsg = idx > 0 ? currentChatMessages[idx - 1] : null;
+              const prevMsg = idx > 0 ? visibleChatMessages[idx - 1] : null;
               // While an offline story is active, online messages remain a separate
               // live channel. Keep their avatars visible instead of treating them as
               // one collapsed story paragraph.
@@ -6759,6 +6776,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             
 
 
+            {imageGenerationError && (
+              <div role="status" className="mx-3 mt-2 rounded-lg bg-red-50 px-3 py-2 text-[11px] leading-relaxed text-red-600">
+                {imageGenerationError}
+              </div>
+            )}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
