@@ -283,12 +283,6 @@ export default function App() {
     }, 3000);
   };
 
-  const [isMobileKeyboardActive, setIsMobileKeyboardActive] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [visualViewportHeight, setVisualViewportHeight] = useState<number>(() => typeof window !== "undefined" ? window.innerHeight : 812);
-  const [vvTop, setVvTop] = useState<number>(0);
-  const [vvLeft, setVvLeft] = useState<number>(0);
-  const [vvWidth, setVvWidth] = useState<number>(() => typeof window !== "undefined" ? window.innerWidth : 375);
   const [isStandaloneMode, setIsStandaloneMode] = useState(isStandalonePwa);
 
   useEffect(() => {
@@ -328,98 +322,6 @@ export default function App() {
         standaloneQuery.removeListener(handleDisplayModeChange);
       }
       window.visualViewport?.removeEventListener("resize", updateAppFrame);
-    };
-  }, []);
-
-  // Synchronize mobile keyboard visual state to prevent bounce and shift view cleanly
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.visualViewport) return;
-
-    const handleViewportChange = () => {
-      const vv = window.visualViewport;
-      if (!vv) return;
-      
-      const isMobile = window.innerWidth < 768;
-      if (!isMobile) {
-        setIsMobileKeyboardActive(false);
-        setKeyboardHeight(0);
-        setVisualViewportHeight(window.innerHeight);
-        setVvWidth(window.innerWidth);
-        setVvTop(0);
-        setVvLeft(0);
-        return;
-      }
-
-      setVisualViewportHeight(vv.height);
-      setVvWidth(vv.width);
-      // In a standalone PWA, visualViewport offsets can already include the
-      // status-bar inset. Applying them to the app shell would add that inset twice.
-      setVvTop(isStandalonePwa() ? 0 : vv.offsetTop);
-      setVvLeft(isStandalonePwa() ? 0 : vv.offsetLeft);
-
-      // Aggressively clamp window scroll back to 0,0 to counteract Edge and iOS virtual viewport top shift
-      if (window.scrollY !== 0 || document.body.scrollTop !== 0 || document.documentElement.scrollTop !== 0) {
-        window.scrollTo(0, 0);
-        document.body.scrollTop = 0;
-        document.documentElement.scrollTop = 0;
-      }
-
-      const offset = window.innerHeight - vv.height;
-      if (offset > 120) { // typical keyboard height threshold (e.g. 120px+)
-        setIsMobileKeyboardActive(true);
-        setKeyboardHeight(offset);
-      } else {
-        setIsMobileKeyboardActive(false);
-        setKeyboardHeight(0);
-      }
-    };
-
-    const preventScrollBounce = () => {
-      if (window.innerWidth < 768) {
-        if (window.scrollY !== 0 || document.body.scrollTop !== 0 || document.documentElement.scrollTop !== 0) {
-          window.scrollTo(0, 0);
-          document.body.scrollTop = 0;
-          document.documentElement.scrollTop = 0;
-        }
-      }
-    };
-
-    // Auto-scroll input to center when focused to make sure it is fully visible above keyboard
-    const handleFocusIn = (_e: FocusEvent) => {
-      // Disabled to prevent browser from scrolling the layout viewport out of view.
-      // The app shell follows the current visual viewport while the keyboard is open.
-    };
-
-    window.visualViewport.addEventListener("resize", handleViewportChange);
-    window.visualViewport.addEventListener("scroll", handleViewportChange);
-    window.addEventListener("scroll", preventScrollBounce, { passive: true });
-    document.addEventListener("focusin", handleFocusIn);
-
-    // Run once to initialize
-    handleViewportChange();
-
-    // Force periodic reset of body scroll when input is focused to combat iOS Safari behavior
-    const interval = setInterval(() => {
-      if (window.innerWidth < 768) {
-        const activeEl = document.activeElement;
-        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.getAttribute('contenteditable') === 'true')) {
-          if (window.scrollY !== 0 || document.body.scrollTop !== 0 || document.documentElement.scrollTop !== 0) {
-            window.scrollTo(0, 0);
-            document.body.scrollTop = 0;
-            document.documentElement.scrollTop = 0;
-          }
-        }
-      }
-    }, 100);
-
-    return () => {
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener("resize", handleViewportChange);
-        window.visualViewport.removeEventListener("scroll", handleViewportChange);
-      }
-      window.removeEventListener("scroll", preventScrollBounce);
-      document.removeEventListener("focusin", handleFocusIn);
-      clearInterval(interval);
     };
   }, []);
 
@@ -1948,10 +1850,10 @@ export default function App() {
       className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
       data-pwa-standalone={isStandaloneMode ? "true" : "false"}
       style={{
-        position: (typeof window !== "undefined" && window.innerWidth < 768) ? "absolute" : "relative",
-        top: (typeof window !== "undefined" && window.innerWidth < 768) ? `${isStandaloneMode ? 0 : vvTop}px` : undefined,
-        left: (typeof window !== "undefined" && window.innerWidth < 768) ? `${isStandaloneMode ? 0 : vvLeft}px` : undefined,
-        width: (typeof window !== "undefined" && window.innerWidth < 768) ? `${isStandaloneMode ? window.innerWidth : vvWidth}px` : "100%",
+        position: (typeof window !== "undefined" && window.innerWidth < 768) ? "fixed" : "relative",
+        top: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
+        left: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
+        width: "100%",
         height: (typeof window !== "undefined" && window.innerWidth < 768) ? "var(--app-height, 100dvh)" : "100dvh",
         // `min-h-[100dvh]` is useful before the app mounts, but on Android Edge it can
         // retain the layout viewport height after the IME opens. Override it with the

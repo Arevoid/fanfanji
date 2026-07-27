@@ -6625,13 +6625,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 type="text"
                 value={chatInputText}
                 onChange={(e) => setChatInputText(e.target.value)}
-                onFocus={() => {
-                  setTimeout(() => {
-                    if (chatEndRef.current) {
-                      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-                    }
-                  }, 120);
-                }}
                 placeholder={
                   isOfflineModeActive
                     ? (isInputNarration
