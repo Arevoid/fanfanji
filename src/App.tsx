@@ -22,6 +22,7 @@ import { DEFAULT_IDENTITY_ID, getOfflineModeStorageKey, getOfflineStoryStorageKe
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord } from "./types";
 import { 
   AlbumWidget, 
+  CalendarAlbumWidget,
   MusicWidget, 
   AnniversaryWidget, 
   TodoWidget, 
@@ -574,8 +575,13 @@ export default function App() {
       localStorage.setItem("phone_homescreen_items", JSON.stringify(items));
       localStorage.setItem("phone_layout_migrated_v3", "true");
     }
-    // Filter out schedule app
-    items = items.filter((item) => item.id !== "schedule");
+    // Remove the retired 1x4 album and upgrade the previous 2x4 album slot
+    // to the calendar album without disturbing other desktop items.
+    items = items
+      .filter((item) => item.id !== "schedule" && !(item.widgetType === "album" && item.size === "1x4"))
+      .map((item) => item.widgetType === "album" && item.size === "2x4"
+        ? { ...item, widgetType: "calendar-album" }
+        : item);
     // Ensure all standard apps and widgets are present in layout
     if (!items.some(item => item.id === "album_widget_1")) {
       items.unshift({ id: "album_widget_1", type: "widget", widgetType: "album", size: "2x2", page: 0 });
@@ -1302,7 +1308,7 @@ export default function App() {
     }
   };
 
-  const handleAddWidget = (widgetType: "album" | "music" | "anniversary" | "todo" | "album_1x4" | "album_2x4" | "welcome") => {
+  const handleAddWidget = (widgetType: "album" | "music" | "anniversary" | "todo" | "calendar_album" | "welcome") => {
     if (widgetType === "welcome") {
       setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: false }));
       setIsShowingAddWidget(false);
@@ -1311,14 +1317,11 @@ export default function App() {
 
     setHomeScreenItems((current) => {
       let size: "1x1" | "2x2" | "1x4" | "2x4" = "2x2";
-      let actualWidgetType: "album" | "music" | "anniversary" | "todo" = "todo";
+      let actualWidgetType: "album" | "calendar-album" | "music" | "anniversary" | "todo" = "todo";
 
-      if (widgetType === "album_1x4") {
-        size = "1x4";
-        actualWidgetType = "album";
-      } else if (widgetType === "album_2x4") {
+      if (widgetType === "calendar_album") {
         size = "2x4";
-        actualWidgetType = "album";
+        actualWidgetType = "calendar-album";
       } else if (widgetType === "album") {
         size = "2x2";
         actualWidgetType = "album";
@@ -1352,6 +1355,7 @@ export default function App() {
   const getWidgetComponent = (type?: string) => {
     switch (type) {
       case "album": return AlbumWidget;
+      case "calendar-album": return CalendarAlbumWidget;
       case "music": return MusicWidget;
       case "anniversary": return AnniversaryWidget;
       case "todo": default: return TodoWidget;

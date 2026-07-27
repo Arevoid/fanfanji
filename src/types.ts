@@ -293,7 +293,7 @@ export interface StylePreset {
 export interface HomeScreenItem {
   id: string;
   type: "app" | "widget";
-  widgetType?: "album" | "music" | "anniversary" | "todo";
+  widgetType?: "album" | "calendar-album" | "music" | "anniversary" | "todo";
   size: "1x1" | "2x2" | "1x4" | "2x4";
   page: number;
 }

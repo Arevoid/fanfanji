@@ -142,6 +142,132 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
   );
 }
 
+/** A wide, date-led photo widget. Its image is intentionally unmasked so the
+ * user controls contrast solely with the single date-text colour setting. */
+export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadius }: WidgetProps) {
+  const [backgroundImage, setBackgroundImage] = useState(() => localStorage.getItem(`calendar_album_image_${id}`) || ALBUM_IMAGES[2]);
+  const [fontColor, setFontColor] = useState(() => localStorage.getItem(`calendar_album_font_color_${id}`) || "#ffffff");
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [draftBackgroundImage, setDraftBackgroundImage] = useState(backgroundImage);
+  const [draftFontColor, setDraftFontColor] = useState(fontColor);
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  const today = new Date();
+  const weekday = today.toLocaleDateString("en-US", { weekday: "long" }).toUpperCase();
+  const monthAndDay = today.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+
+  const handleBackgroundUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (loadEvent) => {
+      const image = new Image();
+      image.onload = () => {
+        const maxDimension = 1200;
+        let { width, height } = image;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d")?.drawImage(image, 0, 0, width, height);
+        setDraftBackgroundImage(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      image.src = loadEvent.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const saveSettings = () => {
+    setBackgroundImage(draftBackgroundImage);
+    setFontColor(draftFontColor);
+    localStorage.setItem(`calendar_album_image_${id}`, draftBackgroundImage);
+    localStorage.setItem(`calendar_album_font_color_${id}`, draftFontColor);
+    setIsSettingsOpen(false);
+  };
+
+  return (
+    <div className="relative w-full h-full group">
+      <button
+        type="button"
+        className="relative w-full h-full overflow-hidden text-left shadow-md border border-white/20 cursor-pointer select-none"
+        style={{
+          borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined,
+          backgroundImage: `url(${backgroundImage})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!isEditing) {
+            setDraftBackgroundImage(backgroundImage);
+            setDraftFontColor(fontColor);
+            setIsSettingsOpen(true);
+          }
+        }}
+        aria-label="编辑日历相册小组件"
+      >
+        <div
+          className="absolute left-4 bottom-3 flex flex-col leading-[0.9]"
+          style={{ color: fontColor, fontFamily: '"Athena Unicode", Georgia, serif' }}
+        >
+          <span className="text-[18px] font-semibold tracking-[-0.03em]">{weekday}</span>
+          <span className="mt-1 text-[21px] font-semibold tracking-[-0.04em]">{monthAndDay}</span>
+        </div>
+      </button>
+
+      {isEditing && onRemove && (
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+          className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center text-xs font-black shadow-md z-30 transition-transform active:scale-90"
+          aria-label="删除小组件"
+        >
+          ×
+        </button>
+      )}
+
+      {isSettingsOpen && createPortal(
+        <div className="fixed inset-0 z-[100] bg-black/35 flex items-end justify-center p-4" onClick={() => setIsSettingsOpen(false)}>
+          <div className="w-full max-w-sm rounded-[28px] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-stone-900">日历相册</h3>
+                <p className="mt-0.5 text-[11px] text-stone-400">背景图与日期文字颜色</p>
+              </div>
+              <Settings className="h-4 w-4 text-stone-400" />
+            </div>
+            <div className="mb-4 h-28 overflow-hidden rounded-2xl border border-stone-100" style={{ backgroundImage: `url(${draftBackgroundImage})`, backgroundSize: "cover", backgroundPosition: "center" }} />
+            <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
+            <button type="button" onClick={() => uploadRef.current?.click()} className="mb-4 w-full rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold text-stone-700">上传背景图片</button>
+            <label className="mb-5 flex items-center justify-between text-xs font-bold text-stone-700">
+              日期文字颜色
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-[10px] font-medium text-stone-400">{draftFontColor.toUpperCase()}</span>
+                <input type="color" value={draftFontColor} onChange={(event) => setDraftFontColor(event.target.value)} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0" />
+              </span>
+            </label>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setIsSettingsOpen(false)} className="flex-1 rounded-xl bg-stone-100 py-2.5 text-xs font-bold text-stone-600">取消</button>
+              <button type="button" onClick={saveSettings} className="flex-1 rounded-xl bg-stone-950 py-2.5 text-xs font-bold text-white">保存</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, onNext, currentTrack, onOpenApp, widgetOpacity, widgetBorderRadius }: WidgetProps) {
   return (
     <div className="relative w-full h-full group">
@@ -852,7 +978,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
 
 // Bottom sheet selector for preset widgets
 interface AddWidgetSheetProps {
-  onAdd: (widgetType: "album" | "music" | "anniversary" | "todo" | "album_1x4" | "album_2x4" | "welcome") => void;
+  onAdd: (widgetType: "album" | "music" | "anniversary" | "todo" | "calendar_album" | "welcome") => void;
   onClose: () => void;
   settings?: UserSettings;
 }
@@ -888,31 +1014,17 @@ export function AddWidgetSheet({ onAdd, onClose, settings }: AddWidgetSheetProps
           </div>
         </button>
 
-        {/* Option 1b: Album 1x4 */}
+        {/* Option 1b: Calendar album 2x4 */}
         <button
-          onClick={() => onAdd("album_1x4")}
-          className="flex items-center gap-3 p-3 bg-stone-50 hover:bg-stone-100 border border-stone-200/60 rounded-2xl text-left transition-all hover:scale-[1.02] active:scale-95"
-        >
-          <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
-            <ImageIcon className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="text-xs font-black text-stone-800">精美相册 (1×4)</h4>
-            <p className="text-[10px] text-stone-400 font-medium mt-0.5">扁平长条横幅小相册</p>
-          </div>
-        </button>
-
-        {/* Option 1c: Album 2x4 */}
-        <button
-          onClick={() => onAdd("album_2x4")}
+          onClick={() => onAdd("calendar_album")}
           className="flex items-center gap-3 p-3 bg-stone-50 hover:bg-stone-100 border border-stone-200/60 rounded-2xl text-left transition-all hover:scale-[1.02] active:scale-95"
         >
           <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600 shrink-0">
-            <ImageIcon className="w-5 h-5" />
+            <Calendar className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="text-xs font-black text-stone-800">精美相册 (2×4)</h4>
-            <p className="text-[10px] text-stone-400 font-medium mt-0.5">大屏宽画幅焦点壁纸</p>
+            <h4 className="text-xs font-black text-stone-800">日历相册 (2×4)</h4>
+            <p className="text-[10px] text-stone-400 font-medium mt-0.5">无蒙版背景与实时时间日期</p>
           </div>
         </button>
 
