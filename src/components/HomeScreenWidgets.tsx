@@ -193,6 +193,13 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
     setIsSettingsOpen(false);
   };
 
+  const cancelSettings = () => {
+    setDraftBackgroundImage(backgroundImage);
+    setDraftFontColor(fontColor);
+    setFontColor(fontColor);
+    setIsSettingsOpen(false);
+  };
+
   return (
     <div className="relative w-full h-full group">
       <button
@@ -216,10 +223,10 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
       >
         <div
           className="absolute left-4 bottom-3 flex flex-col leading-[0.9]"
-          style={{ color: fontColor, fontFamily: '"Athena Unicode", Georgia, serif' }}
+          style={{ fontFamily: '"Athena Unicode", serif' }}
         >
-          <span className="text-[18px] font-semibold tracking-[-0.03em]">{weekday}</span>
-          <span className="mt-1 text-[21px] font-semibold tracking-[-0.04em]">{monthAndDay}</span>
+          <span className="text-[18px] font-semibold tracking-[-0.03em]" style={{ color: fontColor }}>{weekday}</span>
+          <span className="mt-1 text-[21px] font-semibold tracking-[-0.04em]" style={{ color: fontColor }}>{monthAndDay}</span>
         </div>
       </button>
 
@@ -237,7 +244,7 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
       )}
 
       {isSettingsOpen && createPortal(
-        <div className="fixed inset-0 z-[100] bg-black/35 flex items-end justify-center p-4" onClick={() => setIsSettingsOpen(false)}>
+        <div className="fixed inset-0 z-[100] bg-black/35 flex items-end justify-center p-4" onClick={cancelSettings}>
           <div className="w-full max-w-sm rounded-[28px] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
               <div>
@@ -246,18 +253,23 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
               </div>
               <Settings className="h-4 w-4 text-stone-400" />
             </div>
-            <div className="mb-4 h-28 overflow-hidden rounded-2xl border border-stone-100" style={{ backgroundImage: `url(${draftBackgroundImage})`, backgroundSize: "cover", backgroundPosition: "center" }} />
+            <div className="relative mb-4 h-28 overflow-hidden rounded-2xl border border-stone-100" style={{ backgroundImage: `url(${draftBackgroundImage})`, backgroundSize: "cover", backgroundPosition: "center" }}>
+              <div className="absolute bottom-3 left-3 flex flex-col leading-[0.9]" style={{ fontFamily: '"Athena Unicode", serif', color: draftFontColor }}>
+                <span className="text-sm font-semibold">{weekday}</span>
+                <span className="mt-1 text-base font-semibold">{monthAndDay}</span>
+              </div>
+            </div>
             <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
             <button type="button" onClick={() => uploadRef.current?.click()} className="mb-4 w-full rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold text-stone-700">上传背景图片</button>
             <label className="mb-5 flex items-center justify-between text-xs font-bold text-stone-700">
               日期文字颜色
               <span className="flex items-center gap-2">
                 <span className="font-mono text-[10px] font-medium text-stone-400">{draftFontColor.toUpperCase()}</span>
-                <input type="color" value={draftFontColor} onChange={(event) => setDraftFontColor(event.target.value)} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0" />
+                <input type="color" value={draftFontColor} onChange={(event) => { setDraftFontColor(event.target.value); setFontColor(event.target.value); }} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0" />
               </span>
             </label>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setIsSettingsOpen(false)} className="flex-1 rounded-xl bg-stone-100 py-2.5 text-xs font-bold text-stone-600">取消</button>
+              <button type="button" onClick={cancelSettings} className="flex-1 rounded-xl bg-stone-100 py-2.5 text-xs font-bold text-stone-600">取消</button>
               <button type="button" onClick={saveSettings} className="flex-1 rounded-xl bg-stone-950 py-2.5 text-xs font-bold text-white">保存</button>
             </div>
           </div>
