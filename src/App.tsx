@@ -19,7 +19,7 @@ import { migrateLegacyCharacterIdentityData } from "./domain/character/character
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
 import { DEFAULT_IDENTITY_ID, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
-import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory } from "./types";
+import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord } from "./types";
 import { 
   AlbumWidget, 
   MusicWidget, 
@@ -1532,9 +1532,27 @@ export default function App() {
 
   const handleDeleteCharacter = (id: string, skipConfirm = false) => {
     if (skipConfirm || confirm("确定要删除这名角色人设吗？删除后其相关聊天和动态也将被清空。")) {
-      const relationIds = relationships.filter((relation) => relation.characterId === id).map((relation) => relation.id);
-      const cleaned = removeCanonicalCharacterData({ relationships, messages, memories, offlineStories }, id);
-      setCharacters((prev) => prev.filter((c) => c.id !== id));
+      // A previous bad merge could leave a relationship pointing to a contact
+      // copy. Delete that legacy reference together with its archive profile,
+      // otherwise it remains visible in the address book after archive deletion.
+      const characterIds = new Set<string>(characters
+        .filter((character) => character.id === id || character.profileSourceId === id)
+        .map((character) => character.id));
+      characterIds.add(id);
+      const deletedCharacterIds = [...characterIds];
+      const relationIds = relationships
+        .filter((relation) => characterIds.has(relation.characterId))
+        .map((relation) => relation.id);
+      const cleaned = removeCanonicalCharacterData(
+        { relationships, messages, memories, offlineStories },
+        id,
+        deletedCharacterIds,
+      );
+      setCharacters((prev) => prev
+        .filter((character) => !characterIds.has(character.id))
+        .map((character) => character.isGroupChat && character.memberIds
+          ? { ...character, memberIds: character.memberIds.filter((memberId) => !characterIds.has(memberId)) }
+          : character));
       setRelationships(cleaned.relationships);
       setMessages(cleaned.messages);
       setMemories(cleaned.memories);
@@ -1558,15 +1576,18 @@ export default function App() {
           console.warn(`Unable to clear relationship state from ${key}:`, error);
         }
       });
-      setMoments((prev) => prev.filter((m) => m.characterId !== id));
+      setMoments((prev) => prev.filter((moment) => !characterIds.has(moment.characterId)));
       // Inner voices are private chat-experience records and must not survive
       // deletion of their canonical character.
       const innerVoices = loadInnerVoiceRecords([]).value;
-      const remainingInnerVoices = removeInnerVoicesByCharacter(innerVoices, id);
+      const remainingInnerVoices = deletedCharacterIds.reduce<InnerVoiceRecord[]>(
+        (records, characterId) => removeInnerVoicesByCharacter(records, characterId),
+        innerVoices,
+      );
       if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
-      setActiveChatCharId((current) => current === id ? null : current);
+      setActiveChatCharId((current) => current && characterIds.has(current) ? null : current);
       setActiveChatRelationId((current) => current && relationIds.includes(current) ? null : current);
-      setGlobalNotification((current) => current?.characterId === id ? null : current);
+      setGlobalNotification((current) => current?.characterId && characterIds.has(current.characterId) ? null : current);
     }
   };
 

@@ -18,17 +18,23 @@ export function removeRelationshipData(data: RelationshipScopedData, relationIds
   };
 }
 
-/** Removes every relationship-owned record of a canonical character. Legacy
- * character-keyed records are removed too, while groups remain untouched. */
-export function removeCanonicalCharacterData(data: RelationshipScopedData, characterId: string): RelationshipScopedData {
+/** Removes every relationship-owned record of a canonical character. Callers
+ * may include legacy contact-copy IDs that resolve to the same archive
+ * profile. Group records remain untouched. */
+export function removeCanonicalCharacterData(
+  data: RelationshipScopedData,
+  characterId: string,
+  legacyCharacterIds: readonly string[] = [],
+): RelationshipScopedData {
+  const characterIds = new Set([characterId, ...legacyCharacterIds]);
   const relationIds = data.relationships
-    .filter((relationship) => relationship.characterId === characterId)
+    .filter((relationship) => characterIds.has(relationship.characterId))
     .map((relationship) => relationship.id);
   const scoped = removeRelationshipData(data, relationIds);
   return {
     relationships: scoped.relationships,
-    messages: scoped.messages.filter((message) => message.characterId !== characterId),
-    memories: scoped.memories.filter((memory) => memory.characterId !== characterId),
-    offlineStories: scoped.offlineStories.filter((story) => story.characterId !== characterId),
+    messages: scoped.messages.filter((message) => !characterIds.has(message.characterId)),
+    memories: scoped.memories.filter((memory) => !characterIds.has(memory.characterId)),
+    offlineStories: scoped.offlineStories.filter((story) => !characterIds.has(story.characterId)),
   };
 }

@@ -125,4 +125,17 @@ assert.equal(afterCharacterDelete.memories.length, 0);
 assert.equal(afterCharacterDelete.offlineStories.length, 0);
 assert.deepEqual(afterCharacterDelete.messages.map((item) => item.id), ["group-message"], "canonical deletion keeps unrelated group data");
 
+// Archive deletion must also remove a relationship which still references a
+// legacy contact-copy ID; otherwise it would remain in the address book.
+const legacyDelete = removeCanonicalCharacterData({
+  relationships: [legacyRelation],
+  messages: [{ ...message, characterId: legacyContact.id, relationId: legacyRelation.id }],
+  memories: [{ ...memory, characterId: legacyContact.id, relationId: legacyRelation.id }],
+  offlineStories: [{ ...story, characterId: legacyContact.id, relationId: legacyRelation.id }],
+}, character.id, [legacyContact.id]);
+assert.equal(legacyDelete.relationships.length, 0);
+assert.equal(legacyDelete.messages.length, 0);
+assert.equal(legacyDelete.memories.length, 0);
+assert.equal(legacyDelete.offlineStories.length, 0);
+
 console.log("PASS relationship migration, canonicalization, group exclusion, isolation, and cascade cleanup");
