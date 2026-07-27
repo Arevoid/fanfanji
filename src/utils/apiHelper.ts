@@ -354,6 +354,31 @@ export async function apiFetchModels(params: {
   }
 }
 
+/** Image endpoints intentionally have no browser-direct fallback: keys and
+ * trigger validation must always pass through server.ts. */
+export async function apiFetchImageModels(params: { apiKey: string; apiEndpoint: string }): Promise<string[]> {
+  const response = await fetch("/api/image/models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success || !Array.isArray(data.models)) {
+    throw new Error(data.error || "无法访问图片模型列表。");
+  }
+  return data.models;
+}
+
+export async function apiTestImageConnection(params: { apiKey: string; apiEndpoint: string; selectedModel: string }): Promise<{ success: boolean; message: string }> {
+  const response = await fetch("/api/image/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const data = await response.json().catch(() => ({}));
+  return { success: Boolean(response.ok && data.success), message: data.message || data.error || "图片 API 测试失败。" };
+}
+
 // extract memories wrapper
 export async function apiExtractMemories(params: {
   history: any[];

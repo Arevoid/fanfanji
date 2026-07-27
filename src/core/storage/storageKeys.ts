@@ -6,6 +6,7 @@ export const storageKeys = {
   legacyMessages: "phone_messages",
   moments: "phone_moments_v3",
   innerVoiceRecords: "phone_inner_voice_records",
+  imageGenerationRecords: "phone_image_generation_records",
   momentGenerationTasks: "phone_moment_generation_tasks",
   worldBookEntries: "phone_worldbook_entries",
   memoryVaultItems: "phone_memory_vault_items",

@@ -76,6 +76,14 @@ export interface Character {
   minimaxVoiceId?: string;
   minimaxSpeed?: number;
   voiceFrequency?: "low" | "medium" | "high" | "none";
+  /** Canonical appearance data only. It is intentionally never relation-scoped. */
+  enableImageGeneration?: boolean;
+  imageAppearancePrompt?: string;
+  imageNegativePrompt?: string;
+  /** A single reference image blob is stored in IndexedDB; this is metadata only. */
+  imageReferenceAssetId?: string;
+  imageReferenceMimeType?: string;
+  imageReferenceUpdatedAt?: number;
 }
 
 export interface Message {
@@ -98,6 +106,36 @@ export interface Message {
   audioUrl?: string;
   audioDuration?: number;
   isVoiceMessage?: boolean;
+  /** Image data lives in IndexedDB. Legacy uploaded images remain in content as data URLs. */
+  imageAssetId?: string;
+  imageMimeType?: string;
+  imageSource?: "uploaded" | "generated";
+}
+
+export interface ImageApiPreset {
+  id: string;
+  name: string;
+  /** First release deliberately supports only OpenAI Images compatible endpoints. */
+  protocol: "openai-images";
+  apiEndpoint: string;
+  apiKey: string;
+  selectedModel: string;
+}
+
+export interface ImageGenerationRecord {
+  id: string;
+  messageId: string;
+  /** Always the canonical Character ID, including a group sender. */
+  characterId: string;
+  /** Direct chats require this relation boundary. */
+  relationId?: string;
+  /** Direct and group conversations both retain their own container ID. */
+  conversationId: string;
+  /** Group records retain group semantics instead of using a direct relation. */
+  groupId?: string;
+  imageAssetId: string;
+  trigger: "manual" | "explicit-user-text";
+  createdAt: number;
 }
 
 /** A private, generated reflection for one character message. This is never part of chat or memory data. */
@@ -269,6 +307,12 @@ export interface UserSettings {
   minimaxPitch?: number;
   minimaxVol?: number;
   minimaxProxyUrl?: string;
+
+  // OpenAI Images compatible settings. Disabled by default so no image request
+  // can occur until both this and the canonical Character setting are enabled.
+  enableImageGeneration?: boolean;
+  imageApiPresets?: ImageApiPreset[];
+  activeImageApiPresetId?: string;
 }
 
 export interface ApiPreset {

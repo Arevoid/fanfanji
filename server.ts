@@ -13,6 +13,92 @@ async function startServer() {
   // Use JSON parsing with size limits for custom base64 wallpapers or customized avatars
   app.use(express.json({ limit: "15mb" }));
 
+  const explicitImageRequest = (text: string) => {
+    const request = /(?:给我|给咱|发我|发张|发一张|看看|生成|拍).{0,16}(?:照片|图片|图像|自拍|相片)|(?:照片|图片|图像|自拍|相片).{0,12}(?:给我|发我|看看|生成)/i;
+    const blocked = /(?:不要|别|无需|不用|禁止|不想|别再).{0,10}(?:照片|图片|图像|自拍|相片)|(?:“|"|《).{0,30}(?:发张照片|生成一张|给我看看图片)/;
+    return Boolean(text?.trim()) && !blocked.test(text) && request.test(text);
+  };
+  const imageBaseUrl = (endpoint: string) => endpoint.trim().replace(/\/+$/, "").replace(/\/(?:images\/(?:generations|edits)|chat\/completions)$/, "");
+  const parseModelList = (data: any): string[] => {
+    const list = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : Array.isArray(data) ? data : [];
+    return list.map((item: any) => typeof item === "string" ? item : item?.id || item?.name || item?.model).filter(Boolean);
+  };
+  const getImageModels = async (apiKey: string, apiEndpoint: string) => {
+    if (!apiKey?.trim() || !apiEndpoint?.trim()) throw new Error("请填写图片 API 地址与 API Key。");
+    const response = await fetch(`${imageBaseUrl(apiEndpoint)}/models`, { headers: { Authorization: `Bearer ${apiKey.trim()}` } });
+    if (!response.ok) throw new Error(`模型列表请求失败 (${response.status})：${await response.text()}`);
+    const models = parseModelList(await response.json());
+    if (!models.length) throw new Error("模型列表响应不符合 OpenAI compatible /models 格式。");
+    return models;
+  };
+  const toDataUrl = async (value: { b64_json?: string; url?: string }) => {
+    if (value.b64_json) return `data:image/png;base64,${value.b64_json}`;
+    if (!value.url) throw new Error("图片 API 响应中没有 b64_json 或 url。");
+    const response = await fetch(value.url);
+    if (!response.ok) throw new Error(`无法下载图片 API 返回的 URL (${response.status})。`);
+    const bytes = Buffer.from(await response.arrayBuffer()).toString("base64");
+    return `data:${response.headers.get("content-type") || "image/png"};base64,${bytes}`;
+  };
+
+  // Image settings use the OpenAI Images protocol only. These endpoints never
+  // fall back to text chat and the test endpoint never creates an image.
+  app.post("/api/image/models", async (req, res) => {
+    try {
+      return res.json({ success: true, models: await getImageModels(req.body.apiKey, req.body.apiEndpoint) });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, error: error.message || "无法访问图片模型列表。" });
+    }
+  });
+
+  app.post("/api/image/test", async (req, res) => {
+    try {
+      const models = await getImageModels(req.body.apiKey, req.body.apiEndpoint);
+      const selected = String(req.body.selectedModel || "").trim();
+      return res.json({ success: true, message: selected && !models.includes(selected)
+        ? "模型列表可访问，但所选模型不在列表中；这不会测试或消耗图片生成额度。"
+        : "代理与模型列表可访问；这不会测试图片生成，模型列表成功不等于模型支持图片或参考图。" });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, error: error.message || "图片 API 测试失败。" });
+    }
+  });
+
+  app.post("/api/image/generate", async (req, res) => {
+    try {
+      const { apiKey, apiEndpoint, model, prompt, trigger, userText, referenceImage } = req.body || {};
+      if (trigger !== "manual" && !(trigger === "explicit-user-text" && explicitImageRequest(String(userText || "")))) {
+        return res.status(403).json({ error: "图片生成已拦截：触发来源不是手动确认或明确的用户图片请求。" });
+      }
+      if (!apiKey?.trim() || !apiEndpoint?.trim() || !model?.trim() || !prompt?.trim()) {
+        return res.status(400).json({ error: "图片 API 配置、模型或提示词不完整。" });
+      }
+      const baseUrl = imageBaseUrl(apiEndpoint);
+      let response: Response;
+      if (referenceImage?.base64) {
+        const mimeType = /^image\/(?:png|jpeg|webp)$/i.test(referenceImage.mimeType || "") ? referenceImage.mimeType : "image/png";
+        const imageBytes = Buffer.from(String(referenceImage.base64), "base64");
+        if (!imageBytes.length || imageBytes.length > 8 * 1024 * 1024) return res.status(400).json({ error: "参考图无效或超过 8MB 限制。" });
+        const form = new FormData();
+        form.append("model", model.trim());
+        form.append("prompt", prompt.trim());
+        form.append("image", new Blob([imageBytes], { type: mimeType }), "character-reference");
+        form.append("input_fidelity", "high");
+        response = await fetch(`${baseUrl}/images/edits`, { method: "POST", headers: { Authorization: `Bearer ${apiKey.trim()}` }, body: form });
+      } else {
+        response = await fetch(`${baseUrl}/images/generations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey.trim()}` },
+          body: JSON.stringify({ model: model.trim(), prompt: prompt.trim(), n: 1, size: "1024x1024" }),
+        });
+      }
+      if (!response.ok) return res.status(response.status).json({ error: `图片 API 请求失败 (${response.status})：${await response.text()}` });
+      const payload = await response.json();
+      const first = payload?.data?.[0];
+      return res.json({ dataUrl: await toDataUrl(first || {}) });
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message || "图片代理服务异常。" });
+    }
+  });
+
   // API Route: Role-play chat with Character (supports custom Endpoint, Temperature, etc.)
   app.post("/api/chat", async (req, res) => {
     try {

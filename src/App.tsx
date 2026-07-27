@@ -18,6 +18,8 @@ import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/Mem
 import { migrateLegacyCharacterIdentityData } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
+import { loadImageGenerationRecords, removeImageGenerationRecordsByCharacter, saveImageGenerationRecords } from "./core/storage/repositories/imageGenerationRepository";
+import { imageAssetDb } from "./utils/imageAssetDb";
 import { DEFAULT_IDENTITY_ID, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord } from "./types";
 import { 
@@ -188,6 +190,11 @@ const DEFAULT_SETTINGS: UserSettings = {
   bubbleTailEnabled: false,
   bubbleTailVertical: "top",
   bubblePosition: "side"
+  ,enableImageGeneration: false,
+  imageApiPresets: [
+    { id: "image-preset-default", name: "图片 API 配置", protocol: "openai-images", apiEndpoint: "", apiKey: "", selectedModel: "" }
+  ],
+  activeImageApiPresetId: "image-preset-default",
 };
 
 const DEFAULT_MESSAGES: Message[] = [];
@@ -1589,6 +1596,20 @@ export default function App() {
         innerVoices,
       );
       if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
+      const imageRecords = loadImageGenerationRecords([]).value;
+      const remainingImageRecords = deletedCharacterIds.reduce(
+        (records, characterId) => removeImageGenerationRecordsByCharacter(records, characterId),
+        imageRecords,
+      );
+      const removedImageAssetIds = imageRecords.filter((record) => !remainingImageRecords.some((next) => next.id === record.id)).map((record) => record.imageAssetId);
+      if (remainingImageRecords.length !== imageRecords.length) {
+        saveImageGenerationRecords(remainingImageRecords);
+        removedImageAssetIds.forEach((assetId) => imageAssetDb.deleteImage(assetId).catch((error) => console.warn("Failed to delete generated image asset:", error)));
+      }
+      deletedCharacterIds.forEach((characterId) => {
+        const character = characters.find((item) => item.id === characterId);
+        if (character?.imageReferenceAssetId) imageAssetDb.deleteImage(character.imageReferenceAssetId).catch((error) => console.warn("Failed to delete character reference image:", error));
+      });
       setActiveChatCharId((current) => current && characterIds.has(current) ? null : current);
       setActiveChatRelationId((current) => current && relationIds.includes(current) ? null : current);
       setGlobalNotification((current) => current?.characterId && characterIds.has(current.characterId) ? null : current);

@@ -28,6 +28,10 @@ import { resolveCanonicalCharacterId } from "../domain/character/characterIdenti
 import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords, type InnerVoiceScope } from "../core/storage/repositories/innerVoiceRepository";
 import { generateInnerVoice } from "../features/chat/services/innerVoiceService";
+import { generateCharacterImage } from "../features/chat/services/characterImageService";
+import { isExplicitImageRequest } from "../features/chat/services/imageGenerationIntent";
+import { imageAssetDb } from "../utils/imageAssetDb";
+import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
 import { Button, Card, Modal } from "./ui";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
@@ -332,6 +336,20 @@ const RenderAvatar = ({
       className={className}
     />
   );
+};
+
+const StoredChatImage = ({ assetId, alt }: { assetId: string; alt: string }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    imageAssetDb.getImage(assetId).then((blob) => {
+      if (!blob) return;
+      objectUrl = URL.createObjectURL(blob);
+      setUrl(objectUrl);
+    }).catch((error) => console.warn("Failed to load chat image asset:", error));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [assetId]);
+  return url ? <img src={url} alt={alt} className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100" /> : <div className="h-24 w-28 animate-pulse rounded-lg bg-slate-100" />;
 };
 
 interface AppChatProps {
@@ -1196,6 +1214,12 @@ export default function AppChat({
     const innerVoices = loadInnerVoiceRecords([]).value;
     const remainingInnerVoices = removeInnerVoicesByRelation(innerVoices, relationId);
     if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
+    const imageRecords = loadImageGenerationRecords([]).value;
+    const removedImageRecords = imageRecords.filter((record) => record.relationId === relationId);
+    if (removedImageRecords.length) {
+      saveImageGenerationRecords(removeImageGenerationRecordsByRelation(imageRecords, relationId));
+      removedImageRecords.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete relation image asset:", error)));
+    }
     onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
     offlineStories
       .filter((story) => story.relationId === relationId)
@@ -1547,6 +1571,14 @@ export default function AppChat({
   const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
   const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState<number>(1.0);
   const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("low");
+  const [draftEnableImageGeneration, setDraftEnableImageGeneration] = useState(false);
+  const [draftImageAppearancePrompt, setDraftImageAppearancePrompt] = useState("");
+  const [draftImageNegativePrompt, setDraftImageNegativePrompt] = useState("");
+  const [draftImageReferenceAssetId, setDraftImageReferenceAssetId] = useState<string | undefined>();
+  const [draftImageReferenceMimeType, setDraftImageReferenceMimeType] = useState<string | undefined>();
+  const [showImageGenerator, setShowImageGenerator] = useState(false);
+  const [imageRequestText, setImageRequestText] = useState("");
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
 
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
@@ -3014,6 +3046,55 @@ ${stickerListStr}
     generateResponseForUserMessage(normalizedUserMsg);
   };
 
+  /** This is the only AppChat path that imports the image-generation service.
+   * Normal reply, proactive, memory, Moment and Inner Voice paths never call it. */
+  const generateAndSendCharacterImage = async (trigger: "manual" | "explicit-user-text", userText: string) => {
+    if (!activeCharacter) return;
+    const target = activeCharacter.isGroupChat
+      ? (() => {
+          const lastSender = [...currentChatMessages].reverse().find((message) => message.sender === "character" && message.senderId);
+          return lastSender?.senderId ? characters.find((character) => character.id === resolveCanonicalCharacterId(lastSender.senderId!, characters)) : undefined;
+        })()
+      : activeCharacter;
+    if (!target) {
+      showToast("群聊图片需要先有一位角色发言，以确定生成图片的角色。");
+      return;
+    }
+    if (!activeCharacter.isGroupChat && !activeRelationship) return;
+    setIsGeneratingImage(true);
+    try {
+      const scope = activeCharacter.isGroupChat
+        ? { kind: "group" as const, groupId: activeCharacter.id, conversationId: `group:${activeCharacter.id}` }
+        : { kind: "direct" as const, relationId: activeRelationship!.id, conversationId: activeRelationship!.conversationId || getConversationId(activeRelationship!.id) };
+      const recentMessages = activeCharacter.isGroupChat
+        ? currentChatMessages
+        : currentChatMessages.filter((message) => message.relationId === activeRelationship!.id);
+      const generated = await generateCharacterImage({
+        settings, character: target, relationship: activeCharacter.isGroupChat ? undefined : activeRelationship,
+        recentMessages, scope, trigger, userText, createId: () => `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      });
+      onSendMessage(generated.message);
+      const records = loadImageGenerationRecords([]).value;
+      saveImageGenerationRecords([...records, generated.record]);
+      setShowImageGenerator(false);
+      showToast("角色图片已生成并发送。");
+    } catch (error: any) {
+      showToast(error.message || "图片生成失败，请检查图片 API 配置。");
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const deleteMessageAndLinkedImage = (messageId: string) => {
+    const records = loadImageGenerationRecords([]).value;
+    const removed = records.filter((record) => record.messageId === messageId);
+    if (removed.length) {
+      saveImageGenerationRecords(removeImageGenerationRecordByMessage(records, messageId));
+      removed.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete generated image asset:", error)));
+    }
+    onDeleteMessage?.(messageId);
+  };
+
   const sendPartnerRedPacket = async (amount: string, greeting: string) => {
     if (!activeChatCharId || !activeCharacter) return;
     
@@ -3371,7 +3452,9 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
       return;
     }
 
-    let userMsgText = chatInputText.trim();
+    const rawUserRequest = chatInputText.trim();
+    const shouldGenerateExplicitImage = !isOfflineModeActive && isExplicitImageRequest(rawUserRequest);
+    let userMsgText = rawUserRequest;
     if (quotedMessage) {
       const senderName = quotedMessage.sender === "user" ? "我" : (activeCharacter.remark || activeCharacter.name);
       let shortContent = quotedMessage.content;
@@ -3402,6 +3485,10 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
 
     onSendMessage(userMsg);
 
+    // Deliberately independent from generateResponseForUserMessage: no model
+    // output can ask for, trigger, or reach the image API.
+    if (shouldGenerateExplicitImage) void generateAndSendCharacterImage("explicit-user-text", rawUserRequest);
+
     let currentMessagesWithNewUser = currentChatMessages;
     if (isOfflineModeActive && activeOfflineStoryId && onSaveOfflineStory) {
       const targetStory = offlineStories.find(s => s.id === activeOfflineStoryId);
@@ -3425,9 +3512,7 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     if (!activeChatCharId || !activeCharacter) return;
 
     // 1. Delete target message
-    if (onDeleteMessage) {
-      onDeleteMessage(targetMsg.id);
-    }
+    if (onDeleteMessage) deleteMessageAndLinkedImage(targetMsg.id);
 
     // 2. Find the chat history excluding the targetMsg
     const previousMessages = currentChatMessages.filter((m) => m.id !== targetMsg.id);
@@ -3734,6 +3819,12 @@ ${stickerListStr}
         minimaxVoiceId: draftMinimaxVoiceId.trim() || undefined,
         minimaxSpeed: draftMinimaxSpeed,
         voiceFrequency: draftVoiceFrequency,
+        enableImageGeneration: draftEnableImageGeneration,
+        imageAppearancePrompt: draftImageAppearancePrompt.trim() || undefined,
+        imageNegativePrompt: draftImageNegativePrompt.trim() || undefined,
+        imageReferenceAssetId: draftImageReferenceAssetId,
+        imageReferenceMimeType: draftImageReferenceMimeType,
+        imageReferenceUpdatedAt: draftImageReferenceAssetId ? Date.now() : undefined,
       });
 
       // Automatically translate existing non-Chinese messages in current chat
@@ -5217,6 +5308,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   setDraftMinimaxVoiceId(activeCharacter.minimaxVoiceId || "");
                   setDraftMinimaxSpeed(activeCharacter.minimaxSpeed !== undefined ? activeCharacter.minimaxSpeed : 1.0);
                   setDraftVoiceFrequency(activeCharacter.voiceFrequency || "low");
+                  setDraftEnableImageGeneration(activeCharacter.enableImageGeneration === true);
+                  setDraftImageAppearancePrompt(activeCharacter.imageAppearancePrompt || "");
+                  setDraftImageNegativePrompt(activeCharacter.imageNegativePrompt || "");
+                  setDraftImageReferenceAssetId(activeCharacter.imageReferenceAssetId);
+                  setDraftImageReferenceMimeType(activeCharacter.imageReferenceMimeType);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button"
@@ -5709,6 +5805,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     </div>
 
                     {/* Character Specific CSS Customizer */}
+                    {!activeCharacter.isGroupChat && (
+                      <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
+                        <div className="flex items-center justify-between"><div><span className="text-slate-800 font-bold text-sm block">图片生成设置</span><span className="text-[10px] text-slate-400">外貌资料属于角色本身，所有身份共用；聊天与记录仍按关系隔离。</span></div><SettingsSwitch checked={draftEnableImageGeneration} onChange={setDraftEnableImageGeneration} label="角色图片生成" /></div>
+                        <textarea rows={4} value={draftImageAppearancePrompt} onChange={(event) => setDraftImageAppearancePrompt(event.target.value)} placeholder="外貌、服饰、气质、镜头偏好…" className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs leading-relaxed outline-none" />
+                        <textarea rows={2} value={draftImageNegativePrompt} onChange={(event) => setDraftImageNegativePrompt(event.target.value)} placeholder="负面提示词，例如：不要水印、不要文字、不要变脸…" className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs leading-relaxed outline-none" />
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3"><p className="mb-2 text-[10px] text-slate-500">参考图仅支持一张，保存到本机 IndexedDB；备份仅包含元数据，不包含图片二进制。</p><label className="inline-flex cursor-pointer items-center rounded-lg bg-white px-3 py-2 text-[10px] font-bold text-slate-700 shadow-sm"><Camera className="mr-1 h-3.5 w-3.5" />{draftImageReferenceAssetId ? "替换参考图" : "上传参考图"}<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; if (file.size > 8 * 1024 * 1024) return showToast("参考图不能超过 8MB。"); const assetId = `character-reference-${activeCharacter.id}`; try { await imageAssetDb.saveImage(assetId, file); if (draftImageReferenceAssetId && draftImageReferenceAssetId !== assetId) await imageAssetDb.deleteImage(draftImageReferenceAssetId); setDraftImageReferenceAssetId(assetId); setDraftImageReferenceMimeType(file.type); showToast("参考图已保存，点击右上角保存设置后生效。"); } catch { showToast("参考图保存失败。"); } }} /></label>{draftImageReferenceAssetId && <button type="button" onClick={() => { imageAssetDb.deleteImage(draftImageReferenceAssetId).catch(() => undefined); setDraftImageReferenceAssetId(undefined); setDraftImageReferenceMimeType(undefined); }} className="ml-2 text-[10px] font-bold text-rose-500">移除</button>}</div>
+                      </div>
+                    )}
+
                     <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-800 font-bold text-sm">个性化样式</span>
@@ -6241,7 +6346,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   >
                     {/* Actual chat bubble */}
                     <div className="max-w-full">
-                      {msg.content.startsWith("data:image/") ? (
+                      {msg.imageAssetId ? (
+                        <StoredChatImage assetId={msg.imageAssetId} alt="generated chat image" />
+                      ) : msg.content.startsWith("data:image/") ? (
                         <img
                           src={msg.content}
                           alt="chat-pic"
@@ -6629,6 +6736,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             <div ref={chatEndRef} />
           </MessageList>
 
+          {showImageGenerator && (
+            <div className="absolute inset-0 z-[90] flex items-end bg-black/35 p-4" onClick={() => !isGeneratingImage && setShowImageGenerator(false)}>
+              <div className="w-full rounded-[28px] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+                <div className="mb-3 flex items-start justify-between"><div><h3 className="text-sm font-bold text-slate-900">生成角色图片</h3><p className="mt-1 text-[10px] leading-relaxed text-slate-400">仅在你点击“生成并发送”后调用图片 API。普通聊天不会自动生成图片。</p></div><button type="button" onClick={() => setShowImageGenerator(false)} className="text-lg text-slate-400">×</button></div>
+                <textarea value={imageRequestText} onChange={(event) => setImageRequestText(event.target.value)} rows={3} placeholder="描述想让角色发来的照片场景" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs outline-none" />
+                <p className="mt-2 text-[10px] text-slate-400">需要先在全局“图片 API 设置”和角色设置中分别开启图片生成。</p>
+                <div className="mt-4 flex gap-2"><button type="button" onClick={() => setShowImageGenerator(false)} disabled={isGeneratingImage} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-slate-600">取消</button><button type="button" onClick={() => generateAndSendCharacterImage("manual", imageRequestText || "请生成一张符合当前聊天情境的角色照片")} disabled={isGeneratingImage} className="flex-1 rounded-xl bg-neutral-950 py-2.5 text-xs font-bold text-white">{isGeneratingImage ? "生成中…" : "生成并发送"}</button></div>
+              </div>
+            </div>
+          )}
+
           {/* Active Chat Footer Input form */}
           <ChatComposer className={`${
             isFloatingCute 
@@ -6742,6 +6860,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     className="hidden"
                   />
                 </label>
+
+                <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="flex-1 flex flex-col items-center justify-center group min-w-10" title="生成角色图片">
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><Camera className="w-4 h-4 text-slate-700" /></div>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">生成图片</span>
+                </button>
 
                 {/* 2. 红包 (Red Packet) */}
                 <button
@@ -9443,7 +9566,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             {onDeleteMessage && (
               <button
                 onClick={() => {
-                  onDeleteMessage(activeMenuMsg.id);
+                  deleteMessageAndLinkedImage(activeMenuMsg.id);
                   setActiveMenuMsg(null);
                 }}
                 className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
