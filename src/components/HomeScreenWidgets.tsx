@@ -30,6 +30,44 @@ const ALBUM_IMAGES = [
 // Default Todo Items in Widget
 const DEFAULT_TODOS: { id: string; text: string; checked: boolean }[] = [];
 
+const DEFAULT_WIDGET_TEXT_COLOR = "#ffffff";
+
+const normalizeWidgetTextColor = (value: string | null | undefined, fallback = DEFAULT_WIDGET_TEXT_COLOR): string => {
+  if (!value || value === "default") return fallback;
+  const legacyColors: Record<string, string> = {
+    white: "#ffffff", dark: "#1c1917", rose: "#e11d48", amber: "#d97706", blue: "#2563eb",
+  };
+  const normalized = legacyColors[value] || value;
+  return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized.toLowerCase() : fallback;
+};
+
+const compressWidgetBackground = (file: File, onComplete: (dataUrl: string) => void) => {
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const image = new Image();
+    image.onload = () => {
+      const maxDimension = 1200;
+      let { width, height } = image;
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d")?.drawImage(image, 0, 0, width, height);
+      onComplete(canvas.toDataURL("image/jpeg", 0.82));
+    };
+    image.src = event.target?.result as string;
+  };
+  reader.readAsDataURL(file);
+};
+
 interface WidgetProps {
   id: string;
   isEditing?: boolean;
@@ -146,7 +184,7 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
  * user controls contrast solely with the single date-text colour setting. */
 export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadius }: WidgetProps) {
   const [backgroundImage, setBackgroundImage] = useState(() => localStorage.getItem(`calendar_album_image_${id}`) || ALBUM_IMAGES[2]);
-  const [fontColor, setFontColor] = useState(() => localStorage.getItem(`calendar_album_font_color_${id}`) || "#ffffff");
+  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(localStorage.getItem(`calendar_album_font_color_${id}`)));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draftBackgroundImage, setDraftBackgroundImage] = useState(backgroundImage);
   const [draftFontColor, setDraftFontColor] = useState(fontColor);
@@ -159,37 +197,15 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
   const handleBackgroundUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (loadEvent) => {
-      const image = new Image();
-      image.onload = () => {
-        const maxDimension = 1200;
-        let { width, height } = image;
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext("2d")?.drawImage(image, 0, 0, width, height);
-        setDraftBackgroundImage(canvas.toDataURL("image/jpeg", 0.82));
-      };
-      image.src = loadEvent.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+    compressWidgetBackground(file, setDraftBackgroundImage);
   };
 
   const saveSettings = () => {
+    const nextColor = normalizeWidgetTextColor(draftFontColor, fontColor);
     setBackgroundImage(draftBackgroundImage);
-    setFontColor(draftFontColor);
+    setFontColor(nextColor);
     localStorage.setItem(`calendar_album_image_${id}`, draftBackgroundImage);
-    localStorage.setItem(`calendar_album_font_color_${id}`, draftFontColor);
+    localStorage.setItem(`calendar_album_font_color_${id}`, nextColor);
     setIsSettingsOpen(false);
   };
 
@@ -245,30 +261,32 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
 
       {isSettingsOpen && createPortal(
         <div className="fixed inset-0 z-[100] bg-black/35 flex items-end justify-center p-4" onClick={cancelSettings}>
-          <div className="w-full max-w-sm rounded-[28px] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="mb-4 flex items-center justify-between">
+          <div className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-stone-100 px-5 py-4">
               <div>
                 <h3 className="text-sm font-black text-stone-900">日历相册</h3>
                 <p className="mt-0.5 text-[11px] text-stone-400">背景图与日期文字颜色</p>
               </div>
-              <Settings className="h-4 w-4 text-stone-400" />
+              <button type="button" onClick={cancelSettings} className="rounded-full p-1 text-lg font-bold text-stone-400" aria-label="关闭">×</button>
             </div>
-            <div className="relative mb-4 h-28 overflow-hidden rounded-2xl border border-stone-100" style={{ backgroundImage: `url(${draftBackgroundImage})`, backgroundSize: "cover", backgroundPosition: "center" }}>
+            <div className="space-y-4 overflow-y-auto px-5 py-4">
+            <div className="relative h-28 overflow-hidden rounded-2xl border border-stone-100" style={{ backgroundImage: `url(${draftBackgroundImage})`, backgroundSize: "cover", backgroundPosition: "center" }}>
               <div className="absolute bottom-3 left-3 flex flex-col leading-[0.9]" style={{ fontFamily: '"Athena Unicode", serif', color: draftFontColor }}>
                 <span className="text-sm font-semibold">{weekday}</span>
                 <span className="mt-1 text-base font-semibold">{monthAndDay}</span>
               </div>
             </div>
             <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
-            <button type="button" onClick={() => uploadRef.current?.click()} className="mb-4 w-full rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold text-stone-700">上传背景图片</button>
-            <label className="mb-5 flex items-center justify-between text-xs font-bold text-stone-700">
+            <button type="button" onClick={() => uploadRef.current?.click()} className="w-full rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold text-stone-700">上传背景图片</button>
+            <label className="flex items-center justify-between text-xs font-bold text-stone-700">
               日期文字颜色
               <span className="flex items-center gap-2">
-                <span className="font-mono text-[10px] font-medium text-stone-400">{draftFontColor.toUpperCase()}</span>
-                <input type="color" value={draftFontColor} onChange={(event) => { setDraftFontColor(event.target.value); setFontColor(event.target.value); }} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0" />
+                <input value={draftFontColor.toUpperCase()} onChange={(event) => { const value = event.target.value; setDraftFontColor(value); if (/^#[0-9a-f]{6}$/i.test(value)) setFontColor(value); }} className="w-[76px] rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 font-mono text-[10px] font-medium text-stone-600 outline-none" aria-label="颜色 HEX 值" />
+                <input type="color" value={normalizeWidgetTextColor(draftFontColor)} onChange={(event) => { setDraftFontColor(event.target.value); setFontColor(event.target.value); }} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0" />
               </span>
             </label>
-            <div className="flex gap-2">
+            </div>
+            <div className="flex gap-2 border-t border-stone-100 p-4">
               <button type="button" onClick={cancelSettings} className="flex-1 rounded-xl bg-stone-100 py-2.5 text-xs font-bold text-stone-600">取消</button>
               <button type="button" onClick={saveSettings} className="flex-1 rounded-xl bg-stone-950 py-2.5 text-xs font-bold text-white">保存</button>
             </div>
@@ -371,7 +389,7 @@ export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, 
   );
 }
 
-export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widgetBorderRadius }: WidgetProps) {
+function LegacyAnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widgetBorderRadius }: WidgetProps) {
   const [targetDate, setTargetDate] = useState(() => {
     const raw = localStorage.getItem(`anniversary_date_${id}`);
     return raw || "2026-03-02"; // Reference date
@@ -843,6 +861,106 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
           </form>
         </div>,
         document.body
+      )}
+    </div>
+  );
+}
+
+export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widgetBorderRadius }: WidgetProps) {
+  const [targetDate, setTargetDate] = useState(() => localStorage.getItem(`anniversary_date_${id}`) || "2026-03-02");
+  const [title, setTitle] = useState(() => localStorage.getItem(`anniversary_title_${id}`) || "纪念日");
+  const [widgetType, setWidgetType] = useState<"anniversary" | "countdown">(() => (localStorage.getItem(`anniversary_type_${id}`) as "anniversary" | "countdown") || "anniversary");
+  const [backgroundImage, setBackgroundImage] = useState(() => localStorage.getItem(`anniversary_bg_${id}`) || "");
+  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(
+    localStorage.getItem(`anniversary_color_${id}`),
+    localStorage.getItem(`anniversary_bg_${id}`) ? "#ffffff" : "#1c1917",
+  ));
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [draftTargetDate, setDraftTargetDate] = useState(targetDate);
+  const [draftTitle, setDraftTitle] = useState(title);
+  const [draftWidgetType, setDraftWidgetType] = useState(widgetType);
+  const [draftBackgroundImage, setDraftBackgroundImage] = useState(backgroundImage);
+  const [draftFontColor, setDraftFontColor] = useState(fontColor);
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  const openSettings = () => {
+    if (isEditing) return;
+    setDraftTargetDate(targetDate);
+    setDraftTitle(title);
+    setDraftWidgetType(widgetType);
+    setDraftBackgroundImage(backgroundImage);
+    setDraftFontColor(fontColor);
+    setIsSettingsOpen(true);
+  };
+  const cancelSettings = () => {
+    setDraftTargetDate(targetDate);
+    setDraftTitle(title);
+    setDraftWidgetType(widgetType);
+    setDraftBackgroundImage(backgroundImage);
+    setDraftFontColor(fontColor);
+    setFontColor(fontColor);
+    setIsSettingsOpen(false);
+  };
+  const saveSettings = () => {
+    const nextColor = normalizeWidgetTextColor(draftFontColor, fontColor);
+    setTargetDate(draftTargetDate);
+    setTitle(draftTitle);
+    setWidgetType(draftWidgetType);
+    setBackgroundImage(draftBackgroundImage);
+    setFontColor(nextColor);
+    localStorage.setItem(`anniversary_date_${id}`, draftTargetDate);
+    localStorage.setItem(`anniversary_title_${id}`, draftTitle);
+    localStorage.setItem(`anniversary_type_${id}`, draftWidgetType);
+    localStorage.setItem(`anniversary_color_${id}`, nextColor);
+    if (draftBackgroundImage) localStorage.setItem(`anniversary_bg_${id}`, draftBackgroundImage);
+    else localStorage.removeItem(`anniversary_bg_${id}`);
+    setIsSettingsOpen(false);
+  };
+
+  const today = new Date();
+  const target = new Date(targetDate);
+  target.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  const rawDays = Math.floor((today.getTime() - target.getTime()) / 86_400_000);
+  const days = widgetType === "countdown" ? Math.max(0, -rawDays) : Math.max(0, rawDays);
+
+  return (
+    <div className="relative h-full w-full group">
+      <button type="button" className="relative h-full w-full overflow-hidden border border-white/20 p-3 text-left shadow-md" onClick={openSettings}
+        style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined, backgroundColor: backgroundImage ? undefined : (widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)"), backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined, backgroundSize: "cover", backgroundPosition: "center" }}>
+        <div className="flex h-full flex-col justify-between" style={{ color: fontColor }}>
+          <span className="max-w-[120px] truncate pt-1 text-xs font-black" style={{ color: fontColor }}>{title}</span>
+          <span className="flex items-baseline justify-center text-4xl font-black tracking-tight leading-none" style={{ color: fontColor }}>
+            {days}<span className="ml-0.5 text-[10px] font-bold opacity-80">天</span>
+          </span>
+          <span className="h-3" />
+        </div>
+      </button>
+      {isEditing && onRemove && <button type="button" onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md" aria-label="删除小组件">×</button>}
+      {isSettingsOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/35 p-4" onClick={cancelSettings}>
+          <div className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-stone-100 px-5 py-4">
+              <div><h3 className="text-sm font-black text-stone-900">纪念日 / 倒数日</h3><p className="mt-0.5 text-[11px] text-stone-400">内容、背景图与文字颜色</p></div>
+              <button type="button" onClick={cancelSettings} className="rounded-full p-1 text-lg font-bold text-stone-400">×</button>
+            </div>
+            <div className="space-y-4 overflow-y-auto px-5 py-4">
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setDraftWidgetType("anniversary")} className={`flex-1 rounded-xl py-2 text-xs font-bold ${draftWidgetType === "anniversary" ? "bg-stone-950 text-white" : "bg-stone-100 text-stone-600"}`}>纪念日</button>
+                <button type="button" onClick={() => setDraftWidgetType("countdown")} className={`flex-1 rounded-xl py-2 text-xs font-bold ${draftWidgetType === "countdown" ? "bg-stone-950 text-white" : "bg-stone-100 text-stone-600"}`}>倒数日</button>
+              </div>
+              <label className="block text-xs font-bold text-stone-700">文字内容<input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} maxLength={16} className="mt-1.5 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs outline-none" /></label>
+              <label className="block text-xs font-bold text-stone-700">选择日期<input type="date" value={draftTargetDate} onChange={(event) => setDraftTargetDate(event.target.value)} className="mt-1.5 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs outline-none" /></label>
+              <div className="relative h-28 overflow-hidden rounded-2xl border border-stone-100" style={{ backgroundImage: draftBackgroundImage ? `url(${draftBackgroundImage})` : undefined, backgroundColor: draftBackgroundImage ? undefined : "#f5f5f4", backgroundSize: "cover", backgroundPosition: "center" }}>
+                <span className="absolute left-3 top-3 text-xs font-black" style={{ color: normalizeWidgetTextColor(draftFontColor, "#1c1917") }}>{draftTitle || "纪念日"}</span>
+              </div>
+              <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) compressWidgetBackground(file, setDraftBackgroundImage); }} />
+              <button type="button" onClick={() => uploadRef.current?.click()} className="w-full rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold text-stone-700">上传背景图片</button>
+              <label className="flex items-center justify-between text-xs font-bold text-stone-700">文字颜色<span className="flex items-center gap-2"><input value={draftFontColor.toUpperCase()} onChange={(event) => { setDraftFontColor(event.target.value); if (/^#[0-9a-f]{6}$/i.test(event.target.value)) setFontColor(event.target.value); }} className="w-[76px] rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 font-mono text-[10px] font-medium text-stone-600 outline-none" /><input type="color" value={normalizeWidgetTextColor(draftFontColor, "#1c1917")} onChange={(event) => { setDraftFontColor(event.target.value); setFontColor(event.target.value); }} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0" /></span></label>
+            </div>
+            <div className="flex gap-2 border-t border-stone-100 p-4"><button type="button" onClick={cancelSettings} className="flex-1 rounded-xl bg-stone-100 py-2.5 text-xs font-bold text-stone-600">取消</button><button type="button" onClick={saveSettings} className="flex-1 rounded-xl bg-stone-950 py-2.5 text-xs font-bold text-white">保存</button></div>
+          </div>
+        </div>, document.body,
       )}
     </div>
   );
