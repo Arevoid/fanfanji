@@ -1933,7 +1933,7 @@ export default function App() {
           --app-icon-border-width: ${settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1}px;
           --app-icon-border-opacity: ${(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100) / 100};
           --app-default-icon-color: ${settings.desktopIconMode === "dark" ? "#1d1d1f" : "#f3f3f5"};
-          --app-default-icon-surface: ${settings.desktopIconMode === "dark" ? "#ffffff" : "#17181b"};
+          --app-default-icon-surface: ${hexToRgba(settings.desktopIconMode === "dark" ? "#ffffff" : "#17181b", settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100)};
           --app-default-icon-border: ${settings.desktopIconMode === "dark" ? "#e5e5e2" : "#2d2e33"};
           --desktop-app-text-color: ${settings.desktopAppTextColor || "#ffffff"};
         }
@@ -2087,7 +2087,7 @@ export default function App() {
         .phone-screen-container h1,
         .phone-screen-container h2,
         .phone-screen-container .font-bold.text-slate-800,
-        .phone-screen-container .font-extrabold {
+        .phone-screen-container .font-extrabold:not(.desktop-app-label) {
           color: #0f0f10 !important;
           font-weight: 800 !important;
           letter-spacing: -0.025em !important;
