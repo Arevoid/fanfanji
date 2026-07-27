@@ -29,9 +29,13 @@ const settingsPage = readFileSync(new URL("../src/components/AppSettings.tsx", i
 const imageSettings = settingsPage.slice(settingsPage.indexOf('activeTab === "image_api"'), settingsPage.indexOf('activeTab === "beauty"'));
 assert.doesNotMatch(imageSettings, /Provider Protocol|认证方式|OpenAI Images|Gemini Native|Imagen text-to-image|模型已验证|未验证/);
 const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 assert.match(chat, /generated \? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"/);
 assert.match(settingsPage, /const updateCurrentImageModel = \(model: string\)/);
 assert.match(settingsPage, /selectedModel: model/);
 assert.match(settingsPage, /请先选择或输入图片模型。/);
 assert.match(settingsPage, /selectedModel: preset\.selectedModel \|\| \(preset as ImageApiPreset & \{ model\?: string \}\)\.model \|\| ""/);
+assert.match(settingsPage, /当前图片服务不提供模型列表，可手动输入图片模型后保存。/);
+assert.match(server, /当前图片服务不提供模型列表，已保留手动输入的模型/);
+assert.match(server, /\(\?:404\|405\)/);
 console.log("imageApiPayload.test passed");

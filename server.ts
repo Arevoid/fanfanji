@@ -38,7 +38,12 @@ async function startServer() {
         ? "模型列表可访问，但所选模型不在列表中；这不会测试或消耗图片生成额度。"
         : "代理与模型列表可访问；这不会测试图片生成，模型列表成功不等于模型支持图片或参考图。" });
     } catch (error: any) {
-      return res.status(400).json({ success: false, error: error.message || "图片 API 测试失败。" });
+      const selected = String(req.body?.selectedModel || "").trim();
+      const message = error.message || "图片 API 测试失败。";
+      if (selected && /\((?:404|405)\)/.test(message)) {
+        return res.json({ success: true, message: "当前图片服务不提供模型列表，已保留手动输入的模型；保存后可直接尝试生成图片。" });
+      }
+      return res.status(400).json({ success: false, error: message });
     }
   });
 

@@ -506,6 +506,9 @@ export default function AppSettings({
       ? { ...preset, selectedModel: model }
       : preset));
   };
+  const imageModelListMessage = (error: unknown) => /\((?:404|405)\)/.test(error instanceof Error ? error.message : "")
+    ? "当前图片服务不提供模型列表，可手动输入图片模型后保存。"
+    : "无法识别该图片服务，请检查 API 地址、Key 和模型。";
   const fetchImageModels = async () => {
     setIsFetchingImageModels(true); setImageTestResult(null);
     try {
@@ -513,7 +516,7 @@ export default function AppSettings({
       const models = await apiFetchImageModels({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), protocol, geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined });
       setImageModelSuggestions(models);
       if (!models.includes(imageSelectedModel)) updateCurrentImageModel(models[0] || "");
-    } catch { setImageTestResult({ success: false, message: "无法识别该图片服务，请检查 API 地址、Key 和模型。" }); }
+    } catch (error) { setImageTestResult({ success: false, message: imageModelListMessage(error) }); }
     finally { setIsFetchingImageModels(false); }
   };
   const testImageApi = async () => {
@@ -525,7 +528,7 @@ export default function AppSettings({
     try {
       const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
       const result = await apiTestImageConnection({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), selectedModel: imageSelectedModel.trim(), protocol, geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined });
-      setImageTestResult(result.success ? result : { success: false, message: "无法识别该图片服务，请检查 API 地址、Key 和模型。" });
+      setImageTestResult(result.success ? result : { success: false, message: imageModelListMessage(new Error(result.message)) });
     }
     finally { setIsTestingImageApi(false); }
   };
