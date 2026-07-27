@@ -11,6 +11,7 @@ import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repos
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
+import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
@@ -1654,6 +1655,11 @@ export default function App() {
         }
       });
       setMoments((prev) => prev.filter((m) => m.characterId !== id));
+      // Inner voices are private chat-experience records and must not survive
+      // deletion of their canonical character.
+      const innerVoices = loadInnerVoiceRecords([]).value;
+      const remainingInnerVoices = removeInnerVoicesByCharacter(innerVoices, id);
+      if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
       setActiveChatCharId((current) => current === id ? null : current);
       setActiveChatRelationId((current) => current && relationIds.includes(current) ? null : current);
       setGlobalNotification((current) => current?.characterId === id ? null : current);

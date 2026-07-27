@@ -100,6 +100,25 @@ export interface Message {
   isVoiceMessage?: boolean;
 }
 
+/** A private, generated reflection for one character message. This is never part of chat or memory data. */
+export interface InnerVoiceRecord {
+  id: string;
+  /** Always the archive/canonical Character ID, never a contact instance ID. */
+  characterId: string;
+  /** Direct-chat boundary. Present for every direct-chat Inner Voice record. */
+  relationId?: string;
+  /** Group-chat boundary. Present for every group-chat Inner Voice record. */
+  groupId?: string;
+  messageId: string;
+  conversationId: string;
+  triggerMessageSummary: string;
+  state: string;
+  content: string;
+  /** Translation is kept alongside the reflection instead of modifying Message. */
+  translation?: string;
+  createdAt: number;
+}
+
 export interface MomentComment {
   id: string;
   authorName: string;

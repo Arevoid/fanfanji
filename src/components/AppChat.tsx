@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
 import { splitTextToOfflineSegments, compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles as splitIntoWeChatBubbles, type CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
@@ -24,7 +24,11 @@ import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
+import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { createRelationship, findRelationship, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords, type InnerVoiceScope } from "../core/storage/repositories/innerVoiceRepository";
+import { generateInnerVoice } from "../features/chat/services/innerVoiceService";
+import { Button, Card, Modal } from "./ui";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
 import { ChatTopBar } from "../features/chat/components/ChatTopBar";
@@ -1027,6 +1031,103 @@ export default function AppChat({
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
   const [singleCharacterMomentsId, setSingleCharacterMomentsId] = useState<string | null>(null);
   const [isShowingAddFriendDialog, setIsShowingAddFriendDialog] = useState(false);
+  const [innerVoiceRecord, setInnerVoiceRecord] = useState<InnerVoiceRecord | null>(null);
+  const [innerVoiceCharacter, setInnerVoiceCharacter] = useState<Character | null>(null);
+  const [innerVoiceMode, setInnerVoiceMode] = useState<"current" | "history">("current");
+  const [innerVoiceLoading, setInnerVoiceLoading] = useState(false);
+  const [innerVoiceError, setInnerVoiceError] = useState<string | null>(null);
+  const [innerVoiceHistory, setInnerVoiceHistory] = useState<InnerVoiceRecord[]>([]);
+  const innerVoiceRequestsRef = useRef(new Set<string>());
+
+  const closeInnerVoice = () => {
+    setInnerVoiceRecord(null);
+    setInnerVoiceCharacter(null);
+    setInnerVoiceMode("current");
+    setInnerVoiceError(null);
+  };
+
+  const openInnerVoice = async (targetCharacterId: string, triggerMessage: Message) => {
+    const canonicalCharacterId = resolveCanonicalCharacterId(targetCharacterId, characters);
+    const character = characters.find((item) => item.id === canonicalCharacterId);
+    if (!character) return;
+
+    const relationId = activeRelationship?.id;
+    const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
+    const conversationId = relationId
+      ? activeRelationship!.conversationId
+      : triggerMessage.conversationId || groupId;
+    if (!conversationId || (!relationId && !groupId)) return;
+    const scope: InnerVoiceScope = relationId
+      ? { kind: "direct", relationId, messageId: triggerMessage.id }
+      : { kind: "group", groupId: groupId!, conversationId, characterId: canonicalCharacterId, messageId: triggerMessage.id };
+    const listHistory = (records: readonly InnerVoiceRecord[]) => relationId
+      ? listInnerVoicesByRelation(records, relationId)
+      : listInnerVoicesByGroup(records, groupId!, conversationId, canonicalCharacterId);
+
+    setInnerVoiceCharacter(character);
+    setInnerVoiceMode("current");
+    setInnerVoiceError(null);
+    const stored = loadInnerVoiceRecords([]).value;
+    const existing = findInnerVoiceByMessage(stored, scope);
+    setInnerVoiceHistory(listHistory(stored));
+    if (existing) {
+      setInnerVoiceRecord(existing);
+      setInnerVoiceLoading(false);
+      return;
+    }
+
+    setInnerVoiceRecord(null);
+    const requestKey = relationId ? `direct:${relationId}:${triggerMessage.id}` : `group:${groupId}:${canonicalCharacterId}:${triggerMessage.id}`;
+    if (innerVoiceRequestsRef.current.has(requestKey)) return;
+    innerVoiceRequestsRef.current.add(requestKey);
+    setInnerVoiceLoading(true);
+    try {
+      const recentMessages = messages.filter((message) => activeRelationship
+        ? message.relationId === activeRelationship.id
+        : message.characterId === groupId && activeCharacter?.isGroupChat,
+      );
+      const generated = await generateInnerVoice({
+        character,
+        relationship: activeRelationship,
+        triggerMessage,
+        recentMessages,
+        conversationId,
+        relationId,
+        groupId,
+        settings,
+      });
+      if (!generated) {
+        setInnerVoiceError("心声生成结果无效，请稍后重试。");
+        return;
+      }
+      if (character.enableAutoTranslate) {
+        try {
+          const translated = await apiTranslate({
+            text: generated.content,
+            apiKey: settings.apiKey || "",
+            model: settings.selectedModel,
+            apiEndpoint: settings.apiEndpoint,
+          });
+          if (translated.text && translated.text !== generated.content) generated.translation = translated.text;
+        } catch (error) {
+          console.warn("Inner voice translation failed:", error);
+        }
+      }
+      // Re-read before saving so the character/message pair remains unique across repeated taps.
+      const latest = loadInnerVoiceRecords([]).value;
+      const cached = findInnerVoiceByMessage(latest, scope);
+      const record = cached || generated;
+      if (!cached) saveInnerVoiceRecords([...latest, record]);
+      setInnerVoiceRecord(record);
+      setInnerVoiceHistory(listHistory(cached ? latest : [...latest, record]));
+    } catch (error) {
+      console.error("Inner voice generation failed:", error);
+      setInnerVoiceError("暂时无法生成心声，不影响正常聊天。");
+    } finally {
+      innerVoiceRequestsRef.current.delete(requestKey);
+      setInnerVoiceLoading(false);
+    }
+  };
 
   const availableCharacterIds = getAvailableCanonicalCharacterIds(characters);
   const activeRelationships = relationships.filter((relation) => relation.userIdentityId === activeIdentityId && availableCharacterIds.has(relation.characterId));
@@ -1065,6 +1166,9 @@ export default function AppChat({
     // canonical Character and sibling relationships must remain untouched.
     onClearMessages?.(friendId, undefined, relationId);
     onSaveRelationships(relationships.filter((relation) => relation.id !== relationId));
+    const innerVoices = loadInnerVoiceRecords([]).value;
+    const remainingInnerVoices = removeInnerVoicesByRelation(innerVoices, relationId);
+    if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
     onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
     offlineStories
       .filter((story) => story.relationId === relationId)
@@ -4483,6 +4587,59 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 
   return (
     <div className="flex flex-col h-full bg-neutral-100 text-neutral-800 font-sans select-none overflow-hidden relative">
+      <Modal
+        open={Boolean(innerVoiceCharacter)}
+        onClose={closeInnerVoice}
+        title={innerVoiceMode === "history" ? "历史心声" : "角色心声"}
+        description={innerVoiceCharacter ? (
+          <span className="flex items-center gap-2">
+            <RenderAvatar src={innerVoiceCharacter.avatar} alt="" name={innerVoiceCharacter.name} className="h-7 w-7 rounded-full object-cover" />
+            <span>{innerVoiceCharacter.remark || innerVoiceCharacter.name}</span>
+          </span>
+        ) : undefined}
+        ariaLabel="角色心声"
+        footer={innerVoiceMode === "current" ? (
+          <Button variant="secondary" fullWidth onClick={() => setInnerVoiceMode("history")}>查看历史心声</Button>
+        ) : (
+          <Button variant="secondary" fullWidth onClick={() => setInnerVoiceMode("current")}>返回当前心声</Button>
+        )}
+      >
+        {innerVoiceMode === "current" ? (
+          <div className="space-y-3">
+            {innerVoiceLoading && <p className="py-6 text-center text-sm text-[var(--color-text-secondary)]">正在捕捉此刻的心声…</p>}
+            {!innerVoiceLoading && innerVoiceError && <p className="py-6 text-center text-sm text-red-500">{innerVoiceError}</p>}
+            {!innerVoiceLoading && innerVoiceRecord && (
+              <Card variant="secondary" padding="md" className="space-y-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-[var(--color-text-secondary)]">
+                  <span className="rounded-full bg-white px-2 py-1">{innerVoiceRecord.state}</span>
+                  <span>此刻的心声</span>
+                </div>
+                <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-primary)]">{innerVoiceRecord.content}</p>
+                {innerVoiceRecord.translation && (
+                  <p className="border-t border-[var(--color-border)] pt-3 whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-secondary)]">{innerVoiceRecord.translation}</p>
+                )}
+              </Card>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {innerVoiceHistory.length === 0 ? (
+              <p className="py-6 text-center text-sm text-[var(--color-text-secondary)]">还没有历史心声。</p>
+            ) : innerVoiceHistory.map((record) => (
+              <div key={record.id}>
+              <Card variant="outlined" padding="md" className="space-y-2">
+                <div className="flex items-center justify-between gap-3 text-xs text-[var(--color-text-secondary)]">
+                  <span>{new Date(record.createdAt).toLocaleString("zh-CN", { hour12: false })}</span>
+                  <span>{record.state}</span>
+                </div>
+                <p className="whitespace-pre-wrap text-sm leading-6">{record.content}</p>
+                {record.translation && <p className="border-t border-[var(--color-border)] pt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--color-text-secondary)]">{record.translation}</p>}
+              </Card>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
@@ -6293,7 +6450,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                           name={isSelf ? settings.name : msgName}
                           onClick={() => {
                             if (!isSelf) {
-                              setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
+                              void openInnerVoice(groupSenderChar ? groupSenderChar.id : activeCharacter.id, msg);
                             }
                           }}
                           className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
@@ -6335,7 +6492,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                         name={isSelf ? settings.name : msgName}
                         onClick={() => {
                           if (!isSelf) {
-                            setSingleCharacterMomentsId(groupSenderChar ? groupSenderChar.id : activeCharacter.id);
+                            void openInnerVoice(groupSenderChar ? groupSenderChar.id : activeCharacter.id, msg);
                           }
                         }}
                         className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
