@@ -1697,6 +1697,10 @@ export default function App() {
     });
   };
 
+  const handleDeleteMomentsByRelation = (relationId: string) => {
+    setMoments((previous) => previous.filter((moment) => moment.relationId !== relationId));
+  };
+
   const handleAddCommentToMoment = (momentId: string, comment: MomentComment) => {
     setMoments((prev) =>
       prev.map((mom) => {
@@ -2741,6 +2745,7 @@ export default function App() {
                     onDeleteCommentFromMoment={handleDeleteCommentFromMoment}
                     onLikeMoment={handleLikeMoment}
                     onDeleteMoment={handleDeleteMoment}
+                    onDeleteMomentsByRelation={handleDeleteMomentsByRelation}
                     onToggleBookmark={handleToggleBookmark}
                     onDeleteMessage={handleDeleteMessage}
                     onUpdateMessage={handleUpdateMessage}

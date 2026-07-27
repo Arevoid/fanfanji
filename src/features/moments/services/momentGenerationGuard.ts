@@ -14,11 +14,13 @@ export const getLocalMomentGenerationDate = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-export const getCharacterMomentTaskKey = (characterId: string, date: Date): string =>
-  `character-moment:${characterId}:${getLocalMomentGenerationDate(date)}`;
+export const getCharacterMomentTaskKey = (characterId: string, date: Date, relationId?: string): string =>
+  relationId
+    ? `character-moment:relation:${relationId}:${getLocalMomentGenerationDate(date)}`
+    : `character-moment:${characterId}:${getLocalMomentGenerationDate(date)}`;
 
-export function claimCharacterMomentGeneration(characterId: string, now: Date): string | undefined {
-  const taskKey = getCharacterMomentTaskKey(characterId, now);
+export function claimCharacterMomentGeneration(characterId: string, now: Date, relationId?: string): string | undefined {
+  const taskKey = getCharacterMomentTaskKey(characterId, now, relationId);
   const tasks = loadMomentGenerationTasks().value;
   if (tasks[taskKey] || inFlightTaskKeys.has(taskKey)) return undefined;
 
@@ -31,6 +33,7 @@ export function completeCharacterMomentGeneration(taskKey: string, moment: Momen
   const task: MomentGenerationTask = {
     taskKey,
     characterId: moment.characterId || "",
+    relationId: moment.relationId,
     date: getLocalMomentGenerationDate(now),
     type: "character-moment",
     status: "generated",
@@ -50,12 +53,13 @@ export function recordDeletedCharacterMoment(moment: Moment, now = new Date()): 
   if (!moment.characterId) return true;
 
   const date = new Date(moment.timestamp);
-  const taskKey = getCharacterMomentTaskKey(moment.characterId, date);
+  const taskKey = getCharacterMomentTaskKey(moment.characterId, date, moment.relationId);
   const tasks = loadMomentGenerationTasks().value;
   const existing = tasks[taskKey];
   const task: MomentGenerationTask = {
     taskKey,
     characterId: moment.characterId,
+    relationId: moment.relationId,
     date: getLocalMomentGenerationDate(date),
     type: "character-moment",
     status: "deleted",

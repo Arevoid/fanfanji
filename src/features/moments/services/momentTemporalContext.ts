@@ -66,19 +66,19 @@ export function createMomentTemporalContext(date: Date = new Date()): MomentTemp
   };
 }
 
-/** Keeps current online time separate from dated memory and offline fictional scenes. */
+/** Keeps this Moment's publication time separate from dated memory and offline fictional scenes. */
 export function formatMomentTemporalContext(context: MomentTemporalContext, character?: Character): string {
   const birthday = character ? extractCharacterBirthday(character) : undefined;
   const birthdayRule = birthday
-    ? `The character's recorded birthday is ${pad(birthday.month)}-${pad(birthday.day)}. Only call it "today" when the current system date has that month and day.`
-    : "Do not claim that today is the character's birthday unless a recorded birthday matches the current system date.";
+    ? `The character's recorded birthday is ${pad(birthday.month)}-${pad(birthday.day)}. Only call it "today" when the occurrence date has that month and day.`
+    : "Do not claim that today is the character's birthday unless a recorded birthday matches the occurrence date.";
 
-  return `[ONLINE CURRENT-TIME CONTEXT — HIGHEST PRIORITY]
-Current system date: ${context.currentDate}.
+  return `[MOMENT OCCURRENCE-TIME CONTEXT — HIGHEST PRIORITY]
+This Moment occurred and was published at: ${context.currentDate}.
 Current season: ${context.currentSeason}. Current solar term: ${context.currentSolarTerm}.
-This is a current online Moments interaction. Use this system date for words such as "today", "now", the current season, solar terms, holidays, and birthdays.
-Historical chat and memory are dated past events only; they must not replace the current date. Offline-story time is fictional and is valid only inside that story, never as the current online date.
-Do not describe a season, solar term, holiday, or weather scene that conflicts with the current system date unless explicitly referring to a clearly marked historical memory.
+Write the post as if this occurrence time is "today" and "now". Do not use the real app-open time. Use this date for season, solar terms, holidays, and birthdays.
+Historical chat and memory are dated past events only; they must not replace this occurrence time. Offline-story time is fictional and is valid only inside that story.
+Do not describe a season, solar term, holiday, or weather scene that conflicts with this occurrence time unless explicitly referring to a clearly marked historical memory.
 ${birthdayRule}`;
 }
 

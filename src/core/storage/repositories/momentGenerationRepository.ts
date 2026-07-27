@@ -8,6 +8,8 @@ export type MomentGenerationTaskStatus = "generated" | "deleted";
 export interface MomentGenerationTask {
   taskKey: string;
   characterId: string;
+  /** Present for direct-chat Moments; omitted for legacy character-scoped tasks. */
+  relationId?: string;
   date: string;
   type: "character-moment";
   status: MomentGenerationTaskStatus;

@@ -42,7 +42,7 @@ import { ChatTextInput } from "../features/chat/components/ChatTextInput";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
 import { MomentsApp } from "../features/moments/MomentsApp";
-import { requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
+import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
 import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
@@ -347,6 +347,7 @@ interface AppChatProps {
   onDeleteCommentFromMoment?: (momentId: string, commentId: string) => void;
   onLikeMoment: (momentId: string, userName: string) => void;
   onDeleteMoment?: (momentId: string) => void;
+  onDeleteMomentsByRelation?: (relationId: string) => void;
   onToggleBookmark: (messageId: string) => void;
   onDeleteMessage?: (messageId: string) => void;
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>) => void;
@@ -581,8 +582,17 @@ const getPostIntervalMs = (character: Character) => {
   }
 };
 
-const getCharacterLastMomentTimestamp = (moments: Moment[], charId: string) => {
-  const charMoments = moments.filter(m => m.characterId === charId);
+const getRelationshipLastMomentTimestamp = (
+  moments: Moment[],
+  relationship: CharacterRelationship,
+  characterId: string,
+) => {
+  const charMoments = moments.filter((moment) =>
+    moment.relationId === relationship.id
+    || (!moment.relationId
+      && moment.characterId === characterId
+      && (moment.ownerIdentityId || "identity-1") === relationship.userIdentityId),
+  );
   if (charMoments.length === 0) return 0;
   return Math.max(...charMoments.map(m => m.timestamp));
 };
@@ -600,6 +610,7 @@ export default function AppChat({
   onDeleteCommentFromMoment,
   onLikeMoment,
   onDeleteMoment,
+  onDeleteMomentsByRelation,
   onToggleBookmark,
   onDeleteMessage,
   onUpdateMessage,
@@ -1180,6 +1191,7 @@ export default function AppChat({
     // A contact deletion removes only this identity's direct relationship. The
     // canonical Character and sibling relationships must remain untouched.
     onClearMessages?.(friendId, undefined, relationId);
+    onDeleteMomentsByRelation?.(relationId);
     onSaveRelationships(relationships.filter((relation) => relation.id !== relationId));
     const innerVoices = loadInnerVoiceRecords([]).value;
     const remainingInnerVoices = removeInnerVoicesByRelation(innerVoices, relationId);
@@ -4308,7 +4320,7 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
     }, delay);
   };
 
-  const generateCharacterMoment = async (relationship: CharacterRelationship) => {
+  const generateCharacterMoment = async (relationship: CharacterRelationship, occurredAt: number) => {
     const friend = characters.find((character) => character.id === relationship.characterId);
     if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return;
     try {
@@ -4323,7 +4335,7 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
         .slice(0, recallSettings?.recallCount || 5);
       const historicalFallback = friendMsgs.slice(-(friend.retrievalHistoryLimit || 100));
       const fullWorldBook = getFullCharacterWorldBook(worldBookEntries || [], friend.id);
-      const temporalContext = createMomentTemporalContext(new Date());
+      const temporalContext = createMomentTemporalContext(new Date(occurredAt));
       const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
       const history = slicedMsgs.map((m) => ({
@@ -4384,6 +4396,8 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         character: friend,
         ownerIdentityId: activeIdentityId,
         parseContent: cleanAndExtractMoment,
+        relationId: relationship.id,
+        occurredAt: () => occurredAt,
         temporalContext,
       });
       if (generated.moment) onAddMoment(generated.moment);
@@ -4410,12 +4424,25 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
     for (const relationship of activeRelationships) {
       const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relationship.characterId, characters));
       if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) continue;
-      const lastPostTime = getCharacterLastMomentTimestamp(moments, friend.id);
+      const now = Date.now();
+      const lastPostTime = getRelationshipLastMomentTimestamp(moments, relationship, friend.id);
       const interval = getPostIntervalMs(friend);
-      const timeElapsed = Date.now() - lastPostTime;
+      const timeElapsed = now - lastPostTime;
 
       if (timeElapsed >= interval) {
-        await generateCharacterMoment(relationship);
+        const occurredAt = calculateCharacterMomentOccurredAt({
+          now,
+          relationId: relationship.id,
+          lastMomentAt: lastPostTime || undefined,
+          lastActiveAt: relationship.lastActiveTime,
+          scheduledAt: relationship.scheduledProactiveTime,
+          relationshipCreatedAt: relationship.createdAt,
+          intervalMs: interval,
+          occupiedTimestamps: moments
+            .filter((moment) => (moment.ownerIdentityId || "identity-1") === relationship.userIdentityId)
+            .map((moment) => moment.timestamp),
+        });
+        await generateCharacterMoment(relationship, occurredAt);
         // Break to avoid generating multiple moments simultaneously
         break;
       }

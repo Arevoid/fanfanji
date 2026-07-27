@@ -31,6 +31,7 @@ const input = () => ({
   request,
   character,
   ownerIdentityId: "identity-1",
+  relationId: "relation-one",
   parseContent,
   now: () => fixedNow,
   random: () => 0.1,
@@ -45,8 +46,15 @@ const repeatedPageEntry = await requestCharacterMomentOnce(input());
 assert.equal(repeatedPageEntry.skipped, true, "重复进入朋友圈不应再次生成");
 assert.equal(apiCalls, 1);
 
-const taskKey = getCharacterMomentTaskKey(character.id, new Date(fixedNow));
+const taskKey = getCharacterMomentTaskKey(character.id, new Date(fixedNow), "relation-one");
 assert.equal(loadMomentGenerationTasks().value[taskKey]?.status, "generated");
+
+const independentRelation = await requestCharacterMomentOnce({ ...input(), relationId: "relation-two" });
+assert.ok(independentRelation.moment, "the same canonical character may generate once per direct relationship");
+assert.equal(independentRelation.moment?.relationId, "relation-two");
+assert.equal(apiCalls, 2);
+const secondTaskKey = getCharacterMomentTaskKey(character.id, new Date(fixedNow), "relation-two");
+assert.equal(loadMomentGenerationTasks().value[secondTaskKey]?.status, "generated");
 
 assert.equal(saveMoments([first.moment!]).success, true);
 assert.equal(recordDeletedCharacterMoment(first.moment!, new Date(fixedNow + 1)), true);
@@ -57,10 +65,10 @@ assert.equal(loadMoments([]).value.some((moment) => moment.id === first.moment!.
 resetMomentGenerationRuntimeForTests();
 const afterRefresh = await requestCharacterMomentOnce(input());
 assert.equal(afterRefresh.skipped, true, "删除后刷新不得恢复或重新生成当天任务");
-assert.equal(apiCalls, 1);
+assert.equal(apiCalls, 2);
 
 const concurrentAfterDeletion = await Promise.all([requestCharacterMomentOnce(input()), requestCharacterMomentOnce(input())]);
 assert.ok(concurrentAfterDeletion.every((result) => result.skipped), "两个入口同时触发也必须保持删除墓碑");
-assert.equal(apiCalls, 1);
+assert.equal(apiCalls, 2);
 
 console.log("PASS moment auto-generation idempotency, duplicate effects/entries, concurrent triggers, deletion persistence, and refresh tombstone");

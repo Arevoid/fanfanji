@@ -133,6 +133,8 @@ export interface MomentComment {
 export interface Moment {
   id: string;
   characterId?: string; // If posted by a character, otherwise user
+  /** Direct-chat relationship that owns an automatically generated character Moment. */
+  relationId?: string;
   authorName: string;
   authorAvatar: string;
   content: string;
