@@ -19,7 +19,7 @@ import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
 import { getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
-import { AppHeader, ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
+import { ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -1304,19 +1304,39 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
               </div>
             ) : (
               <>
-            <header className="offline-workspace-header">
-              <AppHeader
-                title={<>{activeStory.title}<span className="offline-mode-label">{activeStory.mode === "director" ? "导演" : activeStory.mode === "if" ? "IF线" : "续写"}</span></>}
-                subtitle={<>与「{selectedChar.remark || selectedChar.name}」的离线剧本空间</>}
-                left={<IconButton icon={<ArrowLeft size={24} />} variant="surface" onClick={handleExitStoryWorkspace} aria-label="返回线下故事列表" />}
-                right={<>
-                  <IconButton ref={workspaceMenuTriggerRef} icon={<MoreHorizontal size={22} />} variant="surface" onClick={() => setIsWorkspaceMenuOpen((open) => !open)} aria-label="打开线下剧情菜单" />
-                  <PopoverMenu open={isWorkspaceMenuOpen} onClose={() => setIsWorkspaceMenuOpen(false)} anchorRef={workspaceMenuTriggerRef} placement="bottom-end" ariaLabel="线下剧情菜单" className="offline-workspace-menu">
+            <header className="offline-workspace-header px-4 py-3.5 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleExitStoryWorkspace}
+                  aria-label="返回线下故事列表"
+                  className="w-8 h-8 shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <div className="min-w-0">
+                  <h1 className="text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
+                    <span className="truncate">{activeStory.title}</span>
+                    <span className="offline-mode-label">{activeStory.mode === "director" ? "导演" : activeStory.mode === "if" ? "IF线" : "续写"}</span>
+                  </h1>
+                  <p className="text-[10px] text-slate-500 truncate">与「{selectedChar.remark || selectedChar.name}」的离线剧本空间</p>
+                </div>
+              </div>
+              <div className="shrink-0">
+                <button
+                  ref={workspaceMenuTriggerRef}
+                  type="button"
+                  onClick={() => setIsWorkspaceMenuOpen((open) => !open)}
+                  aria-label="打开线下剧情菜单"
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </button>
+                <PopoverMenu open={isWorkspaceMenuOpen} onClose={() => setIsWorkspaceMenuOpen(false)} anchorRef={workspaceMenuTriggerRef} placement="bottom-end" ariaLabel="线下剧情菜单" className="offline-workspace-menu">
                     <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsReadingSettingsOpen(true); }}><span className="offline-workspace-menu-icon" aria-hidden="true">Aa</span><span>阅读设置</span></button>
                     <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsSettingsOpen(true); }}><Settings size={16} /><span>剧本设置</span></button>
                   </PopoverMenu>
-                </>}
-              />
+              </div>
 
               {activeStory.sourceChatId && (
                 <div className="offline-chat-link-card">
