@@ -1932,16 +1932,10 @@ export default function App() {
           --app-icon-bg-opacity: ${(settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100) / 100};
           --app-icon-border-width: ${settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1}px;
           --app-icon-border-opacity: ${(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100) / 100};
-          --app-default-icon-color: #1d1d1f;
-          --app-default-icon-surface: #ffffff;
-          --app-default-icon-border: #e5e5e2;
-        }
-        @media (prefers-color-scheme: dark) {
-          :root, .phone-screen-container {
-            --app-default-icon-color: #f3f3f5;
-            --app-default-icon-surface: #17181b;
-            --app-default-icon-border: #2d2e33;
-          }
+          --app-default-icon-color: ${settings.desktopIconMode === "dark" ? "#1d1d1f" : "#f3f3f5"};
+          --app-default-icon-surface: ${settings.desktopIconMode === "dark" ? "#ffffff" : "#17181b"};
+          --app-default-icon-border: ${settings.desktopIconMode === "dark" ? "#e5e5e2" : "#2d2e33"};
+          --desktop-app-text-color: ${settings.desktopAppTextColor || "#ffffff"};
         }
         .phone-screen-container .app-icon-surface {
           background-color: var(--app-default-icon-surface) !important;
@@ -1951,10 +1945,13 @@ export default function App() {
         .phone-screen-container .app-icon-surface .app-default-icon {
           color: inherit !important;
         }
-        .phone-screen-container div[style*="--app-icon-radius"],
-        .phone-screen-container button[style*="--app-icon-radius"],
-        .phone-screen-container div.bg-white[style*="--app-icon-radius"],
-        .phone-screen-container button.bg-white[style*="--app-icon-radius"] {
+        .phone-screen-container .desktop-app-label {
+          color: var(--desktop-app-text-color) !important;
+        }
+        .phone-screen-container div[style*="--app-icon-radius"]:not(.app-icon-surface),
+        .phone-screen-container button[style*="--app-icon-radius"]:not(.app-icon-surface),
+        .phone-screen-container div.bg-white[style*="--app-icon-radius"]:not(.app-icon-surface),
+        .phone-screen-container button.bg-white[style*="--app-icon-radius"]:not(.app-icon-surface) {
           background-color: rgba(255, 255, 255, var(--app-icon-bg-opacity, 1)) !important;
           border-width: var(--app-icon-border-width, 1px) !important;
           border-color: rgba(240, 240, 243, var(--app-icon-border-opacity, 1)) !important;
@@ -2528,7 +2525,7 @@ export default function App() {
                                             )}
                                           </div>
                                           {!isHiddenNames && (
-                                            <span className="text-[10px] font-extrabold mt-1 text-neutral-800 truncate w-[72px] -mx-3.5 block select-none tracking-tight font-sans text-center">
+                                            <span className="desktop-app-label text-[10px] font-extrabold mt-1 truncate w-[72px] -mx-3.5 block select-none tracking-tight font-sans text-center">
                                               {app.name}
                                             </span>
                                           )}
@@ -2961,7 +2958,7 @@ export default function App() {
                   )}
                 </div>
                 {!settings.hideAppNames && (
-                  <span className="text-[10px] font-black mt-1 text-neutral-800">
+                  <span className="desktop-app-label text-[10px] font-black mt-1">
                     {desktopApps.find(a => a.id === draggedItem.id)?.name}
                   </span>
                 )}

@@ -200,6 +200,8 @@ export default function AppSettings({
   const [iconBorderWidth, setIconBorderWidth] = useState(settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1);
   const [iconBorderOpacity, setIconBorderOpacity] = useState(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100);
   const [hideAppNames, setHideAppNames] = useState(!!settings.hideAppNames);
+  const [desktopAppTextColor, setDesktopAppTextColor] = useState(settings.desktopAppTextColor || "#ffffff");
+  const [desktopIconMode, setDesktopIconMode] = useState<"light" | "dark">(settings.desktopIconMode || "light");
 
   // Beginner-friendly manual styling states
   const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
@@ -1448,6 +1450,42 @@ export default function AppSettings({
                   {/* 全局应用图标参数组 */}
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-2">
                     <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">全局应用图标参数组</div>
+
+                    <div className="flex items-center justify-between gap-4 py-2">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">桌面应用文字颜色</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={desktopAppTextColor}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setDesktopAppTextColor(value);
+                            if (/^#[0-9a-f]{6}$/i.test(value)) handleSave({ desktopAppTextColor: value });
+                          }}
+                          className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[10px] font-mono uppercase"
+                          aria-label="桌面应用文字颜色"
+                        />
+                        <input
+                          type="color"
+                          value={/^#[0-9a-f]{6}$/i.test(desktopAppTextColor) ? desktopAppTextColor : "#ffffff"}
+                          onChange={(event) => {
+                            const value = event.target.value.toUpperCase();
+                            setDesktopAppTextColor(value);
+                            handleSave({ desktopAppTextColor: value });
+                          }}
+                          className="h-8 w-8 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
+                          aria-label="选择桌面应用文字颜色"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 py-2 border-t border-slate-50">
+                      <div><span className="text-xs font-bold text-slate-700 block">图标模式</span><span className="text-[10px] text-slate-400">浅色图标默认更适合深色壁纸</span></div>
+                      <div className="flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="图标模式">
+                        <button type="button" onClick={() => { setDesktopIconMode("light"); handleSave({ desktopIconMode: "light" }); }} className={`rounded-md px-2.5 py-1.5 text-[10px] font-bold transition-colors ${desktopIconMode === "light" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>浅色</button>
+                        <button type="button" onClick={() => { setDesktopIconMode("dark"); handleSave({ desktopIconMode: "dark" }); }} className={`rounded-md px-2.5 py-1.5 text-[10px] font-bold transition-colors ${desktopIconMode === "dark" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>深色</button>
+                      </div>
+                    </div>
 
                     <div className="flex items-center justify-between gap-4 py-2">
                       <span className="text-xs font-bold text-slate-700 shrink-0">图标圆角</span>

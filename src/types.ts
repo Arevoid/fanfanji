@@ -275,6 +275,10 @@ export interface UserSettings {
   iconBorderWidth?: number;
   iconBorderOpacity?: number;
   hideAppNames?: boolean;
+  /** Color used for desktop application names. */
+  desktopAppTextColor?: string;
+  /** Built-in icon treatment; light keeps default glyphs legible on dark wallpapers. */
+  desktopIconMode?: "light" | "dark";
   enableTimeAwareness?: boolean;
   homeButtonPosition?: { x: number; y: number };
   identities?: UserIdentity[];
