@@ -129,12 +129,26 @@ async function urlToDataUrl(value: { b64_json?: string; url?: string }) {
   return `data:${response.headers.get("content-type") || "image/png"};base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}`;
 }
 
-function inlineDataToUrl(inlineData: { mimeType?: string; data?: string } | undefined, payload?: any): string {
+type GeminiInlineImage = { mimeType?: string; mime_type?: string; data?: string };
+
+function geminiResponseShape(payload: any): string {
+  const parts = payload?.candidates?.flatMap((candidate: any) => candidate?.content?.parts || []) || [];
+  const partKeys = [...new Set(parts.flatMap((part: any) => part && typeof part === "object" ? Object.keys(part) : []))].slice(0, 8);
+  return partKeys.length ? `候选内容字段：${partKeys.join(", ")}` : "未发现候选图片字段";
+}
+
+function inlineDataToUrl(inlineData: GeminiInlineImage | undefined, payload?: any): string {
   if (!inlineData?.data) {
     const rootKeys = payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8).join(", ") : "无可用字段";
-    throw new ImageApiError(200, "missing-image-data", `服务返回成功但未返回图片数据（响应字段：${rootKeys}）。`);
+    const shape = geminiResponseShape(payload);
+    throw new ImageApiError(200, "missing-image-data", `当前图片模型只返回了文字，未输出图片数据。请确认中转站已为该模型开启图片输出，并使用支持图片生成的模型（响应字段：${rootKeys}；${shape}）。`);
   }
-  return `data:${inlineData.mimeType || "image/png"};base64,${inlineData.data}`;
+  return `data:${inlineData.mimeType || inlineData.mime_type || "image/png"};base64,${inlineData.data}`;
+}
+
+function findGeminiInlineImage(payload: any): GeminiInlineImage | undefined {
+  const parts = payload?.candidates?.flatMap((candidate: any) => candidate?.content?.parts || []) || [];
+  return parts.map((part: any) => part?.inlineData || part?.inline_data).find((value: GeminiInlineImage | undefined) => Boolean(value?.data));
 }
 
 export async function generateImageWithProtocol(input: ImageProxyRequest): Promise<string> {
@@ -169,8 +183,7 @@ export async function generateImageWithProtocol(input: ImageProxyRequest): Promi
     });
     await ensureOk(response, "generation");
     const payload = await response.json();
-    const part = payload?.candidates?.flatMap((candidate: any) => candidate?.content?.parts || []).find((item: any) => item?.inlineData?.data);
-    return inlineDataToUrl(part?.inlineData, payload);
+    return inlineDataToUrl(findGeminiInlineImage(payload), payload);
   }
 
   if (reference) throw new Error("Imagen text-to-image 第一版不支持角色参考图或编辑。");

@@ -29,7 +29,7 @@ import { createRelationship, findRelationship, findRelationshipForCanonicalChara
 import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords, type InnerVoiceScope } from "../core/storage/repositories/innerVoiceRepository";
 import { generateInnerVoice } from "../features/chat/services/innerVoiceService";
 import { generateCharacterImage } from "../features/chat/services/characterImageService";
-import { isExplicitImageRequest } from "../features/chat/services/imageGenerationIntent";
+import { getPendingExplicitImageRequest } from "../features/chat/services/imageGenerationIntent";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
 import { Button, Card, Modal } from "./ui";
@@ -3466,7 +3466,8 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
 
     const rawUserRequest = chatInputText.trim();
-    const shouldGenerateExplicitImage = !isOfflineModeActive && isExplicitImageRequest(rawUserRequest);
+    const pendingImageRequest = !isOfflineModeActive ? getPendingExplicitImageRequest(rawUserRequest, currentChatMessages) : null;
+    const shouldGenerateExplicitImage = Boolean(pendingImageRequest);
     let userMsgText = rawUserRequest;
     if (quotedMessage) {
       const senderName = quotedMessage.sender === "user" ? "我" : (activeCharacter.remark || activeCharacter.name);
@@ -3503,7 +3504,7 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     // toast carries the sanitized proxy error; never fall through to a fake
     // “sending a photo” text reply.
     if (shouldGenerateExplicitImage) {
-      await generateAndSendCharacterImage("explicit-user-text", rawUserRequest);
+      await generateAndSendCharacterImage("explicit-user-text", pendingImageRequest!);
       return;
     }
 

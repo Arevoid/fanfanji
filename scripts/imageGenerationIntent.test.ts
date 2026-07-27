@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { isExplicitImageRequest, assertImageGenerationTrigger } from "../src/features/chat/services/imageGenerationIntent";
+import { isExplicitImageRequest, assertImageGenerationTrigger, getPendingExplicitImageRequest } from "../src/features/chat/services/imageGenerationIntent";
 import { createDirectReplyCandidates } from "../src/features/chat/services/directChatService";
 import { assertImageGenerationConfiguration, createGeneratedImageMessages } from "../src/features/chat/services/characterImageService";
 
@@ -16,6 +16,11 @@ assert.equal(isExplicitImageRequest("不要发照片，只和我聊天"), false)
 assert.equal(isExplicitImageRequest("我没让你生成图片"), false);
 assert.equal(isExplicitImageRequest("他说“给我发张照片”是什么意思？"), false);
 assert.equal(isExplicitImageRequest("今天天气不错"), false);
+const pendingThread = [{ id: "ask", characterId: "char", relationId: "rel-a", conversationId: "direct:rel-a", sender: "user" as const, content: "给我发张照片", timestamp: 1 }];
+assert.equal(getPendingExplicitImageRequest("现在？", pendingThread), "给我发张照片", "model changes may retry a pending explicit request");
+assert.equal(getPendingExplicitImageRequest("再试一次", pendingThread), "给我发张照片");
+assert.equal(getPendingExplicitImageRequest("现在？", [...pendingThread, { id: "image", characterId: "char", relationId: "rel-a", conversationId: "direct:rel-a", sender: "character" as const, content: "[图片]", imageSource: "generated" as const, imageAssetId: "asset", timestamp: 2 }]), null);
+assert.equal(getPendingExplicitImageRequest("现在？", [{ ...pendingThread[0], content: "我们聊聊天" }]), null);
 assert.doesNotThrow(() => assertImageGenerationTrigger("manual"));
 assert.doesNotThrow(() => assertImageGenerationTrigger("explicit-user-text", "给我看看图片"));
 assert.throws(() => assertImageGenerationTrigger("explicit-user-text", "普通聊天"));

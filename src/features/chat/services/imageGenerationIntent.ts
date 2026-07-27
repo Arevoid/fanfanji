@@ -1,3 +1,5 @@
+import type { Message } from "../../../types";
+
 const IMAGE_NOUN = "(?:照片|图片|图像|相片|自拍|图)";
 
 const NEGATED_OR_QUOTED = new RegExp(
@@ -14,6 +16,27 @@ const EXPLICIT_IMAGE_REQUEST = new RegExp(
 export function isExplicitImageRequest(text: string): boolean {
   const normalized = text.trim().replace(/\s+/g, " ");
   return normalized.length > 0 && !NEGATED_OR_QUOTED.test(normalized) && EXPLICIT_IMAGE_REQUEST.test(normalized);
+}
+
+const IMAGE_RETRY_FOLLOW_UP = /^(?:现在|现在可以了吗|再试一次|重试|重新(?:发|生成)|再发(?:一张)?|再来(?:一张)?)[？?！!。…]*$/;
+
+/**
+ * A terse follow-up only becomes an image request when it belongs to the same
+ * scoped thread as an earlier explicit request that still has no real image.
+ * This makes changing a model after a reference-image error retryable without
+ * allowing ordinary chat to spend image quota.
+ */
+export function getPendingExplicitImageRequest(text: string, messages: readonly Message[]): string | null {
+  if (isExplicitImageRequest(text)) return text.trim();
+  if (!IMAGE_RETRY_FOLLOW_UP.test(text.trim())) return null;
+  const lastUserIndex = [...messages].map((message, index) => ({ message, index })).reverse().find(({ message }) => message.sender === "user")?.index;
+  if (lastUserIndex === undefined) return null;
+  const lastUser = messages[lastUserIndex];
+  if (!isExplicitImageRequest(lastUser.content)) return null;
+  const hasRealImageAfterRequest = messages.slice(lastUserIndex + 1).some((message) =>
+    message.sender === "character" && message.imageSource === "generated" && Boolean(message.imageAssetId),
+  );
+  return hasRealImageAfterRequest ? null : lastUser.content.trim();
 }
 
 export function assertImageGenerationTrigger(trigger: "manual" | "explicit-user-text", userText?: string): void {

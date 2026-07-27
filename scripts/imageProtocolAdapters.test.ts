@@ -20,6 +20,8 @@ try {
     if (target.includes("unsupported")) return response(400, { error: "model does not support image generation" });
     if (target.endsWith("/models")) return response(200, { data: [{ id: "gpt-image-test" }] });
     if (target.includes("/images/generations")) return response(200, { data: [{ b64_json: "T1BFTkFJ" }] });
+    if (target.includes("snake") && target.includes(":generateContent")) return response(200, { candidates: [{ content: { parts: [{ inline_data: { mime_type: "image/webp", data: "U05BS0U=" } }] } }] });
+    if (target.includes("text-only") && target.includes(":generateContent")) return response(200, { candidates: [{ content: { parts: [{ text: "I cannot provide an image." }] } }], usageMetadata: {} });
     if (target.includes(":generateContent")) return response(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/webp", data: "R0VNSU5J" } }] } }] });
     return response(200, { name: "models/gemini-2.5-flash-image" });
   }) as typeof fetch;
@@ -53,6 +55,13 @@ try {
   assert.equal(calls[4].url, "https://gemini.example/v1/models/gemini-2.5-flash-image:generateContent");
   assert.equal(new Headers(calls[4].init?.headers).get("authorization"), `Bearer ${key}`);
   assert.deepEqual(JSON.parse(String(calls[4].init?.body)).contents[0].parts[1], { inlineData: { mimeType: "image/jpeg", data: "UkVG" } });
+
+  const snakeCaseGemini = await generateImageWithProtocol({ protocol: "gemini-native-image", geminiAuthMode: "bearer", apiEndpoint: "https://snake.example/v1", apiKey: key, model: "gemini-2.5-flash-image", prompt: "portrait" });
+  assert.equal(snakeCaseGemini, "data:image/webp;base64,U05BS0U=");
+  await assert.rejects(
+    generateImageWithProtocol({ protocol: "gemini-native-image", geminiAuthMode: "bearer", apiEndpoint: "https://text-only.example/v1", apiKey: key, model: "gemini-2.5-flash-image", prompt: "portrait" }),
+    /只返回了文字|未输出图片数据/,
+  );
 
   for (const [host, expected] of [["unauthorized", /模型列表认证失败/], ["forbidden", /没有读取模型列表的权限/], ["limited", /过于频繁|额度受限/], ["missing", /未能读取模型列表/]] as const) {
     await assert.rejects(fetchImageModels({ protocol: "openai-images", apiEndpoint: `https://${host}.example/v1`, apiKey: key }), (error: unknown) => {

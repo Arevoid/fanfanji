@@ -54,7 +54,7 @@ const priorityStart = appChat.indexOf("if (shouldGenerateExplicitImage)");
 const priorityEnd = appChat.indexOf("let currentMessagesWithNewUser", priorityStart);
 assert.ok(priorityStart >= 0 && priorityEnd > priorityStart, "explicit image branch must precede normal reply");
 const priorityBranch = appChat.slice(priorityStart, priorityEnd);
-assert.match(priorityBranch, /await generateAndSendCharacterImage\("explicit-user-text", rawUserRequest\)/);
+assert.match(priorityBranch, /await generateAndSendCharacterImage\("explicit-user-text", pendingImageRequest!\)/);
 assert.match(priorityBranch, /return;/);
 assert.doesNotMatch(priorityBranch, /generateResponseForUserMessage/);
 assert.match(appChat, /messages=\{visibleChatMessages\}/);
