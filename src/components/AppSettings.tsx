@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { UserSettings, StylePreset, ApiPreset, ImageApiPreset, ImageApiProtocol, GeminiImageAuthMode, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
+import { UserSettings, StylePreset, ApiPreset, ImageApiPreset, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
 import { apiFetchModels, apiTestKey, apiFetchImageModels, apiTestImageConnection } from "../utils/apiHelper";
 import {
   ChevronLeft,
@@ -26,7 +26,7 @@ import {
 
 import { compressImage } from "../utils/pngParser";
 import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
-import { imageProtocolCapabilities, resolveImageProtocol } from "../features/chat/services/imageProtocol";
+import { inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "../features/chat/services/imageProtocol";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -288,9 +288,6 @@ export default function AppSettings({
   const [imageApiEndpoint, setImageApiEndpoint] = useState(initialImagePreset.apiEndpoint);
   const [imageApiKey, setImageApiKey] = useState(initialImagePreset.apiKey);
   const [imageSelectedModel, setImageSelectedModel] = useState(initialImagePreset.selectedModel);
-  const [imageProtocol, setImageProtocol] = useState<ImageApiProtocol>(resolveImageProtocol(initialImagePreset));
-  const [geminiImageAuthMode, setGeminiImageAuthMode] = useState<GeminiImageAuthMode>(initialImagePreset.geminiAuthMode || "x-goog-api-key");
-  const [imageReferenceImageSupported, setImageReferenceImageSupported] = useState(initialImagePreset.referenceImageSupported === true);
   const [showImagePassword, setShowImagePassword] = useState(false);
   const [imageModelSuggestions, setImageModelSuggestions] = useState<string[]>([]);
   const [isFetchingImageModels, setIsFetchingImageModels] = useState(false);
@@ -486,9 +483,7 @@ export default function AppSettings({
     const preset = presets.find((item) => item.id === id);
     if (!preset) return;
     setActiveImageApiPresetId(id); setImagePresetName(preset.name); setImageApiEndpoint(preset.apiEndpoint);
-    setImageApiKey(preset.apiKey); setImageSelectedModel(preset.selectedModel);
-    setImageProtocol(resolveImageProtocol(preset)); setGeminiImageAuthMode(preset.geminiAuthMode || "x-goog-api-key");
-    setImageReferenceImageSupported(preset.referenceImageSupported === true); setImageTestResult(null);
+    setImageApiKey(preset.apiKey); setImageSelectedModel(preset.selectedModel); setImageTestResult(null);
   };
   const addImagePreset = () => {
     const preset: ImageApiPreset = { id: `image-preset-${Date.now()}`, name: `图片配置 ${imageApiPresets.length + 1}`, protocol: "openai-images", apiEndpoint: "", apiKey: "", selectedModel: "" };
@@ -501,22 +496,32 @@ export default function AppSettings({
   const fetchImageModels = async () => {
     setIsFetchingImageModels(true); setImageTestResult(null);
     try {
-      const models = await apiFetchImageModels({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), protocol: imageProtocol, geminiAuthMode: geminiImageAuthMode });
+      const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
+      const models = await apiFetchImageModels({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), protocol, geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined });
       setImageModelSuggestions(models); if (!models.includes(imageSelectedModel)) setImageSelectedModel(models[0] || "");
-    } catch (error: any) { setImageTestResult({ success: false, message: error.message || "模型列表拉取失败。" }); }
+    } catch { setImageTestResult({ success: false, message: "无法识别该图片服务，请检查 API 地址、Key 和模型。" }); }
     finally { setIsFetchingImageModels(false); }
   };
   const testImageApi = async () => {
     setIsTestingImageApi(true);
-    try { setImageTestResult(await apiTestImageConnection({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), selectedModel: imageSelectedModel.trim(), protocol: imageProtocol, geminiAuthMode: geminiImageAuthMode })); }
+    try {
+      const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
+      const result = await apiTestImageConnection({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), selectedModel: imageSelectedModel.trim(), protocol, geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined });
+      setImageTestResult(result.success ? result : { success: false, message: "无法识别该图片服务，请检查 API 地址、Key 和模型。" });
+    }
     finally { setIsTestingImageApi(false); }
   };
+  const updateImageGenerationEnabled = (enabled: boolean) => {
+    setEnableImageGeneration(enabled);
+    onSaveSettings({ ...settings, enableImageGeneration: enabled });
+  };
   const saveImageApiConfig = () => {
+    const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
     const next = imageApiPresets.map((preset) => preset.id === activeImageApiPresetId ? {
-      ...preset, name: imagePresetName.trim() || preset.name, protocol: imageProtocol,
+      ...preset, name: imagePresetName.trim() || preset.name, protocol,
       apiEndpoint: imageApiEndpoint.trim(), apiKey: imageApiKey.trim(), selectedModel: imageSelectedModel.trim(),
-      geminiAuthMode: imageProtocol === "gemini-native-image" ? geminiImageAuthMode : undefined,
-      referenceImageSupported: imageProtocol === "gemini-native-image" ? imageReferenceImageSupported : undefined,
+      geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined,
+      referenceImageSupported: supportsReferenceImageForModel(protocol, imageSelectedModel),
     } : preset);
     setImageApiPresets(next);
     onSaveSettings({ ...settings, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId });
@@ -847,7 +852,7 @@ export default function AppSettings({
               </button>
 
               <button onClick={() => setActiveTab("image_api")} className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group">
-                <div className="flex items-center gap-3.5"><div className="w-6 h-6 flex items-center justify-center text-slate-800"><Image className="w-5 h-5" /></div><div><span className="text-sm font-bold text-slate-800">图片 API 设置</span><p className="text-[10px] text-slate-400 mt-0.5">OpenAI Images、Gemini Native 与 Imagen text-to-image</p></div></div><ChevronRight className="w-5 h-5 text-slate-300" />
+                <div className="flex items-center gap-3.5"><div className="w-6 h-6 flex items-center justify-center text-slate-800"><Image className="w-5 h-5" /></div><div><span className="text-sm font-bold text-slate-800">图片 API 设置</span><p className="text-[10px] text-slate-400 mt-0.5">管理图片生成服务与模型</p></div></div><ChevronRight className="w-5 h-5 text-slate-300" />
               </button>
 
               {/* 3. Aesthetics Settings */}
@@ -1235,18 +1240,14 @@ export default function AppSettings({
 
           {activeTab === "image_api" && (
             <div className="space-y-4">
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between"><div><span className="text-sm font-bold text-slate-800 block">图片生成总开关</span><span className="text-[10px] text-slate-400">关闭时任何角色都不能调用图片 API</span></div><button type="button" role="switch" aria-checked={enableImageGeneration} onClick={() => setEnableImageGeneration(!enableImageGeneration)} className={`relative h-6 w-11 rounded-full ${enableImageGeneration ? "bg-neutral-950" : "bg-slate-200"}`}><span className={`absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-transform ${enableImageGeneration ? "translate-x-5" : "translate-x-[3px]"}`} /></button></div>
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4"><div className="flex items-center justify-between"><h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">{imageProtocolCapabilities({ protocol: imageProtocol, referenceImageSupported: imageReferenceImageSupported }).label}</h3><span className="text-[9px] text-slate-400">{imageProtocol === "openai-images" ? "/images/generations · /images/edits" : imageProtocol === "gemini-native-image" ? "/models/{model}:generateContent" : "/models/{model}:predict"}</span></div>
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between"><div><span className="text-sm font-bold text-slate-800 block">图片生成总开关</span><span className="text-[10px] text-slate-400">关闭时任何角色都不能生成图片</span></div><button type="button" role="switch" aria-checked={enableImageGeneration} aria-label="图片生成总开关" onClick={() => updateImageGenerationEnabled(!enableImageGeneration)} className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${enableImageGeneration ? "bg-neutral-950" : "bg-slate-200"}`}><span className={`absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-transform duration-200 ${enableImageGeneration ? "translate-x-5" : "translate-x-0"}`} /></button></div>
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4"><div className="flex items-center justify-between"><h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">图片 API 配置</h3></div>
                 <div className="flex gap-2"><select value={activeImageApiPresetId} onChange={(event) => selectImagePreset(event.target.value)} className="flex-1 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageApiPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select><button type="button" onClick={addImagePreset} className="p-2 rounded-xl bg-slate-100"><Plus className="w-4 h-4" /></button><button type="button" onClick={deleteImagePreset} className="p-2 rounded-xl bg-rose-50 text-rose-600"><Trash2 className="w-4 h-4" /></button></div>
                 <input value={imagePresetName} onChange={(event) => setImagePresetName(event.target.value)} placeholder="预设名称" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />
-                <div><label className="mb-1 block text-[10px] font-bold text-slate-500">协议类型 / Provider Protocol</label><select value={imageProtocol} onChange={(event) => { setImageProtocol(event.target.value as ImageApiProtocol); setImageReferenceImageSupported(false); setImageTestResult(null); }} className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs"><option value="openai-images">OpenAI Images Compatible</option><option value="gemini-native-image">Gemini Native Image</option><option value="imagen-text">Imagen text-to-image（仅文生图）</option></select></div>
                 <input value={imageApiEndpoint} onChange={(event) => setImageApiEndpoint(event.target.value)} placeholder="由中转服务商提供的 API 地址" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" />
                 <div className="relative"><input type={showImagePassword ? "text" : "password"} value={imageApiKey} onChange={(event) => setImageApiKey(event.target.value)} placeholder="API Key" className="w-full pl-3 pr-10 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" /><button type="button" onClick={() => setShowImagePassword(!showImagePassword)} className="absolute right-3 top-2 text-slate-400">{showImagePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div>
-                {imageProtocol === "gemini-native-image" && <><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Gemini API Key 认证方式</label><select value={geminiImageAuthMode} onChange={(event) => setGeminiImageAuthMode(event.target.value as GeminiImageAuthMode)} className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs"><option value="x-goog-api-key">x-goog-api-key</option><option value="bearer">Authorization: Bearer</option></select></div><label className="flex items-start gap-2 text-[10px] leading-relaxed text-slate-500"><input type="checkbox" checked={imageReferenceImageSupported} onChange={(event) => setImageReferenceImageSupported(event.target.checked)} className="mt-0.5" />我已确认当前模型与中转支持图像输入；开启后才会把角色参考图按 Gemini inlineData 发送。</label></>}
-                <p className={`text-[10px] ${imageProtocolCapabilities({ protocol: imageProtocol, referenceImageSupported: imageReferenceImageSupported }).supportsReferenceImage ? "text-emerald-600" : "text-slate-400"}`}>参考图能力：{imageProtocolCapabilities({ protocol: imageProtocol, referenceImageSupported: imageReferenceImageSupported }).supportsReferenceImage ? "当前预设已确认支持" : "未验证或当前协议不支持；携带角色参考图时将阻止生成"}</p>
-                {imageProtocol === "imagen-text" && <p className="text-[10px] leading-relaxed text-amber-600">Imagen text-to-image 第一版仅支持文生图；角色参考图会在生成前被阻止，不会静默忽略或降级。</p>}
                 <div><div className="mb-1 flex justify-between"><span className="text-[10px] font-bold text-slate-500">图片模型</span><button type="button" disabled={isFetchingImageModels} onClick={fetchImageModels} className="text-[10px] font-bold text-blue-600">{isFetchingImageModels ? "拉取中…" : "拉取模型列表"}</button></div>{imageModelSuggestions.length ? <select value={imageSelectedModel} onChange={(event) => setImageSelectedModel(event.target.value)} className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageModelSuggestions.map((model) => <option key={model}>{model}</option>)}</select> : <input value={imageSelectedModel} onChange={(event) => setImageSelectedModel(event.target.value)} placeholder="手动输入图片模型" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />}</div>
-                <p className="text-[10px] leading-relaxed text-amber-600">模型列表成功仅表示所选协议的代理与 /models 可访问，不代表模型已验证支持图片生成或参考图；测试不会生成图片，不消耗图片额度。</p>
+                <p className="text-[10px] leading-relaxed text-slate-400">测试连接只检查配置与模型列表，不会生成图片。</p>
                 {imageTestResult && <p className={`text-[10px] ${imageTestResult.success ? "text-emerald-600" : "text-rose-600"}`}>{imageTestResult.message}</p>}
                 <div className="flex gap-2"><button type="button" onClick={testImageApi} disabled={isTestingImageApi} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-xs font-bold">{isTestingImageApi ? "测试中…" : "测试连接"}</button><button type="button" onClick={saveImageApiConfig} className="flex-1 rounded-xl bg-neutral-950 py-2.5 text-xs font-bold text-white">保存配置</button></div>
               </div>

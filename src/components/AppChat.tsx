@@ -339,7 +339,7 @@ const RenderAvatar = ({
   );
 };
 
-const StoredChatImage = ({ assetId, alt }: { assetId: string; alt: string }) => {
+const StoredChatImage = ({ assetId, alt, generated = false }: { assetId: string; alt: string; generated?: boolean }) => {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -350,7 +350,7 @@ const StoredChatImage = ({ assetId, alt }: { assetId: string; alt: string }) => 
     }).catch((error) => console.warn("Failed to load chat image asset:", error));
     return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId]);
-  return url ? <img src={url} alt={alt} className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100" /> : <div className="h-24 w-28 animate-pulse rounded-lg bg-slate-100" />;
+  return url ? <img src={url} alt={alt} className={`max-w-[160px] rounded-lg object-cover cursor-zoom-in bg-stone-100 ${generated ? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"}`} /> : <div className="h-24 w-28 animate-pulse rounded-lg bg-slate-100" />;
 };
 
 interface AppChatProps {
@@ -6348,7 +6348,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                     {/* Actual chat bubble */}
                     <div className="max-w-full">
                       {msg.imageAssetId ? (
-                        <StoredChatImage assetId={msg.imageAssetId} alt="generated chat image" />
+                        <StoredChatImage assetId={msg.imageAssetId} alt="generated chat image" generated={msg.imageSource === "generated"} />
                       ) : msg.content.startsWith("data:image/") ? (
                         <img
                           src={msg.content}

@@ -1,5 +1,22 @@
 import type { ImageApiPreset, ImageApiProtocol } from "../../../types";
 
+export function inferImageProtocol(model: string, endpoint = "", fallback?: ImageApiProtocol): ImageApiProtocol {
+  const normalizedModel = model.trim().toLowerCase();
+  if (normalizedModel.startsWith("gemini-")) return "gemini-native-image";
+  if (normalizedModel.startsWith("imagen-")) return "imagen-text";
+  if (/generativelanguage|googleapis/i.test(endpoint)) return "gemini-native-image";
+  return fallback || "openai-images";
+}
+
+export function inferGeminiImageAuthMode(endpoint: string): "x-goog-api-key" | "bearer" {
+  return /generativelanguage|googleapis/i.test(endpoint) ? "x-goog-api-key" : "bearer";
+}
+
+export function supportsReferenceImageForModel(protocol: ImageApiProtocol, model: string): boolean {
+  if (protocol === "openai-images") return true;
+  return protocol === "gemini-native-image" && /^gemini-[\w.-]*image/i.test(model.trim());
+}
+
 export const resolveImageProtocol = (preset: Pick<ImageApiPreset, "protocol">): ImageApiProtocol => {
   if (!preset.protocol) return "openai-images";
   if (preset.protocol === "openai-images" || preset.protocol === "gemini-native-image" || preset.protocol === "imagen-text") return preset.protocol;
@@ -15,6 +32,6 @@ export function imageProtocolCapabilities(preset: Pick<ImageApiPreset, "protocol
 
 export function assertReferenceImageCapability(preset: ImageApiPreset, hasReferenceImage: boolean): void {
   if (hasReferenceImage && !imageProtocolCapabilities(preset).supportsReferenceImage) {
-    throw new Error("当前协议或模型未确认支持参考图。请切换到支持图像输入的 Gemini 模型并确认能力，或移除角色参考图后再生成。");
+    throw new Error("当前图片模型不支持参考图，请更换支持角色参考图的图片模型。");
   }
 }

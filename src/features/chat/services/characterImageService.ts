@@ -2,7 +2,7 @@ import type { Character, ImageApiPreset, ImageGenerationRecord, Message, UserSet
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { buildCharacterImagePrompt } from "../../../domain/prompt/characterImagePrompt";
 import { assertImageGenerationTrigger } from "./imageGenerationIntent";
-import { assertReferenceImageCapability, resolveImageProtocol } from "./imageProtocol";
+import { assertReferenceImageCapability, inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "./imageProtocol";
 import { imageAssetDb } from "../../../utils/imageAssetDb";
 
 type ImageScope =
@@ -75,7 +75,9 @@ export async function generateCharacterImage(input: {
   const reference = input.character.imageReferenceAssetId
     ? await imageAssetDb.getImage(input.character.imageReferenceAssetId)
     : null;
-  assertReferenceImageCapability(preset, Boolean(reference));
+  const protocol = inferImageProtocol(preset.selectedModel, preset.apiEndpoint, preset.protocol);
+  const referenceImageSupported = supportsReferenceImageForModel(protocol, preset.selectedModel);
+  assertReferenceImageCapability({ ...preset, protocol, referenceImageSupported }, Boolean(reference));
   const response = await fetch("/api/image/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -83,9 +85,9 @@ export async function generateCharacterImage(input: {
       apiKey: preset.apiKey,
       apiEndpoint: preset.apiEndpoint,
       model: preset.selectedModel,
-      protocol: resolveImageProtocol(preset),
-      geminiAuthMode: preset.geminiAuthMode || "x-goog-api-key",
-      referenceImageSupported: preset.referenceImageSupported === true,
+      protocol,
+      geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(preset.apiEndpoint) : undefined,
+      referenceImageSupported,
       prompt: buildCharacterImagePrompt({ ...input, userRequest: input.userText }),
       trigger: input.trigger,
       userText: input.userText,
@@ -94,7 +96,7 @@ export async function generateCharacterImage(input: {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || typeof data.dataUrl !== "string" || !data.dataUrl.startsWith("data:image/")) {
-    throw new Error(data.error || "图片 API 未返回可保存的图片结果。");
+    throw new Error("图片生成失败，请检查图片服务配置和所选模型后重试。");
   }
 
   const messageId = input.createId();
