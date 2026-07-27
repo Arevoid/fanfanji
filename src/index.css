@@ -10,6 +10,18 @@
   font-display: swap;
 }
 
+/* The desktop theme deliberately applies a global font with !important.
+   Calendar dates opt out locally so the bundled Athena face is always used. */
+.calendar-album-widget .calendar-album-date,
+.calendar-album-preview-date,
+.calendar-album-preview-date * {
+  color: var(--calendar-album-date-color) !important;
+  font-family: "Athena Unicode", serif !important;
+  font-style: normal !important;
+  font-weight: 700 !important;
+  opacity: 1 !important;
+}
+
 @font-face {
   font-family: "Athena Unicode";
   src: url("./assets/fonts/new-athena-unicode-bold.woff") format("woff");
