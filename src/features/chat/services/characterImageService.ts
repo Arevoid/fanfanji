@@ -18,9 +18,8 @@ export function assertImageGenerationConfiguration(settings: UserSettings, chara
     throw new Error("图片生成未启用：请同时开启全局图片生成和该角色的图片生成开关。");
   }
   const preset = activePreset(settings);
-  if (!preset?.apiEndpoint.trim() || !preset.apiKey.trim() || !preset.selectedModel.trim()) {
-    throw new Error("图片 API 配置不完整：请填写地址、API Key 和图片模型。");
-  }
+  if (!preset?.selectedModel?.trim()) throw new Error("请先选择或输入图片模型。");
+  if (!preset.apiEndpoint.trim() || !preset.apiKey.trim()) throw new Error("图片 API 配置不完整：请填写地址和 API Key。");
   return preset;
 }
 

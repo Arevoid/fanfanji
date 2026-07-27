@@ -282,10 +282,15 @@ export default function AppSettings({
   const [isFetchingModels, setIsFetchingModels] = useState(false);
 
   const defaultImagePreset: ImageApiPreset = { id: "image-preset-default", name: "图片 API 配置", protocol: "openai-images", apiEndpoint: "", apiKey: "", selectedModel: "" };
+  const initialImagePresets = (settings.imageApiPresets?.length ? settings.imageApiPresets : [defaultImagePreset]).map((preset) => ({
+    ...preset,
+    // Keep a model stored by older image-setting versions instead of replacing it with an empty value.
+    selectedModel: preset.selectedModel || (preset as ImageApiPreset & { model?: string }).model || "",
+  }));
   const [enableImageGeneration, setEnableImageGeneration] = useState(settings.enableImageGeneration === true);
-  const [imageApiPresets, setImageApiPresets] = useState<ImageApiPreset[]>(settings.imageApiPresets?.length ? settings.imageApiPresets : [defaultImagePreset]);
-  const [activeImageApiPresetId, setActiveImageApiPresetId] = useState(settings.activeImageApiPresetId || (settings.imageApiPresets?.[0]?.id || defaultImagePreset.id));
-  const initialImagePreset = (settings.imageApiPresets?.length ? settings.imageApiPresets : [defaultImagePreset]).find((preset) => preset.id === (settings.activeImageApiPresetId || defaultImagePreset.id)) || defaultImagePreset;
+  const [imageApiPresets, setImageApiPresets] = useState<ImageApiPreset[]>(initialImagePresets);
+  const [activeImageApiPresetId, setActiveImageApiPresetId] = useState(settings.activeImageApiPresetId || initialImagePresets[0].id);
+  const initialImagePreset = initialImagePresets.find((preset) => preset.id === (settings.activeImageApiPresetId || initialImagePresets[0].id)) || initialImagePresets[0];
   const [imagePresetName, setImagePresetName] = useState(initialImagePreset.name);
   const [imageApiEndpoint, setImageApiEndpoint] = useState(initialImagePreset.apiEndpoint);
   const [imageApiKey, setImageApiKey] = useState(initialImagePreset.apiKey);
@@ -495,16 +500,27 @@ export default function AppSettings({
     if (imageApiPresets.length <= 1) return alert("至少保留一个图片 API 配置。");
     const next = imageApiPresets.filter((item) => item.id !== activeImageApiPresetId); setImageApiPresets(next); selectImagePreset(next[0].id, next);
   };
+  const updateCurrentImageModel = (model: string) => {
+    setImageSelectedModel(model);
+    setImageApiPresets((presets) => presets.map((preset) => preset.id === activeImageApiPresetId
+      ? { ...preset, selectedModel: model }
+      : preset));
+  };
   const fetchImageModels = async () => {
     setIsFetchingImageModels(true); setImageTestResult(null);
     try {
       const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
       const models = await apiFetchImageModels({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), protocol, geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined });
-      setImageModelSuggestions(models); if (!models.includes(imageSelectedModel)) setImageSelectedModel(models[0] || "");
+      setImageModelSuggestions(models);
+      if (!models.includes(imageSelectedModel)) updateCurrentImageModel(models[0] || "");
     } catch { setImageTestResult({ success: false, message: "无法识别该图片服务，请检查 API 地址、Key 和模型。" }); }
     finally { setIsFetchingImageModels(false); }
   };
   const testImageApi = async () => {
+    if (!imageSelectedModel.trim()) {
+      setImageTestResult({ success: false, message: "请先选择或输入图片模型。" });
+      return;
+    }
     setIsTestingImageApi(true);
     try {
       const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
@@ -518,6 +534,10 @@ export default function AppSettings({
     onSaveSettings({ ...settings, enableImageGeneration: enabled });
   };
   const saveImageApiConfig = () => {
+    if (!imageSelectedModel.trim()) {
+      setImageTestResult({ success: false, message: "请先选择或输入图片模型。" });
+      return;
+    }
     const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
     const next = imageApiPresets.map((preset) => preset.id === activeImageApiPresetId ? {
       ...preset, name: imagePresetName.trim() || preset.name, protocol,
@@ -1248,7 +1268,7 @@ export default function AppSettings({
                 <input value={imagePresetName} onChange={(event) => setImagePresetName(event.target.value)} placeholder="预设名称" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />
                 <input value={imageApiEndpoint} onChange={(event) => setImageApiEndpoint(event.target.value)} placeholder="由中转服务商提供的 API 地址" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" />
                 <div className="relative"><input type={showImagePassword ? "text" : "password"} value={imageApiKey} onChange={(event) => setImageApiKey(event.target.value)} placeholder="API Key" className="w-full pl-3 pr-10 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" /><button type="button" onClick={() => setShowImagePassword(!showImagePassword)} className="absolute right-3 top-2 text-slate-400">{showImagePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div>
-                <div><div className="mb-1 flex justify-between"><span className="text-[10px] font-bold text-slate-500">图片模型</span><button type="button" disabled={isFetchingImageModels} onClick={fetchImageModels} className="text-[10px] font-bold text-blue-600">{isFetchingImageModels ? "拉取中…" : "拉取模型列表"}</button></div>{imageModelSuggestions.length ? <select value={imageSelectedModel} onChange={(event) => setImageSelectedModel(event.target.value)} className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageModelSuggestions.map((model) => <option key={model}>{model}</option>)}</select> : <input value={imageSelectedModel} onChange={(event) => setImageSelectedModel(event.target.value)} placeholder="手动输入图片模型" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />}</div>
+                <div><div className="mb-1 flex justify-between"><span className="text-[10px] font-bold text-slate-500">图片模型</span><button type="button" disabled={isFetchingImageModels} onClick={fetchImageModels} className="text-[10px] font-bold text-blue-600">{isFetchingImageModels ? "拉取中…" : "拉取模型列表"}</button></div>{imageModelSuggestions.length ? <select value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageModelSuggestions.map((model) => <option key={model}>{model}</option>)}</select> : <input value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} placeholder="手动输入图片模型" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />}</div>
                 <p className="text-[10px] leading-relaxed text-slate-400">测试连接只检查配置与模型列表，不会生成图片。</p>
                 {imageTestResult && <p className={`text-[10px] ${imageTestResult.success ? "text-emerald-600" : "text-rose-600"}`}>{imageTestResult.message}</p>}
                 <div className="flex gap-2"><button type="button" onClick={testImageApi} disabled={isTestingImageApi} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-xs font-bold">{isTestingImageApi ? "测试中…" : "测试连接"}</button><button type="button" onClick={saveImageApiConfig} className="flex-1 rounded-xl bg-neutral-950 py-2.5 text-xs font-bold text-white">保存配置</button></div>

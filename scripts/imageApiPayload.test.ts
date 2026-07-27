@@ -30,4 +30,8 @@ const imageSettings = settingsPage.slice(settingsPage.indexOf('activeTab === "im
 assert.doesNotMatch(imageSettings, /Provider Protocol|认证方式|OpenAI Images|Gemini Native|Imagen text-to-image|模型已验证|未验证/);
 const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 assert.match(chat, /generated \? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"/);
+assert.match(settingsPage, /const updateCurrentImageModel = \(model: string\)/);
+assert.match(settingsPage, /selectedModel: model/);
+assert.match(settingsPage, /请先选择或输入图片模型。/);
+assert.match(settingsPage, /selectedModel: preset\.selectedModel \|\| \(preset as ImageApiPreset & \{ model\?: string \}\)\.model \|\| ""/);
 console.log("imageApiPayload.test passed");
