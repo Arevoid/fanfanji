@@ -14,7 +14,7 @@ export interface GenerateInnerVoiceInput {
   settings: UserSettings;
 }
 
-function parseInnerVoice(text: string): { state: string; content: string } | null {
+function parseInnerVoice(text: string): { content: string; emotionalState: string } | null {
   const candidate = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");
@@ -22,10 +22,10 @@ function parseInnerVoice(text: string): { state: string; content: string } | nul
   try {
     const value: unknown = JSON.parse(candidate.slice(start, end + 1));
     if (!value || typeof value !== "object") return null;
-    const record = value as { state?: unknown; content?: unknown };
-    if (typeof record.state !== "string" || typeof record.content !== "string") return null;
-    if (!record.state.trim() || !record.content.trim()) return null;
-    return { state: record.state.trim(), content: record.content.trim() };
+    const record = value as { content?: unknown; emotionalState?: unknown };
+    if (typeof record.content !== "string" || typeof record.emotionalState !== "string") return null;
+    if (!record.content.trim() || !record.emotionalState.trim()) return null;
+    return { content: record.content.trim(), emotionalState: record.emotionalState.trim() };
   } catch {
     return null;
   }
@@ -63,7 +63,9 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
     messageId: input.triggerMessage.id,
     conversationId: input.conversationId,
     triggerMessageSummary: input.triggerMessage.content.slice(0, 120),
-    state: parsed.state,
+    emotionalState: parsed.emotionalState,
+    // Keep the legacy field populated for old consumers; UI uses emotionalState for new records.
+    state: parsed.emotionalState,
     content: parsed.content,
     createdAt: Date.now(),
   };

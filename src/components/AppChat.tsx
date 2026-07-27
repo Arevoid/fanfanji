@@ -1046,6 +1046,9 @@ export default function AppChat({
     setInnerVoiceError(null);
   };
 
+  const getInnerVoiceEmotion = (record: InnerVoiceRecord) =>
+    record.emotionalState?.trim() || `当前情绪：${record.state || "难以言说的心绪"}`;
+
   const openInnerVoice = async (targetCharacterId: string, triggerMessage: Message) => {
     const canonicalCharacterId = resolveCanonicalCharacterId(targetCharacterId, characters);
     const character = characters.find((item) => item.id === canonicalCharacterId);
@@ -4610,14 +4613,16 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             {!innerVoiceLoading && innerVoiceError && <p className="py-6 text-center text-sm text-red-500">{innerVoiceError}</p>}
             {!innerVoiceLoading && innerVoiceRecord && (
               <Card variant="secondary" padding="md" className="space-y-3">
-                <div className="flex items-center gap-2 text-xs font-semibold text-[var(--color-text-secondary)]">
-                  <span className="rounded-full bg-white px-2 py-1">{innerVoiceRecord.state}</span>
-                  <span>此刻的心声</span>
-                </div>
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">此刻的心声</h3>
                 <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-primary)]">{innerVoiceRecord.content}</p>
                 {innerVoiceRecord.translation && (
-                  <p className="border-t border-[var(--color-border)] pt-3 whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-secondary)]">{innerVoiceRecord.translation}</p>
+                  <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-secondary)]">{innerVoiceRecord.translation}</p>
                 )}
+                <div className="border-t border-slate-200" />
+                <div className="space-y-1">
+                  <h4 className="text-xs font-semibold text-[var(--color-text-secondary)]">此刻情绪</h4>
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--color-text-primary)]">{getInnerVoiceEmotion(innerVoiceRecord)}</p>
+                </div>
               </Card>
             )}
           </div>
@@ -4630,10 +4635,15 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               <Card variant="outlined" padding="md" className="space-y-2">
                 <div className="flex items-center justify-between gap-3 text-xs text-[var(--color-text-secondary)]">
                   <span>{new Date(record.createdAt).toLocaleString("zh-CN", { hour12: false })}</span>
-                  <span>{record.state}</span>
                 </div>
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">此刻的心声</h3>
                 <p className="whitespace-pre-wrap text-sm leading-6">{record.content}</p>
-                {record.translation && <p className="border-t border-[var(--color-border)] pt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--color-text-secondary)]">{record.translation}</p>}
+                {record.translation && <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--color-text-secondary)]">{record.translation}</p>}
+                <div className="border-t border-slate-200" />
+                <div className="space-y-1">
+                  <h4 className="text-xs font-semibold text-[var(--color-text-secondary)]">此刻情绪</h4>
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--color-text-primary)]">{getInnerVoiceEmotion(record)}</p>
+                </div>
               </Card>
               </div>
             ))}

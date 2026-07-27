@@ -112,6 +112,9 @@ export interface InnerVoiceRecord {
   messageId: string;
   conversationId: string;
   triggerMessageSummary: string;
+  /** A complete, character-specific emotional sentence for the current moment. */
+  emotionalState?: string;
+  /** @deprecated Legacy one-word state, retained only for rendering existing records. */
   state: string;
   content: string;
   /** Translation is kept alongside the reflection instead of modifying Message. */
