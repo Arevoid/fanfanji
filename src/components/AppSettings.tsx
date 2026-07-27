@@ -500,15 +500,34 @@ export default function AppSettings({
     if (imageApiPresets.length <= 1) return alert("至少保留一个图片 API 配置。");
     const next = imageApiPresets.filter((item) => item.id !== activeImageApiPresetId); setImageApiPresets(next); selectImagePreset(next[0].id, next);
   };
+  const persistImagePresetDraft = (changes: Partial<Pick<ImageApiPreset, "name" | "apiEndpoint" | "apiKey" | "selectedModel">>) => {
+    const name = changes.name ?? imagePresetName;
+    const apiEndpoint = changes.apiEndpoint ?? imageApiEndpoint;
+    const apiKey = changes.apiKey ?? imageApiKey;
+    const selectedModel = changes.selectedModel ?? imageSelectedModel;
+    const protocol = inferImageProtocol(selectedModel, apiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
+    const next = imageApiPresets.map((preset) => preset.id === activeImageApiPresetId ? {
+      ...preset,
+      name: name.trim() || preset.name,
+      apiEndpoint: apiEndpoint.trim(),
+      apiKey: apiKey.trim(),
+      selectedModel: selectedModel.trim(),
+      protocol,
+      geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(apiEndpoint) : undefined,
+      referenceImageSupported: supportsReferenceImageForModel(protocol, selectedModel),
+    } : preset);
+    setImageApiPresets(next);
+    onSaveSettings({ ...settings, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId });
+  };
   const updateCurrentImageModel = (model: string) => {
     setImageSelectedModel(model);
-    setImageApiPresets((presets) => presets.map((preset) => preset.id === activeImageApiPresetId
-      ? { ...preset, selectedModel: model }
-      : preset));
+    persistImagePresetDraft({ selectedModel: model });
   };
-  const imageModelListMessage = (error: unknown) => /\((?:404|405)\)/.test(error instanceof Error ? error.message : "")
-    ? "当前图片服务不提供模型列表，可手动输入图片模型后保存。"
-    : "无法识别该图片服务，请检查 API 地址、Key 和模型。";
+  const imageModelListMessage = (error: unknown) => {
+    const message = error instanceof Error ? error.message : "";
+    if (message) return message;
+    return "无法验证图片服务，请检查 API 地址、Key 和模型。";
+  };
   const fetchImageModels = async () => {
     setIsFetchingImageModels(true); setImageTestResult(null);
     try {
@@ -528,7 +547,7 @@ export default function AppSettings({
     try {
       const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
       const result = await apiTestImageConnection({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), selectedModel: imageSelectedModel.trim(), protocol, geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined });
-      setImageTestResult(result.success ? result : { success: false, message: imageModelListMessage(new Error(result.message)) });
+      setImageTestResult(result);
     }
     finally { setIsTestingImageApi(false); }
   };
@@ -1268,9 +1287,9 @@ export default function AppSettings({
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between"><div><span className="text-sm font-bold text-slate-800 block">图片生成总开关</span><span className="text-[10px] text-slate-400">关闭时任何角色都不能生成图片</span></div><button type="button" role="switch" aria-checked={enableImageGeneration} aria-label="图片生成总开关" onClick={() => updateImageGenerationEnabled(!enableImageGeneration)} className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${enableImageGeneration ? "bg-neutral-950" : "bg-slate-200"}`}><span className={`absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-transform duration-200 ${enableImageGeneration ? "translate-x-5" : "translate-x-0"}`} /></button></div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4"><div className="flex items-center justify-between"><h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">图片 API 配置</h3></div>
                 <div className="flex gap-2"><select value={activeImageApiPresetId} onChange={(event) => selectImagePreset(event.target.value)} className="flex-1 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageApiPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select><button type="button" onClick={addImagePreset} className="p-2 rounded-xl bg-slate-100"><Plus className="w-4 h-4" /></button><button type="button" onClick={deleteImagePreset} className="p-2 rounded-xl bg-rose-50 text-rose-600"><Trash2 className="w-4 h-4" /></button></div>
-                <input value={imagePresetName} onChange={(event) => setImagePresetName(event.target.value)} placeholder="预设名称" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />
-                <input value={imageApiEndpoint} onChange={(event) => setImageApiEndpoint(event.target.value)} placeholder="由中转服务商提供的 API 地址" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" />
-                <div className="relative"><input type={showImagePassword ? "text" : "password"} value={imageApiKey} onChange={(event) => setImageApiKey(event.target.value)} placeholder="API Key" className="w-full pl-3 pr-10 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" /><button type="button" onClick={() => setShowImagePassword(!showImagePassword)} className="absolute right-3 top-2 text-slate-400">{showImagePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div>
+                <input value={imagePresetName} onChange={(event) => { setImagePresetName(event.target.value); persistImagePresetDraft({ name: event.target.value }); }} placeholder="预设名称" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />
+                <input value={imageApiEndpoint} onChange={(event) => { setImageApiEndpoint(event.target.value); persistImagePresetDraft({ apiEndpoint: event.target.value }); }} placeholder="由中转服务商提供的 API 地址" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" />
+                <div className="relative"><input type={showImagePassword ? "text" : "password"} value={imageApiKey} onChange={(event) => { setImageApiKey(event.target.value); persistImagePresetDraft({ apiKey: event.target.value }); }} placeholder="API Key" className="w-full pl-3 pr-10 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" /><button type="button" onClick={() => setShowImagePassword(!showImagePassword)} className="absolute right-3 top-2 text-slate-400">{showImagePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div>
                 <div><div className="mb-1 flex justify-between"><span className="text-[10px] font-bold text-slate-500">图片模型</span><button type="button" disabled={isFetchingImageModels} onClick={fetchImageModels} className="text-[10px] font-bold text-blue-600">{isFetchingImageModels ? "拉取中…" : "拉取模型列表"}</button></div>{imageModelSuggestions.length ? <select value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageModelSuggestions.map((model) => <option key={model}>{model}</option>)}</select> : <input value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} placeholder="手动输入图片模型" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />}</div>
                 <p className="text-[10px] leading-relaxed text-slate-400">测试连接只检查配置与模型列表，不会生成图片。</p>
                 {imageTestResult && <p className={`text-[10px] ${imageTestResult.success ? "text-emerald-600" : "text-rose-600"}`}>{imageTestResult.message}</p>}

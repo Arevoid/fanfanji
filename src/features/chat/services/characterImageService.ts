@@ -95,7 +95,7 @@ export async function generateCharacterImage(input: {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || typeof data.dataUrl !== "string" || !data.dataUrl.startsWith("data:image/")) {
-    throw new Error("图片生成失败，请检查图片服务配置和所选模型后重试。");
+    throw new Error(data.error || "服务返回成功但未返回图片数据。");
   }
 
   const messageId = input.createId();

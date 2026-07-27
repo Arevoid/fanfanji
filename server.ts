@@ -3,7 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
-import { fetchImageModels, generateImageWithProtocol } from "./src/server/imageProtocolAdapters";
+import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
 
 dotenv.config();
 
@@ -26,24 +26,16 @@ async function startServer() {
     try {
       return res.json({ success: true, models: await fetchImageModels(req.body) });
     } catch (error: any) {
-      return res.status(400).json({ success: false, error: error.message || "无法访问图片模型列表。" });
+      return res.status(error instanceof ImageApiError && error.status ? error.status : 400).json({ success: false, code: error instanceof ImageApiError ? error.code : "model-list", error: error.message || "无法访问图片模型列表。" });
     }
   });
 
   app.post("/api/image/test", async (req, res) => {
     try {
-      const models = await fetchImageModels(req.body);
-      const selected = String(req.body.selectedModel || "").trim();
-      return res.json({ success: true, message: selected && !models.includes(selected)
-        ? "模型列表可访问，但所选模型不在列表中；这不会测试或消耗图片生成额度。"
-        : "代理与模型列表可访问；这不会测试图片生成，模型列表成功不等于模型支持图片或参考图。" });
+      const result = await testImageConnectionWithProtocol({ ...req.body, model: req.body?.selectedModel });
+      return res.json({ success: result.success, kind: result.kind, message: result.message });
     } catch (error: any) {
-      const selected = String(req.body?.selectedModel || "").trim();
-      const message = error.message || "图片 API 测试失败。";
-      if (selected && /\((?:404|405)\)/.test(message)) {
-        return res.json({ success: true, message: "当前图片服务不提供模型列表，已保留手动输入的模型；保存后可直接尝试生成图片。" });
-      }
-      return res.status(400).json({ success: false, error: message });
+      return res.status(error instanceof ImageApiError && error.status ? error.status : 400).json({ success: false, code: error instanceof ImageApiError ? error.code : "test", error: error.message || "图片 API 测试失败。" });
     }
   });
 
@@ -55,7 +47,7 @@ async function startServer() {
       }
       return res.json({ dataUrl: await generateImageWithProtocol(req.body) });
     } catch (error: any) {
-      return res.status(400).json({ error: error.message || "图片代理服务异常。" });
+      return res.status(error instanceof ImageApiError && error.status ? error.status : 400).json({ code: error instanceof ImageApiError ? error.code : "generation", error: error.message || "图片代理服务异常。" });
     }
   });
 

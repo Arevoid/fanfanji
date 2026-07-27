@@ -32,10 +32,12 @@ const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.u
 const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 assert.match(chat, /generated \? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"/);
 assert.match(settingsPage, /const updateCurrentImageModel = \(model: string\)/);
+assert.match(settingsPage, /const persistImagePresetDraft =/);
+assert.match(settingsPage, /onSaveSettings\(\{ \.\.\.settings, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId \}\)/);
 assert.match(settingsPage, /selectedModel: model/);
 assert.match(settingsPage, /请先选择或输入图片模型。/);
 assert.match(settingsPage, /selectedModel: preset\.selectedModel \|\| \(preset as ImageApiPreset & \{ model\?: string \}\)\.model \|\| ""/);
-assert.match(settingsPage, /当前图片服务不提供模型列表，可手动输入图片模型后保存。/);
-assert.match(server, /当前图片服务不提供模型列表，已保留手动输入的模型/);
-assert.match(server, /\(\?:404\|405\)/);
+assert.match(settingsPage, /apiTestImageConnection\(\{ apiKey: imageApiKey\.trim\(\), apiEndpoint: imageApiEndpoint\.trim\(\), selectedModel: imageSelectedModel\.trim\(\)/);
+assert.match(server, /testImageConnectionWithProtocol\(\{ \.\.\.req\.body, model: req\.body\?\.selectedModel \}\)/);
+assert.match(server, /ImageApiError/);
 console.log("imageApiPayload.test passed");
