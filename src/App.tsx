@@ -182,7 +182,9 @@ const DEFAULT_SETTINGS: UserSettings = {
   dockBorderRadius: 26,
   widgetBorderRadius: 22,
   iconBorderEnabled: true,
-  bubbleTailEnabled: true,
+  selfBubbleRadius: 6,
+  otherBubbleRadius: 6,
+  bubbleTailEnabled: false,
   bubbleTailVertical: "top",
   bubblePosition: "side"
 };

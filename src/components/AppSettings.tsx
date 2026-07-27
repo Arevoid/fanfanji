@@ -203,11 +203,11 @@ export default function AppSettings({
   const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
   const [otherBubbleBg, setOtherBubbleBg] = useState(settings.otherBubbleBg || "#f4f4f5");
   const [otherBubbleColor, setOtherBubbleColor] = useState(settings.otherBubbleColor || "#18181b");
-  const [otherBubbleRadius, setOtherBubbleRadius] = useState(settings.otherBubbleRadius !== undefined ? settings.otherBubbleRadius : 18);
+  const [otherBubbleRadius, setOtherBubbleRadius] = useState(settings.otherBubbleRadius !== undefined ? settings.otherBubbleRadius : 6);
   const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100);
   const [selfBubbleBg, setSelfBubbleBg] = useState(settings.selfBubbleBg || "#18181b");
   const [selfBubbleColor, setSelfBubbleColor] = useState(settings.selfBubbleColor || "#ffffff");
-  const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.selfBubbleRadius !== undefined ? settings.selfBubbleRadius : 18);
+  const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.selfBubbleRadius !== undefined ? settings.selfBubbleRadius : 6);
   const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100);
   const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
   const [hideNicknames, setHideNicknames] = useState(!!settings.hideNicknames);
@@ -216,7 +216,7 @@ export default function AppSettings({
   const [dockBorderRadius, setDockBorderRadius] = useState(settings.dockBorderRadius !== undefined ? settings.dockBorderRadius : 26);
   const [widgetBorderRadius, setWidgetBorderRadius] = useState(settings.widgetBorderRadius !== undefined ? settings.widgetBorderRadius : 22);
   const [iconBorderEnabled, setIconBorderEnabled] = useState(settings.iconBorderEnabled !== false);
-  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(settings.bubbleTailEnabled !== false);
+  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(settings.bubbleTailEnabled === true);
   const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(settings.bubbleTailVertical || "top");
   const [bubblePosition, setBubblePosition] = useState<"side" | "above">(settings.bubblePosition === "above" ? "above" : "side");
   
