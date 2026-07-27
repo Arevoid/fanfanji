@@ -1,0 +1,9 @@
+name = "fanfanji"
+main = "src/cloudflare/worker.ts"
+compatibility_date = "2026-07-27"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
