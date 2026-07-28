@@ -10,5 +10,7 @@ assert.equal(canPlaceHomeItems([{ size: "2x3" }, { size: "1x1" }, { size: "1x1" 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 assert.match(app, /item\.size === "2x3"[\s\S]{0,180}col-span-3[\s\S]{0,100}row-span-2/);
 assert.match(app, /draggedItem\.size === "2x3"/);
-assert.match(app, /findPageForNewItem\(current, \{ type: "widget", size \}/);
+assert.match(app, /findFirstAvailablePosition\(current, size, 0\)/);
+assert.match(app, /gridColumnStart: itemPosition\.column \+ 1/);
+assert.match(app, /gridRowStart: itemPosition\.row \+ 1/);
 console.log("dual music widget layout tests passed");

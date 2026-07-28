@@ -19,6 +19,7 @@ import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
 import { getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
 import { ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
 
 interface AppOfflineProps {
@@ -29,7 +30,7 @@ interface AppOfflineProps {
   onSaveOfflineStory: (story: OfflineStory) => void;
   onDeleteOfflineStory: (storyId: string) => void;
   onClose: () => void;
-  onNavigateToChat?: (charId: string, relationId?: string) => void;
+  onNavigateToChat?: (charId: string, relationId?: string, conversationId?: string) => void;
   memories: MemoryItem[];
   onSaveMemories: (mems: MemoryItem[]) => void;
   /** Resolves only after the offline handoff memories are durably persisted. */
@@ -316,6 +317,14 @@ export default function AppOffline({
     "--offline-reading-text": readingPreferences.textColor,
     "--offline-reading-card": readingPreferences.cardBackground,
   } as React.CSSProperties;
+  const linkedChatTarget = activeStory
+    ? resolveOfflineChatNavigationTarget({
+        story: activeStory,
+        relationships,
+        characters,
+        ownerIdentityId: activeIdentityId,
+      })
+    : null;
 
   const workspaceEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -378,6 +387,29 @@ export default function AppOffline({
     if (completedStory) clearOfflineSession(completedStory);
     clearActiveStorySnapshot();
     setIsSettingsOpen(false);
+  };
+
+  const handleReturnToOnlineChat = async () => {
+    const latestStory = activeStoryRef.current;
+    if (!latestStory || !onNavigateToChat) return;
+    const target = resolveOfflineChatNavigationTarget({
+      story: latestStory,
+      relationships,
+      characters,
+      ownerIdentityId: activeIdentityId,
+    });
+    if (!target) {
+      showToast("未找到当前身份对应的线上聊天关系。");
+      return;
+    }
+    let completedStory = latestStory;
+    if (shouldAutoSyncOnlineContinuation(latestStory)) {
+      completedStory = await handleSyncMemoryToBrain(latestStory);
+    }
+    clearOfflineSession(completedStory);
+    clearActiveStorySnapshot();
+    setIsSettingsOpen(false);
+    onNavigateToChat(target.characterId, target.relationId, target.conversationId);
   };
 
   // Create new offline story
@@ -1304,59 +1336,61 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
               </div>
             ) : (
               <>
-            <header className="offline-workspace-header px-4 py-3.5 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm">
-              <div className="flex min-w-0 items-center gap-2.5">
+            <header className="offline-workspace-header">
+              <div className="offline-workspace-nav">
                 <button
                   type="button"
                   onClick={handleExitStoryWorkspace}
                   aria-label="返回线下故事列表"
-                  className="w-8 h-8 shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
+                  className="offline-icon-button offline-workspace-back"
                 >
-                  <ArrowLeft className="w-4 h-4" />
+                  <ArrowLeft size={18} />
                 </button>
-                <div className="min-w-0">
-                  <h1 className="text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
-                    <span className="truncate">{activeStory.title}</span>
+                <div className="offline-workspace-title">
+                  <h1>
+                    <span className="offline-workspace-title-text">{activeStory.title}</span>
                     <span className="offline-mode-label">{activeStory.mode === "director" ? "导演" : activeStory.mode === "if" ? "IF线" : "续写"}</span>
                   </h1>
-                  <p className="text-[10px] text-slate-500 truncate">与「{selectedChar.remark || selectedChar.name}」的离线剧本空间</p>
+                  <p>与「{selectedChar.remark || selectedChar.name}」的离线剧本空间</p>
                 </div>
-              </div>
-              <div className="shrink-0">
+                <div className="offline-workspace-menu-anchor">
                 <button
                   ref={workspaceMenuTriggerRef}
                   type="button"
                   onClick={() => setIsWorkspaceMenuOpen((open) => !open)}
                   aria-label="打开线下剧情菜单"
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
+                  className="offline-icon-button"
                 >
-                  <MoreHorizontal className="w-4 h-4" />
+                  <MoreHorizontal size={18} />
                 </button>
                 <PopoverMenu open={isWorkspaceMenuOpen} onClose={() => setIsWorkspaceMenuOpen(false)} anchorRef={workspaceMenuTriggerRef} placement="bottom-end" ariaLabel="线下剧情菜单" className="offline-workspace-menu">
                     <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsReadingSettingsOpen(true); }}><span className="offline-workspace-menu-icon" aria-hidden="true">Aa</span><span>阅读设置</span></button>
                     <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsSettingsOpen(true); }}><Settings size={16} /><span>剧本设置</span></button>
                   </PopoverMenu>
-              </div>
-
-              {activeStory.sourceChatId && (
-                <div className="offline-chat-link-card">
-                  <div><Link2 size={16} /><span>已关联线上聊天记录（导入了 {activeStory.sourceChatMsgCount || 0} 条历史对话）</span></div>
-                  {onNavigateToChat && <button onClick={async () => {
-                    const latestStory = activeStoryRef.current;
-                    if (!latestStory) return;
-                    let completedStory = latestStory;
-                    if (shouldAutoSyncOnlineContinuation(latestStory)) completedStory = await handleSyncMemoryToBrain(latestStory);
-                    clearOfflineSession(completedStory);
-                    clearActiveStorySnapshot();
-                    setIsSettingsOpen(false);
-                    onNavigateToChat(completedStory.characterId, completedStory.relationId);
-                  }}>返回线上聊天 ›</button>}
                 </div>
-              )}
-
-              {activeStory.mode === "if" && activeStory.ifPrompt && <div className="mt-3 text-xs text-amber-700 flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-amber-500" />IF 假想设定：{activeStory.ifPrompt}</div>}
-
+              </div>
             </header>
+
+            {activeStory.sourceChatId && (
+              <section className="offline-chat-link-card" aria-label="线上聊天关联状态">
+                <div className="offline-chat-link-copy">
+                  <Link2 size={16} />
+                  <span>已关联线上聊天记录（导入了 {activeStory.sourceChatMsgCount || 0} 条历史对话）</span>
+                </div>
+                {onNavigateToChat && linkedChatTarget && (
+                  <button type="button" className="offline-chat-link-action" onClick={handleReturnToOnlineChat}>
+                    返回线上聊天
+                  </button>
+                )}
+              </section>
+            )}
+
+            {activeStory.mode === "if" && activeStory.ifPrompt && (
+              <div className="offline-if-context">
+                <Layers size={14} />
+                <span>IF 假想设定：{activeStory.ifPrompt}</span>
+              </div>
+            )}
 
             <main className="offline-story-scroll offline-message-list">
               {activeStory.customCss && <style dangerouslySetInnerHTML={{ __html: activeStory.customCss }} />}

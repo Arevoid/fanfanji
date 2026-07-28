@@ -472,7 +472,15 @@ export interface HomeScreenItem {
   type: "app" | "widget";
   widgetType?: "album" | "calendar-album" | "music" | "dual-music" | "anniversary" | "todo";
   size: "1x1" | "2x2" | "1x4" | "2x3" | "2x4";
+  /** Legacy mirror kept during migration. position.page is authoritative. */
   page: number;
+  position?: HomeScreenPosition;
+}
+
+export interface HomeScreenPosition {
+  page: number;
+  row: number;
+  column: number;
 }
 
 export interface DualMusicWidgetConfig {

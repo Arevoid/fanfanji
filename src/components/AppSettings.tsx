@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { UserSettings, StylePreset, ApiPreset, ImageApiPreset, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
+import { UserSettings, StylePreset, ApiPreset, ImageApiPreset, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type HomeScreenItem } from "../types";
 import { apiFetchModels, apiTestKey, apiFetchImageModels, apiTestImageConnection } from "../utils/apiHelper";
 import {
   ChevronLeft,
@@ -32,6 +32,7 @@ import {
 import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 import { inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "../features/chat/services/imageProtocol";
 import { applyDesktopModuleBackup, buildDesktopModuleBackup, parseDesktopModuleBackup } from "../features/home/desktopModuleBackup";
+import { normalizeHomeScreenLayout } from "../features/home/homeGrid";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -130,6 +131,16 @@ export function sanitizeSystemBackupValue(
   source?: Record<string, unknown>,
 ): string | null {
   if (!value) return value;
+  if (key === "phone_homescreen_items") {
+    try {
+      const parsed = JSON.parse(value);
+      return JSON.stringify(normalizeHomeScreenLayout(
+        Array.isArray(parsed) ? parsed as HomeScreenItem[] : [],
+      ));
+    } catch {
+      return "[]";
+    }
+  }
   if (key === "phone_forum_threads") {
     try {
       const parsed = JSON.parse(value);

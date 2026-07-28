@@ -177,6 +177,8 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
 
       {isEditing && onRemove && (
         <button
+          data-home-delete
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
@@ -270,6 +272,8 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
 
       {isEditing && onRemove && (
         <button
+          data-home-delete
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
             onRemove();
@@ -398,6 +402,8 @@ export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, 
 
       {isEditing && onRemove && (
         <button
+          data-home-delete
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
@@ -585,6 +591,8 @@ function LegacyAnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widge
 
       {isEditing && onRemove && (
         <button
+          data-home-delete
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
@@ -958,7 +966,7 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
           <span className="h-3" />
         </div>
       </button>
-      {isEditing && onRemove && <button type="button" onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md" aria-label="删除小组件">×</button>}
+      {isEditing && onRemove && <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md" aria-label="删除小组件">×</button>}
       {isSettingsOpen && createPortal(
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/35 p-4" onClick={cancelSettings}>
           <div className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
@@ -1120,7 +1128,7 @@ export function DualMusicWidget({
         })}
       </div>
       {isEditing && onRemove && (
-        <button type="button" onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>
+        <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>
       )}
       {showBindingSheet && createPortal(
         <div className="fixed inset-0 z-[10000] flex items-end bg-black/40" onClick={() => setShowBindingSheet(false)}>
@@ -1298,6 +1306,8 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
 
       {isEditing && onRemove && (
         <button
+          data-home-delete
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             onRemove();

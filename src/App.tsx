@@ -37,8 +37,8 @@ import {
 } from "./core/storage/repositories/musicWidgetRepository";
 import { imageAssetDb } from "./utils/imageAssetDb";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
-import { DEFAULT_IDENTITY_ID, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
-import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type IdentityMusicState, type RelationshipMusicState } from "./types";
+import { DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState } from "./types";
 import { 
   AlbumWidget, 
   CalendarAlbumWidget,
@@ -48,7 +48,21 @@ import {
   TodoWidget, 
   AddWidgetSheet 
 } from "./components/HomeScreenWidgets";
-import { getHomeItemDimensions } from "./features/home/homeGrid";
+import {
+  HOME_GRID_COLUMNS,
+  HOME_GRID_ROWS,
+  MAX_HOME_PAGES,
+  canPlaceAt,
+  findFirstAvailablePosition,
+  getHomeGridPositionFromPoint,
+  getHighestOccupiedPage,
+  getHomeItemDimensions,
+  getOverlappingItemIds,
+  getVisibleHomePageCount,
+  normalizeHomeScreenLayout,
+  placeItemAt,
+  swapOneByOneItems,
+} from "./features/home/homeGrid";
 import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./features/music/services/dualMusicRecommendationService";
 import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./features/music/services/musicPlayback";
 import StatusBar from "./components/StatusBar";
@@ -118,6 +132,16 @@ const isStandalonePwa = () =>
   typeof window !== "undefined" &&
   (window.matchMedia("(display-mode: standalone)").matches ||
     (window.navigator as Navigator & { standalone?: boolean }).standalone === true);
+
+interface DragSession {
+  itemId: string;
+  origin: HomeScreenPosition;
+  target?: HomeScreenPosition;
+  grabOffsetX: number;
+  grabOffsetY: number;
+  validity: "valid" | "invalid" | "swap";
+  swapWithId?: string;
+}
 
 const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
 
@@ -660,15 +684,15 @@ export default function App() {
   // HomeScreen layout items (Apps + Widgets)
   const [homeScreenItems, setHomeScreenItems] = useState<HomeScreenItem[]>(() => {
     const raw = localStorage.getItem("phone_homescreen_items");
-    const migratedV3 = localStorage.getItem("phone_layout_migrated_v3");
-    
-    let items: HomeScreenItem[] = [];
-    if (raw && migratedV3) {
+    let items: HomeScreenItem[];
+    if (raw !== null) {
       try {
-        items = JSON.parse(raw);
-      } catch (e) {}
+        const parsed = JSON.parse(raw);
+        items = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        items = [];
+      }
     } else {
-      // Force default gorgeous layout with Album & Music widgets arranged matching user screenshot
       items = [
         { id: "album_widget_1", type: "widget", widgetType: "album", size: "2x2", page: 0 },
         { id: "archives", type: "app", size: "1x1", page: 0 },
@@ -682,33 +706,16 @@ export default function App() {
         { id: "settings", type: "app", size: "1x1", page: 0 },
         { id: "notes", type: "app", size: "1x1", page: 1 },
       ];
-      localStorage.setItem("phone_homescreen_items", JSON.stringify(items));
-      localStorage.setItem("phone_layout_migrated_v3", "true");
     }
-    // Remove the retired 1x4 album and upgrade the previous 2x4 album slot
-    // to the calendar album without disturbing other desktop items.
+
     items = items
       .filter((item) => item.id !== "schedule" && !(item.widgetType === "album" && item.size === "1x4"))
       .map((item) => item.widgetType === "album" && item.size === "2x4"
         ? { ...item, widgetType: "calendar-album" }
         : item);
-    // Ensure all standard apps and widgets are present in layout
-    if (!items.some(item => item.id === "album_widget_1")) {
-      items.unshift({ id: "album_widget_1", type: "widget", widgetType: "album", size: "2x2", page: 0 });
-    }
-    if (!items.some(item => item.id === "music_widget_1")) {
-      items.push({ id: "music_widget_1", type: "widget", widgetType: "music", size: "2x2", page: 0 });
-    }
-    if (!items.some(item => item.id === "memory")) {
-      items.push({ id: "memory", type: "app", size: "1x1", page: 0 });
-    }
-    if (!items.some(item => item.id === "notes")) {
-      items.push({ id: "notes", type: "app", size: "1x1", page: 1 });
-    }
-    if (!items.some(item => item.id === "offline")) {
-      items.push({ id: "offline", type: "app", size: "1x1", page: 0 });
-    }
-    return items;
+    const normalized = normalizeHomeScreenLayout(items);
+    localStorage.setItem("phone_homescreen_items", JSON.stringify(normalized));
+    return normalized;
   });
 
   // Memory Vault (Memory Book) States
@@ -926,194 +933,65 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(0);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isEditingHomeScreen, setIsEditingHomeScreen] = useState(false);
-  const [draggedItem, setDraggedItem] = useState<HomeScreenItem | null>(null);
-  const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
-
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragSession, setDragSession] = useState<DragSession | null>(null);
+  const dragSessionRef = useRef<DragSession | null>(null);
   const [dragCurrent, setDragCurrent] = useState({ x: 0, y: 0 });
+  const [homeLayoutError, setHomeLayoutError] = useState<string | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingItemPressRef = useRef<{
+    item: HomeScreenItem;
+    startX: number;
+    startY: number;
+    grabOffsetX: number;
+    grabOffsetY: number;
+    longPressed: boolean;
+  } | null>(null);
+  const suppressNextItemClickRef = useRef(false);
   const [isShowingAddWidget, setIsShowingAddWidget] = useState(false);
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
+  const pageViewportRef = useRef<HTMLDivElement | null>(null);
+  const [homeGridWidth, setHomeGridWidth] = useState(343);
   const pageSwitchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pageSwitchEdgeRef = useRef<"left" | "right" | null>(null);
+  const draggedItem = dragSession
+    ? homeScreenItems.find((item) => item.id === dragSession.itemId) || null
+    : null;
+  const visibleHomePageCount = getVisibleHomePageCount(homeScreenItems, isEditingHomeScreen);
 
   useEffect(() => {
     localStorage.setItem("phone_homescreen_items", JSON.stringify(homeScreenItems));
   }, [homeScreenItems]);
 
-  const getPageItemsWithPositions = (pageIdx: number) => {
-    const pageItems = homeScreenItems.filter((item) => item.page === pageIdx);
-    const columns = 4;
-    const grid: boolean[][] = [];
+  useEffect(() => {
+    setCurrentPage((page) => Math.max(0, Math.min(page, visibleHomePageCount - 1)));
+  }, [visibleHomePageCount]);
 
-    const getGridCell = (r: number, c: number): boolean => {
-      if (!grid[r]) {
-        grid[r] = new Array(columns).fill(false);
-      }
-      return grid[r][c];
-    };
-
-    const fillArea = (startRow: number, startCol: number, w: number, h: number) => {
-      for (let r = startRow; r < startRow + h; r++) {
-        for (let c = startCol; c < startCol + w; c++) {
-          if (!grid[r]) {
-            grid[r] = new Array(columns).fill(false);
-          }
-          grid[r][c] = true;
-        }
-      }
-    };
-
-    const isAreaEmpty = (startRow: number, startCol: number, w: number, h: number): boolean => {
-      for (let r = startRow; r < startRow + h; r++) {
-        for (let c = startCol; c < startCol + w; c++) {
-          if (c >= columns) return false;
-          if (getGridCell(r, c)) return false;
-        }
-      }
-      return true;
-    };
-
-    return pageItems.map((item) => {
-      const { width: w, height: h } = getHomeItemDimensions(item.size);
-
-      let r = 0;
-      let c = 0;
-      let placed = false;
-
-      while (!placed) {
-        if (c + w <= columns && isAreaEmpty(r, c, w, h)) {
-          fillArea(r, c, w, h);
-          placed = true;
-          return { item, col: c, row: r };
-        } else {
-          c++;
-          if (c >= columns) {
-            c = 0;
-            r++;
-          }
-        }
-      }
-      return { item, col: 0, row: 0 };
-    });
-  };
-
-  const canFitOnPage = (
-    existingItems: HomeScreenItem[],
-    newItem: { type: "app" | "widget"; size: HomeScreenItem["size"] },
-    maxRows: number = 4
-  ): boolean => {
-    const columns = 4;
-    const grid: boolean[][] = [];
-
-    const getGridCell = (r: number, c: number): boolean => {
-      if (!grid[r]) {
-        grid[r] = new Array(columns).fill(false);
-      }
-      return grid[r][c];
-    };
-
-    const setGridCell = (r: number, c: number, val: boolean) => {
-      if (!grid[r]) {
-        grid[r] = new Array(columns).fill(false);
-      }
-      grid[r][c] = val;
-    };
-
-    const isAreaEmpty = (startRow: number, startCol: number, w: number, h: number): boolean => {
-      for (let r = startRow; r < startRow + h; r++) {
-        for (let c = startCol; c < startCol + w; c++) {
-          if (c >= columns) return false;
-          if (getGridCell(r, c)) return false;
-        }
-      }
-      return true;
-    };
-
-    const fillArea = (startRow: number, startCol: number, w: number, h: number) => {
-      for (let r = startRow; r < startRow + h; r++) {
-        for (let c = startCol; c < startCol + w; c++) {
-          setGridCell(r, c, true);
-        }
-      }
-    };
-
-    // Place existing items
-    for (const item of existingItems) {
-      const { width: w, height: h } = getHomeItemDimensions(item.size);
-
-      let placed = false;
-      let r = 0;
-      let c = 0;
-
-      while (!placed) {
-        if (c + w <= columns && isAreaEmpty(r, c, w, h)) {
-          fillArea(r, c, w, h);
-          placed = true;
-        } else {
-          c++;
-          if (c >= columns) {
-            c = 0;
-            r++;
-          }
-        }
-      }
-    }
-
-    // Check if the new item can fit
-    const { width: nw, height: nh } = getHomeItemDimensions(newItem.size);
-
-    let placedNew = false;
-    let r = 0;
-    let c = 0;
-
-    while (!placedNew) {
-      if (c + nw <= columns && isAreaEmpty(r, c, nw, nh)) {
-        if (r + nh > maxRows) {
-          return false;
-        }
-        return true;
-      } else {
-        c++;
-        if (c >= columns) {
-          c = 0;
-          r++;
-        }
-      }
-    }
-
-    return false;
-  };
-
-  const findPageForNewItem = (
-    currentItems: HomeScreenItem[],
-    newItem: { type: "app" | "widget"; size: HomeScreenItem["size"] },
-    startPage: number = 0
-  ): number => {
-    let page = startPage;
-    while (true) {
-      const itemsOnPage = currentItems.filter(item => item.page === page);
-      if (canFitOnPage(itemsOnPage, newItem, 4)) {
-        return page;
-      }
-      page++;
-    }
-  };
+  useEffect(() => {
+    const grid = pageContainerRef.current;
+    if (!grid) return;
+    const updateWidth = () => setHomeGridWidth(grid.getBoundingClientRect().width);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [currentPage, visibleHomePageCount]);
 
   const handleInstallApp = (id: string) => {
-    setInstalledAppIds((prev) => {
-      if (prev.includes(id)) return prev;
-      setHomeScreenItems((current) => {
-        if (current.some(item => item.id === id)) return current;
-        const targetPage = findPageForNewItem(current, { type: "app", size: "1x1" }, currentPage);
-        
-        setTimeout(() => {
-          setCurrentPage(targetPage);
-        }, 50);
-
-        return [...current, { id, type: "app", size: "1x1", page: targetPage }];
-      });
-      return [...prev, id];
+    if (installedAppIds.includes(id)) return;
+    setHomeScreenItems((current) => {
+      if (current.some((item) => item.id === id)) {
+        setInstalledAppIds((previous) => previous.includes(id) ? previous : [...previous, id]);
+        return current;
+      }
+      const position = findFirstAvailablePosition(current, "1x1", 0);
+      if (!position) {
+        setHomeLayoutError(`桌面已达到 ${MAX_HOME_PAGES} 页上限，无法安装更多应用。`);
+        return current;
+      }
+      setInstalledAppIds((previous) => previous.includes(id) ? previous : [...previous, id]);
+      setTimeout(() => setCurrentPage(position.page), 50);
+      return [...current, { id, type: "app", size: "1x1", page: position.page, position }];
     });
   };
 
@@ -1125,83 +1003,149 @@ export default function App() {
     }
   };
 
-  // Unified pointer swiping and stable dragging/swapping logic
   const handleItemPointerDown = (
-    e: React.PointerEvent<HTMLDivElement>, 
-    item: HomeScreenItem, 
-    index: number
+    e: React.PointerEvent<HTMLDivElement>,
+    item: HomeScreenItem,
   ) => {
-    e.stopPropagation(); // Prevents empty desktop long press!
-
-    const clientX = e.clientX;
-    const clientY = e.clientY;
-
-    setDragStart({ x: clientX, y: clientY });
-    setDragCurrent({ x: clientX, y: clientY });
-    swipeStartRef.current = { x: clientX, y: clientY };
+    if ((e.target as HTMLElement).closest("[data-home-delete]")) return;
+    e.stopPropagation();
+    const itemRect = e.currentTarget.getBoundingClientRect();
+    pendingItemPressRef.current = {
+      item,
+      startX: e.clientX,
+      startY: e.clientY,
+      grabOffsetX: e.clientX - itemRect.left,
+      grabOffsetY: e.clientY - itemRect.top,
+      longPressed: isEditingHomeScreen,
+    };
+    setDragCurrent({ x: e.clientX, y: e.clientY });
+    swipeStartRef.current = { x: e.clientX, y: e.clientY };
 
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-
-    if (isEditingHomeScreen) {
-      // In editing mode: start dragging immediately!
-      setDraggedItem(item);
-      setDraggedItemIndex(index);
-    } else {
-      // In non-editing mode: long press for 400ms (snappier!) to enter edit mode and start dragging
+    if (!isEditingHomeScreen) {
       longPressTimerRef.current = setTimeout(() => {
         setIsEditingHomeScreen(true);
-        setDraggedItem(item);
-        setDraggedItemIndex(index);
+        if (pendingItemPressRef.current?.item.id === item.id) {
+          pendingItemPressRef.current.longPressed = true;
+        }
       }, 400);
     }
   };
 
-  const handlePointerUp = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    if (draggedItem) {
-      setDraggedItem(null);
-      setDraggedItemIndex(null);
-    }
-  };
-
-  const moveDraggedItemToPage = (targetPage: number, itemId: string) => {
-    setDraggedItem((prev) => prev ? { ...prev, page: targetPage } : null);
-    setHomeScreenItems((current) => {
-      return current.map(item => {
-        if (item.id === itemId) {
-          return { ...item, page: targetPage };
-        }
-        return item;
-      });
-    });
-  };
-
-  const debouncePageSwitch = (targetPage: number, itemId: string) => {
-    if (pageSwitchTimeoutRef.current) return;
+  const debouncePageSwitch = (targetPage: number, edge: "left" | "right") => {
+    if (pageSwitchTimeoutRef.current || pageSwitchEdgeRef.current === edge) return;
+    pageSwitchEdgeRef.current = edge;
     pageSwitchTimeoutRef.current = setTimeout(() => {
       setCurrentPage(targetPage);
-      moveDraggedItemToPage(targetPage, itemId);
+      const session = dragSessionRef.current;
+      const nextSession = session
+        ? {
+            ...session,
+            target: session.target ? { ...session.target, page: targetPage } : undefined,
+            validity: "invalid" as const,
+            swapWithId: undefined,
+          }
+        : null;
+      dragSessionRef.current = nextSession;
+      setDragSession(nextSession);
       pageSwitchTimeoutRef.current = null;
     }, 600);
   };
 
-  const clearPageSwitchTimeout = () => {
+  const clearPageSwitchTimeout = (resetEdge = true) => {
     if (pageSwitchTimeoutRef.current) {
       clearTimeout(pageSwitchTimeoutRef.current);
       pageSwitchTimeoutRef.current = null;
     }
+    if (resetEdge) pageSwitchEdgeRef.current = null;
+  };
+
+  const updateDragTarget = (e: PointerEvent, session: DragSession) => {
+    const item = homeScreenItems.find((candidate) => candidate.id === session.itemId);
+    const container = pageContainerRef.current;
+    if (!item || !container) return;
+    const rect = container.getBoundingClientRect();
+    const style = window.getComputedStyle(container);
+    const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+    const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+    const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+    const columnGap = Number.parseFloat(style.columnGap) || 0;
+    const rowGap = Number.parseFloat(style.rowGap) || 0;
+    const fallbackTrackWidth = (rect.width - paddingLeft - paddingRight
+      - columnGap * (HOME_GRID_COLUMNS - 1)) / HOME_GRID_COLUMNS;
+    const target = getHomeGridPositionFromPoint({
+      page: currentPage,
+      pointerX: e.clientX,
+      pointerY: e.clientY,
+      grabOffsetX: session.grabOffsetX,
+      grabOffsetY: session.grabOffsetY,
+      containerLeft: rect.left,
+      containerTop: rect.top,
+      containerWidth: rect.width,
+      paddingLeft,
+      paddingRight,
+      paddingTop,
+      columnGap,
+      rowGap,
+      rowHeight: Number.parseFloat(style.gridAutoRows) || fallbackTrackWidth,
+      size: item.size,
+    });
+    const overlaps = getOverlappingItemIds(homeScreenItems, item, target);
+    const swapTarget = overlaps.length === 1
+      ? homeScreenItems.find((candidate) => candidate.id === overlaps[0])
+      : undefined;
+    const canSwap = Boolean(
+      swapTarget
+      && item.size === "1x1"
+      && swapTarget.size === "1x1",
+    );
+    const nextSession: DragSession = {
+      ...session,
+      target,
+      validity: overlaps.length === 0 && canPlaceAt(homeScreenItems, item, target)
+        ? "valid"
+        : canSwap
+          ? "swap"
+          : "invalid",
+      swapWithId: canSwap ? swapTarget?.id : undefined,
+    };
+    dragSessionRef.current = nextSession;
+    setDragSession(nextSession);
   };
 
   const handlePointerMove = (e: PointerEvent) => {
-    if (!draggedItem) return;
+    const pending = pendingItemPressRef.current;
+    const activeSession = dragSessionRef.current;
+    if (!activeSession && pending) {
+      const distance = Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY);
+      if (!pending.longPressed && distance > 10) {
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        pendingItemPressRef.current = null;
+        return;
+      }
+      if (pending.longPressed && distance > 6 && pending.item.position) {
+        const nextSession: DragSession = {
+          itemId: pending.item.id,
+          origin: { ...pending.item.position },
+          target: { ...pending.item.position },
+          grabOffsetX: pending.grabOffsetX,
+          grabOffsetY: pending.grabOffsetY,
+          validity: "valid",
+        };
+        suppressNextItemClickRef.current = true;
+        dragSessionRef.current = nextSession;
+        setDragSession(nextSession);
+        updateDragTarget(e, nextSession);
+      }
+      return;
+    }
+    if (!activeSession) return;
 
     const clientX = e.clientX;
     const clientY = e.clientY;
-
-    // Direct DOM styling for real-time responsiveness without waiting for React render cycles
     const cloneEl = document.getElementById("tactile-drag-clone");
     if (cloneEl) {
       cloneEl.style.left = `${clientX}px`;
@@ -1210,75 +1154,57 @@ export default function App() {
 
     setDragCurrent({ x: clientX, y: clientY });
 
-    if (pageContainerRef.current) {
-      const rect = pageContainerRef.current.getBoundingClientRect();
+    if (pageViewportRef.current) {
+      const rect = pageViewportRef.current.getBoundingClientRect();
       const relativeX = clientX - rect.left;
 
       if (relativeX < 40 && currentPage > 0) {
-        debouncePageSwitch(currentPage - 1, draggedItem.id);
+        debouncePageSwitch(currentPage - 1, "left");
       } else if (relativeX > rect.width - 40) {
-        const totalPages = Math.max(1, ...homeScreenItems.map(item => item.page + 1));
-        if (currentPage < totalPages - 1) {
-          debouncePageSwitch(currentPage + 1, draggedItem.id);
-        } else if (currentPage < 4) { // Limit to 5 pages max
-          debouncePageSwitch(currentPage + 1, draggedItem.id);
+        const highestPage = getHighestOccupiedPage(homeScreenItems);
+        const lastVisiblePage = Math.min(
+          MAX_HOME_PAGES - 1,
+          highestPage + (isEditingHomeScreen ? 1 : 0),
+        );
+        if (currentPage < lastVisiblePage) {
+          debouncePageSwitch(currentPage + 1, "right");
         }
       } else {
         clearPageSwitchTimeout();
       }
     }
+    updateDragTarget(e, activeSession);
+  };
 
-    if (pageContainerRef.current) {
-      const items = pageContainerRef.current.querySelectorAll(`.grid-item[data-page="${currentPage}"]`);
-      let targetId: string | null = null;
-      let minDistance = Infinity;
-
-      items.forEach((el) => {
-        const id = el.getAttribute("data-id");
-        if (id === draggedItem.id) return;
-
-        const rect = el.getBoundingClientRect();
-        // Distance-to-center proximity check for incredibly "跟手" and smooth placement
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-        const dist = Math.hypot(clientX - centerX, clientY - centerY);
-
-        const threshold = Math.max(rect.width, rect.height) * 0.85;
-        if (dist < threshold && dist < minDistance) {
-          minDistance = dist;
-          targetId = id;
+  const finishDrag = (cancelled: boolean) => {
+    clearPageSwitchTimeout();
+    const completedSession = dragSessionRef.current;
+    if (!cancelled && completedSession?.target) {
+      setHomeScreenItems((current) => {
+        if (completedSession.validity === "swap" && completedSession.swapWithId) {
+          return swapOneByOneItems(current, completedSession.itemId, completedSession.swapWithId);
         }
+        if (completedSession.validity === "valid") {
+          return placeItemAt(current, completedSession.itemId, completedSession.target!);
+        }
+        return current;
       });
-
-      if (targetId) {
-        setHomeScreenItems((current) => {
-          const thisPageItems = current.filter(item => item.page === currentPage);
-          const otherPageItems = current.filter(item => item.page !== currentPage);
-
-          const dragIdx = thisPageItems.findIndex(item => item.id === draggedItem.id);
-          const targetIdx = thisPageItems.findIndex(item => item.id === targetId);
-
-          if (dragIdx !== -1 && targetIdx !== -1 && dragIdx !== targetIdx) {
-            const reordered = [...thisPageItems];
-            const [removed] = reordered.splice(dragIdx, 1);
-            reordered.splice(targetIdx, 0, removed);
-            return [...otherPageItems, ...reordered];
-          }
-          return current;
-        });
-      }
     }
+    pendingItemPressRef.current = null;
+    dragSessionRef.current = null;
+    setDragSession(null);
+    setTimeout(() => {
+      suppressNextItemClickRef.current = false;
+    }, 0);
   };
 
   useEffect(() => {
     const handleGlobalPointerMove = (e: PointerEvent) => {
-      // 1. If we are dragging an item:
-      if (draggedItem) {
+      if (dragSessionRef.current || pendingItemPressRef.current) {
         handlePointerMove(e);
         return;
       }
 
-      // 2. If we are tracking a swipe start (not yet dragging):
       if (swipeStartRef.current) {
         const dx = e.clientX - swipeStartRef.current.x;
         const dy = e.clientY - swipeStartRef.current.y;
@@ -1300,50 +1226,48 @@ export default function App() {
     };
 
     const handleGlobalPointerUp = (e: PointerEvent) => {
-      // Clear long press timer
       if (longPressTimerRef.current) {
         clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = null;
       }
+      const wasDragging = Boolean(dragSessionRef.current);
+      if (wasDragging) finishDrag(false);
+      pendingItemPressRef.current = null;
 
-      // 1. If we are dragging an item:
-      if (draggedItem) {
-        handlePointerUp();
-      }
-
-      // 2. If we are swiping the desktop:
-      if (swipeStartRef.current && !draggedItem) {
+      if (swipeStartRef.current && !wasDragging) {
         const dx = e.clientX - swipeStartRef.current.x;
         const dy = e.clientY - swipeStartRef.current.y;
 
-        // If swipe horizontal distance is more than 50px
         if (Math.abs(dx) > 50 && Math.abs(dy) < 100) {
-          const totalPages = Math.max(1, ...homeScreenItems.map(item => item.page + 1));
+          const totalPages = getHighestOccupiedPage(homeScreenItems) + 1;
           if (dx < -50 && currentPage < totalPages - 1) {
-            // Swipe left -> go to next page
             setCurrentPage(prev => prev + 1);
           } else if (dx > 50 && currentPage > 0) {
-            // Swipe right -> go to previous page
             setCurrentPage(prev => prev - 1);
           }
         }
       }
-
-      // Reset swipe tracking and offset
       swipeStartRef.current = null;
       setSwipeOffset(0);
+    };
+    const handleGlobalPointerCancel = () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      pendingItemPressRef.current = null;
+      swipeStartRef.current = null;
+      setSwipeOffset(0);
+      if (dragSessionRef.current) finishDrag(true);
     };
 
     window.addEventListener("pointermove", handleGlobalPointerMove);
     window.addEventListener("pointerup", handleGlobalPointerUp, { passive: true });
-    window.addEventListener("pointercancel", handleGlobalPointerUp, { passive: true });
+    window.addEventListener("pointercancel", handleGlobalPointerCancel, { passive: true });
 
     return () => {
       window.removeEventListener("pointermove", handleGlobalPointerMove);
       window.removeEventListener("pointerup", handleGlobalPointerUp);
-      window.removeEventListener("pointercancel", handleGlobalPointerUp);
+      window.removeEventListener("pointercancel", handleGlobalPointerCancel);
     };
-  }, [draggedItem, currentPage, homeScreenItems]);
+  }, [dragSession, currentPage, homeScreenItems, isEditingHomeScreen]);
 
   const handleDesktopPointerDown = (e: React.PointerEvent) => {
     if (
@@ -1381,6 +1305,7 @@ export default function App() {
       !(e.target as HTMLElement).closest(".dock-container") &&
       !(e.target as HTMLElement).closest(".add-widget-sheet")
     ) {
+      if (dragSession) finishDrag(true);
       setIsEditingHomeScreen(false);
     }
   };
@@ -1410,18 +1335,21 @@ export default function App() {
         actualWidgetType = widgetType as any;
       }
 
-      const targetPage = findPageForNewItem(current, { type: "widget", size }, currentPage);
+      const position = findFirstAvailablePosition(current, size, 0);
+      if (!position) {
+        setHomeLayoutError(`桌面已达到 ${MAX_HOME_PAGES} 页上限，无法添加更多小组件。`);
+        return current;
+      }
       const newWidget: HomeScreenItem = {
         id: `widget-${widgetType}-${Date.now()}`,
         type: "widget",
         widgetType: actualWidgetType,
         size,
-        page: targetPage,
+        page: position.page,
+        position,
       };
 
-      setTimeout(() => {
-        setCurrentPage(targetPage);
-      }, 50);
+      setTimeout(() => setCurrentPage(position.page), 50);
 
       return [...current, newWidget];
     });
@@ -1445,7 +1373,7 @@ export default function App() {
   };
 
   const handleItemClick = (item: HomeScreenItem) => {
-    if (isEditingHomeScreen) return;
+    if (isEditingHomeScreen || suppressNextItemClickRef.current) return;
     if (item.type === "app") {
       setActiveApp(item.id);
     }
@@ -2612,7 +2540,7 @@ export default function App() {
               
               {/* Multiple Pages Grid Section */}
               {(() => {
-                const totalPages = Math.max(1, ...homeScreenItems.map(item => item.page + 1));
+                const totalPages = visibleHomePageCount;
                 let activeOffset = swipeOffset;
                 if (currentPage === 0 && activeOffset > 0) {
                   activeOffset = Math.pow(activeOffset, 0.82); // elastic boundary feel
@@ -2621,7 +2549,7 @@ export default function App() {
                 }
                 return (
                   <div className="flex-1 overflow-hidden flex flex-col relative py-2 select-none">
-                    <div className="flex-1 overflow-hidden relative">
+                    <div ref={pageViewportRef} className="flex-1 overflow-hidden relative">
                       {/* Sliding track for page push effect */}
                       <div 
                         className="flex h-full w-full"
@@ -2639,9 +2567,9 @@ export default function App() {
 
                           // Calculate perfect 1:1 widget width/height and grid row height dynamically
                           const gridPadding = 12; // 12px padding left/right (matches px-3 of dock!)
-                          const outerWidth = 343; // 375px (screen) - 32px (p-4 parent padding)
+                          const outerWidth = homeGridWidth;
                           const innerWidth = outerWidth - 2 * gridPadding; // 319px
-                          const gapWidth = (innerWidth - 4 * iconWidth) / 3;
+                          const gapWidth = Math.max(4, (innerWidth - 4 * iconWidth) / 3);
                           const widgetWidthValue = 2 * iconWidth + gapWidth;
                           const widgetHeight = `${widgetWidthValue}px`;
 
@@ -2655,7 +2583,9 @@ export default function App() {
                             paddingBottom: "14px",
                             display: "grid",
                             gridTemplateColumns: `repeat(4, ${iconWidth}px)`,
-                            justifyContent: "space-between",
+                            justifyContent: "start",
+                            columnGap: `${gapWidth}px`,
+                            gridTemplateRows: `repeat(${HOME_GRID_ROWS}, ${rowHeightValue}px)`,
                             gridAutoRows: `${rowHeightValue}px`,
                             rowGap: `${rowGapValue}px`
                           };
@@ -2713,8 +2643,38 @@ export default function App() {
                                 className="flex-1 content-start select-none"
                                 style={gridStyle}
                               >
-                                {getPageItemsWithPositions(pageIdx).map(({ item, col, row }, index) => {
+                                {dragSession?.target?.page === pageIdx && draggedItem && (() => {
+                                  const span = getHomeItemDimensions(draggedItem.size);
+                                  return (
+                                    <div
+                                      className={`pointer-events-none z-40 rounded-xl border-2 ${
+                                        dragSession.validity === "invalid"
+                                          ? "border-rose-500 bg-rose-400/20"
+                                          : dragSession.validity === "swap"
+                                            ? "border-amber-500 bg-amber-300/20"
+                                            : "border-sky-500 bg-sky-300/20"
+                                      }`}
+                                      style={{
+                                        gridColumnStart: dragSession.target.column + 1,
+                                        gridColumnEnd: `span ${span.width}`,
+                                        gridRowStart: dragSession.target.row + 1,
+                                        gridRowEnd: `span ${span.height}`,
+                                      }}
+                                    />
+                                  );
+                                })()}
+                                {homeScreenItems
+                                  .filter((item) => item.position?.page === pageIdx)
+                                  .map((item, index) => {
                                   const alignClass = "justify-self-center items-center text-center";
+                                  const itemPosition = item.position!;
+                                  const itemSpan = getHomeItemDimensions(item.size);
+                                  const explicitGridStyle = {
+                                    gridColumnStart: itemPosition.column + 1,
+                                    gridColumnEnd: `span ${itemSpan.width}`,
+                                    gridRowStart: itemPosition.row + 1,
+                                    gridRowEnd: `span ${itemSpan.height}`,
+                                  };
 
                                   if (item.type === "app") {
                                     const app = desktopApps.find(a => a.id === item.id);
@@ -2729,11 +2689,12 @@ export default function App() {
                                         data-id={item.id}
                                         data-page={pageIdx}
                                         className={`grid-item col-span-1 row-span-1 flex flex-col ${alignClass} justify-start relative group transition-opacity duration-200 ${
-                                          isDragged ? "opacity-30 scale-95 cursor-grabbing" : "cursor-pointer"
+                                          isDragged ? "z-30 opacity-30 scale-95 cursor-grabbing" : "cursor-pointer"
                                         }`}
+                                        style={explicitGridStyle}
                                         onPointerDown={(e) => {
                                           if (isEditingHomeScreen) e.preventDefault();
-                                          handleItemPointerDown(e, item, index);
+                                          handleItemPointerDown(e, item);
                                         }}
                                         onClick={() => handleItemClick(item)}
                                       >
@@ -2776,6 +2737,8 @@ export default function App() {
 
                                         {isEditingHomeScreen && item.id !== "store" && item.id !== "settings" && (
                                           <button
+                                            data-home-delete
+                                            onPointerDown={(e) => e.stopPropagation()}
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               handleUninstallApp(item.id);
@@ -2819,12 +2782,18 @@ export default function App() {
                                         data-id={item.id}
                                         data-page={pageIdx}
                                         className={`grid-item ${colSpanClass} ${rowSpanClass} relative transition-opacity duration-200 ${
-                                          isDragged ? "opacity-30 scale-95" : ""
+                                          isDragged ? "z-30 opacity-30 scale-95" : ""
                                         }`}
-                                        style={{ height: currentWidgetHeight }}
+                                        style={{ ...explicitGridStyle, height: currentWidgetHeight }}
                                         onPointerDown={(e) => {
                                           if (isEditingHomeScreen) e.preventDefault();
-                                          handleItemPointerDown(e, item, index);
+                                          handleItemPointerDown(e, item);
+                                        }}
+                                        onClickCapture={(event) => {
+                                          if (isEditingHomeScreen && !(event.target as HTMLElement).closest("[data-home-delete]")) {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                          }
                                         }}
                                       >
                                         <div className={`w-full h-full ${
@@ -3028,6 +2997,15 @@ export default function App() {
                   {musicPlaybackError}
                 </button>
               )}
+              {homeLayoutError && (
+                <button
+                  type="button"
+                  onClick={() => setHomeLayoutError(null)}
+                  className="absolute bottom-24 left-1/2 z-[61] w-[86%] -translate-x-1/2 rounded-2xl bg-rose-50 px-4 py-3 text-left text-[11px] font-bold text-rose-600 shadow-lg"
+                >
+                  {homeLayoutError}
+                </button>
+              )}
 
             </div>
           ) : (
@@ -3219,9 +3197,28 @@ export default function App() {
                     onDeleteOfflineStory={handleDeleteOfflineStory}
                     onClose={() => setActiveApp(null)}
                     activeChatRelationId={activeChatRelationId}
-                    onNavigateToChat={(charId, relationId) => {
-                      setActiveChatCharId(charId);
-                      setActiveChatRelationId(relationId || null);
+                    onNavigateToChat={(charId, relationId, conversationId) => {
+                      const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+                      const relationship = relationId
+                        ? relationships.find((candidate) =>
+                            candidate.id === relationId
+                            && candidate.userIdentityId === ownerIdentityId
+                            && resolveCanonicalCharacterId(candidate.characterId, characters)
+                              === resolveCanonicalCharacterId(charId, characters),
+                          )
+                        : undefined;
+                      if (relationId && (
+                        !relationship
+                        || (conversationId
+                          && conversationId !== (relationship.conversationId || getConversationId(relationship.id)))
+                      )) return;
+                      const groupCharacter = !relationId
+                        ? characters.find((character) => character.id === charId && character.isGroupChat)
+                        : undefined;
+                      if (!relationId && conversationId?.startsWith("group:")
+                        && (!groupCharacter || conversationId !== `group:${groupCharacter.id}`)) return;
+                      setActiveChatCharId(relationship?.characterId || charId);
+                      setActiveChatRelationId(relationship?.id || null);
                       setActiveApp("chat");
                     }}
                     memories={memories}

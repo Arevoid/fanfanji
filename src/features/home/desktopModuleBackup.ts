@@ -1,4 +1,5 @@
-import type { UserSettings } from "../../types";
+import type { HomeScreenItem, UserSettings } from "../../types";
+import { normalizeHomeScreenLayout } from "./homeGrid";
 
 export const DESKTOP_SETTING_KEYS = [
   "wallpaper", "customIcons", "dockColor", "dockOpacity", "dockBorderRadius",
@@ -56,7 +57,18 @@ export const parseDesktopModuleBackup = (value: unknown): DesktopModuleBackup =>
   const storage = source.storage as Record<string, unknown>;
   if (Object.keys(settings).some((key) => !DESKTOP_SETTING_KEYS.includes(key as (typeof DESKTOP_SETTING_KEYS)[number]))) throw new Error("备份包含不支持的设置字段。");
   if (Object.entries(storage).some(([key, item]) => !isDesktopStorageKey(key) || typeof item !== "string")) throw new Error("备份包含无效的小组件数据。");
-  return { format: source.format, version: source.version, exportedAt: typeof source.exportedAt === "number" ? source.exportedAt : 0, settings: settings as DesktopModuleBackup["settings"], storage: storage as Record<string, string> };
+  const normalizedStorage = { ...storage } as Record<string, string>;
+  if (normalizedStorage.phone_homescreen_items) {
+    try {
+      const parsedLayout = JSON.parse(normalizedStorage.phone_homescreen_items);
+      normalizedStorage.phone_homescreen_items = JSON.stringify(normalizeHomeScreenLayout(
+        Array.isArray(parsedLayout) ? parsedLayout as HomeScreenItem[] : [],
+      ));
+    } catch {
+      normalizedStorage.phone_homescreen_items = "[]";
+    }
+  }
+  return { format: source.format, version: source.version, exportedAt: typeof source.exportedAt === "number" ? source.exportedAt : 0, settings: settings as DesktopModuleBackup["settings"], storage: normalizedStorage };
 };
 
 /** Merges desktop-only values without touching accounts, API credentials, chats, or characters. */
