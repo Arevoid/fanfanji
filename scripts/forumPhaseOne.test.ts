@@ -173,5 +173,8 @@ assert.doesNotMatch(forumSource, /localStorage\./);
 
 const storeSource = readFileSync(new URL("../src/components/AppStore.tsx", import.meta.url), "utf8");
 assert.doesNotMatch(storeSource, /id === "forum"/);
+const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+assert.match(appSource, /localStorage\.setItem\("phone_installed_apps", JSON\.stringify\(installedAppIds\)\)/);
+assert.match(appSource, /const placedAppIds = homeScreenItems[\s\S]*setInstalledAppIds/);
 
 console.log("PASS forum phase one identity isolation, authors, likes, floors, quotes, cleanup, persistence, backup, and unlocked install");

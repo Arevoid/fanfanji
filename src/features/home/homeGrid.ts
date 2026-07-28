@@ -165,6 +165,84 @@ export const placeItemAt = (
     : candidate);
 };
 
+const findNearestAvailablePosition = (
+  items: readonly HomeScreenItem[],
+  item: Pick<HomeScreenItem, "id" | "size">,
+  origin: HomeScreenPosition,
+  preferredPosition: HomeScreenPosition | undefined,
+  rowCount: number,
+): HomeScreenPosition | undefined => {
+  if (preferredPosition && canPlaceAt(items, item, preferredPosition, rowCount)) {
+    return preferredPosition;
+  }
+  const { width, height } = getItemSpan(item.size);
+  const normalizedRows = normalizeRowCount(rowCount);
+  const candidates: HomeScreenPosition[] = [];
+  for (let page = 0; page < MAX_HOME_PAGES; page += 1) {
+    for (let row = 0; row + height <= normalizedRows; row += 1) {
+      for (let column = 0; column + width <= HOME_GRID_COLUMNS; column += 1) {
+        candidates.push({ page, row, column });
+      }
+    }
+  }
+  candidates.sort((left, right) => {
+    const leftPageDistance = Math.abs(left.page - origin.page);
+    const rightPageDistance = Math.abs(right.page - origin.page);
+    if (leftPageDistance !== rightPageDistance) return leftPageDistance - rightPageDistance;
+    const leftCellDistance = Math.abs(left.row - origin.row) + Math.abs(left.column - origin.column);
+    const rightCellDistance = Math.abs(right.row - origin.row) + Math.abs(right.column - origin.column);
+    if (leftCellDistance !== rightCellDistance) return leftCellDistance - rightCellDistance;
+    return left.page - right.page || left.row - right.row || left.column - right.column;
+  });
+  return candidates.find((position) => canPlaceAt(items, item, position, normalizedRows));
+};
+
+/**
+ * Places the dragged item at the requested target and moves only the items
+ * directly covered by that target. Existing unrelated items never compact.
+ */
+export const placeItemWithDisplacement = (
+  items: readonly HomeScreenItem[],
+  itemId: string,
+  target: HomeScreenPosition,
+  rowCount = MAX_HOME_GRID_ROWS,
+): HomeScreenItem[] => {
+  const item = items.find((candidate) => candidate.id === itemId);
+  if (!item || !item.position || !isValidHomePosition(target, item.size, rowCount)) return [...items];
+  const overlappingIds = getOverlappingItemIds(items, item, target, rowCount);
+  if (overlappingIds.length === 0) return placeItemAt(items, itemId, target, rowCount);
+
+  const overlappingItems = overlappingIds
+    .map((id) => items.find((candidate) => candidate.id === id))
+    .filter((candidate): candidate is HomeScreenItem => Boolean(candidate?.position));
+  if (overlappingItems.length !== overlappingIds.length) return [...items];
+
+  const movingIds = new Set([itemId, ...overlappingIds]);
+  const placed = items.filter((candidate) => !movingIds.has(candidate.id));
+  placed.push({ ...item, page: target.page, position: { ...target } });
+
+  const nextPositions = new Map<string, HomeScreenPosition>([[itemId, { ...target }]]);
+  for (const displaced of overlappingItems) {
+    const nextPosition = findNearestAvailablePosition(
+      placed,
+      displaced,
+      displaced.position!,
+      item.position,
+      rowCount,
+    );
+    if (!nextPosition) return [...items];
+    nextPositions.set(displaced.id, nextPosition);
+    placed.push({ ...displaced, page: nextPosition.page, position: { ...nextPosition } });
+  }
+
+  return items.map((candidate) => {
+    const position = nextPositions.get(candidate.id);
+    return position
+      ? { ...candidate, page: position.page, position: { ...position } }
+      : candidate;
+  });
+};
+
 export const swapOneByOneItems = (
   items: readonly HomeScreenItem[],
   firstId: string,

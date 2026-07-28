@@ -17,6 +17,7 @@ import {
   migrateLegacyHomeScreenLayout,
   normalizeHomeScreenLayout,
   placeItemAt,
+  placeItemWithDisplacement,
   swapOneByOneItems,
 } from "../src/features/home/homeGrid";
 import { sanitizeSystemBackupValue } from "../src/components/AppSettings";
@@ -84,6 +85,43 @@ assert.deepEqual(swapped[1].position, { page: 0, row: 0, column: 0 });
 assert.deepEqual(
   swapOneByOneItems([item("big", "2x2", 0, 0, 0), item("small", "1x1", 0, 3, 3)], "big", "small"),
   [item("big", "2x2", 0, 0, 0), item("small", "1x1", 0, 3, 3)],
+);
+
+const displacedLayout = placeItemWithDisplacement([
+  item("dragged-widget", "2x2", 0, 0, 0),
+  item("occupied-widget", "2x2", 0, 2, 0),
+  item("untouched-app", "1x1", 0, 0, 3),
+], "dragged-widget", { page: 0, row: 2, column: 0 }, 8);
+assert.deepEqual(
+  displacedLayout.find((entry) => entry.id === "dragged-widget")?.position,
+  { page: 0, row: 2, column: 0 },
+);
+assert.deepEqual(
+  displacedLayout.find((entry) => entry.id === "occupied-widget")?.position,
+  { page: 0, row: 0, column: 0 },
+  "the covered widget should first avoid into the dragged item's vacated position",
+);
+assert.deepEqual(
+  displacedLayout.find((entry) => entry.id === "untouched-app")?.position,
+  { page: 0, row: 0, column: 3 },
+  "unrelated desktop items must not be compacted",
+);
+const multiCollisionLayout = placeItemWithDisplacement([
+  item("wide-dragged", "2x4", 0, 4, 0),
+  item("left-app", "1x1", 0, 0, 0),
+  item("right-widget", "2x2", 0, 0, 1),
+], "wide-dragged", { page: 0, row: 0, column: 0 }, 8);
+assert.deepEqual(
+  multiCollisionLayout.find((entry) => entry.id === "wide-dragged")?.position,
+  { page: 0, row: 0, column: 0 },
+);
+assert.notDeepEqual(
+  multiCollisionLayout.find((entry) => entry.id === "left-app")?.position,
+  { page: 0, row: 0, column: 0 },
+);
+assert.notDeepEqual(
+  multiCollisionLayout.find((entry) => entry.id === "right-widget")?.position,
+  { page: 0, row: 0, column: 1 },
 );
 
 const occupancy = buildOccupancy(fixed, 0);
@@ -227,6 +265,9 @@ assert.match(appSource, /className="home-screen-drag-surface/);
 assert.match(appSource, /onContextMenu=\{\(event\) => event\.preventDefault\(\)\}/);
 assert.match(appSource, /onDragStartCapture=\{\(event\) => event\.preventDefault\(\)\}/);
 assert.match(appSource, /gridTemplateRows:\s*`repeat\(\$\{homeGridRows\}/);
+assert.match(appSource, /setPointerCapture\(pending\.pointerId\)/);
+assert.match(appSource, /placeItemWithDisplacement/);
+assert.match(appSource, /distance > 24/);
 assert.match(appSource, /const raw = localStorage\.getItem\("phone_homescreen_items"\)/);
 assert.match(appSource, /if \(raw !== null\)[\s\S]*Array\.isArray\(parsed\) \? parsed : \[\]/);
 

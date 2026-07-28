@@ -61,6 +61,7 @@ import {
   getVisibleHomePageCount,
   normalizeHomeScreenLayout,
   placeItemAt,
+  placeItemWithDisplacement,
   swapOneByOneItems,
 } from "./features/home/homeGrid";
 import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./features/music/services/dualMusicRecommendationService";
@@ -139,7 +140,7 @@ interface DragSession {
   target?: HomeScreenPosition;
   grabOffsetX: number;
   grabOffsetY: number;
-  validity: "valid" | "invalid" | "swap";
+  validity: "valid" | "invalid" | "swap" | "displace";
   swapWithId?: string;
 }
 
@@ -491,7 +492,17 @@ export default function App() {
 
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
     const raw = localStorage.getItem("phone_installed_apps");
-    const parsed = raw ? JSON.parse(raw) as string[] : ["chat", "archives", "worldbook", "music", "notes", "offline"];
+    let parsed: string[] = ["chat", "archives", "worldbook", "music", "notes", "offline"];
+    if (raw) {
+      try {
+        const candidate = JSON.parse(raw);
+        if (Array.isArray(candidate)) {
+          parsed = candidate.filter((id): id is string => typeof id === "string" && Boolean(id));
+        }
+      } catch {
+        // Keep the safe defaults when a legacy value is malformed.
+      }
+    }
     const filtered = parsed.filter(id => id !== "schedule");
     if (!filtered.includes("notes")) {
       filtered.push("notes");
@@ -501,6 +512,10 @@ export default function App() {
     }
     return filtered;
   });
+
+  useEffect(() => {
+    localStorage.setItem("phone_installed_apps", JSON.stringify(installedAppIds));
+  }, [installedAppIds]);
 
   // Global Music Player State
   const [currentTrack, setCurrentTrack] = useState<MusicTrack | null>(null);
@@ -946,6 +961,8 @@ export default function App() {
     grabOffsetX: number;
     grabOffsetY: number;
     longPressed: boolean;
+    pointerId: number;
+    targetElement: HTMLDivElement;
   } | null>(null);
   const suppressNextItemClickRef = useRef(false);
   const [isShowingAddWidget, setIsShowingAddWidget] = useState(false);
@@ -979,6 +996,18 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("phone_homescreen_items", JSON.stringify(homeScreenItems));
+  }, [homeScreenItems]);
+
+  useEffect(() => {
+    const placedAppIds = homeScreenItems
+      .filter((item) => item.type === "app")
+      .map((item) => item.id);
+    setInstalledAppIds((current) => {
+      const merged = [...new Set([...current, ...placedAppIds])];
+      return merged.length === current.length && merged.every((id, index) => id === current[index])
+        ? current
+        : merged;
+    });
   }, [homeScreenItems]);
 
   useEffect(() => {
@@ -1055,6 +1084,8 @@ export default function App() {
       grabOffsetX: e.clientX - itemRect.left,
       grabOffsetY: e.clientY - itemRect.top,
       longPressed: isEditingHomeScreen,
+      pointerId: e.pointerId,
+      targetElement: e.currentTarget,
     };
     setDragCurrent({ x: e.clientX, y: e.clientY });
     swipeStartRef.current = { x: e.clientX, y: e.clientY };
@@ -1063,8 +1094,25 @@ export default function App() {
     if (!isEditingHomeScreen) {
       longPressTimerRef.current = setTimeout(() => {
         setIsEditingHomeScreen(true);
-        if (pendingItemPressRef.current?.item.id === item.id) {
-          pendingItemPressRef.current.longPressed = true;
+        const pending = pendingItemPressRef.current;
+        if (pending?.item.id === item.id && pending.item.position) {
+          pending.longPressed = true;
+          try {
+            pending.targetElement.setPointerCapture(pending.pointerId);
+          } catch {
+            // Pointer capture may be unavailable after a browser gesture cancellation.
+          }
+          const nextSession: DragSession = {
+            itemId: pending.item.id,
+            origin: { ...pending.item.position },
+            target: { ...pending.item.position },
+            grabOffsetX: pending.grabOffsetX,
+            grabOffsetY: pending.grabOffsetY,
+            validity: "valid",
+          };
+          suppressNextItemClickRef.current = true;
+          dragSessionRef.current = nextSession;
+          setDragSession(nextSession);
         }
       }, 400);
     }
@@ -1138,6 +1186,16 @@ export default function App() {
       && item.size === "1x1"
       && swapTarget.size === "1x1",
     );
+    const displacedLayout = overlaps.length > 0
+      ? placeItemWithDisplacement(homeScreenItems, item.id, target, homeGridRows)
+      : null;
+    const displacedItem = displacedLayout?.find((candidate) => candidate.id === item.id);
+    const canDisplace = Boolean(
+      overlaps.length > 0
+      && displacedItem?.position?.page === target.page
+      && displacedItem.position.row === target.row
+      && displacedItem.position.column === target.column,
+    );
     const nextSession: DragSession = {
       ...session,
       target,
@@ -1145,6 +1203,8 @@ export default function App() {
         ? "valid"
         : canSwap
           ? "swap"
+          : canDisplace
+            ? "displace"
           : "invalid",
       swapWithId: canSwap ? swapTarget?.id : undefined,
     };
@@ -1157,7 +1217,7 @@ export default function App() {
     const activeSession = dragSessionRef.current;
     if (!activeSession && pending) {
       const distance = Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY);
-      if (!pending.longPressed && distance > 10) {
+      if (!pending.longPressed && distance > 24) {
         if (longPressTimerRef.current) {
           clearTimeout(longPressTimerRef.current);
           longPressTimerRef.current = null;
@@ -1222,6 +1282,14 @@ export default function App() {
       setHomeScreenItems((current) => {
         if (completedSession.validity === "swap" && completedSession.swapWithId) {
           return swapOneByOneItems(current, completedSession.itemId, completedSession.swapWithId);
+        }
+        if (completedSession.validity === "displace") {
+          return placeItemWithDisplacement(
+            current,
+            completedSession.itemId,
+            completedSession.target!,
+            homeGridRows,
+          );
         }
         if (completedSession.validity === "valid") {
           return placeItemAt(current, completedSession.itemId, completedSession.target!, homeGridRows);
@@ -2699,7 +2767,7 @@ export default function App() {
                                       className={`pointer-events-none z-40 rounded-xl border-2 ${
                                         dragSession.validity === "invalid"
                                           ? "border-rose-500 bg-rose-400/20"
-                                          : dragSession.validity === "swap"
+                                          : dragSession.validity === "swap" || dragSession.validity === "displace"
                                             ? "border-amber-500 bg-amber-300/20"
                                             : "border-sky-500 bg-sky-300/20"
                                       }`}
