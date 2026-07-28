@@ -4,6 +4,7 @@ import type { HomeScreenItem } from "../src/types";
 import {
   HOME_GRID_COLUMNS,
   HOME_GRID_ROWS,
+  MAX_HOME_GRID_ROWS,
   MAX_HOME_PAGES,
   buildOccupancy,
   canPlaceAt,
@@ -11,6 +12,7 @@ import {
   getHighestOccupiedPage,
   getHomeGridPositionFromPoint,
   getItemSpan,
+  getResponsiveHomeGridRowCount,
   getVisibleHomePageCount,
   migrateLegacyHomeScreenLayout,
   normalizeHomeScreenLayout,
@@ -37,6 +39,7 @@ const item = (
 
 assert.equal(HOME_GRID_COLUMNS, 4);
 assert.equal(HOME_GRID_ROWS, 4);
+assert.equal(MAX_HOME_GRID_ROWS, 12);
 assert.deepEqual(getItemSpan("1x1"), { width: 1, height: 1 });
 assert.deepEqual(getItemSpan("2x2"), { width: 2, height: 2 });
 assert.deepEqual(getItemSpan("1x4"), { width: 4, height: 1 });
@@ -88,15 +91,57 @@ assert.equal(occupancy[0][0], "app-a");
 assert.equal(occupancy[1][1], "widget-a");
 assert.equal(occupancy[2][2], "widget-a");
 
-const fullPage = Array.from({ length: 16 }, (_, index) =>
+const responsiveRows = getResponsiveHomeGridRowCount({
+  containerHeight: 652,
+  paddingTop: 14,
+  paddingBottom: 14,
+  rowHeight: 64,
+  rowGap: 16,
+});
+assert.equal(responsiveRows, 8, "the usable full-screen height must expose rows below the legacy 4x4 area");
+assert.equal(getResponsiveHomeGridRowCount({
+  containerHeight: 320,
+  paddingTop: 14,
+  paddingBottom: 14,
+  rowHeight: 64,
+  rowGap: 16,
+}), HOME_GRID_ROWS, "short screens keep the safe four-row minimum");
+assert.equal(
+  canPlaceAt([], item("lower-screen-item", "1x1"), { page: 0, row: 7, column: 3 }, responsiveRows),
+  true,
+);
+assert.equal(
+  canPlaceAt([], item("lower-screen-item", "1x1"), { page: 0, row: 7, column: 3 }, 5),
+  false,
+);
+const repairedForShortScreen = normalizeHomeScreenLayout([
+  item("still-valid", "1x1", 0, 3, 2),
+  item("needs-repair", "1x1", 0, 7, 3),
+], 5);
+assert.deepEqual(
+  repairedForShortScreen.find((entry) => entry.id === "still-valid")?.position,
+  { page: 0, row: 3, column: 2 },
+  "responsive repair must not compact positions that still fit",
+);
+assert.deepEqual(
+  normalizeHomeScreenLayout(repairedForShortScreen, 5),
+  repairedForShortScreen,
+  "responsive out-of-bounds repair must be idempotent",
+);
+
+const fullPage = Array.from({ length: responsiveRows * HOME_GRID_COLUMNS }, (_, index) =>
   item(`full-${index}`, "1x1", 0, Math.floor(index / 4), index % 4));
-assert.deepEqual(findFirstAvailablePosition(fullPage, "1x1", 0), { page: 1, row: 0, column: 0 });
-const allPagesFull = Array.from({ length: MAX_HOME_PAGES * 16 }, (_, index) => {
-  const page = Math.floor(index / 16);
-  const cell = index % 16;
+assert.deepEqual(
+  findFirstAvailablePosition(fullPage, "1x1", 0, responsiveRows),
+  { page: 1, row: 0, column: 0 },
+);
+const cellsPerResponsivePage = responsiveRows * HOME_GRID_COLUMNS;
+const allPagesFull = Array.from({ length: MAX_HOME_PAGES * cellsPerResponsivePage }, (_, index) => {
+  const page = Math.floor(index / cellsPerResponsivePage);
+  const cell = index % cellsPerResponsivePage;
   return item(`limit-${index}`, "1x1", page, Math.floor(cell / 4), cell % 4);
 });
-assert.equal(findFirstAvailablePosition(allPagesFull, "1x1", 0), undefined);
+assert.equal(findFirstAvailablePosition(allPagesFull, "1x1", 0, responsiveRows), undefined);
 
 const legacy = [
   item("legacy-wide", "2x3"),
@@ -163,11 +208,13 @@ const positionAtWidth = (containerWidth: number, column: number, row: number) =>
     columnGap: gap,
     rowGap: gap,
     rowHeight,
+    rowCount: responsiveRows,
     size: "1x1",
   });
 };
 assert.deepEqual(positionAtWidth(319, 3, 3), { page: 0, row: 3, column: 3 });
 assert.deepEqual(positionAtWidth(420, 3, 3), { page: 0, row: 3, column: 3 });
+assert.deepEqual(positionAtWidth(420, 3, 7), { page: 0, row: 7, column: 3 });
 
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 assert.match(appSource, /gridColumnStart:\s*itemPosition\.column \+ 1/);
@@ -176,6 +223,10 @@ assert.match(appSource, /setTimeout\(\(\) => \{[\s\S]*setCurrentPage\(targetPage
 assert.match(appSource, /handleGlobalPointerCancel[\s\S]*finishDrag\(true\)/);
 assert.match(appSource, /data-home-delete/);
 assert.match(appSource, /onClickCapture=\{\(event\) => \{[\s\S]*isEditingHomeScreen/);
+assert.match(appSource, /className="home-screen-drag-surface/);
+assert.match(appSource, /onContextMenu=\{\(event\) => event\.preventDefault\(\)\}/);
+assert.match(appSource, /onDragStartCapture=\{\(event\) => event\.preventDefault\(\)\}/);
+assert.match(appSource, /gridTemplateRows:\s*`repeat\(\$\{homeGridRows\}/);
 assert.match(appSource, /const raw = localStorage\.getItem\("phone_homescreen_items"\)/);
 assert.match(appSource, /if \(raw !== null\)[\s\S]*Array\.isArray\(parsed\) \? parsed : \[\]/);
 
@@ -196,4 +247,4 @@ assert.deepEqual(
   "restoring an explicitly empty system backup must not seed defaults",
 );
 
-console.log("PASS fixed 4x4 home positions, migration, vacancies, swaps, limits, and responsive hit testing");
+console.log("PASS full-height responsive home positions, migration, vacancies, swaps, limits, and native-drag suppression");

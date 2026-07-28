@@ -3,7 +3,26 @@ import type { HomeScreenItem, HomeScreenPosition } from "../../types";
 export type HomeItemSize = HomeScreenItem["size"];
 export const HOME_GRID_COLUMNS = 4;
 export const HOME_GRID_ROWS = 4;
+export const MAX_HOME_GRID_ROWS = 12;
 export const MAX_HOME_PAGES = 20;
+
+const normalizeRowCount = (rowCount: number) =>
+  Math.max(HOME_GRID_ROWS, Math.min(MAX_HOME_GRID_ROWS, Math.floor(rowCount) || HOME_GRID_ROWS));
+
+export const getResponsiveHomeGridRowCount = (input: {
+  containerHeight: number;
+  paddingTop: number;
+  paddingBottom: number;
+  rowHeight: number;
+  rowGap: number;
+}) => {
+  const usableHeight = Math.max(0, input.containerHeight - input.paddingTop - input.paddingBottom);
+  if (!Number.isFinite(usableHeight) || !Number.isFinite(input.rowHeight) || input.rowHeight <= 0) {
+    return HOME_GRID_ROWS;
+  }
+  const rowGap = Math.max(0, Number.isFinite(input.rowGap) ? input.rowGap : 0);
+  return normalizeRowCount(Math.floor((usableHeight + rowGap) / (input.rowHeight + rowGap)));
+};
 
 export const getItemSpan = (size: HomeItemSize) => {
   switch (size) {
@@ -22,6 +41,7 @@ const isInteger = (value: number) => Number.isFinite(value) && Number.isInteger(
 export const isValidHomePosition = (
   position: HomeScreenPosition | undefined,
   size: HomeItemSize,
+  rowCount = MAX_HOME_GRID_ROWS,
 ): position is HomeScreenPosition => {
   if (!position
     || !isInteger(position.page)
@@ -33,13 +53,13 @@ export const isValidHomePosition = (
     || position.column < 0) return false;
   const { width, height } = getItemSpan(size);
   return position.column + width <= HOME_GRID_COLUMNS
-    && position.row + height <= HOME_GRID_ROWS;
+    && position.row + height <= normalizeRowCount(rowCount);
 };
 
 export type HomeOccupancy = Array<Array<string | null>>;
 
-const emptyOccupancy = (): HomeOccupancy =>
-  Array.from({ length: HOME_GRID_ROWS }, () =>
+const emptyOccupancy = (rowCount: number): HomeOccupancy =>
+  Array.from({ length: normalizeRowCount(rowCount) }, () =>
     Array<string | null>(HOME_GRID_COLUMNS).fill(null));
 
 const fillOccupancy = (
@@ -60,13 +80,14 @@ export const buildOccupancy = (
   items: readonly HomeScreenItem[],
   page: number,
   ignoreItemId?: string,
+  rowCount = MAX_HOME_GRID_ROWS,
 ): HomeOccupancy => {
-  const occupancy = emptyOccupancy();
+  const occupancy = emptyOccupancy(rowCount);
   for (const item of items) {
     if (item.id === ignoreItemId
       || !item.position
       || item.position.page !== page
-      || !isValidHomePosition(item.position, item.size)) continue;
+      || !isValidHomePosition(item.position, item.size, rowCount)) continue;
     const { width, height } = getItemSpan(item.size);
     let free = true;
     for (let row = item.position.row; row < item.position.row + height && free; row += 1) {
@@ -86,9 +107,10 @@ export const getOverlappingItemIds = (
   items: readonly HomeScreenItem[],
   item: Pick<HomeScreenItem, "id" | "size">,
   position: HomeScreenPosition,
+  rowCount = MAX_HOME_GRID_ROWS,
 ): string[] => {
-  if (!isValidHomePosition(position, item.size)) return [];
-  const occupancy = buildOccupancy(items, position.page, item.id);
+  if (!isValidHomePosition(position, item.size, rowCount)) return [];
+  const occupancy = buildOccupancy(items, position.page, item.id, rowCount);
   const { width, height } = getItemSpan(item.size);
   const ids = new Set<string>();
   for (let row = position.row; row < position.row + height; row += 1) {
@@ -104,23 +126,26 @@ export const canPlaceAt = (
   items: readonly HomeScreenItem[],
   item: Pick<HomeScreenItem, "id" | "size">,
   position: HomeScreenPosition,
+  rowCount = MAX_HOME_GRID_ROWS,
 ): boolean =>
-  isValidHomePosition(position, item.size)
-  && getOverlappingItemIds(items, item, position).length === 0;
+  isValidHomePosition(position, item.size, rowCount)
+  && getOverlappingItemIds(items, item, position, rowCount).length === 0;
 
 export const findFirstAvailablePosition = (
   items: readonly HomeScreenItem[],
   size: HomeItemSize,
   startPage = 0,
+  rowCount = MAX_HOME_GRID_ROWS,
 ): HomeScreenPosition | undefined => {
   const firstPage = Math.max(0, Math.min(MAX_HOME_PAGES - 1, Math.floor(startPage) || 0));
   const probe = { id: "__home-position-probe__", size };
   const { width, height } = getItemSpan(size);
+  const normalizedRows = normalizeRowCount(rowCount);
   for (let page = firstPage; page < MAX_HOME_PAGES; page += 1) {
-    for (let row = 0; row + height <= HOME_GRID_ROWS; row += 1) {
+    for (let row = 0; row + height <= normalizedRows; row += 1) {
       for (let column = 0; column + width <= HOME_GRID_COLUMNS; column += 1) {
         const position = { page, row, column };
-        if (canPlaceAt(items, probe, position)) return position;
+        if (canPlaceAt(items, probe, position, normalizedRows)) return position;
       }
     }
   }
@@ -131,9 +156,10 @@ export const placeItemAt = (
   items: readonly HomeScreenItem[],
   itemId: string,
   position: HomeScreenPosition,
+  rowCount = MAX_HOME_GRID_ROWS,
 ): HomeScreenItem[] => {
   const item = items.find((candidate) => candidate.id === itemId);
-  if (!item || !canPlaceAt(items, item, position)) return [...items];
+  if (!item || !canPlaceAt(items, item, position, rowCount)) return [...items];
   return items.map((candidate) => candidate.id === itemId
     ? { ...candidate, page: position.page, position: { ...position } }
     : candidate);
@@ -163,19 +189,20 @@ const findLegacySparsePosition = (
   size: HomeItemSize,
   page: number,
   cursor: { row: number; column: number },
+  rowCount: number,
 ): HomeScreenPosition | undefined => {
   const probe = { id: "__legacy-probe__", size };
   const { width, height } = getItemSpan(size);
   let row = cursor.row;
   let column = cursor.column;
-  while (row + height <= HOME_GRID_ROWS) {
+  while (row + height <= rowCount) {
     if (column + width > HOME_GRID_COLUMNS) {
       row += 1;
       column = 0;
       continue;
     }
     const position = { page, row, column };
-    if (canPlaceAt(placed, probe, position)) return position;
+    if (canPlaceAt(placed, probe, position, rowCount)) return position;
     column += 1;
     if (column >= HOME_GRID_COLUMNS) {
       row += 1;
@@ -203,7 +230,9 @@ const advanceLegacyCursor = (
  */
 export const migrateLegacyHomeScreenLayout = (
   sourceItems: readonly HomeScreenItem[],
+  rowCount = MAX_HOME_GRID_ROWS,
 ): HomeScreenItem[] => {
+  const normalizedRows = normalizeRowCount(rowCount);
   const uniqueItems: HomeScreenItem[] = [];
   const seenIds = new Set<string>();
   for (const item of sourceItems) {
@@ -215,9 +244,9 @@ export const migrateLegacyHomeScreenLayout = (
   const placed: HomeScreenItem[] = [];
   const reservedIds = new Set<string>();
   for (const item of uniqueItems) {
-    if (!isValidHomePosition(item.position, item.size)) continue;
+    if (!isValidHomePosition(item.position, item.size, normalizedRows)) continue;
     const normalized = { ...item, page: item.position.page, position: { ...item.position } };
-    if (!canPlaceAt(placed, normalized, normalized.position)) continue;
+    if (!canPlaceAt(placed, normalized, normalized.position, normalizedRows)) continue;
     placed.push(normalized);
     reservedIds.add(item.id);
   }
@@ -232,8 +261,8 @@ export const migrateLegacyHomeScreenLayout = (
     const cursor = cursors.get(startPage) || { row: 0, column: 0 };
     let position = item.position
       ? undefined
-      : findLegacySparsePosition(placed, item.size, startPage, cursor);
-    if (!position) position = findFirstAvailablePosition(placed, item.size, startPage);
+      : findLegacySparsePosition(placed, item.size, startPage, cursor, normalizedRows);
+    if (!position) position = findFirstAvailablePosition(placed, item.size, startPage, normalizedRows);
     if (!position) continue;
     const normalized = { ...item, page: position.page, position: { ...position } };
     placed.push(normalized);
@@ -285,6 +314,7 @@ export const getHomeGridPositionFromPoint = (input: {
   columnGap: number;
   rowGap: number;
   rowHeight: number;
+  rowCount?: number;
   size: HomeItemSize;
 }): HomeScreenPosition => {
   const trackWidth = (
@@ -298,9 +328,10 @@ export const getHomeGridPositionFromPoint = (input: {
   const top = input.pointerY - input.grabOffsetY - input.containerTop - input.paddingTop;
   const rawColumn = Math.round(left / (trackWidth + input.columnGap));
   const rawRow = Math.round(top / (input.rowHeight + input.rowGap));
+  const rowCount = normalizeRowCount(input.rowCount ?? MAX_HOME_GRID_ROWS);
   return {
     page: Math.max(0, Math.min(MAX_HOME_PAGES - 1, Math.floor(input.page) || 0)),
-    row: Math.max(0, Math.min(HOME_GRID_ROWS - height, rawRow)),
+    row: Math.max(0, Math.min(rowCount - height, rawRow)),
     column: Math.max(0, Math.min(HOME_GRID_COLUMNS - width, rawColumn)),
   };
 };
@@ -312,10 +343,10 @@ export const canPlaceHomeItems = (
   columns = HOME_GRID_COLUMNS,
   maxRows = HOME_GRID_ROWS,
 ) => {
-  if (columns !== HOME_GRID_COLUMNS || maxRows !== HOME_GRID_ROWS) return false;
+  if (columns !== HOME_GRID_COLUMNS || maxRows < HOME_GRID_ROWS || maxRows > MAX_HOME_GRID_ROWS) return false;
   const placed: HomeScreenItem[] = [];
   for (const [index, item] of existingItems.entries()) {
-    const position = findFirstAvailablePosition(placed, item.size, 0);
+    const position = findFirstAvailablePosition(placed, item.size, 0, maxRows);
     if (!position || position.page !== 0) return false;
     placed.push({
       id: `compat-${index}`,
@@ -325,6 +356,6 @@ export const canPlaceHomeItems = (
       position,
     });
   }
-  const position = findFirstAvailablePosition(placed, newSize, 0);
+  const position = findFirstAvailablePosition(placed, newSize, 0, maxRows);
   return Boolean(position && position.page === 0);
 };

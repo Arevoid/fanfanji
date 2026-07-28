@@ -50,7 +50,6 @@ import {
 } from "./components/HomeScreenWidgets";
 import {
   HOME_GRID_COLUMNS,
-  HOME_GRID_ROWS,
   MAX_HOME_PAGES,
   canPlaceAt,
   findFirstAvailablePosition,
@@ -58,6 +57,7 @@ import {
   getHighestOccupiedPage,
   getHomeItemDimensions,
   getOverlappingItemIds,
+  getResponsiveHomeGridRowCount,
   getVisibleHomePageCount,
   normalizeHomeScreenLayout,
   placeItemAt,
@@ -952,6 +952,24 @@ export default function App() {
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const pageViewportRef = useRef<HTMLDivElement | null>(null);
   const [homeGridWidth, setHomeGridWidth] = useState(343);
+  const [homeGridHeight, setHomeGridHeight] = useState(0);
+  const homeGridIconWidth = settings.hideAppNames ? 60 : 52;
+  const homeGridPadding = 12;
+  const homeGridInnerWidth = homeGridWidth - homeGridPadding * 2;
+  const homeGridColumnGap = Math.max(
+    4,
+    (homeGridInnerWidth - HOME_GRID_COLUMNS * homeGridIconWidth) / (HOME_GRID_COLUMNS - 1),
+  );
+  const homeGridRowGap = 16;
+  const homeGridWidgetWidth = 2 * homeGridIconWidth + homeGridColumnGap;
+  const homeGridRowHeight = (homeGridWidgetWidth - homeGridRowGap) / 2;
+  const homeGridRows = getResponsiveHomeGridRowCount({
+    containerHeight: homeGridHeight,
+    paddingTop: 14,
+    paddingBottom: 14,
+    rowHeight: homeGridRowHeight,
+    rowGap: homeGridRowGap,
+  });
   const pageSwitchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pageSwitchEdgeRef = useRef<"left" | "right" | null>(null);
   const draggedItem = dragSession
@@ -970,12 +988,32 @@ export default function App() {
   useEffect(() => {
     const grid = pageContainerRef.current;
     if (!grid) return;
-    const updateWidth = () => setHomeGridWidth(grid.getBoundingClientRect().width);
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
+    const updateGridSize = () => {
+      const rect = grid.getBoundingClientRect();
+      setHomeGridWidth(rect.width);
+      setHomeGridHeight(rect.height);
+    };
+    updateGridSize();
+    const observer = new ResizeObserver(updateGridSize);
     observer.observe(grid);
     return () => observer.disconnect();
   }, [currentPage, visibleHomePageCount]);
+
+  useEffect(() => {
+    setHomeScreenItems((current) => {
+      const normalized = normalizeHomeScreenLayout(current, homeGridRows);
+      const unchanged = normalized.length === current.length
+        && normalized.every((item, index) => {
+          const previous = current[index];
+          return previous?.id === item.id
+            && previous.page === item.page
+            && previous.position?.page === item.position?.page
+            && previous.position?.row === item.position?.row
+            && previous.position?.column === item.position?.column;
+        });
+      return unchanged ? current : normalized;
+    });
+  }, [homeGridRows]);
 
   const handleInstallApp = (id: string) => {
     if (installedAppIds.includes(id)) return;
@@ -984,7 +1022,7 @@ export default function App() {
         setInstalledAppIds((previous) => previous.includes(id) ? previous : [...previous, id]);
         return current;
       }
-      const position = findFirstAvailablePosition(current, "1x1", 0);
+      const position = findFirstAvailablePosition(current, "1x1", 0, homeGridRows);
       if (!position) {
         setHomeLayoutError(`桌面已达到 ${MAX_HOME_PAGES} 页上限，无法安装更多应用。`);
         return current;
@@ -1088,9 +1126,10 @@ export default function App() {
       columnGap,
       rowGap,
       rowHeight: Number.parseFloat(style.gridAutoRows) || fallbackTrackWidth,
+      rowCount: homeGridRows,
       size: item.size,
     });
-    const overlaps = getOverlappingItemIds(homeScreenItems, item, target);
+    const overlaps = getOverlappingItemIds(homeScreenItems, item, target, homeGridRows);
     const swapTarget = overlaps.length === 1
       ? homeScreenItems.find((candidate) => candidate.id === overlaps[0])
       : undefined;
@@ -1102,7 +1141,7 @@ export default function App() {
     const nextSession: DragSession = {
       ...session,
       target,
-      validity: overlaps.length === 0 && canPlaceAt(homeScreenItems, item, target)
+      validity: overlaps.length === 0 && canPlaceAt(homeScreenItems, item, target, homeGridRows)
         ? "valid"
         : canSwap
           ? "swap"
@@ -1185,7 +1224,7 @@ export default function App() {
           return swapOneByOneItems(current, completedSession.itemId, completedSession.swapWithId);
         }
         if (completedSession.validity === "valid") {
-          return placeItemAt(current, completedSession.itemId, completedSession.target!);
+          return placeItemAt(current, completedSession.itemId, completedSession.target!, homeGridRows);
         }
         return current;
       });
@@ -1267,7 +1306,7 @@ export default function App() {
       window.removeEventListener("pointerup", handleGlobalPointerUp);
       window.removeEventListener("pointercancel", handleGlobalPointerCancel);
     };
-  }, [dragSession, currentPage, homeScreenItems, isEditingHomeScreen]);
+  }, [dragSession, currentPage, homeScreenItems, homeGridRows, isEditingHomeScreen]);
 
   const handleDesktopPointerDown = (e: React.PointerEvent) => {
     if (
@@ -1335,7 +1374,7 @@ export default function App() {
         actualWidgetType = widgetType as any;
       }
 
-      const position = findFirstAvailablePosition(current, size, 0);
+      const position = findFirstAvailablePosition(current, size, 0, homeGridRows);
       if (!position) {
         setHomeLayoutError(`桌面已达到 ${MAX_HOME_PAGES} 页上限，无法添加更多小组件。`);
         return current;
@@ -2102,6 +2141,14 @@ export default function App() {
           border: 0 !important;
           box-shadow: none !important;
         }
+        .phone-screen-container .home-screen-drag-surface,
+        .phone-screen-container .home-screen-drag-surface * {
+          -webkit-touch-callout: none !important;
+        }
+        .phone-screen-container .home-screen-drag-surface img {
+          -webkit-user-drag: none !important;
+          user-select: none !important;
+        }
         .phone-screen-container .desktop-app-label {
           color: var(--desktop-app-text-color) !important;
         }
@@ -2527,11 +2574,13 @@ export default function App() {
         <div className="flex-1 relative overflow-hidden flex flex-col">
           {activeApp === null ? (
             <div 
-              className="flex-1 flex flex-col justify-between p-4 select-none touch-none"
+              className="home-screen-drag-surface flex-1 flex flex-col justify-between p-4 select-none touch-none"
               style={{
                 paddingTop: "calc(env(safe-area-inset-top, 0px) + 40px)",
                 paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 24px)"
               }}
+              onContextMenu={(event) => event.preventDefault()}
+              onDragStartCapture={(event) => event.preventDefault()}
               onPointerDown={handleDesktopPointerDown}
               onPointerUp={handleDesktopPointerUp}
               onPointerLeave={handleDesktopPointerUp}
@@ -2560,20 +2609,20 @@ export default function App() {
                       >
                         {Array.from({ length: totalPages }).map((_, pageIdx) => {
                           const isHiddenNames = !!settings.hideAppNames;
-                          const iconWidth = isHiddenNames ? 60 : 52;
+                          const iconWidth = homeGridIconWidth;
                           const iconSizeStyle = isHiddenNames 
                             ? { width: "60px", height: "60px" } 
                             : { width: "52px", height: "52px" };
 
                           // Calculate perfect 1:1 widget width/height and grid row height dynamically
-                          const gridPadding = 12; // 12px padding left/right (matches px-3 of dock!)
+                          const gridPadding = homeGridPadding; // 12px padding left/right (matches px-3 of dock!)
                           const outerWidth = homeGridWidth;
                           const innerWidth = outerWidth - 2 * gridPadding; // 319px
-                          const gapWidth = Math.max(4, (innerWidth - 4 * iconWidth) / 3);
+                          const gapWidth = Math.max(4, (innerWidth - HOME_GRID_COLUMNS * iconWidth) / (HOME_GRID_COLUMNS - 1));
                           const widgetWidthValue = 2 * iconWidth + gapWidth;
                           const widgetHeight = `${widgetWidthValue}px`;
 
-                          const rowGapValue = 16;
+                          const rowGapValue = homeGridRowGap;
                           const rowHeightValue = (widgetWidthValue - rowGapValue) / 2;
 
                           const gridStyle = {
@@ -2585,7 +2634,7 @@ export default function App() {
                             gridTemplateColumns: `repeat(4, ${iconWidth}px)`,
                             justifyContent: "start",
                             columnGap: `${gapWidth}px`,
-                            gridTemplateRows: `repeat(${HOME_GRID_ROWS}, ${rowHeightValue}px)`,
+                            gridTemplateRows: `repeat(${homeGridRows}, ${rowHeightValue}px)`,
                             gridAutoRows: `${rowHeightValue}px`,
                             rowGap: `${rowGapValue}px`
                           };
