@@ -2805,6 +2805,7 @@ export default function App() {
                 {activeApp === "archives" && (
                   <AppArchives
                     characters={characters}
+                    worldBookEntries={worldBookEntries}
                     onSaveCharacter={handleSaveCharacter}
                     onDeleteCharacter={handleDeleteCharacter}
                     onClose={() => setActiveApp(null)}

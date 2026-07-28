@@ -1,15 +1,17 @@
 import React, { useState } from "react";
 import { Character, WorldBookEntry } from "../types";
 import { apiSummarizePersonality } from "../utils/apiHelper";
-import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2 } from "lucide-react";
+import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
 import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
+import { buildCharacterExport, characterExportFilename } from "../features/archives/characterExport";
 
 interface AppArchivesProps {
   characters: Character[];
   onSaveCharacter: (character: Character) => void;
   onDeleteCharacter: (id: string, skipConfirm?: boolean) => void;
   onClose: () => void;
+  worldBookEntries?: WorldBookEntry[];
   onSaveWorldBookEntries?: (entries: WorldBookEntry[]) => void;
 }
 
@@ -26,6 +28,7 @@ export default function AppArchives({
   onSaveCharacter,
   onDeleteCharacter,
   onClose,
+  worldBookEntries = [],
   onSaveWorldBookEntries,
 }: AppArchivesProps) {
   const visibleCharacters = characters.filter((c) => !c.isGroupChat && !c.isContactInstance);
@@ -34,6 +37,9 @@ export default function AppArchives({
   const [isCreating, setIsCreating] = useState(false);
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportCharacterId, setExportCharacterId] = useState<string>("");
+  const [includeBoundWorldBook, setIncludeBoundWorldBook] = useState(true);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [newRefTitle, setNewRefTitle] = useState("");
   const [newRefContent, setNewRefContent] = useState("");
@@ -75,6 +81,24 @@ export default function AppArchives({
       title,
       message
     });
+  };
+
+  const downloadCharacterExport = () => {
+    const character = visibleCharacters.find((item) => item.id === exportCharacterId);
+    if (!character) return;
+    const payload = buildCharacterExport(character, worldBookEntries, includeBoundWorldBook);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = characterExportFilename(character.name);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setShowExportDialog(false);
+    showAlert("导出成功", includeBoundWorldBook
+      ? `已导出「${character.name}」角色卡及其专属世界书。`
+      : `已导出「${character.name}」角色卡。`);
   };
 
   // Form State
@@ -254,8 +278,11 @@ export default function AppArchives({
           r.readAsText(file);
         });
         const parsedJson = JSON.parse(text);
-        importedChar = mapSillyTavernToCharacter(parsedJson, "");
         const innerData = parsedJson.data || parsedJson;
+        const embeddedCharacter = innerData?.extensions?.fanfanji?.character;
+        importedChar = embeddedCharacter && typeof embeddedCharacter === "object"
+          ? { ...embeddedCharacter, id: "char-import-" + Date.now() }
+          : mapSillyTavernToCharacter(parsedJson, "");
         const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
         if (mwb && Array.isArray(mwb)) {
           characterBook = { entries: mwb };
@@ -306,8 +333,13 @@ export default function AppArchives({
       const finishImport = (importEntries: boolean) => {
         try {
           let importedEntriesCount = 0;
-          if (importEntries && characterBook && Array.isArray(characterBook.entries) && characterBook.entries.length > 0) {
-            const mappedEntries = characterBook.entries
+          const rawEntries = Array.isArray(characterBook?.entries)
+            ? characterBook.entries
+            : characterBook?.entries && typeof characterBook.entries === "object"
+              ? Object.values(characterBook.entries)
+              : [];
+          if (importEntries && rawEntries.length > 0) {
+            const mappedEntries = rawEntries
               .map((entry: any) => {
                 try {
                   const mapped = mapSillyTavernEntry(entry, importedChar.id);
@@ -341,10 +373,15 @@ export default function AppArchives({
         }
       };
 
-      if (characterBook && Array.isArray(characterBook.entries) && characterBook.entries.length > 0) {
+      const importedWorldBookCount = Array.isArray(characterBook?.entries)
+        ? characterBook.entries.length
+        : characterBook?.entries && typeof characterBook.entries === "object"
+          ? Object.keys(characterBook.entries).length
+          : 0;
+      if (importedWorldBookCount > 0) {
         showConfirm(
           "导入关联世界书词条",
-          `检测到该角色设定中包含 ${characterBook.entries.length} 条世界书关联词条，是否同时导入并关联至世界书？`,
+          `检测到该角色设定中包含 ${importedWorldBookCount} 条世界书关联词条，是否同时导入并关联至世界书？`,
           () => finishImport(true),
           () => finishImport(false)
         );
@@ -583,6 +620,20 @@ export default function AppArchives({
                         className="hidden"
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddMenu(false);
+                        setExportCharacterId(visibleCharacters[0]?.id || "");
+                        setIncludeBoundWorldBook(true);
+                        setShowExportDialog(true);
+                      }}
+                      disabled={visibleCharacters.length === 0}
+                      className="flex items-center gap-2 px-3.5 py-2.5 text-xs font-bold text-stone-700 hover:bg-stone-100 rounded-[16px] transition-colors text-left w-full disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Download className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                      <span>导出角色</span>
+                    </button>
                   </div>
                 </>
               )}
@@ -1120,6 +1171,34 @@ export default function AppArchives({
           </div>
         )}
       </div>
+
+      {showExportDialog && (
+        <div className="fixed inset-0 z-[9999] bg-black/45 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 animate-fade-in" onClick={() => setShowExportDialog(false)}>
+          <div className="w-full max-w-sm rounded-[28px] bg-white p-5 shadow-2xl space-y-4 animate-slide-up" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">导出角色</h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-400">导出为 JSON 角色卡，可选择附带该角色专属世界书。</p>
+              </div>
+              <button type="button" onClick={() => setShowExportDialog(false)} className="p-1.5 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+            </div>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-bold text-slate-600">选择角色</span>
+              <select value={exportCharacterId} onChange={(event) => setExportCharacterId(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-slate-400">
+                {visibleCharacters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
+              </select>
+            </label>
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-3.5 cursor-pointer">
+              <input type="checkbox" checked={includeBoundWorldBook} onChange={(event) => setIncludeBoundWorldBook(event.target.checked)} className="mt-0.5 h-4 w-4 accent-neutral-950" />
+              <span className="space-y-0.5"><span className="block text-xs font-bold text-slate-700">同时导出专属世界书</span><span className="block text-[11px] leading-relaxed text-slate-400">仅包含绑定到所选角色的世界书词条；不勾选则只导出角色卡。</span></span>
+            </label>
+            <div className="flex gap-2.5 pt-1">
+              <button type="button" onClick={() => setShowExportDialog(false)} className="flex-1 rounded-full bg-slate-100 py-2.5 text-xs font-bold text-slate-600">取消</button>
+              <button type="button" onClick={downloadCharacterExport} disabled={!exportCharacterId} className="flex-1 rounded-full bg-neutral-950 py-2.5 text-xs font-bold text-white disabled:opacity-40">导出 JSON</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Custom Dialogs */}
       {confirmDialog && (

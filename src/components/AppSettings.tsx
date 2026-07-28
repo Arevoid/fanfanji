@@ -27,6 +27,7 @@ import {
 import { compressImage } from "../utils/pngParser";
 import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 import { inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "../features/chat/services/imageProtocol";
+import { applyDesktopModuleBackup, buildDesktopModuleBackup, parseDesktopModuleBackup } from "../features/home/desktopModuleBackup";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -631,6 +632,42 @@ export default function AppSettings({
         alert("无法导入该主题文件，请选择有效的聊天主题 JSON。");
       } finally {
         event.target.value = "";
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const downloadDesktopModuleBackup = () => {
+    try {
+      const backup = buildDesktopModuleBackup(settings, localStorage);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
+      const link = document.createElement("a");
+      const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      link.href = url;
+      link.download = `fanfanji-desktop-module_${date}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      alert("导出桌面模块失败：" + (error?.message || "未知错误"));
+    }
+  };
+
+  const importDesktopModuleBackup = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const backup = parseDesktopModuleBackup(JSON.parse(reader.result as string));
+        if (!confirm("导入桌面模块将覆盖当前壁纸、Dock、桌面布局、小组件与应用图标美化设置；聊天、角色、API 等数据不会受影响。是否继续？")) return;
+        applyDesktopModuleBackup(backup, localStorage);
+        alert("桌面模块已导入，应用将刷新以应用新外观。");
+        window.location.reload();
+      } catch (error: any) {
+        alert("导入桌面模块失败：" + (error?.message || "文件格式无效"));
       }
     };
     reader.readAsText(file);
@@ -2728,6 +2765,26 @@ export default function AppSettings({
                       }}
                       className="hidden"
                     />
+                  </label>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">桌面模块备份</h3>
+                  <p className="mt-2 text-[10px] leading-relaxed text-slate-400">单独备份和恢复桌面美化：壁纸、Dock 外观、桌面布局与小组件设置、应用文字与图标参数，以及自定义应用图标。不会包含聊天、角色、世界书或 API 配置。</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button type="button" onClick={downloadDesktopModuleBackup} className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group">
+                    <Download className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-bold text-slate-700">导出桌面模块</span>
+                    <span className="text-[8px] text-slate-400 mt-1">下载桌面 JSON</span>
+                  </button>
+                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group cursor-pointer">
+                    <Upload className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-bold text-slate-700">导入桌面模块</span>
+                    <span className="text-[8px] text-slate-400 mt-1">恢复桌面 JSON</span>
+                    <input type="file" accept="application/json" onChange={importDesktopModuleBackup} className="hidden" />
                   </label>
                 </div>
               </div>
