@@ -11,9 +11,18 @@ export const stripMomentVoiceMarkup = (content: string) => content
   .replace(/\[(?:语音|voice)\s*:\s*([^\]\n]+?)\s*\(\s*\d+(?:秒|s)\s*\)\]/gi, "$1")
   .replace(/\[(?:语音|voice)\s*:\s*"([^"]+)"\]/gi, "$1");
 
-/** Removes chat-only sticker markup while preserving ordinary Unicode emoji. */
+/**
+ * Moments are text-and-image posts, not chat messages. Strip the whole chat
+ * sticker payload (including its blob/data URL), while keeping ordinary
+ * Unicode emoji that users type as part of normal text.
+ */
 export const stripMomentStickerMarkup = (content: string) => content
-  .replace(/\[(?:表情包|表情|贴纸|sticker|emoji[-\s]?sticker)(?:\s*[|:：][^\]\n]*)?\]\s*/gi, "");
+  // Current chat sticker format: [表情]|名称|blob:https://... . A legacy
+  // parser can already have removed the [表情] prefix, so the prefix is optional.
+  .replace(/(?:^|\n)\s*(?:\[(?:表情包|表情|贴纸|sticker|emoji[-\s]?sticker)\]\s*)?\|[^|\n]{0,120}\|\s*(?:blob:|data:image\/|https?:\/\/)[^\n]*(?=\n|$)/gi, (_match, offset, source) => (offset > 0 && source[offset - 1] === "\n" ? "\n" : ""))
+  // Also remove malformed marker-only variants rather than exposing protocol text.
+  .replace(/\[(?:表情包|表情|贴纸|sticker|emoji[-\s]?sticker)(?:\s*[|:：][^\]\n]*)?\]\s*/gi, "")
+  .replace(/(?:^|\n)\s*(?:blob:|data:image\/)[^\n]*(?=\n|$)/gi, (_match, offset, source) => (offset > 0 && source[offset - 1] === "\n" ? "\n" : ""));
 
 /** Normalizes user publishing input at the Moments feature boundary. */
 export const sanitizeMomentPublishText = (content: string) =>
@@ -74,5 +83,6 @@ export const getMomentComments = (moment: Moment) => {
   const deletedCommentIds = new Set(moment.deletedCommentIds || []);
   return [...moment.comments, ...dynamicComments]
     .filter((comment) => !deletedCommentIds.has(comment.id))
-    .map((comment) => ({ ...comment, content: stripMomentVoiceMarkup(comment.content).trim() }));
+    .map((comment) => ({ ...comment, content: sanitizeMomentPublishText(comment.content) }))
+    .filter((comment) => Boolean(comment.content));
 };

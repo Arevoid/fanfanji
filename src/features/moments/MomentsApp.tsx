@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Camera, ChevronLeft, FileText, Heart, Image as ImageIcon, Languages, MessageCircle, Plus, X } from "lucide-react";
 import type { Character, Moment, MomentComment, UserSettings } from "../../types";
-import { cleanAndExtractMoment, getMomentComments, renderMomentContent } from "./services/momentContent";
+import { cleanAndExtractMoment, getMomentComments, renderMomentContent, sanitizeMomentPublishText } from "./services/momentContent";
 
 export interface MomentsAppProps {
   moments: Moment[];
@@ -58,8 +58,9 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({
 
   const publish = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!content.trim() && !image && !imageDescription.trim()) return;
-    onPublishUserMoment({ content, image, imageDescription });
+    const publishedContent = sanitizeMomentPublishText(content);
+    if (!publishedContent && !image && !imageDescription.trim()) return;
+    onPublishUserMoment({ content: publishedContent, image, imageDescription });
     setContent(""); setImage(null); setImageDescription(""); setShowTextImage(false); setShowPublisher(false);
   };
   const upload = async (file: File, kind: "moment" | "cover") => {
@@ -67,10 +68,10 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({
     if (kind === "moment" && uploaded) setImage(uploaded);
   };
   const submitComment = (momentId: string) => {
-    const value = commentInputs[momentId];
-    if (!value?.trim()) return;
+    const value = sanitizeMomentPublishText(commentInputs[momentId] || "");
+    if (!value) return;
     const target = replyingTo[momentId];
-    onPublishComment(momentId, value.trim(), target);
+    onPublishComment(momentId, value, target);
     setCommentInputs((current) => ({ ...current, [momentId]: "" }));
     setShowCommentInput((current) => ({ ...current, [momentId]: false }));
     setReplyingTo((current) => { const next = { ...current }; delete next[momentId]; return next; });

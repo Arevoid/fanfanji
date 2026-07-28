@@ -7,6 +7,7 @@ import { loadCharacters, saveCharacters } from "./core/storage/repositories/char
 import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
+import { sanitizeMomentPublishText } from "./features/moments/services/momentContent";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
@@ -1694,7 +1695,15 @@ export default function App() {
 
   // Moments Handlers
   const handleAddMoment = (newMo: Moment) => {
-    setMoments((prev) => [newMo, ...prev]);
+    const content = sanitizeMomentPublishText(newMo.content);
+    if (!content && !newMo.image && !newMo.imageDescription) return;
+    setMoments((prev) => [{
+      ...newMo,
+      content,
+      comments: newMo.comments
+        .map((comment) => ({ ...comment, content: sanitizeMomentPublishText(comment.content) }))
+        .filter((comment) => Boolean(comment.content)),
+    }, ...prev]);
   };
 
   const handleLikeMoment = (id: string, userName: string) => {
@@ -1727,12 +1736,14 @@ export default function App() {
   };
 
   const handleAddCommentToMoment = (momentId: string, comment: MomentComment) => {
+    const content = sanitizeMomentPublishText(comment.content);
+    if (!content) return;
     setMoments((prev) =>
       prev.map((mom) => {
         if (mom.id === momentId) {
           return {
             ...mom,
-            comments: [...mom.comments, comment],
+            comments: [...mom.comments, { ...comment, content }],
           };
         }
         return mom;

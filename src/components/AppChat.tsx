@@ -135,6 +135,21 @@ const CHARACTER_MEDIA_USAGE_RULES = `[特殊媒体使用规则]
 不要为了显示功能而强迫角色使用特殊消息；不要连续多轮无理由发送语音或表情包；不要用表情包重复已经能由文字完整表达的内容。
 【图片绝对规则】你没有发送图片的能力。无论用户是否索要照片，绝对不得输出“（发送了一张图片）”“（发送了一张自拍）”“我给你发图了”等任何暗示已发图片的文字或动作描述。只有应用代码在实际生成并创建图片消息时，界面才会显示图片；你只输出真实的普通文字回复。`;
 
+type ChatStylePreset = "default" | "floating-cute" | "liquid-glass";
+
+/**
+ * `default` is the inherited setting, not a character-level visual override.
+ * Existing characters persisted it explicitly, so treating it as an override
+ * prevented the global liquid-glass selection from ever reaching chat pages.
+ */
+export const resolveActiveChatStylePreset = (
+  characterPreset: ChatStylePreset | undefined,
+  globalPreset: ChatStylePreset | undefined,
+): ChatStylePreset =>
+  characterPreset && characterPreset !== "default"
+    ? characterPreset
+    : (globalPreset || "default");
+
 const SettingsSwitch = ({
   checked,
   onChange,
@@ -1055,7 +1070,10 @@ export default function AppChat({
   const visibleChatMessages = currentChatMessages
     .map((message) => ({ ...message, content: stripInternalDeliveryMarkers(message.content) }))
     .filter((message) => Boolean(message.content.trim()));
-  const activeStylePreset = (activeCharacter?.chatStylePreset) || (settings.globalChatStylePreset) || "default";
+  const activeStylePreset = resolveActiveChatStylePreset(
+    activeCharacter?.chatStylePreset,
+    settings.globalChatStylePreset,
+  );
   const isFloatingCute = activeStylePreset === "floating-cute";
   const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
   const globalChatIcons = sanitizeChatIcons(settings.chatIcons);
@@ -4483,9 +4501,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 2. The post content must be natural, engaging, and in Chinese.
 3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
 4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, or talk like an AI. Just output the text of the Moment post.
-5. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)".
-6. If this post needs an image, add one final separate line in exactly this format: "(配图：图片描述)". This line will be rendered as a text-image card, never as post body text.
-6. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
+5. Moments do not support chat stickers or sticker links. Never output [表情]、[表情]|名称|URL、blob: URL, sticker names, or any chat attachment markup. Use plain text only.
+6. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)".
+7. If this post needs an image, add one final separate line in exactly this format: "(配图：图片描述)". This line will be rendered as a text-image card, never as post body text.
+8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 `;
 
       const composedPrompt = PromptComposer.compose({
@@ -8774,7 +8793,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             <div className="relative">
               <MessageSquare className="w-5 h-5" />
               {(() => {
-                const totalUnreadCount = friendIds.reduce((sum, relationId) => sum + messages.filter((message) => message.relationId === relationId && message.sender === "character" && !message.isOffline).length, 0);
+                const totalUnreadCount = chatThreads.reduce((sum, thread) => sum + getUnreadCount(thread.id), 0);
                 return totalUnreadCount > 0 ? (
                   <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] bg-red-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-0.5 border border-white">
                     {totalUnreadCount}
