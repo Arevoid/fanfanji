@@ -228,8 +228,9 @@ const authorUpdate = await generateThreadActivity({
   now: now + 100,
   random: () => authorRandomValues.shift() ?? 0,
   aiCall: async (params) => {
-    assert.match(params.message, /当前关系聊天/);
-    return { text: '{"body":"匿名楼主的后续更新"}' };
+    assert.match(params.message, /不得复述私人聊天/);
+    assert.doesNotMatch(params.message, /当前关系聊天|当前关系记忆/);
+    return { text: '{"body":"匿名帖子的后续更新","replyToFloor":null}' };
   },
 });
 assert.equal(authorUpdate.outcome, "author-update");
@@ -253,7 +254,7 @@ const userActivity = await generateThreadActivity({
   settings,
   now: now + 200,
   random: () => userRandomValues.shift() ?? 0,
-  aiCall: async () => ({ text: '{"body":"角色的新回复","anonymous":false}' }),
+  aiCall: async () => ({ text: '{"body":"实名帖子的新回复","anonymous":false,"replyToFloor":null}' }),
 });
 assert.equal(userActivity.outcome, "replies");
 assert.equal(userActivity.replies[0].kind, "reply");
@@ -294,7 +295,7 @@ const deleted = deleteForumThread(
 );
 assert.equal(deleted.threads.length, 0);
 assert.equal(frozenSnapshot.replies[0].kind, "author-update");
-assert.equal(frozenSnapshot.replies[0].body, "匿名楼主的后续更新");
+assert.equal(frozenSnapshot.replies[0].body, "匿名帖子的后续更新");
 
 const forumSource = readFileSync(new URL("../src/components/AppForum.tsx", import.meta.url), "utf8");
 assert.match(forumSource, /PopoverMenu/);

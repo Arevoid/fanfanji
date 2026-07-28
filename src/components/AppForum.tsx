@@ -40,6 +40,7 @@ import {
 import {
   loadForumReplies,
   loadForumGenerationTasks,
+  loadForumDataSafely,
   loadForumShares,
   loadForumThreads,
   saveForumData,
@@ -71,6 +72,9 @@ import {
   generateThreadActivity,
   mapForumGenerationError,
 } from "../features/forum/services/forumGenerationService";
+import {
+  buildForumProtectedNames,
+} from "../domain/forum/forumContentSafety";
 
 interface AppForumProps {
   activeIdentity: UserIdentity;
@@ -131,9 +135,22 @@ export default function AppForum({
   onOpenChat,
   onClose,
 }: AppForumProps) {
-  const [threads, setThreads] = useState<ForumThread[]>(() =>
-    loadForumThreads(new Set(relationships.map((relationship) => relationship.id))).value);
-  const [replies, setReplies] = useState<ForumReply[]>(() => loadForumReplies().value);
+  const forumProtectedNames = useMemo(
+    () => buildForumProtectedNames({
+      ownerIdentity: activeIdentity,
+      characters,
+    }),
+    [activeIdentity, characters],
+  );
+  const initialForumDataRef = useRef<ReturnType<typeof loadForumDataSafely> | null>(null);
+  if (!initialForumDataRef.current) {
+    initialForumDataRef.current = loadForumDataSafely({
+      validRelationIds: new Set(relationships.map((relationship) => relationship.id)),
+      protectedNames: forumProtectedNames,
+    });
+  }
+  const [threads, setThreads] = useState<ForumThread[]>(initialForumDataRef.current.threads);
+  const [replies, setReplies] = useState<ForumReply[]>(initialForumDataRef.current.replies);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [readonlySnapshot, setReadonlySnapshot] = useState<ForumThreadPublicSnapshot | null>(null);
   const [showComposer, setShowComposer] = useState(false);
@@ -181,6 +198,17 @@ export default function AppForum({
     [relationships, characters, activeIdentity.id],
   );
   const selectedShareTarget = shareTargets.find((target) => target.relationship.id === selectedShareRelationId);
+
+  useEffect(() => {
+    const safe = loadForumDataSafely({
+      validRelationIds: new Set(relationships.map((relationship) => relationship.id)),
+      protectedNames: forumProtectedNames,
+    });
+    if (safe.sanitized) {
+      setThreads(safe.threads);
+      setReplies(safe.replies);
+    }
+  }, [forumProtectedNames, relationships]);
 
   useEffect(() => {
     if (activeThreadId && !activeThread) {

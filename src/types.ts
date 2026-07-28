@@ -205,6 +205,13 @@ export interface ForumPublicAuthor {
   isAnonymous: boolean;
 }
 
+export interface ForumVirtualProfile {
+  id: string;
+  displayName: string;
+  avatarSeed: string;
+  publicStyle: string;
+}
+
 export interface ForumThread {
   id: string;
   ownerIdentityId: string;

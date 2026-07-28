@@ -1,10 +1,11 @@
 import type { ForumReply, ForumThread } from "../../types";
+import { validateForumGeneratedText } from "./forumContentSafety";
 
 export interface ForumGeneratedReplyCandidate {
   body: string;
   displayName?: string;
   anonymous?: boolean;
-  replyToFloor?: number;
+  replyToFloor?: number | null;
 }
 
 export interface ForumGeneratedThreadCandidate {
@@ -82,25 +83,38 @@ const extractJsonValue = (text: string): unknown => {
 const cleanText = (value: unknown, maxLength: number): string =>
   typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 
+const cleanGeneratedText = (value: unknown, maxLength: number, label: string): string => {
+  const candidate = cleanText(value, maxLength);
+  const validated = validateForumGeneratedText(candidate);
+  if (!validated.valid) {
+    throw new Error(`生成内容无效：${label}不是安全的论坛纯文本。`);
+  }
+  return validated.text;
+};
+
 export const parseForumThreadCandidate = (text: string): ForumGeneratedThreadCandidate => {
   const raw = extractJsonValue(text);
   const value = Array.isArray(raw) ? raw[0] : raw;
   if (!value || typeof value !== "object") throw new Error("结构解析失败：帖子对象无效。");
   const record = value as Record<string, unknown>;
-  const title = cleanText(record.title, 80);
-  const body = cleanText(record.body, 5000);
+  const title = cleanGeneratedText(record.title, 80, "帖子标题");
+  const body = cleanGeneratedText(record.body, 5000, "帖子正文");
   if (!title || !body) throw new Error("生成内容无效：帖子标题或正文为空。");
   const replies = Array.isArray(record.replies)
     ? record.replies.slice(0, 5).flatMap((item): ForumGeneratedReplyCandidate[] => {
         if (!item || typeof item !== "object") return [];
         const reply = item as Record<string, unknown>;
-        const replyBody = cleanText(reply.body, 2000);
+        const replyBody = cleanGeneratedText(reply.body, 2000, "帖子附带回复");
         if (!replyBody) return [];
         return [{
           body: replyBody,
           ...(cleanText(reply.displayName, 24) ? { displayName: cleanText(reply.displayName, 24) } : {}),
           ...(typeof reply.anonymous === "boolean" ? { anonymous: reply.anonymous } : {}),
-          ...(Number.isInteger(reply.replyToFloor) ? { replyToFloor: Number(reply.replyToFloor) } : {}),
+          ...(reply.replyToFloor === null
+            ? { replyToFloor: null }
+            : Number.isInteger(reply.replyToFloor)
+              ? { replyToFloor: Number(reply.replyToFloor) }
+              : {}),
         }];
       })
     : [];
@@ -120,11 +134,16 @@ export const parseForumReplyCandidate = (text: string): ForumGeneratedReplyCandi
   const value = Array.isArray(raw) ? raw[0] : raw;
   if (!value || typeof value !== "object") throw new Error("结构解析失败：回复对象无效。");
   const record = value as Record<string, unknown>;
-  const body = cleanText(record.body, 2000);
+  const body = cleanGeneratedText(record.body, 2000, "回复");
   if (!body) throw new Error("生成内容无效：回复为空。");
   return {
     body,
     ...(typeof record.anonymous === "boolean" ? { anonymous: record.anonymous } : {}),
+    ...(record.replyToFloor === null
+      ? { replyToFloor: null }
+      : Number.isInteger(record.replyToFloor)
+        ? { replyToFloor: Number(record.replyToFloor) }
+        : {}),
   };
 };
 
@@ -136,4 +155,15 @@ export const validateForumReplyTimeline = (
   && reply.ownerIdentityId === thread.ownerIdentityId
   && reply.floor >= 2
   && reply.occurredAt >= thread.occurredAt
-  && (!reply.replyToFloor || reply.replyToFloor < reply.floor));
+  && (!reply.replyToFloor || (() => {
+    if (reply.replyToFloor >= reply.floor) return false;
+    const target = replies.find((candidate) =>
+      candidate.threadId === reply.threadId
+      && candidate.floor === reply.replyToFloor);
+    return Boolean(
+      target
+      && reply.replyToReplyId === target.id
+      && reply.replyToAuthorName === target.publicAuthor.displayName
+      && reply.quotedText === (target.isDeleted ? "该回复已删除" : target.body.slice(0, 120)),
+    );
+  })()));

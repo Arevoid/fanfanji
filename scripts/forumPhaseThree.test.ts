@@ -109,9 +109,9 @@ const contextA = buildForumRelationGenerationContext({
   worldBookEntries,
 });
 assert.ok(contextA);
-assert.match(contextA.promptContext, /A 私密聊天/);
-assert.match(contextA.promptContext, /A 私密记忆/);
-assert.doesNotMatch(contextA.promptContext, /B 私密聊天|B 私密记忆|身份 B/);
+assert.match(contextA.promptContext, /仅可参考的话题类别/);
+assert.match(contextA.promptContext, /不得复述私人聊天/);
+assert.doesNotMatch(contextA.promptContext, /A 私密聊天|A 私密记忆|B 私密聊天|B 私密记忆|身份 B/);
 assert.equal(buildForumRelationGenerationContext({
   ownerIdentityId: "identity-a",
   relationship: relationB,
@@ -141,13 +141,13 @@ const generated = await generateForumThreads({
     prompts.push(params.message);
     return {
       text: JSON.stringify({
-        title: `合法帖子 ${callIndex}`,
-        body: `这是第 ${callIndex} 条不重复正文，内容足够用于验证。`,
+        title: `水管维修讨论 ${callIndex}`,
+        body: `家里水管漏水第 ${callIndex} 次，想讨论可靠的维修办法。`,
         anonymous: callIndex === 1,
         relationId: "forged-relation",
         characterId: "forged-character",
         replies: [{
-          body: `相关回复 ${callIndex}`,
+          body: `水管漏水最好先关闭总阀，再联系维修人员 ${callIndex}。`,
           displayName: "虚拟回帖人",
           replyToFloor: 999,
         }],
@@ -156,22 +156,23 @@ const generated = await generateForumThreads({
   },
 });
 assert.equal(generated.threads.length, 5);
-assert.equal(generated.replies.length, 5);
+assert.equal(generated.replies.length, 0, "invalid replyToFloor values are rejected");
 assert.equal(new Set(generated.threads.map((thread) => thread.occurredAt)).size, 5);
 assert.ok(generated.threads.every((thread) => thread.occurredAt <= now));
 assert.equal(generated.threads[0].privateAuthorRelationId, relationA.id);
 assert.equal(generated.threads[0].privateAuthorCharacterId, character.id);
 assert.doesNotMatch(JSON.stringify(generated), /forged-relation|forged-character/);
-assert.ok(prompts.every((prompt) => !prompt.includes("B 私密聊天") && !prompt.includes("B 私密记忆")));
+assert.ok(prompts.every((prompt) =>
+  !prompt.includes("A 私密聊天")
+  && !prompt.includes("A 私密记忆")
+  && !prompt.includes("B 私密聊天")
+  && !prompt.includes("B 私密记忆")));
 generated.threads.forEach((thread) => {
   const threadReplies = generated.replies.filter((reply) => reply.threadId === thread.id);
   assert.equal(validateForumReplyTimeline(thread, threadReplies), true);
-  assert.equal(threadReplies[0].floor, 2);
-  assert.equal(threadReplies[0].replyToFloor, undefined);
 });
 
-await assert.rejects(
-  generateForumThreads({
+const invalidGeneration = await generateForumThreads({
     ownerIdentityId: "identity-a",
     count: 1,
     trigger: "refresh",
@@ -184,9 +185,9 @@ await assert.rejects(
     settings,
     now,
     aiCall: async () => ({ text: "not-json" }),
-  }),
-  /结构解析失败/,
-);
+  });
+assert.deepEqual(invalidGeneration.threads, []);
+assert.deepEqual(invalidGeneration.replies, []);
 assert.throws(() => parseForumThreadCandidate('{"title":"","body":""}'), /生成内容无效/);
 assert.equal(isForumThreadDuplicate(
   {
@@ -235,10 +236,12 @@ const initialReplies = await generateInitialRepliesForUserThread({
   worldBookEntries,
   settings,
   now,
+  maxReplies: 1,
+  random: () => 0.9,
   aiCall: async (params) => {
     assert.doesNotMatch(params.message, /identity-a|relation-a/);
     assert.doesNotMatch(params.message, /B 私密聊天|B 私密记忆/);
-    return { text: '{"body":"自然且合法的初始回复","anonymous":false}' };
+    return { text: '{"body":"这段公开内容可以再补充一些具体信息","anonymous":false,"replyToFloor":null}' };
   },
 });
 assert.equal(initialReplies.length, 1);

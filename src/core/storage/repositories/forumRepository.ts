@@ -1,4 +1,5 @@
 import type { ForumGenerationTask, ForumReply, ForumShare, ForumThread } from "../../../types";
+import { sanitizeStoredForumContent } from "../../../domain/forum/forumContentSafety";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readArray, writeArray } from "./repositoryUtils";
@@ -260,4 +261,23 @@ export const saveForumDataAtomically = (
   saveForumThreads(previousThreads);
   saveForumReplies(previousReplies);
   return { success: false };
+};
+
+export const loadForumDataSafely = (input: {
+  validRelationIds?: ReadonlySet<string>;
+  protectedNames: readonly string[];
+}): { threads: ForumThread[]; replies: ForumReply[]; sanitized: boolean } => {
+  const loadedThreads = loadForumThreads(input.validRelationIds).value;
+  const loadedReplies = loadForumReplies().value;
+  const safe = sanitizeStoredForumContent({
+    threads: loadedThreads,
+    replies: loadedReplies,
+    protectedNames: input.protectedNames,
+  });
+  if (safe.changed) saveForumDataAtomically(safe.threads, safe.replies);
+  return {
+    threads: safe.threads,
+    replies: safe.replies,
+    sanitized: safe.changed,
+  };
 };

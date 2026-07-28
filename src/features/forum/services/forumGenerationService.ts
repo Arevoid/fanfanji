@@ -3,8 +3,10 @@ import type {
   ForumPublicAuthor,
   ForumReply,
   ForumThread,
+  ForumVirtualProfile,
   MemoryItem,
   Message,
+  UserIdentity,
   UserSettings,
   WorldBookEntry,
 } from "../../../types";
@@ -12,10 +14,22 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
 import { apiChat } from "../../../utils/apiHelper";
 import {
+  buildForumProtectedNames,
+  buildForumPublicSafeContext,
+  findForumPrivateNameViolation,
+  isForumGeneratedReplyRelevant,
+} from "../../../domain/forum/forumContentSafety";
+import {
+  createForumVirtualAuthor,
+  getForumVirtualProfile,
+} from "../../../domain/forum/forumVirtualProfiles";
+import {
   forumThreadFingerprint,
   isForumThreadDuplicate,
   parseForumReplyCandidate,
   parseForumThreadCandidate,
+  type ForumGeneratedReplyCandidate,
+  type ForumGeneratedThreadCandidate,
   validateForumReplyTimeline,
 } from "../../../domain/forum/forumValidation";
 import {
@@ -27,7 +41,10 @@ import {
 export interface ForumRelationContext {
   relationship: CharacterRelationship;
   character: Character;
+  /** Public-safe topic categories and speaking style; never raw chat or Memory. */
   promptContext: string;
+  /** Canonical public style only, used when this character replies to a public thread. */
+  publicReplyPersona: string;
 }
 
 export interface ForumGenerationBundle {
@@ -46,6 +63,20 @@ type ForumAiCall = (params: {
   streamCompatible?: boolean;
 }) => Promise<{ text: string }>;
 
+interface ForumAiRequest {
+  message: string;
+  systemInstruction: string;
+  apiKey: string;
+  model: string;
+  apiEndpoint?: string;
+  apiTemperature?: number;
+  streamCompatible?: boolean;
+}
+
+type ForumReplyAuthor =
+  | { kind: "relation"; context: ForumRelationContext }
+  | { kind: "virtual"; profile: ForumVirtualProfile };
+
 const defaultAiCall: ForumAiCall = (params) => apiChat({ ...params, history: [] });
 
 const id = (prefix: string): string => {
@@ -58,6 +89,67 @@ const id = (prefix: string): string => {
 const trimContext = (value: string, max = 1800): string =>
   value.trim().slice(0, max);
 
+const FORUM_PUBLIC_TEXT_RULES = `论坛内容只能是普通纯文本。
+禁止括号动作、神态、心理描写和角色扮演旁白；禁止[无语]等状态标签。
+禁止伪造表情包、图片、语音、视频、附件、Markdown 图片、data URL、聊天分段或时间标记。
+不得声称执行点赞、发布、转发、删除、发送媒体等操作。
+不得公开输入中未在帖子或公开楼层出现的私人姓名、昵称、身份或可识别细节。
+回复必须直接回应主楼主题或指定楼层，不得拼接无关私人故事。`;
+
+const correctionInstruction = `上一次候选不符合论坛公开内容规则。请重新生成一次：
+只保留与公开帖子直接相关的自然论坛文字；移除动作旁白、情绪标签、伪媒体、私人姓名和无关故事。`;
+
+const requireTextAiConfig = (settings: UserSettings): void => {
+  if (!settings.apiKey?.trim() || !settings.selectedModel?.trim()) {
+    throw new Error("论坛 AI 配置缺失：请先在 API 设置中填写 API Key 并选择文本模型。");
+  }
+};
+
+const toAiRequest = (
+  settings: UserSettings,
+  prompt: { systemInstruction: string; message: string },
+): ForumAiRequest => ({
+  ...prompt,
+  apiKey: settings.apiKey,
+  model: settings.selectedModel,
+  apiEndpoint: settings.apiEndpoint,
+  apiTemperature: settings.apiTemperature,
+  streamCompatible: settings.streamCompatible,
+});
+
+const generateValidatedCandidate = async <T>(input: {
+  aiCall: ForumAiCall;
+  request: ForumAiRequest;
+  parse: (text: string) => T;
+  validate: (candidate: T) => T | undefined;
+}): Promise<T | undefined> => {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await input.aiCall({
+      ...input.request,
+      systemInstruction: attempt === 0
+        ? input.request.systemInstruction
+        : `${input.request.systemInstruction}\n\n${correctionInstruction}`,
+    });
+    try {
+      const parsed = input.parse(result.text);
+      const validated = input.validate(parsed);
+      if (validated) return validated;
+    } catch {
+      // One corrected retry is allowed for parse and public-content validation failures.
+    }
+  }
+  return undefined;
+};
+
+const getProtectedNames = (
+  settings: UserSettings,
+  characters: readonly Character[],
+  ownerIdentityId: string,
+): string[] => buildForumProtectedNames({
+  ownerIdentity: settings.identities?.find((identity) => identity.id === ownerIdentityId),
+  characters,
+});
+
 export const buildForumRelationGenerationContext = (input: {
   ownerIdentityId: string;
   relationship: CharacterRelationship;
@@ -65,6 +157,7 @@ export const buildForumRelationGenerationContext = (input: {
   messages: readonly Message[];
   memories: readonly MemoryItem[];
   worldBookEntries: readonly WorldBookEntry[];
+  identities?: readonly UserIdentity[];
 }): ForumRelationContext | undefined => {
   if (input.relationship.userIdentityId !== input.ownerIdentityId) return undefined;
   const canonicalId = resolveCanonicalCharacterId(input.relationship.characterId, input.characters);
@@ -76,42 +169,37 @@ export const buildForumRelationGenerationContext = (input: {
       message.relationId === input.relationship.id
       && message.conversationId === input.relationship.conversationId)
     .sort((left, right) => left.timestamp - right.timestamp)
-    .slice(-16)
-    .map((message) => `${message.sender === "user" ? "用户" : character.name}：${trimContext(message.content, 240)}`)
-    .join("\n");
+    .slice(-16);
   const relationMemories = input.memories
     .filter((memory) => memory.relationId === input.relationship.id)
     .sort((left, right) => right.timestamp - left.timestamp)
-    .slice(0, 8)
-    .map((memory) => `- ${trimContext(memory.content, 240)}`)
-    .join("\n");
-  const worldBook = input.worldBookEntries
+    .slice(0, 8);
+  const worldBookEntries = input.worldBookEntries
     .filter((entry) =>
       entry.isActive !== false
       && (entry.characterId === canonicalId || entry.characterId === "global"))
-    .slice(0, 8)
-    .map((entry) => `- ${entry.title}：${trimContext(entry.content, 300)}`)
-    .join("\n");
+    .slice(0, 8);
+  const protectedNames = buildForumProtectedNames({
+    ownerIdentity: input.identities?.find((identity) => identity.id === input.ownerIdentityId),
+    characters: input.characters,
+  });
+  const promptContext = buildForumPublicSafeContext({
+    character,
+    relationshipCompressedMemory: input.relationship.compressedMemory,
+    recentMessages,
+    memories: relationMemories,
+    worldBookEntries,
+    protectedNames,
+  });
   return {
     relationship: input.relationship,
     character,
-    promptContext: `角色：${character.name}
-人设：${trimContext(`${character.personality}\n${character.backstory}`, 1600)}
-当前关系压缩记忆：${trimContext(input.relationship.compressedMemory || "", 900) || "无"}
-当前 relation 的近期聊天：
-${recentMessages || "无"}
-当前 relation 的 Memory：
-${relationMemories || "无"}
-角色 WorldBook：
-${worldBook || "无"}`,
+    promptContext,
+    publicReplyPersona: `公开昵称：${character.remark || character.name}
+${promptContext.split("\n")[0]}
+回复时只能依据公开帖子，不得引用 relation 聊天、Memory 或关系事件。`,
   };
 };
-
-const virtualAuthor = (name?: string): ForumPublicAuthor => ({
-  displayName: name?.trim().slice(0, 24) || "路过的论坛用户",
-  kind: "virtual",
-  isAnonymous: false,
-});
 
 const anonymousAiAuthor = (): ForumPublicAuthor => ({
   displayName: "匿名用户",
@@ -119,39 +207,133 @@ const anonymousAiAuthor = (): ForumPublicAuthor => ({
   isAnonymous: true,
 });
 
+const relationAuthor = (
+  context: ForumRelationContext,
+  anonymous: boolean,
+): ForumPublicAuthor => anonymous
+  ? anonymousAiAuthor()
+  : {
+      displayName: context.character.remark || context.character.name,
+      avatar: context.character.avatar || undefined,
+      kind: "ai-character",
+      isAnonymous: false,
+    };
+
+export const selectForumReplyAuthors = (input: {
+  count: number;
+  relationContexts: readonly ForumRelationContext[];
+  random: () => number;
+  seed: string;
+}): ForumReplyAuthor[] => {
+  const count = Math.max(0, Math.min(3, Math.floor(input.count)));
+  if (count === 0) return [];
+  const authors: ForumReplyAuthor[] = Array.from({ length: count }, (_, index) => ({
+    kind: "virtual" as const,
+    profile: getForumVirtualProfile(input.seed, index),
+  }));
+  const includeFriend = input.relationContexts.length > 0 && input.random() < 0.35;
+  if (includeFriend) {
+    const contextIndex = Math.min(
+      input.relationContexts.length - 1,
+      Math.floor(input.random() * input.relationContexts.length),
+    );
+    const authorIndex = Math.min(count - 1, Math.floor(input.random() * count));
+    authors[authorIndex] = {
+      kind: "relation",
+      context: input.relationContexts[contextIndex],
+    };
+  }
+  return authors;
+};
+
 const buildThreadPrompt = (input: {
   relationContext?: ForumRelationContext;
-  trigger: "refresh" | "lazy";
+  virtualProfile: ForumVirtualProfile;
 }): { systemInstruction: string; message: string } => ({
-  systemInstruction: `你只负责提出一个虚拟本地论坛帖候选，不执行发布、点赞、删除或转发。
+  systemInstruction: `你只负责提出一个虚拟本地论坛帖候选，不执行任何写操作。
+${FORUM_PUBLIC_TEXT_RULES}
 严格只输出一个 JSON 对象，不要 Markdown：
-{"title":"1-80字","body":"1-5000字","anonymous":false,"virtualDisplayName":"虚构昵称","replies":[{"body":"相关回复","displayName":"虚构昵称","anonymous":false,"replyToFloor":2}]}
-replies 为 0-5 条。replyToFloor 只能引用此前已经存在的楼层；不确定时省略。禁止输出 relationId、characterId、threadId 或真实网络账号。`,
+{"title":"1-80字","body":"1-5000字","anonymous":false,"replies":[{"body":"相关回复","replyToFloor":null}]}
+replies 为 0-5 条，由普通论坛路人发表。replyToFloor 只能引用本次候选中此前已出现的真实回复楼层；直接回复主楼必须为 null。
+禁止输出 relationId、characterId、threadId、replyId、作者姓名或真实网络账号。`,
   message: input.relationContext
-    ? `以这个角色在当前独立关系中的视角，生成一条自然论坛帖。角色可选择实名或匿名。\n${input.relationContext.promptContext}`
-    : "生成一条来自应用内虚拟论坛账号的自然帖子。不得冒充已存在角色，也不得涉及真实论坛用户。",
+    ? `以该角色的公开论坛表达方式生成一条帖子，可选择实名或匿名。
+${input.relationContext.promptContext}`
+    : `以应用内虚拟论坛账号“${input.virtualProfile.displayName}”的风格生成一条帖子。
+公开风格：${input.virtualProfile.publicStyle}
+不得冒充任何已有角色，不读取聊天、Memory 或 WorldBook。`,
 });
+
+const isThreadCandidatePublicSafe = (input: {
+  candidate: ForumGeneratedThreadCandidate;
+  relationContext?: ForumRelationContext;
+  virtualProfile: ForumVirtualProfile;
+  protectedNames: readonly string[];
+}): ForumGeneratedThreadCandidate | undefined => {
+  const anonymous = Boolean(input.relationContext && input.candidate.anonymous);
+  const allowedAuthorNames = input.relationContext && !anonymous
+    ? [
+        input.relationContext.character.name,
+        input.relationContext.character.remark || "",
+      ]
+    : input.relationContext
+      ? []
+      : [input.virtualProfile.displayName];
+  const violation = findForumPrivateNameViolation({
+    text: `${input.candidate.title}\n${input.candidate.body}`,
+    protectedNames: input.protectedNames,
+    allowedAuthorNames,
+  });
+  if (violation) return undefined;
+  const replies = (input.candidate.replies || []).filter((reply) => {
+    if (findForumPrivateNameViolation({
+      text: reply.body,
+      protectedNames: input.protectedNames,
+      publicTexts: [input.candidate.title, input.candidate.body],
+    })) return false;
+    return isForumGeneratedReplyRelevant({
+      replyBody: reply.body,
+      threadTitle: input.candidate.title,
+      threadBody: input.candidate.body,
+    });
+  });
+  return { ...input.candidate, replies };
+};
+
+const resolveReplyTarget = (
+  replyToFloor: number | null | undefined,
+  threadId: string,
+  availableReplies: readonly ForumReply[],
+): { valid: boolean; target?: ForumReply } => {
+  if (replyToFloor === null || replyToFloor === undefined) return { valid: true };
+  if (!Number.isInteger(replyToFloor) || replyToFloor < 2) return { valid: false };
+  const target = availableReplies.find((reply) =>
+    reply.threadId === threadId
+    && reply.floor === replyToFloor
+    && !reply.isDeleted);
+  return target ? { valid: true, target } : { valid: false };
+};
+
+const quoteTargetFields = (target?: ForumReply) => target ? {
+  replyToReplyId: target.id,
+  replyToFloor: target.floor,
+  replyToAuthorName: target.publicAuthor.displayName,
+  quotedText: target.isDeleted ? "该回复已删除" : target.body.slice(0, 120),
+} : {};
 
 const createGeneratedThread = (input: {
   ownerIdentityId: string;
   relationContext?: ForumRelationContext;
-  candidate: ReturnType<typeof parseForumThreadCandidate>;
-  trigger: "refresh" | "lazy";
+  virtualProfile: ForumVirtualProfile;
+  candidate: ForumGeneratedThreadCandidate;
   occurredAt: number;
   now: number;
 }): { thread: ForumThread; replies: ForumReply[] } => {
   const character = input.relationContext?.character;
   const anonymous = Boolean(character && input.candidate.anonymous);
-  const publicAuthor: ForumPublicAuthor = character
-    ? anonymous
-      ? anonymousAiAuthor()
-      : {
-          displayName: character.remark || character.name,
-          avatar: character.avatar || undefined,
-          kind: "ai-character",
-          isAnonymous: false,
-        }
-    : virtualAuthor(input.candidate.virtualDisplayName);
+  const publicAuthor = input.relationContext
+    ? relationAuthor(input.relationContext, anonymous)
+    : createForumVirtualAuthor(input.virtualProfile);
   const threadId = id("forum-ai-thread");
   const thread: ForumThread = {
     id: threadId,
@@ -159,7 +341,7 @@ const createGeneratedThread = (input: {
     publicAuthor,
     ...(character ? {
       privateAuthorRelationId: input.relationContext?.relationship.id,
-      privateAuthorCharacterId: character?.id,
+      privateAuthorCharacterId: character.id,
     } : {}),
     title: input.candidate.title,
     body: input.candidate.body,
@@ -174,27 +356,20 @@ const createGeneratedThread = (input: {
     updatedAt: input.now,
   };
   const replies: ForumReply[] = [];
-  for (const candidate of input.candidate.replies || []) {
+  for (const [candidateIndex, candidate] of (input.candidate.replies || []).entries()) {
+    const targetResult = resolveReplyTarget(candidate.replyToFloor, threadId, replies);
+    if (!targetResult.valid) continue;
     const floor = replies.length + 2;
-    const replyTo = candidate.replyToFloor && candidate.replyToFloor >= 2 && candidate.replyToFloor < floor
-      ? replies.find((reply) => reply.floor === candidate.replyToFloor)
-      : undefined;
+    const profile = getForumVirtualProfile(threadId, candidateIndex);
     replies.push({
       id: id("forum-ai-reply"),
       threadId,
       ownerIdentityId: input.ownerIdentityId,
       floor,
       kind: "reply",
-      publicAuthor: candidate.anonymous
-        ? { displayName: "匿名用户", kind: "anonymous-ai", isAnonymous: true }
-        : virtualAuthor(candidate.displayName),
+      publicAuthor: createForumVirtualAuthor(profile),
       body: candidate.body,
-      ...(replyTo ? {
-        replyToReplyId: replyTo.id,
-        replyToFloor: replyTo.floor,
-        replyToAuthorName: replyTo.publicAuthor.displayName,
-        quotedText: replyTo.body.slice(0, 120),
-      } : {}),
+      ...quoteTargetFields(targetResult.target),
       source: "ai-virtual",
       occurredAt: Math.min(input.now, thread.occurredAt + (replies.length + 1) * 1000),
       baseLikeCount: 0,
@@ -205,12 +380,6 @@ const createGeneratedThread = (input: {
   }
   thread.replyCount = replies.length;
   return { thread, replies };
-};
-
-const requireTextAiConfig = (settings: UserSettings): void => {
-  if (!settings.apiKey?.trim() || !settings.selectedModel?.trim()) {
-    throw new Error("论坛 AI 配置缺失：请先在 API 设置中填写 API Key 并选择文本模型。");
-  }
 };
 
 export const mapForumGenerationError = (error: unknown): string => {
@@ -245,8 +414,17 @@ export async function generateForumThreads(input: {
     .filter((relation) =>
       relation.userIdentityId === input.ownerIdentityId
       && (!input.preferredRelationId || relation.id === input.preferredRelationId))
-    .map((relationship) => buildForumRelationGenerationContext({ ...input, relationship }))
+    .map((relationship) => buildForumRelationGenerationContext({
+      ...input,
+      relationship,
+      identities: input.settings.identities,
+    }))
     .filter((value): value is ForumRelationContext => Boolean(value));
+  const protectedNames = getProtectedNames(
+    input.settings,
+    input.characters,
+    input.ownerIdentityId,
+  );
   const planned = Math.max(1, Math.min(5, Math.floor(input.count)));
   const threads: ForumThread[] = [];
   const replies: ForumReply[] = [];
@@ -254,26 +432,33 @@ export async function generateForumThreads(input: {
   const aiCall = input.aiCall || defaultAiCall;
   for (let index = 0; index < planned; index += 1) {
     const useVirtual = relationContexts.length === 0
-      || (input.trigger === "refresh" && random() < 0.25);
+      || (input.trigger === "refresh" && random() < 0.4);
     const relationContext = useVirtual
       ? undefined
       : relationContexts[index % relationContexts.length];
-    const prompt = buildThreadPrompt({ relationContext, trigger: input.trigger });
-    const result = await aiCall({
-      ...prompt,
-      apiKey: input.settings.apiKey,
-      model: input.settings.selectedModel,
-      apiEndpoint: input.settings.apiEndpoint,
-      apiTemperature: input.settings.apiTemperature,
-      streamCompatible: input.settings.streamCompatible,
+    const virtualProfile = getForumVirtualProfile(
+      `${input.ownerIdentityId}:${input.trigger}:${input.now}`,
+      index,
+    );
+    const prompt = buildThreadPrompt({ relationContext, virtualProfile });
+    const candidate = await generateValidatedCandidate({
+      aiCall,
+      request: toAiRequest(input.settings, prompt),
+      parse: parseForumThreadCandidate,
+      validate: (value) => isThreadCandidatePublicSafe({
+        candidate: value,
+        relationContext,
+        virtualProfile,
+        protectedNames,
+      }),
     });
-    const candidate = parseForumThreadCandidate(result.text);
+    if (!candidate) continue;
     const occurredAt = Math.min(input.now, input.now - (planned - index - 1) * 61_000);
     const generated = createGeneratedThread({
       ownerIdentityId: input.ownerIdentityId,
       relationContext,
+      virtualProfile,
       candidate,
-      trigger: input.trigger,
       occurredAt,
       now: input.now,
     });
@@ -281,7 +466,7 @@ export async function generateForumThreads(input: {
       ownerIdentityId: input.ownerIdentityId,
       title: generated.thread.title,
       body: generated.thread.body,
-      authorScope: relationContext?.relationship.id || "virtual",
+      authorScope: relationContext?.relationship.id || virtualProfile.id,
       trigger: input.trigger,
     });
     if (fingerprints.has(fingerprint)
@@ -296,6 +481,132 @@ export async function generateForumThreads(input: {
   return { threads, replies, fingerprints: [...fingerprints] };
 }
 
+const publicThreadContext = (
+  thread: ForumThread,
+  replies: readonly ForumReply[],
+): string => {
+  const publicReplies = replies
+    .filter((reply) => reply.threadId === thread.id && !reply.isDeleted)
+    .sort((left, right) => left.floor - right.floor)
+    .slice(-12)
+    .map((reply) => `${reply.floor} 楼 ${reply.publicAuthor.displayName}：${trimContext(reply.body, 240)}`)
+    .join("\n");
+  const validFloors = replies
+    .filter((reply) => reply.threadId === thread.id && !reply.isDeleted)
+    .map((reply) => reply.floor)
+    .sort((left, right) => left - right);
+  return `公开作者：${thread.publicAuthor.displayName}
+标题：${thread.title}
+正文：${thread.body}
+已有公开楼层：
+${publicReplies || "无"}
+可引用楼层：${validFloors.length > 0 ? validFloors.join("、") : "无"}。直接回复主楼时 replyToFloor 必须为 null。`;
+};
+
+const validateReplyCandidate = (input: {
+  candidate: ForumGeneratedReplyCandidate;
+  thread: ForumThread;
+  availableReplies: readonly ForumReply[];
+  protectedNames: readonly string[];
+  author: ForumReplyAuthor | { kind: "thread-author"; publicAuthor: ForumPublicAuthor };
+}): ForumGeneratedReplyCandidate | undefined => {
+  const targetResult = resolveReplyTarget(
+    input.candidate.replyToFloor,
+    input.thread.id,
+    input.availableReplies,
+  );
+  if (!targetResult.valid) return undefined;
+  const allowedAuthorNames = input.author.kind === "relation"
+    ? input.candidate.anonymous
+      ? []
+      : [
+          input.author.context.character.name,
+          input.author.context.character.remark || "",
+        ]
+    : input.author.kind === "virtual"
+      ? [input.author.profile.displayName]
+      : input.author.publicAuthor.isAnonymous
+        ? []
+        : [input.author.publicAuthor.displayName];
+  if (findForumPrivateNameViolation({
+    text: input.candidate.body,
+    protectedNames: input.protectedNames,
+    publicTexts: [
+      input.thread.title,
+      input.thread.body,
+      ...input.availableReplies
+        .filter((reply) => reply.threadId === input.thread.id && !reply.isDeleted)
+        .map((reply) => reply.body),
+    ],
+    allowedAuthorNames,
+  })) return undefined;
+  if (!isForumGeneratedReplyRelevant({
+    replyBody: input.candidate.body,
+    threadTitle: input.thread.title,
+    threadBody: input.thread.body,
+    targetBody: targetResult.target?.body,
+  })) return undefined;
+  return input.candidate;
+};
+
+const createGeneratedReply = (input: {
+  prefix: string;
+  thread: ForumThread;
+  candidate: ForumGeneratedReplyCandidate;
+  author: ForumReplyAuthor;
+  availableReplies: readonly ForumReply[];
+  floor: number;
+  occurredAt: number;
+  now: number;
+}): ForumReply | undefined => {
+  const targetResult = resolveReplyTarget(
+    input.candidate.replyToFloor,
+    input.thread.id,
+    input.availableReplies,
+  );
+  if (!targetResult.valid) return undefined;
+  const anonymous = input.author.kind === "relation" && Boolean(input.candidate.anonymous);
+  return {
+    id: id(input.prefix),
+    threadId: input.thread.id,
+    ownerIdentityId: input.thread.ownerIdentityId,
+    floor: input.floor,
+    kind: "reply",
+    publicAuthor: input.author.kind === "relation"
+      ? relationAuthor(input.author.context, anonymous)
+      : createForumVirtualAuthor(input.author.profile),
+    body: input.candidate.body,
+    ...quoteTargetFields(targetResult.target),
+    source: input.author.kind === "relation"
+      ? anonymous ? "ai-character-anonymous" : "ai-character"
+      : "ai-virtual",
+    occurredAt: Math.min(input.now, Math.max(input.thread.occurredAt, input.occurredAt)),
+    baseLikeCount: 0,
+    likedByIdentityIds: [],
+    createdAt: input.now,
+    updatedAt: input.now,
+  };
+};
+
+const buildReplyPrompt = (input: {
+  thread: ForumThread;
+  availableReplies: readonly ForumReply[];
+  author: ForumReplyAuthor;
+}): { systemInstruction: string; message: string } => ({
+  systemInstruction: `你只生成一条与当前论坛帖直接相关的公开回复。
+${FORUM_PUBLIC_TEXT_RULES}
+严格输出 JSON：{"body":"回复正文","anonymous":false,"replyToFloor":null}。
+replyToFloor 只能取提示中列出的真实楼层；直接回复主楼必须为 null。
+不输出任何 ID、作者名、引用正文或内部身份。`,
+  message: `${publicThreadContext(input.thread, input.availableReplies)}
+${input.author.kind === "relation"
+    ? `按该角色经过公开脱敏的说话风格回复：
+${input.author.context.publicReplyPersona}`
+    : `作为普通论坛用户“${input.author.profile.displayName}”回复。
+公开风格：${input.author.profile.publicStyle}
+不得读取或猜测任何角色聊天、Memory、WorldBook。`}`,
+});
+
 export async function generateInitialRepliesForUserThread(input: {
   thread: ForumThread;
   existingReplies: readonly ForumReply[];
@@ -307,9 +618,11 @@ export async function generateInitialRepliesForUserThread(input: {
   settings: UserSettings;
   now: number;
   maxReplies?: number;
+  random?: () => number;
   aiCall?: ForumAiCall;
 }): Promise<ForumReply[]> {
   requireTextAiConfig(input.settings);
+  const random = input.random || Math.random;
   const relationContexts = input.relationships
     .filter((relation) => relation.userIdentityId === input.thread.ownerIdentityId)
     .map((relationship) => buildForumRelationGenerationContext({
@@ -319,60 +632,56 @@ export async function generateInitialRepliesForUserThread(input: {
       messages: input.messages,
       memories: input.memories,
       worldBookEntries: input.worldBookEntries,
+      identities: input.settings.identities,
     }))
-    .filter((value): value is ForumRelationContext => Boolean(value))
-    .slice(0, Math.max(1, Math.min(3, input.maxReplies ?? 2)));
-  const replyAuthors: Array<ForumRelationContext | undefined> =
-    relationContexts.length > 0 ? relationContexts : [undefined];
+    .filter((value): value is ForumRelationContext => Boolean(value));
+  const replyCount = Math.max(1, Math.min(3, input.maxReplies ?? 2));
+  const authors = selectForumReplyAuthors({
+    count: replyCount,
+    relationContexts,
+    random,
+    seed: `${input.thread.id}:initial`,
+  });
+  const protectedNames = getProtectedNames(
+    input.settings,
+    input.characters,
+    input.thread.ownerIdentityId,
+  );
   const aiCall = input.aiCall || defaultAiCall;
   const generated: ForumReply[] = [];
-  for (const context of replyAuthors) {
-    const result = await aiCall({
-      systemInstruction: `你只生成一条对论坛主楼的自然回复。严格输出 JSON：{"body":"回复正文","anonymous":false}。不执行点赞、发帖、转发、删除，不输出任何 ID。`,
-      message: `公开主楼作者：${input.thread.publicAuthor.displayName}
-标题：${input.thread.title}
-正文：${input.thread.body}
-${context
-    ? `请按当前角色和关系上下文回复，但不得泄露内部身份标识。用户匿名时也只能视为公开匿名作者。\n${context.promptContext}`
-    : "请作为应用内虚拟论坛账号自然回复，不得冒充任何已有角色，也不得推断匿名用户身份。"}`,
-      apiKey: input.settings.apiKey,
-      model: input.settings.selectedModel,
-      apiEndpoint: input.settings.apiEndpoint,
-      apiTemperature: input.settings.apiTemperature,
-      streamCompatible: input.settings.streamCompatible,
+  for (const [index, author] of authors.entries()) {
+    const availableReplies = [
+      ...input.existingReplies.filter((reply) => reply.threadId === input.thread.id),
+      ...generated,
+    ];
+    const prompt = buildReplyPrompt({ thread: input.thread, availableReplies, author });
+    const candidate = await generateValidatedCandidate({
+      aiCall,
+      request: toAiRequest(input.settings, prompt),
+      parse: parseForumReplyCandidate,
+      validate: (value) => validateReplyCandidate({
+        candidate: value,
+        thread: input.thread,
+        availableReplies,
+        protectedNames,
+        author,
+      }),
     });
-    const candidate = parseForumReplyCandidate(result.text);
-    const floor = Math.max(
-      1,
-      ...input.existingReplies
-        .filter((reply) => reply.threadId === input.thread.id)
-        .map((reply) => reply.floor),
-      ...generated.map((reply) => reply.floor),
-    ) + 1;
-    generated.push({
-      id: id("forum-ai-reply"),
-      threadId: input.thread.id,
-      ownerIdentityId: input.thread.ownerIdentityId,
+    if (!candidate) continue;
+    if (availableReplies.some((reply) =>
+      reply.threadId === input.thread.id && reply.body.trim() === candidate.body.trim())) continue;
+    const floor = Math.max(1, ...availableReplies.map((reply) => reply.floor)) + 1;
+    const reply = createGeneratedReply({
+      prefix: "forum-ai-reply",
+      thread: input.thread,
+      candidate,
+      author,
+      availableReplies,
       floor,
-      kind: "reply",
-      publicAuthor: candidate.anonymous
-        ? anonymousAiAuthor()
-        : context ? {
-            displayName: context.character.remark || context.character.name,
-            avatar: context.character.avatar || undefined,
-            kind: "ai-character",
-            isAnonymous: false,
-          } : virtualAuthor("路过的论坛用户"),
-      body: candidate.body,
-      source: context
-        ? candidate.anonymous ? "ai-character-anonymous" : "ai-character"
-        : "ai-virtual",
-      occurredAt: Math.min(input.now, Math.max(input.thread.occurredAt, input.thread.occurredAt + floor * 1000)),
-      baseLikeCount: 0,
-      likedByIdentityIds: [],
-      createdAt: input.now,
-      updatedAt: input.now,
+      occurredAt: input.thread.occurredAt + (index + 1) * 1000,
+      now: input.now,
     });
+    if (reply) generated.push(reply);
   }
   return generated.filter((reply) => reply.occurredAt >= input.thread.occurredAt);
 }
@@ -381,23 +690,6 @@ export interface ForumThreadActivityResult {
   outcome: "no-update" | "author-update" | "replies";
   replies: ForumReply[];
 }
-
-const publicThreadContext = (
-  thread: ForumThread,
-  replies: readonly ForumReply[],
-): string => {
-  const publicReplies = replies
-    .filter((reply) => reply.threadId === thread.id && !reply.isDeleted)
-    .sort((left, right) => left.floor - right.floor)
-    .slice(-12)
-    .map((reply) => `${reply.floor} 楼 ${reply.publicAuthor.displayName}：${trimContext(reply.body, 240)}`)
-    .join("\n");
-  return `公开作者：${thread.publicAuthor.displayName}
-标题：${thread.title}
-正文：${thread.body}
-已有公开楼层：
-${publicReplies || "无"}`;
-};
 
 const isAiOrVirtualThread = (thread: ForumThread): boolean =>
   thread.source === "ai-character"
@@ -440,6 +732,7 @@ export async function generateThreadActivity(input: {
       messages: input.messages,
       memories: input.memories,
       worldBookEntries: input.worldBookEntries,
+      identities: input.settings.identities,
     }))
     .filter((value): value is ForumRelationContext => Boolean(value));
   const originalAuthorContext = input.thread.privateAuthorRelationId
@@ -454,35 +747,49 @@ export async function generateThreadActivity(input: {
       || Boolean(originalAuthorContext));
   const chooseAuthorUpdate = canAuthorUpdate && random() < 0.5;
   const aiCall = input.aiCall || defaultAiCall;
-  const baseFloor = Math.max(
-    1,
-    ...input.existingReplies
-      .filter((reply) => reply.threadId === input.thread.id)
-      .map((reply) => reply.floor),
+  const threadReplies = input.existingReplies
+    .filter((reply) => reply.threadId === input.thread.id)
+    .sort((left, right) => left.floor - right.floor);
+  const baseFloor = Math.max(1, ...threadReplies.map((reply) => reply.floor));
+  const protectedNames = getProtectedNames(
+    input.settings,
+    input.characters,
+    input.ownerIdentityId,
   );
-  const publicContext = publicThreadContext(input.thread, input.existingReplies);
 
   if (chooseAuthorUpdate) {
-    const result = await aiCall({
-      systemInstruction: `你只生成一条论坛楼主后续更新。严格输出 JSON：{"body":"更新正文"}。
-不执行点赞、删除、转发，不修改原主楼，不输出任何 ID，不泄露匿名作者内部身份。`,
-      message: `${publicContext}
-请以原楼主的公开身份追加一条自然后续更新。
+    const threadAuthor = {
+      kind: "thread-author" as const,
+      publicAuthor: input.thread.publicAuthor,
+    };
+    const prompt = {
+      systemInstruction: `你只生成一条论坛楼主后续更新。
+${FORUM_PUBLIC_TEXT_RULES}
+严格输出 JSON：{"body":"更新正文","replyToFloor":null}。
+不修改原主楼，不输出任何 ID；仅在确实针对某楼补充时选择提示中的真实楼层。`,
+      message: `${publicThreadContext(input.thread, threadReplies)}
+请以原楼主的公开身份追加自然后续更新。
 ${originalAuthorContext
-    ? `原作者自己的 relation 上下文：\n${originalAuthorContext.promptContext}`
+    ? originalAuthorContext.promptContext
     : "该帖来自应用内虚拟论坛账号，不读取任何角色私密上下文。"}`,
-      apiKey: input.settings.apiKey,
-      model: input.settings.selectedModel,
-      apiEndpoint: input.settings.apiEndpoint,
-      apiTemperature: input.settings.apiTemperature,
-      streamCompatible: input.settings.streamCompatible,
+    };
+    const candidate = await generateValidatedCandidate({
+      aiCall,
+      request: toAiRequest(input.settings, prompt),
+      parse: parseForumReplyCandidate,
+      validate: (value) => validateReplyCandidate({
+        candidate: value,
+        thread: input.thread,
+        availableReplies: threadReplies,
+        protectedNames,
+        author: threadAuthor,
+      }),
     });
-    const candidate = parseForumReplyCandidate(result.text);
-    if (input.existingReplies.some((reply) =>
-      reply.threadId === input.thread.id
-      && reply.body.trim() === candidate.body.trim())) {
+    if (!candidate || threadReplies.some((reply) => reply.body.trim() === candidate.body.trim())) {
       return { outcome: "no-update", replies: [] };
     }
+    const targetResult = resolveReplyTarget(candidate.replyToFloor, input.thread.id, threadReplies);
+    if (!targetResult.valid) return { outcome: "no-update", replies: [] };
     const reply: ForumReply = {
       id: id("forum-author-update"),
       threadId: input.thread.id,
@@ -491,6 +798,7 @@ ${originalAuthorContext
       kind: "author-update",
       publicAuthor: { ...input.thread.publicAuthor },
       body: candidate.body,
+      ...quoteTargetFields(targetResult.target),
       source: input.thread.source === "ai-character-anonymous"
         ? "ai-character-anonymous"
         : input.thread.source === "ai-character"
@@ -506,54 +814,42 @@ ${originalAuthorContext
   }
 
   const requestedCount = 1 + Math.floor(random() * 3);
-  const authors: Array<ForumRelationContext | undefined> = validContexts.length > 0
-    ? Array.from({ length: requestedCount }, (_, index) => validContexts[index % validContexts.length])
-    : [undefined];
+  const authors = selectForumReplyAuthors({
+    count: requestedCount,
+    relationContexts: validContexts,
+    random,
+    seed: `${input.thread.id}:${input.trigger}:${baseFloor}`,
+  });
   const generated: ForumReply[] = [];
-  for (const context of authors) {
-    const result = await aiCall({
-      systemInstruction: `你只生成一条与当前论坛帖相关的新回复。严格输出 JSON：{"body":"回复正文","anonymous":false}。
-不执行点赞、删除、转发，不输出任何 ID，不泄露匿名作者内部身份。`,
-      message: `${publicContext}
-${context
-    ? `请按这个回复角色自己的独立 relation 上下文发言：\n${context.promptContext}`
-    : "请作为应用内虚拟论坛账号自然回复，不得冒充原楼主或任何已有角色。"}`,
-      apiKey: input.settings.apiKey,
-      model: input.settings.selectedModel,
-      apiEndpoint: input.settings.apiEndpoint,
-      apiTemperature: input.settings.apiTemperature,
-      streamCompatible: input.settings.streamCompatible,
+  for (const [index, author] of authors.entries()) {
+    const availableReplies = [...threadReplies, ...generated];
+    const prompt = buildReplyPrompt({ thread: input.thread, availableReplies, author });
+    const candidate = await generateValidatedCandidate({
+      aiCall,
+      request: toAiRequest(input.settings, prompt),
+      parse: parseForumReplyCandidate,
+      validate: (value) => validateReplyCandidate({
+        candidate: value,
+        thread: input.thread,
+        availableReplies,
+        protectedNames,
+        author,
+      }),
     });
-    const candidate = parseForumReplyCandidate(result.text);
-    if ([...input.existingReplies, ...generated].some((reply) =>
-      reply.threadId === input.thread.id && reply.body.trim() === candidate.body.trim())) continue;
+    if (!candidate || availableReplies.some((reply) =>
+      reply.body.trim() === candidate.body.trim())) continue;
     const floor = baseFloor + generated.length + 1;
-    generated.push({
-      id: id("forum-activity-reply"),
-      threadId: input.thread.id,
-      ownerIdentityId: input.ownerIdentityId,
+    const reply = createGeneratedReply({
+      prefix: "forum-activity-reply",
+      thread: input.thread,
+      candidate,
+      author,
+      availableReplies,
       floor,
-      kind: "reply",
-      publicAuthor: candidate.anonymous
-        ? anonymousAiAuthor()
-        : context
-          ? {
-              displayName: context.character.remark || context.character.name,
-              avatar: context.character.avatar || undefined,
-              kind: "ai-character",
-              isAnonymous: false,
-            }
-          : virtualAuthor("路过的论坛用户"),
-      body: candidate.body,
-      source: context
-        ? candidate.anonymous ? "ai-character-anonymous" : "ai-character"
-        : "ai-virtual",
-      occurredAt: Math.min(input.now, Math.max(input.thread.occurredAt, input.now)),
-      baseLikeCount: 0,
-      likedByIdentityIds: [],
-      createdAt: input.now,
-      updatedAt: input.now,
+      occurredAt: input.now - Math.max(0, authors.length - index - 1) * 1000,
+      now: input.now,
     });
+    if (reply) generated.push(reply);
   }
   return generated.length > 0
     ? { outcome: "replies", replies: generated }

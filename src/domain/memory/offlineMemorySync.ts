@@ -46,8 +46,11 @@ export function collectOfflineHandoffContent(story: OfflineStory, characterName 
   }
 
   if (/(吃饭|下馆子|餐厅|做饭)/.test(sourceText)) {
-    const invitees = userText.includes("小念")
-      ? `${characterName}和小念`
+    const explicitlyNamedInvitees = userText.match(
+      /(?:我请|邀请)([\p{Script=Han}]{2,4})和([\p{Script=Han}]{2,4})(?=吃饭|下馆子|去餐厅)/u,
+    );
+    const invitees = explicitlyNamedInvitees
+      ? `${explicitlyNamedInvitees[1]}和${explicitlyNamedInvitees[2]}`
       : userText.includes("你们")
         ? `${characterName}和其他在场角色`
         : characterName;
