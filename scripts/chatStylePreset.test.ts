@@ -25,5 +25,15 @@ assert.match(
   /background: radial-gradient\(circle at 12% 8%, #ffffff 0%, #f3f7fb 42%, #e7eef7 100%\) !important;/,
   "liquid glass without a wallpaper must use an opaque base rather than expose the chat list beneath it",
 );
+assert.match(
+  appChatSource,
+  /#conv-screen\.style-liquid-glass \.chat-bubble-self,/,
+  "liquid glass bubble rules must match the ID specificity of saved bubble colors",
+);
+assert.match(
+  appChatSource,
+  /#conv-screen\.style-liquid-glass \.chat-bubble-self \*,/,
+  "liquid glass must force readable text inside a self bubble",
+);
 
 console.log("chat style preset resolution tests passed");

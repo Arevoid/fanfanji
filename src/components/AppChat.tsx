@@ -5135,6 +5135,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                 }
  
                 /* 3. 聊天气泡 (Chat Bubbles) - 强效覆盖，解决圆角/背景色被 Tailwind 和 App.tsx 覆盖的问题 */
+                #conv-screen.style-liquid-glass .chat-bubble-self,
+                #conv-screen.style-liquid-glass .transfer-card,
+                #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self,
                 .phone-screen-container .style-liquid-glass .chat-bubble-self,
                 .style-liquid-glass .chat-bubble-self {
                   background: rgba(255, 255, 255, 0.68) !important;
@@ -5153,11 +5156,17 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   line-height: 1.4 !important;
                   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
                 }
+                #conv-screen.style-liquid-glass .chat-bubble-self *,
+                #conv-screen.style-liquid-glass .transfer-card *,
+                #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self *,
                 .phone-screen-container .style-liquid-glass .chat-bubble-self *,
                 .style-liquid-glass .chat-bubble-self * {
                   color: #1c1917 !important;
                 }
 
+                #conv-screen.style-liquid-glass .chat-bubble-other,
+                #conv-screen.style-liquid-glass .received-transfer-card,
+                #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other,
                 .phone-screen-container .style-liquid-glass .chat-bubble-other,
                 .style-liquid-glass .chat-bubble-other {
                   background: rgba(255, 255, 255, 0.68) !important;
@@ -5176,6 +5185,9 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   line-height: 1.4 !important;
                   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
                 }
+                #conv-screen.style-liquid-glass .chat-bubble-other *,
+                #conv-screen.style-liquid-glass .received-transfer-card *,
+                #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other *,
                 .phone-screen-container .style-liquid-glass .chat-bubble-other *,
                 .style-liquid-glass .chat-bubble-other * {
                   color: #1c1917 !important;
