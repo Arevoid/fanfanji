@@ -7,7 +7,14 @@ export const DESKTOP_SETTING_KEYS = [
   "desktopAppTextColor", "desktopIconMode", "hideHomeWelcomeWidget", "homeButtonPosition",
 ] as const satisfies ReadonlyArray<keyof UserSettings>;
 
-const DESKTOP_STORAGE_KEYS = new Set(["phone_homescreen_items", "phone_installed_apps", "phone_memo_todos"]);
+const DESKTOP_STORAGE_KEYS = new Set([
+  "phone_homescreen_items",
+  "phone_installed_apps",
+  "phone_memo_todos",
+  "phone_dual_music_widget_configs",
+  "phone_identity_music_states",
+  "phone_relationship_music_states",
+]);
 const WIDGET_STORAGE_PREFIXES = ["album_widget_photos_", "calendar_album_", "anniversary_"];
 
 export interface DesktopModuleBackup {

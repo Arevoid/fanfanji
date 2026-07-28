@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { apiExtractMemories, apiTranslate } from "./utils/apiHelper";
-import { audioDb } from "./utils/audioDb";
+import { apiChat, apiExtractMemories, apiTranslate } from "./utils/apiHelper";
+import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { loadSettings, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
@@ -16,21 +16,37 @@ import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceReco
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
-import { migrateLegacyCharacterIdentityData } from "./domain/character/characterIdentity";
+import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
 import { loadImageGenerationRecords, removeImageGenerationRecordsByCharacter, saveImageGenerationRecords } from "./core/storage/repositories/imageGenerationRepository";
+import {
+  bindDualMusicWidget,
+  loadDualMusicWidgetConfigs,
+  loadIdentityMusicStates,
+  loadRelationshipMusicStates,
+  removeMusicDataByRelations,
+  removeMusicTrackReferences,
+  saveDualMusicWidgetConfigs,
+  saveIdentityMusicStates,
+  saveRelationshipMusicStates,
+  upsertIdentityMusicTrack,
+} from "./core/storage/repositories/musicWidgetRepository";
 import { imageAssetDb } from "./utils/imageAssetDb";
 import { DEFAULT_IDENTITY_ID, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
-import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord } from "./types";
+import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type IdentityMusicState, type RelationshipMusicState } from "./types";
 import { 
   AlbumWidget, 
   CalendarAlbumWidget,
-  MusicWidget, 
+  MusicWidget,
+  DualMusicWidget,
   AnniversaryWidget, 
   TodoWidget, 
   AddWidgetSheet 
 } from "./components/HomeScreenWidgets";
+import { getHomeItemDimensions } from "./features/home/homeGrid";
+import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./features/music/services/dualMusicRecommendationService";
+import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./features/music/services/musicPlayback";
 import StatusBar from "./components/StatusBar";
 import AppChat from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
@@ -222,6 +238,22 @@ export default function App() {
     const raw = localStorage.getItem("phone_music_tracks");
     return raw ? JSON.parse(raw) : [];
   });
+  const tracksRef = useRef<MusicTrack[]>(tracks);
+  const [dualMusicConfigs, setDualMusicConfigs] = useState<DualMusicWidgetConfig[]>(() => loadDualMusicWidgetConfigs());
+  const [identityMusicStates, setIdentityMusicStates] = useState<IdentityMusicState[]>(() => loadIdentityMusicStates());
+  const [relationshipMusicStates, setRelationshipMusicStates] = useState<RelationshipMusicState[]>(() => loadRelationshipMusicStates());
+  const [playbackOrigin, setPlaybackOrigin] = useState<string | null>(null);
+  const [musicPlaybackError, setMusicPlaybackError] = useState<string | null>(null);
+  const [musicRecommendationRelationId, setMusicRecommendationRelationId] = useState<string | null>(null);
+  const [musicRecommendationError, setMusicRecommendationError] = useState<string | null>(null);
+  const musicRecommendationInFlightRef = useRef(new Set<string>());
+
+  useEffect(() => { tracksRef.current = tracks; }, [tracks]);
+  useEffect(() => () => {
+    tracksRef.current.forEach((track) => {
+      if (track.isLocal && track.url.startsWith("blob:")) URL.revokeObjectURL(track.url);
+    });
+  }, []);
 
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => {
     const raw = localStorage.getItem("phone_music_playlists");
@@ -349,11 +381,16 @@ export default function App() {
           parsedTracks.map(async (track) => {
             if (track.isLocal) {
               try {
-                const blob = await audioDb.getTrackFile(track.id);
+                const blob = await audioDb.getTrackFile(getTrackAudioAssetId(track));
                 if (blob) {
                   const newUrl = URL.createObjectURL(blob);
                   updated = true;
-                  return { ...track, url: newUrl };
+                  return {
+                    ...track,
+                    audioAssetId: track.audioAssetId || track.id,
+                    audioMimeType: track.audioMimeType || blob.type || undefined,
+                    url: newUrl,
+                  };
                 }
               } catch (err) {
                 console.error("Failed to restore local track:", track.id, err);
@@ -456,12 +493,20 @@ export default function App() {
       }
     } else if (playMode === "random") {
       const randomIndex = Math.floor(Math.random() * allTracks.length);
-      setCurrentTrack(allTracks[randomIndex]);
+      const nextTrack = allTracks[randomIndex];
+      setCurrentTrack(nextTrack);
+      if (playbackOrigin && shouldRecordIdentityListening(playbackOrigin)) {
+        setIdentityMusicStates((states) => upsertIdentityMusicTrack(states, settings.activeIdentityId || DEFAULT_IDENTITY_ID, nextTrack.id));
+      }
       setIsPlaying(true);
     } else {
       const currentIndex = allTracks.findIndex((t) => t.id === currentTrack?.id);
       const nextIndex = (currentIndex + 1) % allTracks.length;
-      setCurrentTrack(allTracks[nextIndex]);
+      const nextTrack = allTracks[nextIndex];
+      setCurrentTrack(nextTrack);
+      if (playbackOrigin && shouldRecordIdentityListening(playbackOrigin)) {
+        setIdentityMusicStates((states) => upsertIdentityMusicTrack(states, settings.activeIdentityId || DEFAULT_IDENTITY_ID, nextTrack.id));
+      }
       setIsPlaying(true);
     }
   };
@@ -471,7 +516,11 @@ export default function App() {
     if (allTracks.length === 0) return;
     const currentIndex = allTracks.findIndex((t) => t.id === currentTrack?.id);
     const prevIndex = (currentIndex - 1 + allTracks.length) % allTracks.length;
-    setCurrentTrack(allTracks[prevIndex]);
+    const previousTrack = allTracks[prevIndex];
+    setCurrentTrack(previousTrack);
+    if (playbackOrigin && shouldRecordIdentityListening(playbackOrigin)) {
+      setIdentityMusicStates((states) => upsertIdentityMusicTrack(states, settings.activeIdentityId || DEFAULT_IDENTITY_ID, previousTrack.id));
+    }
     setIsPlaying(true);
   };
 
@@ -482,14 +531,24 @@ export default function App() {
     const audio = globalAudioRef.current;
     
     const handleEnded = () => {
+      if (playbackOrigin?.endsWith(":right")) {
+        setIsPlaying(false);
+        return;
+      }
       handleNextTrack();
+    };
+    const handleAudioError = () => {
+      setIsPlaying(false);
+      setMusicPlaybackError("无法播放这首歌，请检查音频格式、网络链接或重新导入文件。");
     };
 
     audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleAudioError);
     return () => {
       audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleAudioError);
     };
-  }, [tracks, currentTrack, playMode]);
+  }, [tracks, currentTrack, playMode, playbackOrigin]);
 
   useEffect(() => {
     const audio = globalAudioRef.current;
@@ -500,7 +559,10 @@ export default function App() {
         audio.src = currentTrack.url;
       }
       if (isPlaying) {
-        audio.play().catch(() => setIsPlaying(false));
+        audio.play().catch(() => {
+          setIsPlaying(false);
+          setMusicPlaybackError("浏览器未能播放这首歌，请再次点击或检查音频格式。");
+        });
       } else {
         audio.pause();
       }
@@ -508,6 +570,40 @@ export default function App() {
       audio.pause();
     }
   }, [currentTrack, isPlaying]);
+
+  const toggleTrack = (trackId: string, origin: string, recordIdentityPlayback = false, trackOverride?: MusicTrack) => {
+    const track = trackOverride || tracks.find((item) => item.id === trackId);
+    if (!track) {
+      setMusicPlaybackError("歌曲已不存在，请重新选择。");
+      return;
+    }
+    if (track.isLocal && (!track.url || !track.url.startsWith("blob:"))) {
+      setMusicPlaybackError("本地音频文件缺失，请重新导入这首歌。");
+      return;
+    }
+    if (!track.isLocal && !/^https?:\/\//i.test(track.url)) {
+      setMusicPlaybackError("歌曲链接无效，请在音乐库中更新。");
+      return;
+    }
+    setMusicPlaybackError(null);
+    if (getMusicPlaybackAction({
+      currentTrackId: currentTrack?.id,
+      currentOrigin: playbackOrigin,
+      isPlaying,
+      targetTrackId: track.id,
+      targetOrigin: origin,
+    }) === "pause") {
+      setIsPlaying(false);
+      return;
+    }
+    setCurrentTrack(track);
+    setPlaybackOrigin(origin);
+    setIsPlaying(true);
+    if (recordIdentityPlayback && shouldRecordIdentityListening(origin)) {
+      const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+      setIdentityMusicStates((states) => upsertIdentityMusicTrack(states, ownerIdentityId, track.id));
+    }
+  };
 
   // Sync with navigator.mediaSession for robust background playback
   useEffect(() => {
@@ -873,18 +969,7 @@ export default function App() {
     };
 
     return pageItems.map((item) => {
-      let w = 1;
-      let h = 1;
-      if (item.size === "2x2") {
-        w = 2;
-        h = 2;
-      } else if (item.size === "1x4") {
-        w = 4;
-        h = 1;
-      } else if (item.size === "2x4") {
-        w = 4;
-        h = 2;
-      }
+      const { width: w, height: h } = getHomeItemDimensions(item.size);
 
       let r = 0;
       let c = 0;
@@ -909,7 +994,7 @@ export default function App() {
 
   const canFitOnPage = (
     existingItems: HomeScreenItem[],
-    newItem: { type: "app" | "widget"; size: "1x1" | "2x2" | "1x4" | "2x4" },
+    newItem: { type: "app" | "widget"; size: HomeScreenItem["size"] },
     maxRows: number = 4
   ): boolean => {
     const columns = 4;
@@ -949,18 +1034,7 @@ export default function App() {
 
     // Place existing items
     for (const item of existingItems) {
-      let w = 1;
-      let h = 1;
-      if (item.size === "2x2") {
-        w = 2;
-        h = 2;
-      } else if (item.size === "1x4") {
-        w = 4;
-        h = 1;
-      } else if (item.size === "2x4") {
-        w = 4;
-        h = 2;
-      }
+      const { width: w, height: h } = getHomeItemDimensions(item.size);
 
       let placed = false;
       let r = 0;
@@ -981,18 +1055,7 @@ export default function App() {
     }
 
     // Check if the new item can fit
-    let nw = 1;
-    let nh = 1;
-    if (newItem.size === "2x2") {
-      nw = 2;
-      nh = 2;
-    } else if (newItem.size === "1x4") {
-      nw = 4;
-      nh = 1;
-    } else if (newItem.size === "2x4") {
-      nw = 4;
-      nh = 2;
-    }
+    const { width: nw, height: nh } = getHomeItemDimensions(newItem.size);
 
     let placedNew = false;
     let r = 0;
@@ -1018,7 +1081,7 @@ export default function App() {
 
   const findPageForNewItem = (
     currentItems: HomeScreenItem[],
-    newItem: { type: "app" | "widget"; size: "1x1" | "2x2" | "1x4" | "2x4" },
+    newItem: { type: "app" | "widget"; size: HomeScreenItem["size"] },
     startPage: number = 0
   ): number => {
     let page = startPage;
@@ -1316,7 +1379,7 @@ export default function App() {
     }
   };
 
-  const handleAddWidget = (widgetType: "album" | "music" | "anniversary" | "todo" | "calendar_album" | "welcome") => {
+  const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "welcome") => {
     if (widgetType === "welcome") {
       setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: false }));
       setIsShowingAddWidget(false);
@@ -1324,8 +1387,8 @@ export default function App() {
     }
 
     setHomeScreenItems((current) => {
-      let size: "1x1" | "2x2" | "1x4" | "2x4" = "2x2";
-      let actualWidgetType: "album" | "calendar-album" | "music" | "anniversary" | "todo" = "todo";
+      let size: HomeScreenItem["size"] = "2x2";
+      let actualWidgetType: NonNullable<HomeScreenItem["widgetType"]> = "todo";
 
       if (widgetType === "calendar_album") {
         size = "2x4";
@@ -1333,6 +1396,9 @@ export default function App() {
       } else if (widgetType === "album") {
         size = "2x2";
         actualWidgetType = "album";
+      } else if (widgetType === "dual_music") {
+        size = "2x3";
+        actualWidgetType = "dual-music";
       } else {
         size = "2x2";
         actualWidgetType = widgetType as any;
@@ -1358,6 +1424,7 @@ export default function App() {
 
   const handleRemoveWidget = (id: string) => {
     setHomeScreenItems(current => current.filter(item => item.id !== id));
+    setDualMusicConfigs((configs) => configs.filter((config) => config.widgetId !== id));
   };
 
   const getWidgetComponent = (type?: string) => {
@@ -1365,6 +1432,7 @@ export default function App() {
       case "album": return AlbumWidget;
       case "calendar-album": return CalendarAlbumWidget;
       case "music": return MusicWidget;
+      case "dual-music": return DualMusicWidget;
       case "anniversary": return AnniversaryWidget;
       case "todo": default: return TodoWidget;
     }
@@ -1424,11 +1492,16 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("phone_music_tracks", JSON.stringify(tracks));
+      localStorage.setItem("phone_music_tracks", JSON.stringify(tracks.map((track) =>
+        track.isLocal ? { ...track, url: "" } : track)));
     } catch (e) {
       console.error("Failed to save tracks to localStorage:", e);
     }
   }, [tracks]);
+
+  useEffect(() => { saveDualMusicWidgetConfigs(dualMusicConfigs); }, [dualMusicConfigs]);
+  useEffect(() => { saveIdentityMusicStates(identityMusicStates); }, [identityMusicStates]);
+  useEffect(() => { saveRelationshipMusicStates(relationshipMusicStates); }, [relationshipMusicStates]);
 
   useEffect(() => {
     try {
@@ -1569,6 +1642,9 @@ export default function App() {
       setMessages(cleaned.messages);
       setMemories(cleaned.memories);
       setOfflineStories(cleaned.offlineStories);
+      const musicCleanup = removeMusicDataByRelations(dualMusicConfigs, relationshipMusicStates, relationIds);
+      setDualMusicConfigs(musicCleanup.configs);
+      setRelationshipMusicStates(musicCleanup.states);
       relationIds.forEach((relationId) => {
         localStorage.removeItem(getOfflineModeStorageKey(relationId));
         localStorage.removeItem(getOfflineStoryStorageKey(relationId));
@@ -1818,16 +1894,118 @@ export default function App() {
   };
 
   const handleDeleteMusicTrack = (id: string) => {
-    setTracks((prev) => {
-      const track = prev.find((t) => t.id === id);
-      if (track?.isLocal) {
-        audioDb.deleteTrackFile(id).catch((err) => {
-          console.error("Failed to delete local track from IndexedDB:", err);
-        });
-      }
-      return prev.filter((t) => t.id !== id);
-    });
+    const track = tracks.find((item) => item.id === id);
+    if (track?.isLocal) {
+      audioDb.deleteTrackFile(getTrackAudioAssetId(track)).catch((err) => {
+        console.error("Failed to delete local track from IndexedDB:", err);
+      });
+    }
+    if (track?.coverAssetId) {
+      audioDb.deleteTrackCover(track.coverAssetId).catch((err) => {
+        console.error("Failed to delete local track cover:", err);
+      });
+    }
+    if (track?.url?.startsWith("blob:")) URL.revokeObjectURL(track.url);
+    setTracks((prev) => prev.filter((item) => item.id !== id));
+    setPlaylists((prev) => prev.map((playlist) => ({ ...playlist, tracks: playlist.tracks.filter((trackId) => trackId !== id) })));
+    const cleaned = removeMusicTrackReferences(identityMusicStates, relationshipMusicStates, id);
+    setIdentityMusicStates(cleaned.identityStates);
+    setRelationshipMusicStates(cleaned.relationshipStates);
+    if (currentTrack?.id === id) {
+      globalAudioRef.current?.pause();
+      if (globalAudioRef.current) globalAudioRef.current.removeAttribute("src");
+      setCurrentTrack(null);
+      setIsPlaying(false);
+      setPlaybackOrigin(null);
+    }
   };
+
+  const refreshRelationshipMusic = async (relationId: string) => {
+    if (musicRecommendationInFlightRef.current.has(relationId)) return;
+    const relationship = relationships.find((item) => item.id === relationId);
+    if (!relationship) return;
+    const characterId = resolveCanonicalCharacterId(relationship.characterId, characters);
+    const character = characters.find((item) => item.id === characterId);
+    if (!character || character.isGroupChat) return;
+    if (!tracks.length) {
+      setMusicRecommendationError("请先在音乐库添加歌曲。");
+      return;
+    }
+    musicRecommendationInFlightRef.current.add(relationId);
+    setMusicRecommendationRelationId(relationId);
+    setMusicRecommendationError(null);
+    try {
+      const recommendation = await recommendDualMusicTrack({
+        tracks,
+        character,
+        relationship,
+        messages,
+        memories,
+        currentState: relationshipMusicStates.find((state) => state.relationId === relationId),
+        settings,
+        requestAi: apiChat,
+      });
+      if (!recommendation) {
+        setMusicRecommendationError("暂时没有选到合适的歌曲，可以稍后重试。");
+        return;
+      }
+      setRelationshipMusicStates((states) => applyRelationshipRecommendation(states, {
+        relationship,
+        characterId,
+        recommendation,
+      }));
+    } catch {
+      setMusicRecommendationError("选歌失败，已保留原来的歌曲。");
+    } finally {
+      musicRecommendationInFlightRef.current.delete(relationId);
+      setMusicRecommendationRelationId(null);
+    }
+  };
+
+  const handleBindMusicRelationship = (widgetId: string, relationId: string) => {
+    const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+    const relationship = relationships.find((item) =>
+      item.id === relationId && item.userIdentityId === ownerIdentityId);
+    if (!relationship) {
+      setMusicRecommendationError("该好友不属于当前身份，无法绑定。");
+      return;
+    }
+    const characterId = resolveCanonicalCharacterId(relationship.characterId, characters);
+    setDualMusicConfigs((configs) => bindDualMusicWidget(configs, {
+      widgetId,
+      ownerIdentityId,
+      relationId,
+      characterId,
+    }));
+    if (!relationshipMusicStates.some((state) => state.relationId === relationId)) {
+      void refreshRelationshipMusic(relationId);
+    }
+  };
+
+  const handleDeleteRelationshipMusic = (relationId: string) => {
+    setDualMusicConfigs((configs) => configs.map((config) => config.relationId === relationId
+      ? { ...config, relationId: undefined, characterId: undefined, updatedAt: Date.now() }
+      : config));
+    setRelationshipMusicStates((states) => states.filter((state) => state.relationId !== relationId));
+  };
+
+  useEffect(() => {
+    if (activeApp !== null) return;
+    const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+    const now = Date.now();
+    const dueRelationIds = new Set<string>(dualMusicConfigs
+      .filter((config) =>
+        config.ownerIdentityId === ownerIdentityId
+        && config.relationId
+        && homeScreenItems.some((item) =>
+          item.id === config.widgetId && item.widgetType === "dual-music" && item.page === currentPage))
+      .map((config) => config.relationId!)
+      .filter((relationId) => {
+        const state = relationshipMusicStates.find((item) => item.relationId === relationId);
+        return !state || (state.nextRefreshAt !== undefined && state.nextRefreshAt <= now);
+      }));
+    dueRelationIds.forEach((relationId) => { void refreshRelationshipMusic(relationId); });
+  }, [activeApp, currentPage, dualMusicConfigs, homeScreenItems, relationshipMusicStates, settings.activeIdentityId, tracks.length]);
 
   const handleAddMusicPlaylist = (pl: MusicPlaylist) => {
     setPlaylists((prev) => {
@@ -1905,6 +2083,23 @@ export default function App() {
       icon: AppIcons.settings(),
     }
   ];
+  const activeIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+  const activeIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId) || {
+    id: activeIdentityId,
+    name: settings.name,
+    avatar: settings.avatar,
+    signature: settings.signature,
+    bio: settings.bio,
+  };
+  const availableMusicRelationships = relationships
+    .filter((relationship) => relationship.userIdentityId === activeIdentityId)
+    .map((relationship) => ({
+      relationship,
+      character: characters.find((character) =>
+        character.id === resolveCanonicalCharacterId(relationship.characterId, characters)),
+    }))
+    .filter((item): item is { relationship: CharacterRelationship; character: Character } =>
+      Boolean(item.character && !item.character.isGroupChat));
 
   return (
     <div
@@ -2571,6 +2766,10 @@ export default function App() {
                                       colSpanClass = "col-span-4";
                                       rowSpanClass = "row-span-2";
                                       currentWidgetHeight = `${2 * rowHeightValue + rowGapValue}px`;
+                                    } else if (item.size === "2x3") {
+                                      colSpanClass = "col-span-3";
+                                      rowSpanClass = "row-span-2";
+                                      currentWidgetHeight = `${2 * rowHeightValue + rowGapValue}px`;
                                     } else if (item.size === "2x2") {
                                       colSpanClass = "col-span-2";
                                       rowSpanClass = "row-span-2";
@@ -2610,6 +2809,19 @@ export default function App() {
                                             widgetOpacity={settings.widgetOpacity}
                                             widgetBorderRadius={settings.widgetBorderRadius}
                                             size={item.size}
+                                            tracks={tracks}
+                                            activeIdentity={activeIdentity}
+                                            dualMusicConfig={dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)}
+                                            identityMusicState={identityMusicStates.find((state) => state.ownerIdentityId === activeIdentityId)}
+                                            relationshipMusicState={relationshipMusicStates.find((state) =>
+                                              state.relationId === dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)?.relationId)}
+                                            availableMusicRelationships={availableMusicRelationships}
+                                            playbackOrigin={playbackOrigin}
+                                            onToggleTrack={(trackId: string, origin: string) => toggleTrack(trackId, origin, origin.endsWith(":left"))}
+                                            onBindMusicRelationship={handleBindMusicRelationship}
+                                            onRefreshRelationshipMusic={(relationId: string) => { void refreshRelationshipMusic(relationId); }}
+                                            musicRecommendationLoading={musicRecommendationRelationId === dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)?.relationId}
+                                            musicError={musicRecommendationError || musicPlaybackError}
                                           />
                                         </div>
                                       </div>
@@ -2752,6 +2964,15 @@ export default function App() {
                   />
                 </div>
               )}
+              {musicPlaybackError && (
+                <button
+                  type="button"
+                  onClick={() => setMusicPlaybackError(null)}
+                  className="absolute bottom-24 left-1/2 z-[60] w-[86%] -translate-x-1/2 rounded-2xl bg-rose-50 px-4 py-3 text-left text-[11px] font-bold text-rose-600 shadow-lg"
+                >
+                  {musicPlaybackError}
+                </button>
+              )}
 
             </div>
           ) : (
@@ -2799,6 +3020,10 @@ export default function App() {
                     onSaveOfflineStory={handleSaveOfflineStory}
                     onDeleteOfflineStory={handleDeleteOfflineStory}
                     onDeleteCharacter={handleDeleteCharacter}
+                    onDeleteRelationshipMusic={handleDeleteRelationshipMusic}
+                    musicTracks={tracks}
+                    identityMusicStates={identityMusicStates}
+                    relationshipMusicStates={relationshipMusicStates}
                   />
                 </div>
 
@@ -2842,6 +3067,7 @@ export default function App() {
                     setPlayMode={setPlayMode}
                     volume={volume}
                     setVolume={setVolume}
+                    onPlayTrack={(track) => toggleTrack(track.id, "music-library", true, track)}
                   />
                 )}
 
@@ -2978,8 +3204,8 @@ export default function App() {
             ) : (
               <div 
                 style={{ 
-                  width: draggedItem.size === "1x4" ? "300px" : draggedItem.size === "2x4" ? "300px" : (settings.hideAppNames ? "154px" : "150px"),
-                  height: draggedItem.size === "1x4" ? "54px" : draggedItem.size === "2x4" ? "120px" : (settings.hideAppNames ? "154px" : "150px")
+                  width: draggedItem.size === "1x4" || draggedItem.size === "2x4" ? "300px" : draggedItem.size === "2x3" ? "225px" : (settings.hideAppNames ? "154px" : "150px"),
+                  height: draggedItem.size === "1x4" ? "54px" : draggedItem.size === "2x4" || draggedItem.size === "2x3" ? "120px" : (settings.hideAppNames ? "154px" : "150px")
                 }}
               >
                 {React.createElement(getWidgetComponent(draggedItem.widgetType), {
@@ -2991,6 +3217,11 @@ export default function App() {
                   widgetOpacity: settings.widgetOpacity,
                   widgetBorderRadius: settings.widgetBorderRadius,
                   size: draggedItem.size,
+                  tracks,
+                  activeIdentity,
+                  dualMusicConfig: dualMusicConfigs.find((config) => config.widgetId === draggedItem.id && config.ownerIdentityId === activeIdentityId),
+                  identityMusicState: identityMusicStates.find((state) => state.ownerIdentityId === activeIdentityId),
+                  availableMusicRelationships,
                 })}
               </div>
             )}

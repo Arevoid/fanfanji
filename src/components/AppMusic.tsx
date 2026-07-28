@@ -42,6 +42,7 @@ interface AppMusicProps {
   setPlayMode: React.Dispatch<React.SetStateAction<"single" | "list" | "random">>;
   volume: number;
   setVolume: React.Dispatch<React.SetStateAction<number>>;
+  onPlayTrack: (track: MusicTrack) => void;
 }
 
 const PRESEED_TRACKS: MusicTrack[] = [];
@@ -69,6 +70,7 @@ export default function AppMusic({
   setPlayMode,
   volume,
   setVolume,
+  onPlayTrack,
 }: AppMusicProps) {
   const [activeTab, setActiveTab] = useState<"library" | "playlists">("library");
   
@@ -80,6 +82,8 @@ export default function AppMusic({
   const [newTitle, setNewTitle] = useState("");
   const [newArtist, setNewArtist] = useState("");
   const [newUrl, setNewUrl] = useState("");
+  const [newCoverUrl, setNewCoverUrl] = useState("");
+  const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
   const [importMethod, setImportMethod] = useState<"upload" | "link">("upload");
   const [isShowingImportModal, setIsShowingImportModal] = useState(false);
 
@@ -133,33 +137,31 @@ export default function AppMusic({
   }, [volume]);
 
   const handlePlayPause = () => {
-    setIsPlaying(!isPlaying);
+    if (currentTrack) onPlayTrack(currentTrack);
   };
 
   const handleNext = () => {
     if (allTracks.length === 0) return;
     if (playMode === "random") {
       const randomIndex = Math.floor(Math.random() * allTracks.length);
-      setCurrentTrack(allTracks[randomIndex]);
+      onPlayTrack(allTracks[randomIndex]);
     } else {
       const currentIndex = allTracks.findIndex((t) => t.id === currentTrack?.id);
       const nextIndex = (currentIndex + 1) % allTracks.length;
-      setCurrentTrack(allTracks[nextIndex]);
+      onPlayTrack(allTracks[nextIndex]);
     }
-    setIsPlaying(true);
   };
 
   const handlePrev = () => {
     if (allTracks.length === 0) return;
     if (playMode === "random") {
       const randomIndex = Math.floor(Math.random() * allTracks.length);
-      setCurrentTrack(allTracks[randomIndex]);
+      onPlayTrack(allTracks[randomIndex]);
     } else {
       const currentIndex = allTracks.findIndex((t) => t.id === currentTrack?.id);
       const prevIndex = currentIndex <= 0 ? allTracks.length - 1 : currentIndex - 1;
-      setCurrentTrack(allTracks[prevIndex]);
+      onPlayTrack(allTracks[prevIndex]);
     }
-    setIsPlaying(true);
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -183,6 +185,8 @@ export default function AppMusic({
       const trackId = `local-track-${Date.now()}`;
       try {
         await audioDb.saveTrackFile(trackId, file);
+        const coverAssetId = pendingCoverFile ? `track-cover-${trackId}` : undefined;
+        if (coverAssetId && pendingCoverFile) await audioDb.saveTrackCover(coverAssetId, pendingCoverFile);
         const fileUrl = URL.createObjectURL(file);
         const newTrack: MusicTrack = {
           id: trackId,
@@ -190,28 +194,19 @@ export default function AppMusic({
           artist: "本地上传",
           url: fileUrl,
           isLocal: true,
+          audioAssetId: trackId,
+          audioMimeType: file.type || undefined,
+          coverAssetId,
+          coverMimeType: pendingCoverFile?.type,
         };
         onAddTrack(newTrack);
-        setCurrentTrack(newTrack);
-        setIsPlaying(true);
+        onPlayTrack(newTrack);
+        setPendingCoverFile(null);
         setIsShowingImportModal(false);
         setActiveTab("library");
       } catch (err) {
         console.error("Failed to save local track to IndexedDB:", err);
-        // Fallback: add anyway
-        const fileUrl = URL.createObjectURL(file);
-        const newTrack: MusicTrack = {
-          id: `local-track-${Date.now()}`,
-          title: file.name.replace(/\.[^/.]+$/, ""),
-          artist: "本地上传",
-          url: fileUrl,
-          isLocal: true,
-        };
-        onAddTrack(newTrack);
-        setCurrentTrack(newTrack);
-        setIsPlaying(true);
-        setIsShowingImportModal(false);
-        setActiveTab("library");
+        alert("本地音频保存失败，未加入音乐库。请检查浏览器存储空间后重试。");
       }
     }
   };
@@ -226,13 +221,14 @@ export default function AppMusic({
       artist: newArtist.trim() || "网络直链",
       url: newUrl.trim(),
       isLocal: false,
+      coverUrl: newCoverUrl.trim() || undefined,
     };
     onAddTrack(newTrack);
     setNewTitle("");
     setNewArtist("");
     setNewUrl("");
-    setCurrentTrack(newTrack);
-    setIsPlaying(true);
+    setNewCoverUrl("");
+    onPlayTrack(newTrack);
     setIsShowingImportModal(false);
     setActiveTab("library");
   };
@@ -466,8 +462,7 @@ export default function AppMusic({
                     <div
                       className="flex-1 min-w-0 cursor-pointer flex items-center gap-2.5"
                       onClick={() => {
-                        setCurrentTrack(track);
-                        setIsPlaying(true);
+                        onPlayTrack(track);
                       }}
                     >
                       <span className="text-[10px] font-mono opacity-50 w-4">{(idx + 1).toString().padStart(2, "0")}</span>
@@ -610,6 +605,11 @@ export default function AppMusic({
             <div className="flex-1 overflow-y-auto pb-4 pr-1">
               {importMethod === "upload" ? (
                 <div className="space-y-4 text-center">
+                  <label className="block cursor-pointer rounded-2xl border border-stone-200 bg-stone-50 p-3 text-left">
+                    <span className="block text-[10px] font-bold text-stone-500">歌曲封面（可选）</span>
+                    <span className="mt-1 block truncate text-xs text-stone-700">{pendingCoverFile?.name || "选择本地图片"}</span>
+                    <input type="file" accept="image/*" className="hidden" onChange={(event) => setPendingCoverFile(event.target.files?.[0] || null)} />
+                  </label>
                   <label className="cursor-pointer block border-2 border-dashed border-stone-300 hover:border-neutral-950 bg-stone-50 p-6 rounded-2xl transition-all">
                     <div className="flex flex-col items-center">
                       <div className="w-12 h-12 bg-neutral-950 text-white rounded-full flex items-center justify-center mb-2 border border-stone-200">
@@ -661,6 +661,17 @@ export default function AppMusic({
                       value={newUrl}
                       onChange={(e) => setNewUrl(e.target.value)}
                       placeholder="https://example.com/audio.mp3"
+                      className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-[8px] px-3 py-2 text-xs text-stone-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] text-stone-500 mb-1 font-bold">封面图片网址（可选）</label>
+                    <input
+                      type="url"
+                      value={newCoverUrl}
+                      onChange={(event) => setNewCoverUrl(event.target.value)}
+                      placeholder="https://example.com/cover.jpg"
                       className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-[8px] px-3 py-2 text-xs text-stone-800"
                     />
                   </div>

@@ -200,9 +200,17 @@ export interface MusicTrack {
   id: string;
   title: string;
   artist: string;
-  url: string; // File ObjectURL or raw internet URL
+  /** Runtime ObjectURL for a local file, or the persisted URL for a network track. */
+  url: string;
   isLocal: boolean;
   duration?: string;
+  /** Local audio blobs live in MusicAppDB. Old tracks use id as the asset key. */
+  audioAssetId?: string;
+  audioMimeType?: string;
+  /** Local cover blobs live in MusicAppDB; remote covers may use coverUrl. */
+  coverAssetId?: string;
+  coverMimeType?: string;
+  coverUrl?: string;
 }
 
 export interface MusicPlaylist {
@@ -348,9 +356,40 @@ export interface StylePreset {
 export interface HomeScreenItem {
   id: string;
   type: "app" | "widget";
-  widgetType?: "album" | "calendar-album" | "music" | "anniversary" | "todo";
-  size: "1x1" | "2x2" | "1x4" | "2x4";
+  widgetType?: "album" | "calendar-album" | "music" | "dual-music" | "anniversary" | "todo";
+  size: "1x1" | "2x2" | "1x4" | "2x3" | "2x4";
   page: number;
+}
+
+export interface DualMusicWidgetConfig {
+  widgetId: string;
+  ownerIdentityId: string;
+  relationId?: string;
+  /** Canonical profile reference only; relationId remains the ownership boundary. */
+  characterId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface IdentityMusicState {
+  ownerIdentityId: string;
+  currentTrackId?: string;
+  recentTrackIds: string[];
+  updatedAt: number;
+}
+
+export interface RelationshipMusicState {
+  relationId: string;
+  conversationId: string;
+  /** Canonical profile reference only. */
+  characterId: string;
+  currentTrackId?: string;
+  recentTrackIds: string[];
+  selectedAt?: number;
+  nextRefreshAt?: number;
+  selectionReason?: string;
+  selectionSource?: "ai" | "local";
+  updatedAt: number;
 }
 
 export interface MemoryItem {

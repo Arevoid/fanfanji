@@ -103,6 +103,9 @@ const BACKUP_KEYS = [
   "phone_moments_v3",
   "phone_music_playlists",
   "phone_music_tracks",
+  "phone_dual_music_widget_configs",
+  "phone_identity_music_states",
+  "phone_relationship_music_states",
   "phone_offline_stories",
   "phone_presets",
   "phone_settings",
@@ -2666,6 +2669,10 @@ export default function AppSettings({
                 
                 <p className="text-[10px] text-slate-400 leading-relaxed">
                   您可以将本手机内的所有角色人设、对话记录、世界书词条、备忘录以及美化配置打包导出备份。未来可在任何设备上导入此文件进行100%完美还原。
+                </p>
+
+                <p className="text-[10px] leading-relaxed text-amber-600">
+                  本地歌曲元数据、双人音乐组件与关系听歌状态会进入 JSON 备份；音频和本地封面二进制不会写入 JSON，恢复后需重新导入本地文件。
                 </p>
 
                 <div className="grid grid-cols-2 gap-3 pt-2">

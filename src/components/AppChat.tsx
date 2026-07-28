@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { splitTextToOfflineSegments, compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles as splitIntoWeChatBubbles, stripInternalDeliveryMarkers, type CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
@@ -23,6 +23,7 @@ import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
+import { buildRelationMusicContext } from "../domain/prompt/musicContext";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
@@ -402,6 +403,10 @@ interface AppChatProps {
   onSaveOfflineStory?: (story: OfflineStory) => void;
   onDeleteOfflineStory?: (storyId: string) => void;
   onDeleteCharacter?: (id: string, skipConfirm?: boolean) => void;
+  onDeleteRelationshipMusic?: (relationId: string) => void;
+  musicTracks?: MusicTrack[];
+  identityMusicStates?: IdentityMusicState[];
+  relationshipMusicStates?: RelationshipMusicState[];
 }
 
 const PRESEED_MOMENTS: Moment[] = [];
@@ -665,6 +670,10 @@ export default function AppChat({
   onSaveOfflineStory,
   onDeleteOfflineStory,
   onDeleteCharacter,
+  onDeleteRelationshipMusic,
+  musicTracks = [],
+  identityMusicStates = [],
+  relationshipMusicStates = [],
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
 
@@ -1245,6 +1254,7 @@ export default function AppChat({
       removedImageRecords.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete relation image asset:", error)));
     }
     onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
+    onDeleteRelationshipMusic?.(relationId);
     offlineStories
       .filter((story) => story.relationId === relationId)
       .forEach((story) => onDeleteOfflineStory?.(story.id));
@@ -2575,6 +2585,16 @@ ${activeCharacter.disableBracketActions
       const relationshipContext = activeRelationship
         ? `\n[Current direct relationship]\n- Relationship state: ${activeRelationship.relationship}\n- This is the only user-identity relationship whose chat history and memories may be used.`
         : "";
+      const musicContext = activeRelationship && userMsg
+        ? buildRelationMusicContext({
+          userText: userMsg.content,
+          ownerIdentityId: activeRelationship.userIdentityId,
+          relationId: activeRelationship.id,
+          tracks: musicTracks,
+          identityStates: identityMusicStates,
+          relationshipStates: relationshipMusicStates,
+        })
+        : "";
 
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
       const scanContextParts = [
@@ -2595,6 +2615,7 @@ ${activeCharacter.disableBracketActions
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
       if (relationshipContext) assembledInstructions.push(relationshipContext);
+      if (musicContext) assembledInstructions.push(musicContext);
 
       // 1.2 Red Packet Reaction Prompt
       if (isRedPacket && userMsg) {

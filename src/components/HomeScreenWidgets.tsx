@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { MusicTrack, Character, UserSettings } from "../types";
+import {
+  MusicTrack,
+  Character,
+  UserSettings,
+  type DualMusicWidgetConfig,
+  type IdentityMusicState,
+  type RelationshipMusicState,
+  type UserIdentity,
+} from "../types";
+import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { audioDb } from "../utils/audioDb";
 import { 
   Play, 
   Pause, 
@@ -83,7 +93,19 @@ interface WidgetProps {
   installedAppIds?: string[];
   widgetOpacity?: number;
   widgetBorderRadius?: number;
-  size?: "1x1" | "2x2" | "1x4" | "2x4";
+  size?: "1x1" | "2x2" | "1x4" | "2x3" | "2x4";
+  tracks?: MusicTrack[];
+  activeIdentity?: UserIdentity;
+  dualMusicConfig?: DualMusicWidgetConfig;
+  identityMusicState?: IdentityMusicState;
+  relationshipMusicState?: RelationshipMusicState;
+  availableMusicRelationships?: Array<{ relationship: CharacterRelationship; character: Character }>;
+  playbackOrigin?: string | null;
+  onToggleTrack?: (trackId: string, origin: string) => void;
+  onBindMusicRelationship?: (widgetId: string, relationId: string) => void;
+  onRefreshRelationshipMusic?: (relationId: string) => void;
+  musicRecommendationLoading?: boolean;
+  musicError?: string | null;
 }
 
 export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBorderRadius }: WidgetProps) {
@@ -978,6 +1000,189 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
   );
 }
 
+function DualMusicCover({ track, fallback, alt }: { track?: MusicTrack; fallback: string; alt: string }) {
+  const [localCoverUrl, setLocalCoverUrl] = useState("");
+  useEffect(() => {
+    let objectUrl = "";
+    if (!track?.coverAssetId) {
+      setLocalCoverUrl("");
+      return;
+    }
+    audioDb.getTrackCover(track.coverAssetId).then((blob) => {
+      if (!blob) return;
+      objectUrl = URL.createObjectURL(blob);
+      setLocalCoverUrl(objectUrl);
+    }).catch(() => setLocalCoverUrl(""));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [track?.coverAssetId]);
+  return (
+    <img
+      src={localCoverUrl || track?.coverUrl || fallback}
+      alt={alt}
+      className="h-full w-full rounded-[14px] object-cover"
+    />
+  );
+}
+
+export function DualMusicWidget({
+  id,
+  isEditing,
+  onRemove,
+  tracks = [],
+  currentTrack,
+  isPlaying,
+  activeIdentity,
+  dualMusicConfig,
+  identityMusicState,
+  relationshipMusicState,
+  availableMusicRelationships = [],
+  playbackOrigin,
+  onToggleTrack,
+  onBindMusicRelationship,
+  onRefreshRelationshipMusic,
+  musicRecommendationLoading,
+  musicError,
+  widgetOpacity,
+  widgetBorderRadius,
+}: WidgetProps) {
+  const [showBindingSheet, setShowBindingSheet] = useState(false);
+  const bound = availableMusicRelationships.find((item) => item.relationship.id === dualMusicConfig?.relationId);
+  const leftTrack = tracks.find((track) => track.id === identityMusicState?.currentTrackId);
+  const rightTrack = tracks.find((track) => track.id === relationshipMusicState?.currentTrackId);
+  const leftOrigin = `dual:${id}:left`;
+  const rightOrigin = `dual:${id}:right`;
+  const fallbackUserAvatar = activeIdentity?.avatar || "";
+  const fallbackFriendAvatar = bound?.character.avatar || fallbackUserAvatar;
+
+  const renderCard = (input: {
+    side: "left" | "right";
+    track?: MusicTrack;
+    avatar: string;
+    name: string;
+    emptyText: string;
+    origin: string;
+  }) => {
+    const playing = Boolean(input.track && isPlaying && currentTrack?.id === input.track.id && playbackOrigin === input.origin);
+    return (
+      <div
+        className="flex min-w-0 flex-1 flex-col rounded-[18px] p-1.5 shadow-sm"
+        style={{ backgroundColor: `rgba(255, 255, 255, ${(widgetOpacity ?? 70) / 100})` }}
+      >
+        <div className="relative aspect-square min-h-0 w-full">
+          <DualMusicCover track={input.track} fallback={input.avatar} alt={input.track?.title || input.name} />
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (input.side === "right" && !isEditing) setShowBindingSheet(true);
+            }}
+            className={`absolute top-1.5 ${input.side === "left" ? "left-1.5" : "right-1.5"} h-7 w-7 overflow-hidden rounded-full bg-white shadow`}
+            aria-label={input.side === "right" ? "绑定或更换角色" : input.name}
+          >
+            <img src={input.avatar} alt="" className="h-full w-full object-cover" />
+          </button>
+        </div>
+        <div className="flex min-h-0 items-center gap-1 px-1 pb-0.5 pt-1.5">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[10px] font-black leading-tight text-stone-900">
+              {input.track?.title || input.emptyText}
+            </p>
+            <p className="mt-0.5 truncate text-[8px] font-semibold leading-tight text-stone-400">
+              {input.track?.artist || input.name}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={!input.track}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (input.track) onToggleTrack?.(input.track.id, input.origin);
+            }}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-950 text-white disabled:bg-stone-200 disabled:text-stone-400"
+            aria-label={playing ? `暂停${input.track?.title}` : `播放${input.track?.title || ""}`}
+          >
+            {playing ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="relative h-full w-full group">
+      <div
+        className="flex h-full w-full gap-1.5 overflow-hidden p-1"
+        style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined }}
+      >
+        {renderCard({
+          side: "left",
+          track: leftTrack,
+          avatar: fallbackUserAvatar,
+          name: activeIdentity?.name || "我",
+          emptyText: "去音乐库播放一首歌",
+          origin: leftOrigin,
+        })}
+        {renderCard({
+          side: "right",
+          track: rightTrack,
+          avatar: fallbackFriendAvatar,
+          name: bound ? (bound.character.remark || bound.character.name) : "绑定角色",
+          emptyText: tracks.length ? (bound ? "点击换一首" : "点击头像绑定角色") : "请先在音乐库添加歌曲",
+          origin: rightOrigin,
+        })}
+      </div>
+      {isEditing && onRemove && (
+        <button type="button" onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>
+      )}
+      {showBindingSheet && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-end bg-black/40" onClick={() => setShowBindingSheet(false)}>
+          <div className="max-h-[72vh] w-full overflow-y-auto rounded-t-[28px] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-stone-900">双人音乐</h3>
+                <p className="mt-0.5 text-[10px] text-stone-400">绑定当前身份下的单聊好友</p>
+              </div>
+              <button type="button" onClick={() => setShowBindingSheet(false)} className="h-7 w-7 rounded-full bg-stone-100 text-stone-500">×</button>
+            </div>
+            <div className="space-y-2">
+              {availableMusicRelationships.length ? availableMusicRelationships.map(({ relationship, character }) => (
+                <button
+                  type="button"
+                  key={relationship.id}
+                  onClick={() => {
+                    onBindMusicRelationship?.(id, relationship.id);
+                    setShowBindingSheet(false);
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-2xl border p-3 text-left ${dualMusicConfig?.relationId === relationship.id ? "border-stone-900 bg-stone-50" : "border-stone-100"}`}
+                >
+                  <img src={character.avatar} alt="" className="h-10 w-10 rounded-full object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-black text-stone-800">{character.remark || character.name}</p>
+                    <p className="mt-0.5 truncate text-[10px] text-stone-400">{relationship.relationship}</p>
+                  </div>
+                  {dualMusicConfig?.relationId === relationship.id && <Check className="h-4 w-4" />}
+                </button>
+              )) : <p className="py-8 text-center text-xs text-stone-400">当前身份还没有可绑定的单聊好友</p>}
+            </div>
+            {bound && (
+              <button
+                type="button"
+                disabled={musicRecommendationLoading || tracks.length === 0}
+                onClick={() => onRefreshRelationshipMusic?.(bound.relationship.id)}
+                className="mt-4 w-full rounded-full bg-stone-950 py-3 text-xs font-black text-white disabled:bg-stone-200"
+              >
+                {musicRecommendationLoading ? "正在选歌…" : "换一首"}
+              </button>
+            )}
+            {musicError && <p className="mt-3 text-center text-[10px] text-rose-500">{musicError}</p>}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds, widgetOpacity, widgetBorderRadius }: WidgetProps) {
   const [todos, setTodos] = useState<{ id: string; text: string; checked: boolean }[]>([]);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
@@ -1120,7 +1325,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
 
 // Bottom sheet selector for preset widgets
 interface AddWidgetSheetProps {
-  onAdd: (widgetType: "album" | "music" | "anniversary" | "todo" | "calendar_album" | "welcome") => void;
+  onAdd: (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "welcome") => void;
   onClose: () => void;
   settings?: UserSettings;
 }
@@ -1181,6 +1386,19 @@ export function AddWidgetSheet({ onAdd, onClose, settings }: AddWidgetSheetProps
           <div>
             <h4 className="text-xs font-black text-stone-800">音乐播放</h4>
             <p className="text-[10px] text-stone-400 font-medium mt-0.5">常驻迷你留声机</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => onAdd("dual_music")}
+          className="flex items-center gap-3 p-3 bg-stone-50 hover:bg-stone-100 border border-stone-200/60 rounded-2xl text-left transition-all hover:scale-[1.02] active:scale-95"
+        >
+          <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
+            <MusicIcon className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h4 className="text-xs font-black text-stone-800">双人音乐 (2×3)</h4>
+            <p className="text-[10px] text-stone-400 font-medium mt-0.5">我与好友各自正在听</p>
           </div>
         </button>
 
