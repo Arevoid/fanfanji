@@ -110,6 +110,8 @@ export interface Message {
   imageAssetId?: string;
   imageMimeType?: string;
   imageSource?: "uploaded" | "generated";
+  /** Resolves a frozen, public-only forum snapshot from the ForumShare repository. */
+  forumShareId?: string;
 }
 
 export type ImageApiProtocol = "openai-images" | "gemini-native-image" | "imagen-text";
@@ -194,6 +196,111 @@ export interface Moment {
   imageDescription?: string;
   /** The user identity whose social circle this post belongs to. */
   ownerIdentityId?: string;
+}
+
+export interface ForumPublicAuthor {
+  displayName: string;
+  avatar?: string;
+  kind: "user" | "anonymous-user" | "ai-character" | "anonymous-ai" | "virtual";
+  isAnonymous: boolean;
+}
+
+export interface ForumThread {
+  id: string;
+  ownerIdentityId: string;
+  publicAuthor: ForumPublicAuthor;
+  /** Private author mapping is never copied into a public snapshot or Message. */
+  privateAuthorRelationId?: string;
+  privateAuthorCharacterId?: string;
+  title: string;
+  body: string;
+  source: "user" | "user-anonymous" | "ai-character" | "ai-character-anonymous" | "ai-virtual" | "virtual";
+  occurredAt: number;
+  baseLikeCount: number;
+  likedByIdentityIds: string[];
+  replyCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumReply {
+  id: string;
+  threadId: string;
+  ownerIdentityId: string;
+  /** Main post is floor 1. Reply floors are allocated once and never renumbered. */
+  floor: number;
+  /** Missing on phase-one records means a normal reply. */
+  kind?: "reply" | "author-update";
+  publicAuthor: ForumPublicAuthor;
+  body: string;
+  replyToReplyId?: string;
+  replyToFloor?: number;
+  replyToAuthorName?: string;
+  quotedText?: string;
+  source: "user" | "user-anonymous" | "ai-character" | "ai-character-anonymous" | "ai-virtual";
+  occurredAt: number;
+  baseLikeCount: number;
+  likedByIdentityIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  /** Deleted replies remain as tombstones so floors and quote targets stay stable. */
+  isDeleted?: boolean;
+  deletedAt?: number;
+}
+
+export type ForumGenerationTrigger =
+  | "refresh"
+  | "initial-replies"
+  | "lazy"
+  | "like-engagement"
+  | "manual-thread-refresh";
+export type ForumGenerationTaskStatus = "running" | "succeeded" | "failed" | "stale";
+
+export interface ForumGenerationTask {
+  id: string;
+  taskKey: string;
+  ownerIdentityId: string;
+  relationId?: string;
+  characterId?: string;
+  threadId?: string;
+  trigger: ForumGenerationTrigger;
+  status: ForumGenerationTaskStatus;
+  startedAt: number;
+  completedAt?: number;
+  retryAfter?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumThreadPublicSnapshot {
+  threadId: string;
+  title: string;
+  body: string;
+  publicAuthor: ForumPublicAuthor;
+  occurredAt: number;
+  replyCount: number;
+  replies: Array<{
+    id: string;
+    floor: number;
+    kind?: "reply" | "author-update";
+    body: string;
+    publicAuthor: ForumPublicAuthor;
+    replyToFloor?: number;
+    replyToAuthorName?: string;
+    quotedText?: string;
+    occurredAt: number;
+  }>;
+}
+
+export interface ForumShare {
+  id: string;
+  ownerIdentityId: string;
+  threadId: string;
+  targetRelationId: string;
+  conversationId: string;
+  sourceMessageId: string;
+  publicSnapshot: ForumThreadPublicSnapshot;
+  createdAt: number;
 }
 
 export interface MusicTrack {

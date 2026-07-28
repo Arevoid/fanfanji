@@ -24,6 +24,7 @@ import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import { buildRelationMusicContext } from "../domain/prompt/musicContext";
+import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
@@ -33,9 +34,13 @@ import { generateCharacterImage } from "../features/chat/services/characterImage
 import { getPendingExplicitImageRequest } from "../features/chat/services/imageGenerationIntent";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
+import { loadForumGenerationTasks, loadForumShares, loadForumThreads, saveForumGenerationTasks, saveForumShares, saveForumThreads } from "../core/storage/repositories/forumRepository";
+import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from "../domain/forum/forumShare";
+import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
 import { Button, Card, Modal } from "./ui";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
+import { ForumShareCard } from "../features/forum/components/ForumShareCard";
 import { ChatTopBar } from "../features/chat/components/ChatTopBar";
 import { ContactList } from "../features/chat/components/ContactList";
 import { ConversationList } from "../features/chat/components/ConversationList";
@@ -407,6 +412,9 @@ interface AppChatProps {
   musicTracks?: MusicTrack[];
   identityMusicStates?: IdentityMusicState[];
   relationshipMusicStates?: RelationshipMusicState[];
+  pendingForumShareMessageId?: string | null;
+  onForumShareHandled?: () => void;
+  onOpenForumShare?: (shareId: string) => void;
 }
 
 const PRESEED_MOMENTS: Moment[] = [];
@@ -674,8 +682,13 @@ export default function AppChat({
   musicTracks = [],
   identityMusicStates = [],
   relationshipMusicStates = [],
+  pendingForumShareMessageId,
+  onForumShareHandled,
+  onOpenForumShare,
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
+  const [forumShareReplyError, setForumShareReplyError] = useState("");
+  const forumShareReplyInFlightRef = useRef<Set<string>>(new Set());
 
   // MiniMax Real-time TTS Playback States
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
@@ -1074,6 +1087,9 @@ export default function AppChat({
   const currentChatMessages = messages.filter((m) => !m.isOffline && (activeRelationship
     ? m.relationId === activeRelationship.id
     : m.characterId === activeChatCharId && activeCharacter?.isGroupChat));
+  const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const forumSharesForCurrentIdentity = loadForumShares().value.filter((share) =>
+    share.ownerIdentityId === activeIdentityId);
   // Old records may contain model-facing scheduling metadata. Never render it
   // as a chat bubble, but retain the underlying history record untouched.
   const visibleChatMessages = currentChatMessages
@@ -1087,7 +1103,6 @@ export default function AppChat({
   const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
   const globalChatIcons = sanitizeChatIcons(settings.chatIcons);
   const getChatIcon = (key: ChatIconKey): string | undefined => characterChatIcons[key] || globalChatIcons[key];
-  const activeIdentityId = settings.activeIdentityId || "identity-1";
   const belongsToActiveIdentity = (ownerIdentityId?: string) =>
     (ownerIdentityId || "identity-1") === activeIdentityId;
 
@@ -1255,6 +1270,18 @@ export default function AppChat({
     }
     onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
     onDeleteRelationshipMusic?.(relationId);
+    const forumShares = loadForumShares().value;
+    const remainingForumShares = removeForumSharesByRelation(forumShares, relationId);
+    if (remainingForumShares.length !== forumShares.length) saveForumShares(remainingForumShares);
+    const forumThreads = loadForumThreads().value;
+    const unlinkedForumThreads = unlinkForumPrivateAuthorByRelation(forumThreads, relationId);
+    if (unlinkedForumThreads.some((thread, index) => thread !== forumThreads[index])) {
+      saveForumThreads(unlinkedForumThreads);
+    }
+    saveForumGenerationTasks(removeForumGenerationTasksByRelation(
+      loadForumGenerationTasks().value,
+      relationId,
+    ));
     offlineStories
       .filter((story) => story.relationId === relationId)
       .forEach((story) => onDeleteOfflineStory?.(story.id));
@@ -2352,7 +2379,11 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     });
   };
 
-  const generateResponseForUserMessage = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
+  const generateResponseForUserMessage = async (
+    userMsg: Message | null,
+    customHistoryOverride?: Message[],
+    options?: { forumShareTrigger?: boolean },
+  ) => {
     if (!activeChatCharId || !activeCharacter) return;
 
     if (activeCharacter.isGroupChat) {
@@ -2360,6 +2391,7 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     }
 
     setIsTyping(true);
+    if (options?.forumShareTrigger) setForumShareReplyError("");
 
     const isRedPacket = userMsg && isRedPacketMarkup(userMsg.content);
     if (isRedPacket) {
@@ -2595,6 +2627,16 @@ ${activeCharacter.disableBracketActions
           relationshipStates: relationshipMusicStates,
         })
         : "";
+      const forumContext = activeRelationship
+        ? buildRelationForumContext({
+          ownerIdentityId: activeRelationship.userIdentityId,
+          relationId: activeRelationship.id,
+          conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
+          messages: finalMsgs,
+          shares: loadForumShares().value,
+          threads: loadForumThreads().value,
+        })
+        : "";
 
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
       const scanContextParts = [
@@ -2616,6 +2658,7 @@ ${activeCharacter.disableBracketActions
       assembledInstructions.push(mainPromptText);
       if (relationshipContext) assembledInstructions.push(relationshipContext);
       if (musicContext) assembledInstructions.push(musicContext);
+      if (forumContext) assembledInstructions.push(forumContext);
 
       // 1.2 Red Packet Reaction Prompt
       if (isRedPacket && userMsg) {
@@ -3053,7 +3096,11 @@ ${stickerListStr}
           content: `⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`,
           timestamp: Date.now(),
         };
-        onSendMessage(errMsg);
+        if (options?.forumShareTrigger) {
+          setForumShareReplyError("帖子已成功转发，但 AI 暂时没有返回有效回复。你可以稍后继续发送消息讨论。");
+        } else {
+          onSendMessage(errMsg);
+        }
       }
     } catch (err: any) {
       const errMsgStr = err?.message || "";
@@ -3074,7 +3121,11 @@ ${stickerListStr}
           : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`,
         timestamp: Date.now(),
       };
-      onSendMessage(errMsg);
+      if (options?.forumShareTrigger) {
+        setForumShareReplyError(`帖子已成功转发，但 AI 回复失败：${errMsgStr || "请检查网络和 API 配置后重试。"}`);
+      } else {
+        onSendMessage(errMsg);
+      }
     } finally {
       setIsTyping(false);
     }
@@ -3565,6 +3616,40 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
 
     generateResponseForUserMessage(userMsg, currentMessagesWithNewUser);
   };
+
+  useEffect(() => {
+    if (!pendingForumShareMessageId || !activeRelationship || !activeCharacter || activeCharacter.isGroupChat) return;
+    if (activeRelationship.userIdentityId !== activeIdentityId) return;
+    const shareMessage = messages.find((message) =>
+      message.id === pendingForumShareMessageId
+      && message.forumShareId
+      && message.relationId === activeRelationship.id
+      && message.conversationId === (activeRelationship.conversationId || getConversationId(activeRelationship.id)));
+    if (!shareMessage || forumShareReplyInFlightRef.current.has(shareMessage.id)) return;
+    forumShareReplyInFlightRef.current.add(shareMessage.id);
+    const relationHistory = messages.filter((message) =>
+      message.relationId === activeRelationship.id
+      && message.conversationId === shareMessage.conversationId
+      && !message.isOffline);
+    void generateResponseForUserMessage(
+      shareMessage,
+      relationHistory,
+      { forumShareTrigger: true },
+    ).finally(() => {
+      forumShareReplyInFlightRef.current.delete(shareMessage.id);
+      onForumShareHandled?.();
+    });
+  }, [
+    pendingForumShareMessageId,
+    activeRelationship?.id,
+    activeRelationship?.conversationId,
+    activeRelationship?.userIdentityId,
+    activeCharacter?.id,
+    activeCharacter?.isGroupChat,
+    activeIdentityId,
+    messages.length,
+    onForumShareHandled,
+  ]);
 
   const handleRegenerateResponse = async (targetMsg: Message, oocComment: string) => {
     if (!activeChatCharId || !activeCharacter) return;
@@ -6421,7 +6506,23 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   >
                     {/* Actual chat bubble */}
                     <div className="max-w-full">
-                      {msg.imageAssetId ? (
+                      {msg.forumShareId ? (() => {
+                        const share = forumSharesForCurrentIdentity.find((item) =>
+                          item.id === msg.forumShareId
+                          && item.sourceMessageId === msg.id
+                          && item.targetRelationId === msg.relationId
+                          && item.conversationId === msg.conversationId);
+                        return share ? (
+                          <ForumShareCard
+                            share={share}
+                            onOpen={() => onOpenForumShare?.(share.id)}
+                          />
+                        ) : (
+                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                            论坛分享已不可用
+                          </div>
+                        );
+                      })() : msg.imageAssetId ? (
                         <StoredChatImage assetId={msg.imageAssetId} alt="generated chat image" generated={msg.imageSource === "generated"} />
                       ) : msg.content.startsWith("data:image/") ? (
                         <img
@@ -6836,6 +6937,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             {imageGenerationError && (
               <div role="status" className="mx-3 mt-2 rounded-lg bg-red-50 px-3 py-2 text-[11px] leading-relaxed text-red-600">
                 {imageGenerationError}
+              </div>
+            )}
+            {forumShareReplyError && (
+              <div role="status" className="mx-3 mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-700">
+                {forumShareReplyError}
               </div>
             )}
             <form

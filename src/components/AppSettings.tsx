@@ -101,6 +101,11 @@ const BACKUP_KEYS = [
   "phone_messages",
   "phone_messages_v3",
   "phone_moments_v3",
+  "phone_forum_threads",
+  "phone_forum_replies",
+  "phone_forum_shares",
+  "phone_forum_generation_tasks",
+  "phone_character_relationships",
   "phone_music_playlists",
   "phone_music_tracks",
   "phone_dual_music_widget_configs",
@@ -114,6 +119,51 @@ const BACKUP_KEYS = [
 
 const BACKUP_KEY_SET = new Set<string>(BACKUP_KEYS);
 type BackupData = Partial<Record<(typeof BACKUP_KEYS)[number], string | null>>;
+
+export function sanitizeSystemBackupValue(
+  key: string,
+  value: string | null,
+  source?: Record<string, unknown>,
+): string | null {
+  if (!value) return value;
+  if (key === "phone_forum_threads") {
+    try {
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return "[]";
+      return JSON.stringify(parsed.map((thread) => {
+        if (!thread || typeof thread !== "object") return thread;
+        const { privateAuthorRelationId: _relation, privateAuthorCharacterId: _character, ...publicThread } =
+          thread as Record<string, unknown>;
+        return publicThread;
+      }));
+    } catch {
+      return "[]";
+    }
+  }
+  if (key === "phone_forum_generation_tasks") {
+    try {
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return "[]";
+      const relationshipRaw = source?.phone_character_relationships;
+      const relationships = typeof relationshipRaw === "string"
+        ? JSON.parse(relationshipRaw)
+        : JSON.parse(localStorage.getItem("phone_character_relationships") || "[]");
+      const validRelationIds = new Set(
+        Array.isArray(relationships)
+          ? relationships.flatMap((item) =>
+              item && typeof item === "object" && typeof item.id === "string" ? [item.id] : [])
+          : [],
+      );
+      return JSON.stringify(parsed.filter((task) =>
+        task
+        && typeof task === "object"
+        && (typeof task.relationId !== "string" || validRelationIds.has(task.relationId))));
+    } catch {
+      return "[]";
+    }
+  }
+  return value;
+}
 
 function snapshotLocalStorage(): Map<string, string> {
   const snapshot = new Map<string, string>();
@@ -2683,7 +2733,7 @@ export default function AppSettings({
                       try {
                         const backupData: BackupData = {};
                         BACKUP_KEYS.forEach(key => {
-                          backupData[key] = localStorage.getItem(key);
+                          backupData[key] = sanitizeSystemBackupValue(key, localStorage.getItem(key));
                         });
 
                         const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
@@ -2740,7 +2790,11 @@ export default function AppSettings({
                                 for (const [key, value] of entries) {
                                   if (typeof value === "string") {
                                     writtenKeys.push(key);
-                                    localStorage.setItem(key, value);
+                                    localStorage.setItem(key, sanitizeSystemBackupValue(
+                                      key,
+                                      value,
+                                      json as Record<string, unknown>,
+                                    ) || value);
                                   }
                                 }
                               } catch (writeError) {

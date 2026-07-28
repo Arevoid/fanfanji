@@ -35,10 +35,13 @@ assert.equal(
 
 const spatialBoundary = formatOnlineChatSpatialBoundary();
 assert.match(spatialBoundary, /\u8fdc\u7a0b\u7ebf\u4e0a\u804a\u5929/);
-assert.match(spatialBoundary, /\u628a\u7269\u54c1\u9012\u7ed9\u7528\u6237/);
+assert.match(spatialBoundary, /不得描述[^。\n]*把实物递给用户/);
 assert.match(spatialBoundary, /\u6211\u53bb\u53a8\u623f\u5012\u676f\u6c34/);
 assert.match(spatialBoundary, /\u4e0b\u6b21\u89c1\u9762\u7ed9\u4f60\u5e26/);
-assert.match(spatialBoundary, /\u8fc7\u53bb\u7684\u7ebf\u4e0b\u5267\u60c5/);
+assert.match(
+  spatialBoundary,
+  /\u8fc7\u53bb\u7ebf\u4e0b\u5267\u60c5[^。\n]*\u4e0d\u80fd\u5355\u72ec\u8bc1\u660e\u5f53\u524d\u4ecd\u5728\u540c\u5730/,
+);
 
 assert.equal(
   sanitizeMomentPublishText("[sticker|happy|https://example.test/sticker.png] text moment"),

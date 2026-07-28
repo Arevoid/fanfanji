@@ -15,10 +15,13 @@ import { loadRelationships, saveRelationships } from "./core/storage/repositorie
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
+import { loadForumGenerationTasks, loadForumShares, loadForumThreads, saveForumGenerationTasks, saveForumShares, saveForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
+import { cleanupForumDataForDeletedCharacter } from "./domain/forum/forumShare";
+import { removeForumGenerationTasksByRelations } from "./domain/forum/forumGenerationGuard";
 import { loadImageGenerationRecords, removeImageGenerationRecordsByCharacter, saveImageGenerationRecords } from "./core/storage/repositories/imageGenerationRepository";
 import {
   bindDualMusicWidget,
@@ -268,6 +271,8 @@ export default function App() {
   const [activeApp, setActiveApp] = useState<string | null>(null);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
+  const [pendingForumShareMessageId, setPendingForumShareMessageId] = useState<string | null>(null);
+  const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
 
   // Offline Stories State & Handlers
@@ -1645,6 +1650,18 @@ export default function App() {
       const musicCleanup = removeMusicDataByRelations(dualMusicConfigs, relationshipMusicStates, relationIds);
       setDualMusicConfigs(musicCleanup.configs);
       setRelationshipMusicStates(musicCleanup.states);
+      const forumCleanup = cleanupForumDataForDeletedCharacter({
+        shares: loadForumShares().value,
+        threads: loadForumThreads().value,
+        relationIds,
+        characterIds: deletedCharacterIds,
+      });
+      saveForumShares(forumCleanup.shares);
+      saveForumThreads(forumCleanup.threads);
+      saveForumGenerationTasks(removeForumGenerationTasksByRelations(
+        loadForumGenerationTasks().value,
+        relationIds,
+      ));
       relationIds.forEach((relationId) => {
         localStorage.removeItem(getOfflineModeStorageKey(relationId));
         localStorage.removeItem(getOfflineStoryStorageKey(relationId));
@@ -3024,6 +3041,12 @@ export default function App() {
                     musicTracks={tracks}
                     identityMusicStates={identityMusicStates}
                     relationshipMusicStates={relationshipMusicStates}
+                    pendingForumShareMessageId={pendingForumShareMessageId}
+                    onForumShareHandled={() => setPendingForumShareMessageId(null)}
+                    onOpenForumShare={(shareId) => {
+                      setOpenForumShareId(shareId);
+                      setActiveApp("forum");
+                    }}
                   />
                 </div>
 
@@ -3073,6 +3096,22 @@ export default function App() {
 
                 {activeApp === "forum" && (
                   <AppForum
+                    activeIdentity={activeIdentity}
+                    characters={characters}
+                    relationships={relationships}
+                    messages={messages}
+                    memories={memories}
+                    worldBookEntries={worldBookEntries}
+                    settings={settings}
+                    openForumShareId={openForumShareId}
+                    onOpenForumShareHandled={() => setOpenForumShareId(null)}
+                    onSendMessage={handleSendMessage}
+                    onOpenChat={(characterId, relationId, sourceMessageId) => {
+                      setActiveChatCharId(characterId);
+                      setActiveChatRelationId(relationId);
+                      setPendingForumShareMessageId(sourceMessageId);
+                      setActiveApp("chat");
+                    }}
                     onClose={() => setActiveApp(null)}
                   />
                 )}
