@@ -5027,7 +5027,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
             {activeStylePreset === "liquid-glass" && (
               <style>{`
                 #conv-screen {
-                  ${activeCharacter.chatBg ? `background: url("${activeCharacter.chatBg}") center/cover no-repeat !important;` : 'background: transparent !important;'}
+                  /* A transparent page exposes the chat list below this overlay. Keep an
+                     opaque glass base when the user has not supplied a chat wallpaper. */
+                  ${activeCharacter.chatBg
+                    ? `background: url("${activeCharacter.chatBg}") center/cover no-repeat !important;`
+                    : 'background: radial-gradient(circle at 12% 8%, #ffffff 0%, #f3f7fb 42%, #e7eef7 100%) !important;'}
                 }
                 .cv-messages-list {
                   background: transparent !important;

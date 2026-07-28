@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { resolveActiveChatStylePreset } from "../src/components/AppChat";
 
 assert.equal(
@@ -17,5 +18,12 @@ assert.equal(
   "an explicit non-default character style remains an override",
 );
 assert.equal(resolveActiveChatStylePreset("default", undefined), "default");
+
+const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+assert.match(
+  appChatSource,
+  /background: radial-gradient\(circle at 12% 8%, #ffffff 0%, #f3f7fb 42%, #e7eef7 100%\) !important;/,
+  "liquid glass without a wallpaper must use an opaque base rather than expose the chat list beneath it",
+);
 
 console.log("chat style preset resolution tests passed");
