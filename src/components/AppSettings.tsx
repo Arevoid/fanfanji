@@ -860,6 +860,8 @@ export default function AppSettings({
     { key: "schedule", label: "日程" },
     { key: "forum", label: "论坛" },
     { key: "notes", label: "备忘录" },
+    { key: "memory", label: "记忆书" },
+    { key: "offline", label: "线下" },
     { key: "store", label: "应用商店" },
     { key: "settings", label: "设置" }
   ];
