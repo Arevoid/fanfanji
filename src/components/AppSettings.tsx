@@ -24,7 +24,11 @@ import {
   VolumeX
 } from "lucide-react";
 
-import { compressImage } from "../utils/pngParser";
+import {
+  compressImage,
+  compressImagePreservingTransparency,
+  isTransparencyPreservedImage,
+} from "../utils/pngParser";
 import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 import { inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "../features/chat/services/imageProtocol";
 import { applyDesktopModuleBackup, buildDesktopModuleBackup, parseDesktopModuleBackup } from "../features/home/desktopModuleBackup";
@@ -782,7 +786,7 @@ export default function AppSettings({
     const file = e.target.files?.[0];
     if (file) {
       try {
-        const compressed = await compressImage(file, 120, 120, 0.8);
+        const compressed = await compressImagePreservingTransparency(file, 120, 120, 0.8);
         const updatedIcons = { ...settings.customIcons, [appKey]: compressed };
         handleSave({ customIcons: updatedIcons });
       } catch (err) {
@@ -1760,6 +1764,7 @@ export default function AppSettings({
                     <div className="grid grid-cols-4 gap-2.5">
                       {appKeys.map((item) => {
                         const customImg = settings.customIcons[item.key];
+                        const isTransparentIcon = isTransparencyPreservedImage(customImg);
                         return (
                           <div
                             key={item.key}
@@ -1767,11 +1772,19 @@ export default function AppSettings({
                           >
                             <label className="cursor-pointer flex flex-col items-center w-full">
                               <div 
-                                className="w-10 h-10 bg-white border border-slate-200 flex items-center justify-center shadow-sm overflow-hidden shrink-0 group-hover:border-neutral-950 transition-colors"
-                                style={{ borderRadius: "var(--app-icon-radius, 35%)" }}
+                                className={`w-10 h-10 flex items-center justify-center overflow-hidden shrink-0 transition-colors ${
+                                  isTransparentIcon
+                                    ? "bg-transparent border-0 shadow-none"
+                                    : "bg-white border border-slate-200 shadow-sm group-hover:border-neutral-950"
+                                }`}
+                                style={{ borderRadius: isTransparentIcon ? 0 : "var(--app-icon-radius, 35%)" }}
                               >
                                 {customImg ? (
-                                  <img src={customImg} alt={item.label} className="w-full h-full object-cover" />
+                                  <img
+                                    src={customImg}
+                                    alt={item.label}
+                                    className={`w-full h-full ${isTransparentIcon ? "object-contain" : "object-cover"}`}
+                                  />
                                 ) : (
                                   <Sliders className="w-4 h-4 text-slate-400" />
                                 )}

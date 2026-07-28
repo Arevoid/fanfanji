@@ -11,6 +11,10 @@ import {
 } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { audioDb } from "../utils/audioDb";
+import {
+  compressImagePreservingTransparency,
+  isTransparencyPreservedImage,
+} from "../utils/pngParser";
 import { 
   Play, 
   Pause, 
@@ -114,55 +118,37 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
     return raw ? JSON.parse(raw) : [];
   });
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = () => {
-          // Resize/compress the image to max 800px dimension so it fits easily within localStorage (approx 30-80KB)
-          const canvas = document.createElement("canvas");
-          const maxDim = 800;
-          let width = img.width;
-          let height = img.height;
-
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            ctx.drawImage(img, 0, 0, width, height);
-            const compressedBase64 = canvas.toDataURL("image/jpeg", 0.75); // high quality compressed JPEG
-
-            const updated = [compressedBase64];
-            setCustomPhotos(updated);
-            localStorage.setItem(`album_widget_photos_${id}`, JSON.stringify(updated));
-          }
-        };
-        img.src = event.target?.result as string;
-      };
-      reader.readAsDataURL(file);
+      const compressed = await compressImagePreservingTransparency(file, 800, 800, 0.75);
+      const updated = [compressed];
+      setCustomPhotos(updated);
+      localStorage.setItem(`album_widget_photos_${id}`, JSON.stringify(updated));
     }
   };
 
   const defaultImage = ALBUM_IMAGES[0];
+  const currentImage = customPhotos.length > 0 ? customPhotos[0] : defaultImage;
+  const isTransparentPhoto = isTransparencyPreservedImage(currentImage);
 
   return (
     <div className="relative w-full h-full group">
       <div 
-        className="w-full h-full rounded-2xl overflow-hidden shadow-md border border-white/20 bg-stone-900/10 cursor-pointer select-none"
+        className={`w-full h-full overflow-hidden cursor-pointer select-none ${
+          isTransparentPhoto
+            ? "bg-transparent border-0 shadow-none"
+            : "rounded-2xl shadow-md border border-white/20 bg-stone-900/10"
+        }`}
         style={{
-          borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined
+          borderRadius: isTransparentPhoto
+            ? 0
+            : widgetBorderRadius !== undefined
+              ? `${widgetBorderRadius}px`
+              : undefined,
+          backgroundColor: isTransparentPhoto ? "transparent" : undefined,
+          border: isTransparentPhoto ? "none" : undefined,
+          boxShadow: isTransparentPhoto ? "none" : undefined,
         }}
         onClick={(e) => {
           e.stopPropagation();
@@ -180,9 +166,11 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
         />
 
         <img 
-          src={customPhotos.length > 0 ? customPhotos[0] : defaultImage} 
+          src={currentImage}
           alt="Album moment" 
-          className="w-full h-full object-cover transform hover:scale-105 transition-transform duration-500"
+          className={`w-full h-full transform hover:scale-105 transition-transform duration-500 ${
+            isTransparentPhoto ? "object-contain" : "object-cover"
+          }`}
           referrerPolicy="no-referrer"
         />
       </div>

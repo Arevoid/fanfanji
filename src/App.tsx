@@ -36,6 +36,7 @@ import {
   upsertIdentityMusicTrack,
 } from "./core/storage/repositories/musicWidgetRepository";
 import { imageAssetDb } from "./utils/imageAssetDb";
+import { isTransparencyPreservedImage } from "./utils/pngParser";
 import { DEFAULT_IDENTITY_ID, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type IdentityMusicState, type RelationshipMusicState } from "./types";
 import { 
@@ -2168,6 +2169,11 @@ export default function App() {
         .phone-screen-container .app-icon-surface .app-default-icon {
           color: inherit !important;
         }
+        .phone-screen-container .app-icon-surface.transparent-custom-icon {
+          background: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+        }
         .phone-screen-container .desktop-app-label {
           color: var(--desktop-app-text-color) !important;
         }
@@ -2715,6 +2721,7 @@ export default function App() {
                                     if (!app) return null;
                                     const isDragged = draggedItem?.id === item.id;
                                     const customIconUrl = settings.customIcons[app.id];
+                                    const isTransparentCustomIcon = isTransparencyPreservedImage(customIconUrl);
 
                                     return (
                                       <div
@@ -2736,11 +2743,24 @@ export default function App() {
                                             : ""
                                         }`}>
                                           <div 
-                                            className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] transform active:scale-95 transition-all duration-150 overflow-hidden shrink-0"
-                                            style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
+                                            className={`app-icon-surface flex items-center justify-center transform active:scale-95 transition-all duration-150 overflow-hidden shrink-0 ${
+                                              isTransparentCustomIcon
+                                                ? "transparent-custom-icon"
+                                                : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)]"
+                                            }`}
+                                            style={{
+                                              borderRadius: isTransparentCustomIcon ? 0 : "var(--app-icon-radius, 35%)",
+                                              ...iconSizeStyle,
+                                            }}
                                           >
                                             {customIconUrl ? (
-                                              <img src={customIconUrl} alt={app.name} className="w-full h-full object-cover" />
+                                              <img
+                                                src={customIconUrl}
+                                                alt={app.name}
+                                                className={`w-full h-full ${
+                                                  isTransparentCustomIcon ? "object-contain" : "object-cover"
+                                                }`}
+                                              />
                                             ) : (
                                               <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                                                 {app.icon}
@@ -2879,6 +2899,8 @@ export default function App() {
                 const iconSizeStyle = isHiddenNames 
                   ? { width: "60px", height: "60px" } 
                   : { width: "52px", height: "52px" };
+                const isTransparentDockIcon = (appId: string) =>
+                  isTransparencyPreservedImage(settings.customIcons[appId]);
 
                 return (
                   <div 
@@ -2896,11 +2918,15 @@ export default function App() {
                       {installedAppIds.includes("chat") ? (
                         <button
                           onClick={() => setActiveApp("chat")}
-                          className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
-                          style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
+                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
+                            isTransparentDockIcon("chat")
+                              ? "transparent-custom-icon"
+                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
+                          }`}
+                          style={{ borderRadius: isTransparentDockIcon("chat") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
                           {settings.customIcons["chat"] ? (
-                            <img src={settings.customIcons["chat"]} alt="" className="w-full h-full object-cover" />
+                            <img src={settings.customIcons["chat"]} alt="" className={`w-full h-full ${isTransparentDockIcon("chat") ? "object-contain" : "object-cover"}`} />
                           ) : (
                             <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                               {AppIcons.chat()}
@@ -2916,11 +2942,15 @@ export default function App() {
                       {installedAppIds.includes("music") ? (
                         <button
                           onClick={() => setActiveApp("music")}
-                          className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
-                          style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
+                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
+                            isTransparentDockIcon("music")
+                              ? "transparent-custom-icon"
+                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
+                          }`}
+                          style={{ borderRadius: isTransparentDockIcon("music") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
                           {settings.customIcons["music"] ? (
-                            <img src={settings.customIcons["music"]} alt="" className="w-full h-full object-cover" />
+                            <img src={settings.customIcons["music"]} alt="" className={`w-full h-full ${isTransparentDockIcon("music") ? "object-contain" : "object-cover"}`} />
                           ) : (
                             <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                               {AppIcons.music()}
@@ -2936,11 +2966,15 @@ export default function App() {
                       {installedAppIds.includes("archives") ? (
                         <button
                           onClick={() => setActiveApp("archives")}
-                          className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
-                          style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
+                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
+                            isTransparentDockIcon("archives")
+                              ? "transparent-custom-icon"
+                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
+                          }`}
+                          style={{ borderRadius: isTransparentDockIcon("archives") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
                           {settings.customIcons["archives"] ? (
-                            <img src={settings.customIcons["archives"]} alt="" className="w-full h-full object-cover" />
+                            <img src={settings.customIcons["archives"]} alt="" className={`w-full h-full ${isTransparentDockIcon("archives") ? "object-contain" : "object-cover"}`} />
                           ) : (
                             <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                               {AppIcons.archives()}
@@ -2955,11 +2989,15 @@ export default function App() {
                     <div className="flex items-center justify-center w-full h-full">
                       <button
                         onClick={() => setActiveApp("settings")}
-                        className="app-icon-surface bg-white border border-[#f0f0f3] flex items-center justify-center shadow-[0_3px_8px_rgba(0,0,0,0.05)] active:scale-90 transition-all hover:bg-stone-50 overflow-hidden shrink-0"
-                        style={{ borderRadius: "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
+                        className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
+                          isTransparentDockIcon("settings")
+                            ? "transparent-custom-icon"
+                            : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
+                        }`}
+                        style={{ borderRadius: isTransparentDockIcon("settings") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                       >
                         {settings.customIcons["settings"] ? (
-                          <img src={settings.customIcons["settings"]} alt="" className="w-full h-full object-cover" />
+                          <img src={settings.customIcons["settings"]} alt="" className={`w-full h-full ${isTransparentDockIcon("settings") ? "object-contain" : "object-cover"}`} />
                         ) : (
                           <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                             {AppIcons.settings()}
@@ -3219,15 +3257,29 @@ export default function App() {
             {draggedItem.type === "app" ? (
               <div className="flex flex-col items-center">
                 <div 
-                  className="bg-white border border-[#f0f0f3] flex items-center justify-center overflow-hidden shrink-0 shadow-lg" 
+                  className={`flex items-center justify-center overflow-hidden shrink-0 ${
+                    isTransparencyPreservedImage(settings.customIcons[draggedItem.id])
+                      ? "bg-transparent border-0 shadow-none"
+                      : "bg-white border border-[#f0f0f3] shadow-lg"
+                  }`}
                   style={{ 
-                    borderRadius: "var(--app-icon-radius, 35%)",
+                    borderRadius: isTransparencyPreservedImage(settings.customIcons[draggedItem.id])
+                      ? 0
+                      : "var(--app-icon-radius, 35%)",
                     width: settings.hideAppNames ? "52px" : "44px",
                     height: settings.hideAppNames ? "52px" : "44px"
                   }}
                 >
                   {settings.customIcons[draggedItem.id] ? (
-                    <img src={settings.customIcons[draggedItem.id]} alt="" className="w-full h-full object-cover" />
+                    <img
+                      src={settings.customIcons[draggedItem.id]}
+                      alt=""
+                      className={`w-full h-full ${
+                        isTransparencyPreservedImage(settings.customIcons[draggedItem.id])
+                          ? "object-contain"
+                          : "object-cover"
+                      }`}
+                    />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
                       {desktopApps.find(a => a.id === draggedItem.id)?.icon}

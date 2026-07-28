@@ -528,6 +528,67 @@ export function compressImage(file: File, maxWidth: number, maxHeight: number, q
   });
 }
 
+/**
+ * Keeps transparent PNG uploads transparent while continuing to compress
+ * ordinary images as JPEG. A PNG data URL therefore also acts as persisted
+ * rendering metadata for frameless icons/widgets without a second store.
+ */
+export function compressImagePreservingTransparency(
+  file: File,
+  maxWidth: number,
+  maxHeight: number,
+  quality: number = 0.8,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const source = event.target?.result as string;
+      const image = new Image();
+      image.onload = () => {
+        let width = image.width;
+        let height = image.height;
+        if (width > maxWidth || height > maxHeight) {
+          const scale = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.max(1, Math.round(width * scale));
+          height = Math.max(1, Math.round(height * scale));
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          resolve(source);
+          return;
+        }
+        context.clearRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+
+        let hasTransparency = false;
+        if (file.type.toLowerCase() === "image/png") {
+          const pixels = context.getImageData(0, 0, width, height).data;
+          for (let index = 3; index < pixels.length; index += 4) {
+            if (pixels[index] < 255) {
+              hasTransparency = true;
+              break;
+            }
+          }
+        }
+        resolve(hasTransparency
+          ? canvas.toDataURL("image/png")
+          : canvas.toDataURL("image/jpeg", quality));
+      };
+      image.onerror = reject;
+      image.src = source;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+export const isTransparencyPreservedImage = (value?: string | null): boolean =>
+  /^data:image\/png(?:;|,)/i.test(value || "");
+
 // @ts-ignore
 import mammothCode from "mammoth/mammoth.browser.min.js?raw";
 
