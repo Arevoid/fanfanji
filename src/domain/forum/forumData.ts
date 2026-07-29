@@ -5,6 +5,34 @@ export interface ForumData {
   replies: ForumReply[];
 }
 
+export interface ForumThreadMetrics {
+  effectiveReplyCount: number;
+  maxFloor: number;
+  latestReplyAt?: number;
+  updatedAt: number;
+  lastReplyExcerpt?: string;
+}
+
+/** Derives list-card values from the canonical thread/reply collections. */
+export const selectForumThreadMetrics = (
+  thread: ForumThread,
+  replies: readonly ForumReply[],
+): ForumThreadMetrics => {
+  const threadReplies = replies
+    .filter((reply) => reply.threadId === thread.id && reply.ownerIdentityId === thread.ownerIdentityId)
+    .sort((left, right) => left.floor - right.floor);
+  const liveReplies = threadReplies.filter((reply) => !reply.isDeleted);
+  const latest = liveReplies.reduce<ForumReply | undefined>((current, reply) =>
+    !current || reply.occurredAt > current.occurredAt ? reply : current, undefined);
+  return {
+    effectiveReplyCount: liveReplies.length,
+    maxFloor: Math.max(1, ...threadReplies.map((reply) => reply.floor)),
+    ...(latest ? { latestReplyAt: latest.occurredAt } : {}),
+    updatedAt: Math.max(thread.updatedAt, latest?.updatedAt || 0, latest?.occurredAt || 0),
+    ...(latest ? { lastReplyExcerpt: latest.body.replace(/\s+/g, " ").trim().slice(0, 120) } : {}),
+  };
+};
+
 export const createForumPublicAuthor = (
   identity: UserIdentity,
   anonymous: boolean,

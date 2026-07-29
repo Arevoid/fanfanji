@@ -1,0 +1,150 @@
+import type { Character, ForumActivityTask, ForumReply, ForumThread, MemoryItem, Message, UserSettings, WorldBookEntry } from "../../../types";
+import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
+import { commitForumMutation, getForumSnapshotForIdentity } from "../../../core/storage/repositories/forumRepository";
+import { planForumActivity, releaseForumPendingEvents, shouldAttemptAutomaticForumActivity } from "./forumActivityService";
+
+const id = (prefix: string): string => `${prefix}-${typeof crypto !== "undefined" && "randomUUID" in crypto
+  ? crypto.randomUUID()
+  : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+
+export interface ForumActivityRuntimeContext {
+  ownerIdentityId: string;
+  relationships: readonly CharacterRelationship[];
+  characters: readonly Character[];
+  messages: readonly Message[];
+  memories: readonly MemoryItem[];
+  worldBookEntries: readonly WorldBookEntry[];
+  settings: UserSettings;
+  now?: () => number;
+  random?: () => number;
+}
+
+const updateThreadsForReplies = (threads: readonly ForumThread[], replies: readonly ForumReply[]): ForumThread[] => threads.map((thread) => {
+  const latest = replies.filter((reply) => reply.threadId === thread.id && reply.ownerIdentityId === thread.ownerIdentityId)
+    .reduce((value, reply) => Math.max(value, reply.updatedAt, reply.occurredAt), thread.updatedAt);
+  return latest === thread.updatedAt ? thread : { ...thread, updatedAt: latest };
+});
+
+export const releaseDueForumActivity = (context: ForumActivityRuntimeContext, limit = 1): ForumReply[] => {
+  const now = context.now?.() ?? Date.now();
+  const snapshot = getForumSnapshotForIdentity(context.ownerIdentityId);
+  const tasks = snapshot.activityTasks;
+  const allEvents = tasks.flatMap((task) => task.pendingEvents);
+  const released = releaseForumPendingEvents({
+    events: allEvents,
+    threads: snapshot.threads,
+    replies: snapshot.replies,
+    actorStates: snapshot.actorStates,
+    ownerIdentityId: context.ownerIdentityId,
+    now,
+    limit,
+  });
+  const changed = released.events.some((event, index) => event.status !== allEvents[index]?.status);
+  if (!changed) return [];
+  const eventMap = new Map(released.events.map((event) => [event.id, event]));
+  const nextTasks = tasks.map((task) => ({
+    ...task,
+    pendingEvents: task.pendingEvents.map((event) => eventMap.get(event.id) || event),
+    updatedAt: now,
+  }));
+  const newReplies = released.replies.slice(snapshot.replies.length);
+  const nextThreads = updateThreadsForReplies(snapshot.threads, released.replies);
+  const result = commitForumMutation({ replies: released.replies, threads: nextThreads, actorStates: released.actorStates, activityTasks: nextTasks },
+    newReplies.map((reply) => ({ type: "reply-created" as const, ownerIdentityId: reply.ownerIdentityId, threadId: reply.threadId, replyId: reply.id, publicAuthor: reply.publicAuthor, occurredAt: reply.occurredAt })));
+  return result.success ? newReplies : [];
+};
+
+export const forceForumThreadActivity = async (context: ForumActivityRuntimeContext, threadId: string): Promise<{ outcome: "planned" | "no-update"; released: ForumReply[] }> => {
+  const now = context.now?.() ?? Date.now();
+  const snapshot = getForumSnapshotForIdentity(context.ownerIdentityId);
+  const thread = snapshot.threads.find((item) => item.id === threadId);
+  if (!thread) throw new Error("帖子不存在或不属于当前身份。");
+  if (snapshot.activityTasks.some((task) => task.threadId === threadId
+    && task.trigger === "manual-thread-refresh"
+    && now - task.startedAt < 60_000)) {
+    throw new Error("请稍候再刷新帖子动态。");
+  }
+  const events = await planForumActivity({
+    trigger: "manual-thread-refresh", ownerIdentityId: context.ownerIdentityId, thread,
+    replies: snapshot.replies, actorStates: snapshot.actorStates, relationships: context.relationships,
+    characters: context.characters, messages: context.messages, memories: context.memories,
+    worldBookEntries: context.worldBookEntries, settings: context.settings, now, random: context.random,
+  });
+  if (!events.length) return { outcome: "no-update", released: [] };
+  const task: ForumActivityTask = {
+    id: id("forum-activity-task"), ownerIdentityId: context.ownerIdentityId, threadId,
+    trigger: "manual-thread-refresh", status: "succeeded", startedAt: now,
+    completedAt: now, pendingEvents: events, createdAt: now, updatedAt: now,
+  };
+  if (!commitForumMutation({ activityTasks: [...snapshot.activityTasks, task] }).success) throw new Error("保存失败");
+  // Explicit refresh makes the first valid activity visible immediately. Others retain their schedule.
+  const first = events[0];
+  if (first && first.scheduledAt > now) {
+    const current = getForumSnapshotForIdentity(context.ownerIdentityId);
+    commitForumMutation({ activityTasks: current.activityTasks.map((item) => item.id === task.id
+      ? { ...item, pendingEvents: item.pendingEvents.map((event) => event.id === first.id ? { ...event, scheduledAt: now, updatedAt: now } : event) }
+      : item) });
+  }
+  return { outcome: "planned", released: releaseDueForumActivity(context, 1) };
+};
+
+/** User-post initial replies use the same pending/release path as runtime activity. */
+export const scheduleInitialForumReplies = async (context: ForumActivityRuntimeContext, threadId: string): Promise<ForumReply[]> => {
+  const now = context.now?.() ?? Date.now();
+  const snapshot = getForumSnapshotForIdentity(context.ownerIdentityId);
+  const thread = snapshot.threads.find((item) => item.id === threadId);
+  if (!thread || thread.ownerIdentityId !== context.ownerIdentityId) return [];
+  if (snapshot.activityTasks.some((task) => task.threadId === threadId && task.trigger === "initial-replies")) return [];
+  const events = await planForumActivity({
+    trigger: "initial-replies", ownerIdentityId: context.ownerIdentityId, thread,
+    replies: snapshot.replies, actorStates: snapshot.actorStates, relationships: context.relationships,
+    characters: context.characters, messages: context.messages, memories: context.memories,
+    worldBookEntries: context.worldBookEntries, settings: context.settings, now, random: context.random,
+  });
+  if (!events.length) return [];
+  const first = events[0];
+  const task: ForumActivityTask = {
+    id: id("forum-activity-task"), ownerIdentityId: context.ownerIdentityId, threadId,
+    trigger: "initial-replies", status: "succeeded", startedAt: now, completedAt: now,
+    pendingEvents: events.map((event) => event.id === first.id ? { ...event, scheduledAt: now, updatedAt: now } : event),
+    createdAt: now, updatedAt: now,
+  };
+  if (!commitForumMutation({ activityTasks: [...snapshot.activityTasks, task] }).success) throw new Error("保存失败");
+  return releaseDueForumActivity(context, 1);
+};
+
+export const runAutomaticForumActivityCheck = async (context: ForumActivityRuntimeContext): Promise<{ attempted: boolean; released: ForumReply[] }> => {
+  const released = releaseDueForumActivity(context, 1);
+  if (released.length) return { attempted: false, released };
+  const now = context.now?.() ?? Date.now();
+  const snapshot = getForumSnapshotForIdentity(context.ownerIdentityId);
+  if (!context.settings.apiKey?.trim() || !context.settings.selectedModel?.trim()
+    || !shouldAttemptAutomaticForumActivity({ activityTasks: snapshot.activityTasks, ownerIdentityId: context.ownerIdentityId, now })) {
+    return { attempted: false, released: [] };
+  }
+  const thread = [...snapshot.threads]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .find((candidate) => !snapshot.activityTasks.some((task) => task.threadId === candidate.id && task.trigger === "automatic" && now - task.startedAt < 12 * 60 * 1000));
+  if (!thread) return { attempted: false, released: [] };
+  try {
+    const events = await planForumActivity({
+      trigger: "automatic", ownerIdentityId: context.ownerIdentityId, thread,
+      replies: snapshot.replies, actorStates: snapshot.actorStates, relationships: context.relationships,
+      characters: context.characters, messages: context.messages, memories: context.memories,
+      worldBookEntries: context.worldBookEntries, settings: context.settings, now, random: context.random,
+    });
+    const task: ForumActivityTask = {
+      id: id("forum-activity-task"), ownerIdentityId: context.ownerIdentityId, threadId: thread.id,
+      trigger: "automatic", status: events.length ? "succeeded" : "failed", startedAt: now,
+      completedAt: now, ...(events.length ? {} : { retryAfter: now + 5 * 60 * 1000 }), pendingEvents: events,
+      createdAt: now, updatedAt: now,
+    };
+    commitForumMutation({ activityTasks: [...snapshot.activityTasks, task] });
+    return { attempted: true, released: releaseDueForumActivity(context, 1) };
+  } catch {
+    // Automatic failures are deliberately silent; the persisted backoff prevents rapid retries.
+    const failed: ForumActivityTask = { id: id("forum-activity-task"), ownerIdentityId: context.ownerIdentityId, threadId: thread.id, trigger: "automatic", status: "failed", startedAt: now, completedAt: now, retryAfter: now + 5 * 60 * 1000, pendingEvents: [], createdAt: now, updatedAt: now };
+    commitForumMutation({ activityTasks: [...snapshot.activityTasks, failed] });
+    return { attempted: true, released: [] };
+  }
+};

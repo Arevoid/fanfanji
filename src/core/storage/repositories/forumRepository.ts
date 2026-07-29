@@ -1,8 +1,109 @@
-import type { ForumGenerationTask, ForumReply, ForumShare, ForumThread } from "../../../types";
+import type {
+  ForumActivityTask,
+  ForumDmConversation,
+  ForumDmMessage,
+  ForumDmTask,
+  ForumActorRef,
+  ForumActorState,
+  ForumGenerationTask,
+  ForumLikeHistoryRecord,
+  ForumMutationEvent,
+  ForumNotification,
+  ForumPendingActivityEvent,
+  ForumReply,
+  ForumShare,
+  ForumThread,
+  ForumUserProfile,
+  ForumVisitHistory,
+} from "../../../types";
 import { sanitizeStoredForumContent } from "../../../domain/forum/forumContentSafety";
+import { compactForumState, estimateForumStorageUsage } from "../../../domain/forum/forumCapacity";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readArray, writeArray } from "./repositoryUtils";
+
+export interface ForumStateSnapshot {
+  revision: number;
+  threads: ForumThread[];
+  replies: ForumReply[];
+  shares: ForumShare[];
+  generationTasks: ForumGenerationTask[];
+  actorStates: ForumActorState[];
+  activityTasks: ForumActivityTask[];
+  profiles: ForumUserProfile[];
+  visitHistory: ForumVisitHistory[];
+  likeHistory: ForumLikeHistoryRecord[];
+  notifications: ForumNotification[];
+  dmConversations: ForumDmConversation[];
+  dmMessages: ForumDmMessage[];
+  dmTasks: ForumDmTask[];
+}
+
+export interface ForumIdentitySnapshot extends ForumStateSnapshot {
+  ownerIdentityId: string;
+}
+
+export type ForumStateMutation = Partial<Pick<ForumStateSnapshot,
+  "threads" | "replies" | "shares" | "generationTasks" | "actorStates" | "activityTasks" | "profiles" | "visitHistory" | "likeHistory" | "notifications" | "dmConversations" | "dmMessages" | "dmTasks">>;
+
+const forumListeners = new Set<() => void>();
+const forumMutationListeners = new Set<(event: ForumMutationEvent) => void>();
+const identitySnapshotCache = new Map<string, { revision: number; snapshot: ForumIdentitySnapshot }>();
+let forumSnapshot: ForumStateSnapshot | null = null;
+let forumRawFingerprint = "";
+let forumRevision = 0;
+let storageListenerAttached = false;
+const forumStorageKeyValues: readonly string[] = [
+  storageKeys.forumThreads,
+  storageKeys.forumReplies,
+  storageKeys.forumShares,
+  storageKeys.forumGenerationTasks,
+  storageKeys.forumActorStates,
+  storageKeys.forumActivityTasks,
+  storageKeys.forumProfiles,
+  storageKeys.forumVisitHistory,
+  storageKeys.forumLikeHistory,
+  storageKeys.forumNotifications,
+  storageKeys.forumDmConversations,
+  storageKeys.forumDmMessages,
+  storageKeys.forumDmTasks,
+];
+
+const getRawForumFingerprint = (): string => {
+  if (typeof localStorage === "undefined") return "memory";
+  return [
+    storageKeys.forumThreads,
+    storageKeys.forumReplies,
+    storageKeys.forumShares,
+    storageKeys.forumGenerationTasks,
+    storageKeys.forumActorStates,
+    storageKeys.forumActivityTasks,
+    storageKeys.forumProfiles,
+    storageKeys.forumVisitHistory,
+    storageKeys.forumLikeHistory,
+    storageKeys.forumNotifications,
+    storageKeys.forumDmConversations,
+    storageKeys.forumDmMessages,
+    storageKeys.forumDmTasks,
+  ].map((key) => localStorage.getItem(key) || "").join("\u0001");
+};
+
+const emitForumStateChanged = (): void => {
+  identitySnapshotCache.clear();
+  forumListeners.forEach((listener) => listener());
+};
+
+const attachStorageListener = (): void => {
+  if (storageListenerAttached || typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+  storageListenerAttached = true;
+  window.addEventListener("storage", (event) => {
+    if (!event.key || !forumStorageKeyValues.includes(event.key)) return;
+    forumSnapshot = null;
+    forumRawFingerprint = "";
+    forumRevision += 1;
+    emitForumStateChanged();
+  });
+};
 
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -58,8 +159,137 @@ const isForumReply = (value: unknown): value is ForumReply => {
     && (reply.replyToAuthorName === undefined || typeof reply.replyToAuthorName === "string")
     && (reply.quotedText === undefined || typeof reply.quotedText === "string")
     && (reply.isDeleted === undefined || typeof reply.isDeleted === "boolean")
-    && (reply.deletedAt === undefined || typeof reply.deletedAt === "number");
+    && (reply.deletedAt === undefined || typeof reply.deletedAt === "number")
+    && (reply.privateActor === undefined || isForumActorRef(reply.privateActor));
 };
+
+const isForumActorRef = (value: unknown): value is ForumActorRef => {
+  if (!value || typeof value !== "object") return false;
+  const actor = value as Record<string, unknown>;
+  return (actor.kind === "relationship"
+    && typeof actor.relationId === "string"
+    && typeof actor.characterId === "string")
+    || (actor.kind === "virtual" && typeof actor.virtualProfileId === "string");
+};
+
+const isForumActorState = (value: unknown): value is ForumActorState => {
+  if (!value || typeof value !== "object") return false;
+  const state = value as Record<string, unknown>;
+  return typeof state.ownerIdentityId === "string"
+    && typeof state.threadId === "string"
+    && typeof state.actorKey === "string"
+    && isForumActorRef(state.actor)
+    && isStringArray(state.recentReplyIds)
+    && isStringArray(state.recentTopicFingerprints)
+    && Array.isArray(state.hourlyReplyTimestamps)
+    && state.hourlyReplyTimestamps.every((item) => typeof item === "number")
+    && typeof state.updatedAt === "number";
+};
+
+const isPendingActivityEvent = (value: unknown): value is ForumPendingActivityEvent => {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Record<string, unknown>;
+  const target = event.replyTarget as Record<string, unknown> | undefined;
+  const validTarget = target?.type === "thread"
+    || (target?.type === "floor" && Number.isInteger(target.floor))
+    || (target?.type === "batch" && typeof target.localId === "string");
+  return typeof event.id === "string"
+    && typeof event.ownerIdentityId === "string"
+    && typeof event.threadId === "string"
+    && typeof event.batchId === "string"
+    && typeof event.localId === "string"
+    && event.actorSlotSnapshot !== null
+    && typeof event.actorSlotSnapshot === "object"
+    && isForumActorRef((event.actorSlotSnapshot as Record<string, unknown>).actor)
+    && (event.kind === "reply" || event.kind === "author-update")
+    && typeof event.body === "string"
+    && validTarget
+    && typeof event.scheduledAt === "number"
+    && ["pending", "released", "skipped"].includes(String(event.status))
+    && typeof event.createdAt === "number"
+    && typeof event.updatedAt === "number";
+};
+
+const isForumActivityTask = (value: unknown): value is ForumActivityTask => {
+  if (!value || typeof value !== "object") return false;
+  const task = value as Record<string, unknown>;
+  return typeof task.id === "string"
+    && typeof task.ownerIdentityId === "string"
+    && typeof task.threadId === "string"
+    && ["automatic", "manual-thread-refresh", "initial-replies", "like-engagement"].includes(String(task.trigger))
+    && ["running", "succeeded", "failed", "blocked"].includes(String(task.status))
+    && typeof task.startedAt === "number"
+    && Array.isArray(task.pendingEvents)
+    && task.pendingEvents.every(isPendingActivityEvent)
+    && typeof task.createdAt === "number"
+    && typeof task.updatedAt === "number";
+};
+
+const isForumUserProfile = (value: unknown): value is ForumUserProfile => {
+  if (!value || typeof value !== "object") return false;
+  const profile = value as Record<string, unknown>;
+  return typeof profile.ownerIdentityId === "string"
+    && typeof profile.displayName === "string"
+    && (profile.avatar === undefined || typeof profile.avatar === "string")
+    && (profile.avatarAssetId === undefined || typeof profile.avatarAssetId === "string")
+    && (profile.bio === undefined || typeof profile.bio === "string")
+    && typeof profile.createdAt === "number"
+    && typeof profile.updatedAt === "number";
+};
+
+const isPublicThreadSnapshot = (value: unknown): boolean => {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Record<string, unknown>;
+  return typeof snapshot.threadId === "string"
+    && typeof snapshot.title === "string"
+    && typeof snapshot.body === "string"
+    && isPublicAuthor(snapshot.publicAuthor)
+    && typeof snapshot.occurredAt === "number"
+    && typeof snapshot.replyCount === "number"
+    && Array.isArray(snapshot.replies);
+};
+
+const isForumVisitHistory = (value: unknown): value is ForumVisitHistory => {
+  if (!value || typeof value !== "object") return false;
+  const history = value as Record<string, unknown>;
+  return typeof history.id === "string" && typeof history.ownerIdentityId === "string"
+    && typeof history.threadId === "string" && typeof history.lastVisitedAt === "number"
+    && typeof history.visitCount === "number" && isPublicThreadSnapshot(history.publicSnapshot);
+};
+
+const isForumLikeHistory = (value: unknown): value is ForumLikeHistoryRecord => {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  const snapshot = record.publicSnapshot as Record<string, unknown> | undefined;
+  return typeof record.id === "string" && typeof record.ownerIdentityId === "string"
+    && (record.targetType === "thread" || record.targetType === "reply")
+    && typeof record.threadId === "string" && (record.replyId === undefined || typeof record.replyId === "string")
+    && typeof record.likedAt === "number" && isPublicThreadSnapshot(snapshot?.thread)
+    && (snapshot?.reply === undefined || typeof snapshot.reply === "object");
+};
+
+const isForumNotification = (value: unknown): value is ForumNotification => {
+  if (!value || typeof value !== "object") return false;
+  const notification = value as Record<string, unknown>;
+  return typeof notification.id === "string" && typeof notification.eventKey === "string"
+    && typeof notification.ownerIdentityId === "string"
+    && (notification.type === "thread-reply" || notification.type === "reply-reply" || notification.type === "direct-message")
+    && isPublicAuthor(notification.actorPublicSnapshot)
+    && typeof notification.threadId === "string" && typeof notification.replyId === "string"
+    && (notification.targetReplyId === undefined || typeof notification.targetReplyId === "string")
+    && typeof notification.preview === "string" && typeof notification.occurredAt === "number"
+    && (notification.readAt === undefined || typeof notification.readAt === "number")
+    && (notification.conversationId === undefined || typeof notification.conversationId === "string");
+};
+
+const isForumDmActor = (value: unknown): boolean => Boolean(value && typeof value === "object" && ((value as Record<string, unknown>).kind === "virtual" && typeof (value as Record<string, unknown>).virtualProfileId === "string" || (value as Record<string, unknown>).kind === "relationship" && typeof (value as Record<string, unknown>).relationId === "string" && typeof (value as Record<string, unknown>).characterId === "string"));
+const isForumDmConversation = (value: unknown): value is ForumDmConversation => {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === "string" && typeof item.ownerIdentityId === "string" && isForumDmActor(item.participant) && isPublicAuthor(item.participantPublicSnapshot) && typeof item.lastMessageAt === "number" && typeof item.unreadCount === "number" && typeof item.createdAt === "number" && typeof item.updatedAt === "number";
+};
+const isForumDmMessage = (value: unknown): value is ForumDmMessage => Boolean(value && typeof value === "object" && typeof (value as Record<string, unknown>).id === "string" && typeof (value as Record<string, unknown>).conversationId === "string" && typeof (value as Record<string, unknown>).ownerIdentityId === "string" && ["user", "participant"].includes(String((value as Record<string, unknown>).sender)) && typeof (value as Record<string, unknown>).body === "string" && typeof (value as Record<string, unknown>).occurredAt === "number" && typeof (value as Record<string, unknown>).createdAt === "number");
+const isForumDmTask = (value: unknown): value is ForumDmTask => Boolean(value && typeof value === "object" && typeof (value as Record<string, unknown>).id === "string" && typeof (value as Record<string, unknown>).taskKey === "string" && typeof (value as Record<string, unknown>).ownerIdentityId === "string" && typeof (value as Record<string, unknown>).conversationId === "string" && ["running", "succeeded", "failed", "stale"].includes(String((value as Record<string, unknown>).status)) && typeof (value as Record<string, unknown>).startedAt === "number");
 
 const filterLoaded = <T>(
   loaded: StorageResult<unknown[]>,
@@ -94,14 +324,30 @@ export const loadForumThreads = (
   };
 };
 
-export const saveForumThreads = (threads: ForumThread[]): StorageWriteResult =>
-  writeArray(storageKeys.forumThreads, threads);
-
 export const loadForumReplies = (): StorageResult<ForumReply[]> =>
   filterLoaded(readArray<unknown>(storageKeys.forumReplies, []), isForumReply);
 
-export const saveForumReplies = (replies: ForumReply[]): StorageWriteResult =>
-  writeArray(storageKeys.forumReplies, replies);
+/** Private local scheduling data. It is deliberately excluded from system backup. */
+export const loadForumActorStates = (): StorageResult<ForumActorState[]> =>
+  filterLoaded(readArray<unknown>(storageKeys.forumActorStates, []), isForumActorState);
+
+export const loadForumActivityTasks = (): StorageResult<ForumActivityTask[]> =>
+  filterLoaded(readArray<unknown>(storageKeys.forumActivityTasks, []), isForumActivityTask);
+
+export const loadForumProfiles = (): StorageResult<ForumUserProfile[]> =>
+  filterLoaded(readArray<unknown>(storageKeys.forumProfiles, []), isForumUserProfile);
+
+export const loadForumVisitHistory = (): StorageResult<ForumVisitHistory[]> =>
+  filterLoaded(readArray<unknown>(storageKeys.forumVisitHistory, []), isForumVisitHistory);
+
+export const loadForumLikeHistory = (): StorageResult<ForumLikeHistoryRecord[]> =>
+  filterLoaded(readArray<unknown>(storageKeys.forumLikeHistory, []), isForumLikeHistory);
+
+export const loadForumNotifications = (): StorageResult<ForumNotification[]> =>
+  filterLoaded(readArray<unknown>(storageKeys.forumNotifications, []), isForumNotification);
+export const loadForumDmConversations = (): StorageResult<ForumDmConversation[]> => filterLoaded(readArray<unknown>(storageKeys.forumDmConversations, []), isForumDmConversation);
+export const loadForumDmMessages = (): StorageResult<ForumDmMessage[]> => filterLoaded(readArray<unknown>(storageKeys.forumDmMessages, []), isForumDmMessage);
+export const loadForumDmTasks = (): StorageResult<ForumDmTask[]> => filterLoaded(readArray<unknown>(storageKeys.forumDmTasks, []), isForumDmTask);
 
 const isForumShare = (value: unknown): value is ForumShare => {
   if (!value || typeof value !== "object") return false;
@@ -181,9 +427,6 @@ export const loadForumShares = (): StorageResult<ForumShare[]> =>
     };
   })();
 
-export const saveForumShares = (shares: ForumShare[]): StorageWriteResult =>
-  writeArray(storageKeys.forumShares, shares);
-
 const FORUM_TASK_STALE_MS = 10 * 60 * 1000;
 
 const isForumGenerationTask = (value: unknown): value is ForumGenerationTask => {
@@ -232,36 +475,278 @@ export const loadForumGenerationTasks = (
   };
 };
 
-export const saveForumGenerationTasks = (tasks: ForumGenerationTask[]): StorageWriteResult =>
-  writeArray(storageKeys.forumGenerationTasks, tasks);
+const buildForumSnapshot = (): ForumStateSnapshot => ({
+  revision: forumRevision,
+  threads: loadForumThreads().value,
+  replies: loadForumReplies().value,
+  shares: loadForumShares().value,
+  generationTasks: loadForumGenerationTasks().value,
+  actorStates: loadForumActorStates().value,
+  activityTasks: loadForumActivityTasks().value,
+  profiles: loadForumProfiles().value,
+  visitHistory: loadForumVisitHistory().value,
+  likeHistory: loadForumLikeHistory().value,
+  notifications: loadForumNotifications().value,
+  dmConversations: loadForumDmConversations().value,
+  dmMessages: loadForumDmMessages().value,
+  dmTasks: loadForumDmTasks().value,
+});
 
-export const saveForumData = (
-  threads: ForumThread[],
-  replies: ForumReply[],
-): { threads: StorageWriteResult; replies: StorageWriteResult; success: boolean } => {
-  const threadResult = saveForumThreads(threads);
-  const replyResult = saveForumReplies(replies);
-  return {
-    threads: threadResult,
-    replies: replyResult,
-    success: threadResult.success && replyResult.success,
+/** Returns a stable object until forum storage actually changes. */
+export const getForumStateSnapshot = (): ForumStateSnapshot => {
+  attachStorageListener();
+  const fingerprint = getRawForumFingerprint();
+  if (forumSnapshot && forumRawFingerprint === fingerprint) return forumSnapshot;
+  forumRevision += 1;
+  forumRawFingerprint = fingerprint;
+  forumSnapshot = buildForumSnapshot();
+  identitySnapshotCache.clear();
+  return forumSnapshot;
+};
+
+export const getForumSnapshotForIdentity = (ownerIdentityId: string): ForumIdentitySnapshot => {
+  const snapshot = getForumStateSnapshot();
+  const cached = identitySnapshotCache.get(ownerIdentityId);
+  if (cached && cached.revision === snapshot.revision) return cached.snapshot;
+  const identitySnapshot: ForumIdentitySnapshot = {
+    ...snapshot,
+    ownerIdentityId,
+    threads: snapshot.threads.filter((thread) => thread.ownerIdentityId === ownerIdentityId),
+    replies: snapshot.replies.filter((reply) => reply.ownerIdentityId === ownerIdentityId),
+    shares: snapshot.shares.filter((share) => share.ownerIdentityId === ownerIdentityId),
+    generationTasks: snapshot.generationTasks.filter((task) => task.ownerIdentityId === ownerIdentityId),
+    actorStates: snapshot.actorStates.filter((state) => state.ownerIdentityId === ownerIdentityId),
+    activityTasks: snapshot.activityTasks.filter((task) => task.ownerIdentityId === ownerIdentityId),
+    profiles: snapshot.profiles.filter((profile) => profile.ownerIdentityId === ownerIdentityId),
+    visitHistory: snapshot.visitHistory.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
+    likeHistory: snapshot.likeHistory.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
+    notifications: snapshot.notifications.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
+    dmConversations: snapshot.dmConversations.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
+    dmMessages: snapshot.dmMessages.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
+    dmTasks: snapshot.dmTasks.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
   };
+  identitySnapshotCache.set(ownerIdentityId, { revision: snapshot.revision, snapshot: identitySnapshot });
+  return identitySnapshot;
 };
 
-export const saveForumDataAtomically = (
-  threads: ForumThread[],
-  replies: ForumReply[],
-): { success: boolean } => {
-  const previousThreads = loadForumThreads().value;
-  const previousReplies = loadForumReplies().value;
-  const threadResult = saveForumThreads(threads);
-  if (!threadResult.success) return { success: false };
-  const replyResult = saveForumReplies(replies);
-  if (replyResult.success) return { success: true };
-  saveForumThreads(previousThreads);
-  saveForumReplies(previousReplies);
-  return { success: false };
+export const subscribeForumState = (listener: () => void): (() => void) => {
+  attachStorageListener();
+  forumListeners.add(listener);
+  return () => forumListeners.delete(listener);
 };
+
+/** Public-safe events for future notification consumers. No private actor data is emitted. */
+export const subscribeForumMutation = (listener: (event: ForumMutationEvent) => void): (() => void) => {
+  forumMutationListeners.add(listener);
+  return () => forumMutationListeners.delete(listener);
+};
+
+/** Explicitly refreshes subscribers after an external restore has changed localStorage. */
+export const notifyForumStateChanged = (): ForumStateSnapshot => {
+  forumSnapshot = null;
+  forumRawFingerprint = "";
+  const snapshot = getForumStateSnapshot();
+  emitForumStateChanged();
+  return snapshot;
+};
+
+/**
+ * Writes every supplied collection as one logical mutation. Subscribers only
+ * observe a new revision after every storage write has succeeded.
+ */
+export const commitForumMutation = (mutation: ForumStateMutation, events: readonly ForumMutationEvent[] = []): {
+  success: boolean;
+  snapshot?: ForumStateSnapshot;
+  error?: StorageWriteResult["error"];
+} => {
+  const current = getForumStateSnapshot();
+  const next: ForumStateMutation = {
+    ...(mutation.threads ? { threads: mutation.threads } : {}),
+    ...(mutation.replies ? { replies: mutation.replies } : {}),
+    ...(mutation.shares ? { shares: mutation.shares } : {}),
+    ...(mutation.generationTasks ? { generationTasks: mutation.generationTasks } : {}),
+    ...(mutation.actorStates ? { actorStates: mutation.actorStates } : {}),
+    ...(mutation.activityTasks ? { activityTasks: mutation.activityTasks } : {}),
+    ...(mutation.profiles ? { profiles: mutation.profiles } : {}),
+    ...(mutation.visitHistory ? { visitHistory: mutation.visitHistory } : {}),
+    ...(mutation.likeHistory ? { likeHistory: mutation.likeHistory } : {}),
+    ...(mutation.notifications ? { notifications: mutation.notifications } : {}),
+    ...(mutation.dmConversations ? { dmConversations: mutation.dmConversations } : {}),
+    ...(mutation.dmMessages ? { dmMessages: mutation.dmMessages } : {}),
+    ...(mutation.dmTasks ? { dmTasks: mutation.dmTasks } : {}),
+  };
+  const previous: ForumStateMutation = {
+    ...(next.threads ? { threads: current.threads } : {}),
+    ...(next.replies ? { replies: current.replies } : {}),
+    ...(next.shares ? { shares: current.shares } : {}),
+    ...(next.generationTasks ? { generationTasks: current.generationTasks } : {}),
+    ...(next.actorStates ? { actorStates: current.actorStates } : {}),
+    ...(next.activityTasks ? { activityTasks: current.activityTasks } : {}),
+    ...(next.profiles ? { profiles: current.profiles } : {}),
+    ...(next.visitHistory ? { visitHistory: current.visitHistory } : {}),
+    ...(next.likeHistory ? { likeHistory: current.likeHistory } : {}),
+    ...(next.notifications ? { notifications: current.notifications } : {}),
+    ...(next.dmConversations ? { dmConversations: current.dmConversations } : {}),
+    ...(next.dmMessages ? { dmMessages: current.dmMessages } : {}),
+    ...(next.dmTasks ? { dmTasks: current.dmTasks } : {}),
+  };
+  const writers: Array<() => StorageWriteResult> = [];
+  if (next.threads) writers.push(() => writeArray(storageKeys.forumThreads, next.threads!));
+  if (next.replies) writers.push(() => writeArray(storageKeys.forumReplies, next.replies!));
+  if (next.shares) writers.push(() => writeArray(storageKeys.forumShares, next.shares!));
+  if (next.generationTasks) writers.push(() => writeArray(storageKeys.forumGenerationTasks, next.generationTasks!));
+  if (next.actorStates) writers.push(() => writeArray(storageKeys.forumActorStates, next.actorStates!));
+  if (next.activityTasks) writers.push(() => writeArray(storageKeys.forumActivityTasks, next.activityTasks!));
+  if (next.profiles) writers.push(() => writeArray(storageKeys.forumProfiles, next.profiles!));
+  if (next.visitHistory) writers.push(() => writeArray(storageKeys.forumVisitHistory, next.visitHistory!));
+  if (next.likeHistory) writers.push(() => writeArray(storageKeys.forumLikeHistory, next.likeHistory!));
+  if (next.notifications) writers.push(() => writeArray(storageKeys.forumNotifications, next.notifications!));
+  if (next.dmConversations) writers.push(() => writeArray(storageKeys.forumDmConversations, next.dmConversations!));
+  if (next.dmMessages) writers.push(() => writeArray(storageKeys.forumDmMessages, next.dmMessages!));
+  if (next.dmTasks) writers.push(() => writeArray(storageKeys.forumDmTasks, next.dmTasks!));
+  for (const write of writers) {
+    const result = write();
+    if (!result.success) {
+      if (previous.threads) writeArray(storageKeys.forumThreads, previous.threads);
+      if (previous.replies) writeArray(storageKeys.forumReplies, previous.replies);
+      if (previous.shares) writeArray(storageKeys.forumShares, previous.shares);
+      if (previous.generationTasks) writeArray(storageKeys.forumGenerationTasks, previous.generationTasks);
+      if (previous.actorStates) writeArray(storageKeys.forumActorStates, previous.actorStates);
+      if (previous.activityTasks) writeArray(storageKeys.forumActivityTasks, previous.activityTasks);
+      if (previous.profiles) writeArray(storageKeys.forumProfiles, previous.profiles);
+      if (previous.visitHistory) writeArray(storageKeys.forumVisitHistory, previous.visitHistory);
+      if (previous.likeHistory) writeArray(storageKeys.forumLikeHistory, previous.likeHistory);
+      if (previous.notifications) writeArray(storageKeys.forumNotifications, previous.notifications);
+      if (previous.dmConversations) writeArray(storageKeys.forumDmConversations, previous.dmConversations);
+      if (previous.dmMessages) writeArray(storageKeys.forumDmMessages, previous.dmMessages);
+      if (previous.dmTasks) writeArray(storageKeys.forumDmTasks, previous.dmTasks);
+      return { success: false, ...(result.error ? { error: result.error } : {}) };
+    }
+  }
+  forumRevision += 1;
+  forumRawFingerprint = getRawForumFingerprint();
+  forumSnapshot = {
+    revision: forumRevision,
+    threads: next.threads || current.threads,
+    replies: next.replies || current.replies,
+    shares: next.shares || current.shares,
+    generationTasks: next.generationTasks || current.generationTasks,
+    actorStates: next.actorStates || current.actorStates,
+    activityTasks: next.activityTasks || current.activityTasks,
+    profiles: next.profiles || current.profiles,
+    visitHistory: next.visitHistory || current.visitHistory,
+    likeHistory: next.likeHistory || current.likeHistory,
+    notifications: next.notifications || current.notifications,
+    dmConversations: next.dmConversations || current.dmConversations,
+    dmMessages: next.dmMessages || current.dmMessages,
+    dmTasks: next.dmTasks || current.dmTasks,
+  };
+  emitForumStateChanged();
+  events.forEach((event) => forumMutationListeners.forEach((listener) => listener(event)));
+  return { success: true, snapshot: forumSnapshot };
+};
+
+export const saveForumThreads = (threads: ForumThread[]): StorageWriteResult => {
+  const result = commitForumMutation({ threads });
+  return { success: result.success, ...(result.error ? { error: result.error } : {}) };
+};
+
+export const saveForumReplies = (replies: ForumReply[]): StorageWriteResult => {
+  const result = commitForumMutation({ replies });
+  return { success: result.success, ...(result.error ? { error: result.error } : {}) };
+};
+
+export const saveForumShares = (shares: ForumShare[]): StorageWriteResult => {
+  const result = commitForumMutation({ shares });
+  return { success: result.success, ...(result.error ? { error: result.error } : {}) };
+};
+
+/** Removes one identity's forum-owned public state without affecting other identities. */
+export const cleanupForumIdentityData = (ownerIdentityId: string): StorageWriteResult => {
+  const current = getForumStateSnapshot();
+  const result = commitForumMutation({
+    threads: current.threads.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    replies: current.replies.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    shares: current.shares.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    generationTasks: current.generationTasks.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    actorStates: current.actorStates.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    activityTasks: current.activityTasks.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    profiles: current.profiles.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    visitHistory: current.visitHistory.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    likeHistory: current.likeHistory.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    notifications: current.notifications.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    dmConversations: current.dmConversations.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    dmMessages: current.dmMessages.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+    dmTasks: current.dmTasks.filter((item) => item.ownerIdentityId !== ownerIdentityId),
+  });
+  return { success: result.success, ...(result.error ? { error: result.error } : {}) };
+};
+
+/** Relation-scoped DM cleanup; public forum content and virtual/NPC conversations remain intact. */
+export const cleanupForumDmForRelations = (relationIds: readonly string[]): StorageWriteResult => {
+  const removed = new Set(relationIds); const current = getForumStateSnapshot();
+  const ids = new Set(current.dmConversations.filter((item) => item.participant.kind === "relationship" && removed.has(item.participant.relationId)).map((item) => item.id));
+  const result = commitForumMutation({
+    dmConversations: current.dmConversations.filter((item) => !ids.has(item.id)),
+    dmMessages: current.dmMessages.filter((item) => !ids.has(item.conversationId)),
+    dmTasks: current.dmTasks.filter((item) => !ids.has(item.conversationId)),
+    notifications: current.notifications.filter((item) => !item.conversationId || !ids.has(item.conversationId)),
+  });
+  return { success: result.success, ...(result.error ? { error: result.error } : {}) };
+};
+
+/** Explicit, idempotent capacity maintenance. It never removes user-authored forum posts or replies. */
+export const compactPersistedForumState = (now = Date.now()): { success: boolean; beforeBytes: number; afterBytes: number; error?: StorageWriteResult["error"] } => {
+  const current = getForumStateSnapshot();
+  const beforeBytes = estimateForumStorageUsage(current).bytes;
+  const compacted = compactForumState({ ...current, now });
+  const result = commitForumMutation(compacted);
+  return { success: result.success, beforeBytes, afterBytes: result.success ? estimateForumStorageUsage(result.snapshot).bytes : beforeBytes, ...(result.error ? { error: result.error } : {}) };
+};
+
+/** Deterministic hydration repair for duplicate IDs and dangling references. Public history is retained where possible. */
+export const repairForumState = (): StorageWriteResult => {
+  const current = getForumStateSnapshot();
+  const unique = <T>(items: readonly T[], key: (item: T) => string) => [...new Map(items.map((item) => [key(item), item])).values()];
+  const threads = unique(current.threads, (item) => item.id);
+  const threadIds = new Set(threads.map((item) => item.id));
+  const replies = unique(current.replies, (item) => item.id).filter((item) => threadIds.has(item.threadId)).sort((a, b) => a.floor - b.floor);
+  const conversationIds = new Set(unique(current.dmConversations, (item) => item.id).map((item) => item.id));
+  const result = commitForumMutation({
+    threads,
+    replies,
+    shares: unique(current.shares, (item) => item.id),
+    generationTasks: unique(current.generationTasks, (item) => item.id),
+    actorStates: unique(current.actorStates, (item) => `${item.ownerIdentityId}:${item.threadId}:${item.actorKey}`).filter((item) => threadIds.has(item.threadId)),
+    activityTasks: unique(current.activityTasks, (item) => item.id).filter((item) => threadIds.has(item.threadId)),
+    profiles: unique(current.profiles, (item) => item.ownerIdentityId),
+    visitHistory: unique(current.visitHistory, (item) => item.id),
+    likeHistory: unique(current.likeHistory, (item) => item.id),
+    notifications: unique(current.notifications, (item) => item.eventKey),
+    dmConversations: unique(current.dmConversations, (item) => item.id),
+    dmMessages: unique(current.dmMessages, (item) => item.id).filter((item) => conversationIds.has(item.conversationId)),
+    dmTasks: unique(current.dmTasks, (item) => item.id).filter((item) => conversationIds.has(item.conversationId)),
+  });
+  return { success: result.success, ...(result.error ? { error: result.error } : {}) };
+};
+
+export const saveForumGenerationTasks = (tasks: ForumGenerationTask[]): StorageWriteResult => {
+  const result = commitForumMutation({ generationTasks: tasks });
+  return { success: result.success, ...(result.error ? { error: result.error } : {}) };
+};
+
+export const saveForumData = (threads: ForumThread[], replies: ForumReply[]): {
+  threads: StorageWriteResult;
+  replies: StorageWriteResult;
+  success: boolean;
+} => {
+  const result = commitForumMutation({ threads, replies });
+  const writeResult: StorageWriteResult = { success: result.success, ...(result.error ? { error: result.error } : {}) };
+  return { threads: writeResult, replies: writeResult, success: result.success };
+};
+
+export const saveForumDataAtomically = (threads: ForumThread[], replies: ForumReply[]): { success: boolean } =>
+  ({ success: commitForumMutation({ threads, replies }).success });
 
 export const loadForumDataSafely = (input: {
   validRelationIds?: ReadonlySet<string>;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ChevronLeft,
   LoaderCircle,
@@ -10,10 +10,18 @@ import {
   Share2,
   ThumbsUp,
   Trash2,
+  User,
+  Bell,
+  Mail,
+  History,
+  Pencil,
   X,
 } from "lucide-react";
 import type {
   Character,
+  ForumActivityTask,
+  ForumRootTab,
+  ForumDmConversation as ForumDmConversationType,
   ForumGenerationTask,
   ForumReply,
   ForumThread,
@@ -33,25 +41,36 @@ import {
   getForumLikeCount,
   listForumRepliesForThread,
   listForumThreadsForIdentity,
+  selectForumThreadMetrics,
   toggleForumReplyLike,
   toggleForumThreadLike,
   tombstoneForumReply,
 } from "../domain/forum/forumData";
 import {
-  loadForumReplies,
+  loadForumActivityTasks,
+  loadForumActorStates,
   loadForumGenerationTasks,
   loadForumDataSafely,
-  loadForumShares,
+  loadForumReplies,
   loadForumThreads,
-  saveForumData,
-  saveForumDataAtomically,
-  saveForumGenerationTasks,
-  saveForumReplies,
-  saveForumShares,
-  saveForumThreads,
+  commitForumMutation,
+  getForumSnapshotForIdentity,
+  subscribeForumState,
+  subscribeForumMutation,
 } from "../core/storage/repositories/forumRepository";
+import {
+  createForumTranslationHash,
+  deleteForumTranslationForReply,
+  deleteForumTranslationsForThread,
+  getForumTranslation,
+  touchForumTranslation,
+} from "../core/storage/repositories/forumTranslationRepository";
+import { getForumTranslationTargetLanguage, translateForumContent } from "../features/forum/services/forumTranslationService";
+import { useForumActivityEngine } from "../features/forum/hooks/useForumActivityEngine";
+import { forceForumThreadActivity, scheduleInitialForumReplies } from "../features/forum/services/forumActivityRuntime";
 import { BottomSheet, Button, ConfirmDialog, PopoverMenu } from "./ui";
 import { ForumAvatar } from "../features/forum/components/ForumAvatar";
+import { getForumVirtualProfile } from "../domain/forum/forumVirtualProfiles";
 import { ForumThreadCard } from "../features/forum/components/ForumThreadCard";
 import { ForumSnapshotDetail } from "../features/forum/components/ForumSnapshotDetail";
 import { appendForumShareOnce, listForumShareTargets } from "../domain/forum/forumShare";
@@ -75,6 +94,14 @@ import {
 import {
   buildForumProtectedNames,
 } from "../domain/forum/forumContentSafety";
+import { appendForumNotification, createForumNotification, createForumProfile, recordForumVisit, toPublicThreadSnapshot, updateForumLikeHistory } from "../domain/forum/forumProfileData";
+import { imageAssetDb } from "../utils/imageAssetDb";
+import { compressImage } from "../utils/stickerDb";
+import { ForumDmList } from "../features/forum/components/ForumDmList";
+import { ForumDmConversation } from "../features/forum/components/ForumDmConversation";
+import { appendForumDmMessage, markForumDmRead, openForumDmConversation, resolveForumDmActorFromPublicRecord } from "../domain/forum/forumDmData";
+import { requestForumDmReply } from "../features/forum/services/forumDmService";
+import { FORUM_HOME_PAGE_SIZE, FORUM_REPLY_PAGE_SIZE } from "../domain/forum/forumCapacity";
 
 interface AppForumProps {
   activeIdentity: UserIdentity;
@@ -121,6 +148,14 @@ const truncateQuote = (value: string): string => {
   return normalized.length > 72 ? `${normalized.slice(0, 72)}…` : normalized;
 };
 
+function HistoryList({ title, empty, items, onOpen }: { title: string; empty: string; items: Array<{ id: string; publicSnapshot?: { thread?: ForumThreadPublicSnapshot; title?: string; publicAuthor?: { displayName: string }; body?: string; }; lastVisitedAt?: number; likedAt?: number; occurredAt?: number; preview?: string; actorPublicSnapshot?: { displayName: string } }>; onOpen: (item: any) => void }) {
+  if (!items.length) return <p className="py-16 text-center text-sm text-slate-400">{empty}</p>;
+  return <section className="overflow-hidden rounded-2xl bg-white shadow-sm"><h2 className="border-b border-slate-100 px-4 py-3 text-sm font-bold">{title}</h2>{items.map((item) => {
+    const snapshot = item.publicSnapshot?.thread || item.publicSnapshot || {};
+    return <button key={item.id} type="button" onClick={() => onOpen(item)} className="block w-full border-b border-slate-100 px-4 py-3 text-left last:border-0"><p className="truncate text-sm font-semibold text-slate-800">{snapshot.title || item.actorPublicSnapshot?.displayName || "论坛动态"}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{item.preview || snapshot.body || ""}</p></button>;
+  })}</section>;
+}
+
 export default function AppForum({
   activeIdentity,
   characters,
@@ -142,15 +177,14 @@ export default function AppForum({
     }),
     [activeIdentity, characters],
   );
-  const initialForumDataRef = useRef<ReturnType<typeof loadForumDataSafely> | null>(null);
-  if (!initialForumDataRef.current) {
-    initialForumDataRef.current = loadForumDataSafely({
-      validRelationIds: new Set(relationships.map((relationship) => relationship.id)),
-      protectedNames: forumProtectedNames,
-    });
-  }
-  const [threads, setThreads] = useState<ForumThread[]>(initialForumDataRef.current.threads);
-  const [replies, setReplies] = useState<ForumReply[]>(initialForumDataRef.current.replies);
+  const forumSnapshot = useSyncExternalStore(
+    subscribeForumState,
+    () => getForumSnapshotForIdentity(activeIdentity.id),
+    () => getForumSnapshotForIdentity(activeIdentity.id),
+  );
+  const { threads, replies, shares, generationTasks, profiles, visitHistory, likeHistory, notifications, dmConversations, dmMessages, dmTasks } = forumSnapshot;
+  const [rootTab, setRootTab] = useState<ForumRootTab>("home");
+  const [secondaryPage, setSecondaryPage] = useState<"history" | "likes" | "notifications" | "profile" | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [readonlySnapshot, setReadonlySnapshot] = useState<ForumThreadPublicSnapshot | null>(null);
   const [showComposer, setShowComposer] = useState(false);
@@ -169,11 +203,19 @@ export default function AppForum({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isThreadRefreshing, setIsThreadRefreshing] = useState(false);
   const [waitingReplyThreadIds, setWaitingReplyThreadIds] = useState<string[]>([]);
-  const [, setGenerationTasks] = useState<ForumGenerationTask[]>(() =>
-    loadForumGenerationTasks(new Set(relationships.map((relationship) => relationship.id))).value);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [profileName, setProfileName] = useState("");
+  const [profileBio, setProfileBio] = useState("");
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
+  const [activeDmConversationId, setActiveDmConversationId] = useState<string | null>(null);
+  const [dmBody, setDmBody] = useState("");
+  const [isDmSending, setIsDmSending] = useState(false);
+  const [visibleThreadCount, setVisibleThreadCount] = useState(FORUM_HOME_PAGE_SIZE);
+  const [visibleReplyCount, setVisibleReplyCount] = useState(FORUM_REPLY_PAGE_SIZE);
+  const [translatedContentIds, setTranslatedContentIds] = useState<Record<string, boolean>>({});
+  const [translationLoadingIds, setTranslationLoadingIds] = useState<Record<string, boolean>>({});
   const replyLockRef = useRef(false);
   const postLockRef = useRef(false);
   const shareLockRef = useRef(false);
@@ -189,26 +231,89 @@ export default function AppForum({
     [threads, activeIdentity.id],
   );
   const activeThread = identityThreads.find((thread) => thread.id === activeThreadId);
+  const activeDmConversation = dmConversations.find((conversation) => conversation.id === activeDmConversationId);
+  const activeProfile = profiles.find((profile) => profile.ownerIdentityId === activeIdentity.id) || createForumProfile(activeIdentity, 0);
+  const forumIdentity = useMemo(() => ({ ...activeIdentity, name: activeProfile.displayName, avatar: activeProfile.avatar || activeIdentity.avatar }), [activeIdentity, activeProfile.avatar, activeProfile.displayName]);
   const activeReplies = useMemo(
     () => activeThread ? listForumRepliesForThread(replies, activeThread) : [],
     [replies, activeThread],
   );
+  const visibleThreads = identityThreads.slice(0, visibleThreadCount);
+  const visibleReplies = activeReplies.slice(0, visibleReplyCount);
   const shareTargets = useMemo(
     () => listForumShareTargets(relationships || [], characters || [], activeIdentity.id),
     [relationships, characters, activeIdentity.id],
   );
   const selectedShareTarget = shareTargets.find((target) => target.relationship.id === selectedShareRelationId);
 
+  useForumActivityEngine({
+    ownerIdentityId: activeIdentity.id,
+    relationships,
+    characters,
+    messages,
+    memories,
+    worldBookEntries,
+    settings,
+  });
+
   useEffect(() => {
     const safe = loadForumDataSafely({
       validRelationIds: new Set(relationships.map((relationship) => relationship.id)),
       protectedNames: forumProtectedNames,
     });
-    if (safe.sanitized) {
-      setThreads(safe.threads);
-      setReplies(safe.replies);
-    }
   }, [forumProtectedNames, relationships]);
+
+  useEffect(() => {
+    if (!profiles.some((profile) => profile.ownerIdentityId === activeIdentity.id)) {
+      commitForumMutation({ profiles: [...profiles, createForumProfile(activeIdentity)] });
+    }
+  }, [activeIdentity, profiles]);
+
+  useEffect(() => {
+    setRootTab("home"); setSecondaryPage(null); setActiveThreadId(null); setReadonlySnapshot(null);
+    setProfileName(activeProfile.displayName); setProfileBio(activeProfile.bio || "");
+  }, [activeIdentity.id]);
+
+  useEffect(() => { setVisibleThreadCount(FORUM_HOME_PAGE_SIZE); }, [activeIdentity.id]);
+  useEffect(() => { setVisibleReplyCount(FORUM_REPLY_PAGE_SIZE); }, [activeThreadId]);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    if (!activeProfile.avatarAssetId) { setProfileAvatarUrl(null); return undefined; }
+    void imageAssetDb.getImage(activeProfile.avatarAssetId).then((blob) => {
+      if (!blob) return;
+      objectUrl = URL.createObjectURL(blob); setProfileAvatarUrl(objectUrl);
+    });
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [activeProfile.avatarAssetId]);
+
+  useEffect(() => subscribeForumMutation((event) => {
+    if (event.ownerIdentityId !== activeIdentity.id || event.type !== "reply-created" || !event.replyId) return;
+    const snapshot = getForumSnapshotForIdentity(activeIdentity.id);
+    const reply = snapshot.replies.find((item) => item.id === event.replyId);
+    const thread = snapshot.threads.find((item) => item.id === event.threadId);
+    if (!reply || !thread) return;
+    const targetReply = reply.replyToReplyId ? snapshot.replies.find((item) => item.id === reply.replyToReplyId) : undefined;
+    const notification = createForumNotification({ ownerIdentityId: activeIdentity.id, thread, reply, targetReply });
+    if (!notification) return;
+    const open = activeThreadId === thread.id;
+    commitForumMutation({ notifications: appendForumNotification(snapshot.notifications, open ? { ...notification, readAt: Date.now() } : notification) });
+  }), [activeIdentity.id, activeThreadId]);
+
+  useEffect(() => {
+    if (!activeThreadId) return;
+    const unread = notifications.filter((item) => item.threadId === activeThreadId && !item.readAt);
+    if (unread.length) commitForumMutation({ notifications: notifications.map((item) => item.threadId === activeThreadId ? { ...item, readAt: Date.now() } : item) });
+  }, [activeThreadId, notifications]);
+
+  useEffect(() => {
+    if (activeDmConversationId) commitForumMutation({ dmConversations: markForumDmRead(dmConversations, activeDmConversationId) });
+  }, [activeDmConversationId]);
+
+  useEffect(() => {
+    setTranslatedContentIds({});
+    setTranslationLoadingIds({});
+  }, [activeIdentity.id]);
 
   useEffect(() => {
     if (activeThreadId && !activeThread) {
@@ -221,7 +326,7 @@ export default function AppForum({
 
   useEffect(() => {
     if (!openForumShareId) return;
-    const share = loadForumShares().value.find((item) =>
+    const share = shares.find((item) =>
       item.id === openForumShareId && item.ownerIdentityId === activeIdentity.id);
     if (share) {
       const original = identityThreads.find((thread) => thread.id === share.threadId);
@@ -234,7 +339,7 @@ export default function AppForum({
       }
     }
     onOpenForumShareHandled?.();
-  }, [openForumShareId, activeIdentity.id, identityThreads, onOpenForumShareHandled]);
+  }, [openForumShareId, activeIdentity.id, identityThreads, onOpenForumShareHandled, shares]);
 
   useEffect(() => {
     if (lazyAttemptedIdentityRef.current === activeIdentity.id) return;
@@ -267,11 +372,10 @@ export default function AppForum({
       trigger: "lazy",
       now,
     });
-    if (!begun.task || !saveForumGenerationTasks(begun.tasks).success) {
+    if (!begun.task || !commitForumMutation({ generationTasks: begun.tasks }).success) {
       releaseForumGenerationTask(taskKey);
       return;
     }
-    setGenerationTasks(begun.tasks);
     void generateForumThreads({
       ownerIdentityId: activeIdentity.id,
       count: 1,
@@ -288,25 +392,48 @@ export default function AppForum({
     }).then((generated) => {
       if (generated.threads.length === 0) throw new Error("生成内容无效");
       const currentThreads = loadForumThreads().value;
-      const currentReplies = loadForumReplies().value;
       const nextThreads = [...generated.threads, ...currentThreads];
-      const nextReplies = [...currentReplies, ...generated.replies];
-      if (!saveForumDataAtomically(nextThreads, nextReplies).success) throw new Error("storage");
-      setThreads(nextThreads);
-      setReplies(nextReplies);
+      const refreshActivityTasks: ForumActivityTask[] = generated.threads.flatMap((thread) => {
+        const generatedReplies = generated.replies.filter((reply) => reply.threadId === thread.id);
+        if (!generatedReplies.length) return [];
+        return [{
+          id: createId("forum-refresh-activity"),
+          ownerIdentityId: activeIdentity.id,
+          threadId: thread.id,
+          trigger: "automatic" as const,
+          status: "succeeded" as const,
+          startedAt: now,
+          completedAt: now,
+          pendingEvents: generatedReplies.map((reply, index) => {
+            const profile = getForumVirtualProfile(thread.id, index);
+            return {
+              id: createId("forum-refresh-pending"), ownerIdentityId: activeIdentity.id, threadId: thread.id,
+              batchId: `refresh-${thread.id}`, localId: `e${index + 1}`,
+              actorSlotSnapshot: { slotId: `virtual-${index + 1}`, publicAuthor: reply.publicAuthor, actor: { kind: "virtual" as const, virtualProfileId: profile.id }, safePublicStyle: profile.publicStyle },
+              privateActor: { kind: "virtual" as const, virtualProfileId: profile.id }, kind: "reply" as const, body: reply.body,
+              replyTarget: { type: "thread" as const }, scheduledAt: now + index * 45_000, status: "pending" as const,
+              createdAt: now, updatedAt: now,
+            };
+          }),
+          createdAt: now,
+          updatedAt: now,
+        }];
+      });
+      if (!commitForumMutation({
+        threads: nextThreads,
+        activityTasks: [...loadForumActivityTasks().value, ...refreshActivityTasks],
+      }).success) throw new Error("storage");
       const latestTasks = loadForumGenerationTasks(
         new Set(relationships.map((relationship) => relationship.id)),
       ).value;
       const finished = finishForumGenerationTask(latestTasks, begun.task.id, "succeeded", Date.now());
-      saveForumGenerationTasks(finished);
-      setGenerationTasks(finished);
+      commitForumMutation({ generationTasks: finished });
     }).catch(() => {
       const latestTasks = loadForumGenerationTasks(
         new Set(relationships.map((relationship) => relationship.id)),
       ).value;
       const finished = finishForumGenerationTask(latestTasks, begun.task.id, "failed", Date.now());
-      saveForumGenerationTasks(finished);
-      setGenerationTasks(finished);
+      commitForumMutation({ generationTasks: finished });
     }).finally(() => releaseForumGenerationTask(taskKey));
   }, [
     activeIdentity.id,
@@ -322,11 +449,10 @@ export default function AppForum({
   const reportStorageError = () => setError("保存失败，请检查浏览器存储空间后重试。");
 
   const persistTasks = (nextTasks: ForumGenerationTask[]) => {
-    if (!saveForumGenerationTasks(nextTasks).success) {
+    if (!commitForumMutation({ generationTasks: nextTasks }).success) {
       reportStorageError();
       return false;
     }
-    setGenerationTasks(nextTasks);
     return true;
   };
 
@@ -390,9 +516,7 @@ export default function AppForum({
       }
       const nextThreads = [...generated.threads, ...currentThreads];
       const nextReplies = [...currentReplies, ...generated.replies];
-      if (!saveForumDataAtomically(nextThreads, nextReplies).success) throw new Error("storage");
-      setThreads(nextThreads);
-      setReplies(nextReplies);
+      if (!commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
       persistTasks(finishForumGenerationTask(
         loadForumGenerationTasks(new Set(relationships.map((relationship) => relationship.id))).value,
         begun.task.id,
@@ -417,6 +541,23 @@ export default function AppForum({
   };
 
   const generateInitialReplies = async (thread: ForumThread) => {
+    setWaitingReplyThreadIds((ids) => [...new Set([...ids, thread.id])]);
+    try {
+      await scheduleInitialForumReplies({
+        ownerIdentityId: activeIdentity.id,
+        relationships,
+        characters,
+        messages,
+        memories,
+        worldBookEntries,
+        settings,
+      }, thread.id);
+    } catch (generationError) {
+      setError(mapForumGenerationError(generationError));
+    } finally {
+      setWaitingReplyThreadIds((ids) => ids.filter((idValue) => idValue !== thread.id));
+    }
+    return;
     const now = Date.now();
     const taskKey = buildForumGenerationTaskKey({
       ownerIdentityId: thread.ownerIdentityId,
@@ -467,9 +608,7 @@ export default function AppForum({
                 updatedAt: Math.max(item.updatedAt, ...generatedReplies.map((reply) => reply.updatedAt)),
               }
             : item);
-        if (!saveForumDataAtomically(nextThreads, nextReplies).success) throw new Error("storage");
-        setThreads(nextThreads);
-        setReplies(nextReplies);
+        if (!commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
       }
       persistTasks(finishForumGenerationTask(
         loadForumGenerationTasks(new Set(relationships.map((relationship) => relationship.id))).value,
@@ -498,32 +637,50 @@ export default function AppForum({
     thread: ForumThread,
   ) => {
     if (trigger === "manual-thread-refresh" && threadRefreshLockRef.current) return;
+    if (trigger === "manual-thread-refresh") {
+      threadRefreshLockRef.current = true;
+      setIsThreadRefreshing(true);
+      setError("");
+      setNotice("");
+      try {
+        const result = await forceForumThreadActivity({
+          ownerIdentityId: activeIdentity.id,
+          relationships,
+          characters,
+          messages,
+          memories,
+          worldBookEntries,
+          settings,
+        }, thread.id);
+        if (result.outcome === "no-update" || result.released.length === 0) {
+          setNotice("暂时没有新的回复");
+        } else {
+          setNotice("发现了新的回复");
+          requestAnimationFrame(() => {
+            document.getElementById(`forum-reply-${result.released[0].id}`)
+              ?.scrollIntoView({ behavior: "smooth", block: "center" });
+          });
+        }
+      } catch (activityError) {
+        setError(mapForumGenerationError(activityError));
+      } finally {
+        setIsThreadRefreshing(false);
+        threadRefreshLockRef.current = false;
+      }
+      return;
+    }
     const now = Date.now();
     const validRelationIds = new Set(relationships.map((relationship) => relationship.id));
     const currentTasks = loadForumGenerationTasks(validRelationIds, now).value;
     if (trigger === "like-engagement"
       && hasEvaluatedLikeEngagement(currentTasks, activeIdentity.id, thread.id)) return;
-    if (trigger === "manual-thread-refresh") {
-      const cooldown = getThreadRefreshCooldownRemaining(
-        currentTasks,
-        activeIdentity.id,
-        thread.id,
-        now,
-      );
-      if (cooldown > 0) {
-        setNotice(`请等待 ${Math.ceil(cooldown / 1000)} 秒后再刷新`);
-        return;
-      }
-      threadRefreshLockRef.current = true;
-      setIsThreadRefreshing(true);
-    }
     setError("");
     setNotice("");
     const taskKey = buildForumGenerationTaskKey({
       ownerIdentityId: activeIdentity.id,
       threadId: thread.id,
       trigger,
-      windowKey: trigger === "like-engagement" ? "once" : createId("manual-refresh"),
+      windowKey: "once",
     });
     const begun = beginForumGenerationTask({
       tasks: currentTasks,
@@ -536,10 +693,6 @@ export default function AppForum({
     });
     if (!begun.task || !persistTasks(begun.tasks)) {
       releaseForumGenerationTask(taskKey);
-      if (trigger === "manual-thread-refresh") {
-        setIsThreadRefreshing(false);
-        threadRefreshLockRef.current = false;
-      }
       return;
     }
     try {
@@ -557,7 +710,6 @@ export default function AppForum({
         now,
       });
       if (result.outcome === "no-update" || result.replies.length === 0) {
-        if (trigger === "manual-thread-refresh") setNotice("暂时没有新的回复");
       } else {
         const currentThreads = loadForumThreads(validRelationIds).value;
         const currentReplies = loadForumReplies().value;
@@ -574,9 +726,7 @@ export default function AppForum({
                 updatedAt: Math.max(item.updatedAt, ...result.replies.map((reply) => reply.updatedAt)),
               }
             : item);
-        if (!saveForumDataAtomically(nextThreads, nextReplies).success) throw new Error("storage");
-        setThreads(nextThreads);
-        setReplies(nextReplies);
+        if (!commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
         setNotice(result.outcome === "author-update" ? "楼主发布了新动态" : "发现了新的回复");
         requestAnimationFrame(() => {
           document.getElementById(`forum-reply-${result.replies[0].id}`)
@@ -593,14 +743,11 @@ export default function AppForum({
         : mapForumGenerationError(activityError));
     } finally {
       releaseForumGenerationTask(taskKey);
-      if (trigger === "manual-thread-refresh") {
-        setIsThreadRefreshing(false);
-        threadRefreshLockRef.current = false;
-      }
     }
   };
 
   const handleBack = () => {
+    if (activeDmConversationId) { setActiveDmConversationId(null); setDmBody(""); return; }
     if (activeThreadId || readonlySnapshot) {
       setActiveThreadId(null);
       setReadonlySnapshot(null);
@@ -611,7 +758,53 @@ export default function AppForum({
       setNotice("");
       return;
     }
+    if (secondaryPage) { setSecondaryPage(null); return; }
+    if (rootTab === "mine") { setRootTab("home"); return; }
     onClose();
+  };
+
+  const openDmFromRecord = (thread?: ForumThread, reply?: ForumReply) => {
+    const resolved = resolveForumDmActorFromPublicRecord({ ownerIdentityId: activeIdentity.id, thread, reply, relationships, characters });
+    if (!resolved) { setError("该作者暂不支持论坛私信"); return; }
+    const opened = openForumDmConversation({ ownerIdentityId: activeIdentity.id, conversations: dmConversations, actor: resolved.actor, publicAuthor: resolved.publicAuthor, ...(thread ? { originThreadId: thread.id } : {}), ...(reply ? { originReplyId: reply.id } : {}) });
+    if (!commitForumMutation({ dmConversations: opened.conversations }).success) { reportStorageError(); return; }
+    setActiveDmConversationId(opened.conversation.id); setRootTab("dm");
+  };
+
+  const sendDm = async () => {
+    if (!activeDmConversation || !dmBody.trim() || isDmSending) return;
+    const appended = appendForumDmMessage({ messages: dmMessages, conversations: dmConversations, conversationId: activeDmConversation.id, ownerIdentityId: activeIdentity.id, sender: "user", body: dmBody });
+    if (!commitForumMutation({ dmConversations: appended.conversations, dmMessages: appended.messages }).success) { reportStorageError(); return; }
+    setDmBody(""); setIsDmSending(true); setError("");
+    try {
+      await requestForumDmReply({ conversation: activeDmConversation, conversations: appended.conversations, messages: appended.messages, tasks: dmTasks, threads, notifications, relationships, characters, settings, profileName: activeProfile.displayName, activeConversationId: activeDmConversation.id, commit: (mutation) => commitForumMutation(mutation).success });
+    } catch (dmError) { setError(dmError instanceof Error ? dmError.message : "论坛私信回复失败，请稍后重试"); }
+    finally { setIsDmSending(false); }
+  };
+
+  const openThread = (thread: ForumThread) => {
+    setActiveThreadId(thread.id); setReplyingTo(null); setReplyBody(""); setReplyAnonymously(false); setError(""); setNotice("");
+    commitForumMutation({ visitHistory: recordForumVisit(visitHistory, activeIdentity.id, thread, replies) });
+    setVisibleReplyCount(FORUM_REPLY_PAGE_SIZE); requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
+  };
+
+  const saveProfile = () => {
+    const displayName = profileName.trim();
+    if (!displayName) { setError("昵称不能为空"); return; }
+    const nextProfile = { ...activeProfile, displayName: displayName.slice(0, 32), bio: profileBio.trim().slice(0, 160), updatedAt: Date.now() };
+    if (commitForumMutation({ profiles: [...profiles.filter((item) => item.ownerIdentityId !== activeIdentity.id), nextProfile] })) { setSecondaryPage(null); setNotice("资料已保存"); }
+    else reportStorageError();
+  };
+
+  const uploadProfileAvatar = async (file: File | undefined) => {
+    if (!file || !file.type.startsWith("image/")) { setError("请选择图片文件"); return; }
+    try {
+      const blob = await compressImage(file);
+      const assetId = `forum-profile-avatar-${activeIdentity.id}`;
+      await imageAssetDb.saveImage(assetId, blob);
+      const next = { ...activeProfile, avatarAssetId: assetId, updatedAt: Date.now() };
+      if (!commitForumMutation({ profiles: [...profiles.filter((item) => item.ownerIdentityId !== activeIdentity.id), next] })) reportStorageError();
+    } catch { setError("头像保存失败，请重试"); }
   };
 
   const resetShareSheet = () => {
@@ -639,9 +832,9 @@ export default function AppForum({
       characterId: selectedShareTarget.character.id,
       now,
     });
-    const existingShares = loadForumShares().value;
+    const existingShares = shares;
     const nextShares = appendForumShareOnce(existingShares, operation.share);
-    if (nextShares.length === existingShares.length || !saveForumShares(nextShares).success) {
+    if (nextShares.length === existingShares.length || !commitForumMutation({ shares: nextShares }).success) {
       reportStorageError();
       setIsSharing(false);
       shareLockRef.current = false;
@@ -674,15 +867,14 @@ export default function AppForum({
     setError("");
     const thread = createForumThread({
       id: createId("forum-thread"),
-      identity: activeIdentity,
+      identity: forumIdentity,
       title,
       body,
       anonymous: postAnonymously,
       now: Date.now(),
     });
     const nextThreads = [thread, ...threads];
-    if (saveForumThreads(nextThreads).success) {
-      setThreads(nextThreads);
+    if (commitForumMutation({ threads: nextThreads }).success) {
       resetComposer();
       void generateInitialReplies(thread);
     } else {
@@ -697,16 +889,18 @@ export default function AppForum({
       item.id === threadId && item.ownerIdentityId === activeIdentity.id);
     const wasLiked = Boolean(thread?.likedByIdentityIds.includes(activeIdentity.id));
     const next = toggleForumThreadLike(threads, threadId, activeIdentity.id);
-    if (saveForumThreads(next).success) {
-      setThreads(next);
+    const changed = next.find((item) => item.id === threadId);
+    if (thread && changed && commitForumMutation({ threads: next, likeHistory: updateForumLikeHistory(likeHistory, { ownerIdentityId: activeIdentity.id, thread, replies, liked: changed.likedByIdentityIds.includes(activeIdentity.id) }) }).success) {
       if (thread && !wasLiked) void runThreadActivity("like-engagement", thread);
     } else reportStorageError();
   };
 
   const handleToggleReplyLike = (replyId: string) => {
+    const reply = replies.find((item) => item.id === replyId && item.ownerIdentityId === activeIdentity.id);
+    const thread = reply ? threads.find((item) => item.id === reply.threadId) : undefined;
     const next = toggleForumReplyLike(replies, replyId, activeIdentity.id);
-    if (saveForumReplies(next).success) setReplies(next);
-    else reportStorageError();
+    const changed = next.find((item) => item.id === replyId);
+    if (!reply || !thread || !changed || !commitForumMutation({ replies: next, likeHistory: updateForumLikeHistory(likeHistory, { ownerIdentityId: activeIdentity.id, thread, replies, reply, liked: changed.likedByIdentityIds.includes(activeIdentity.id) }) }).success) reportStorageError();
   };
 
   const handleSubmitReply = () => {
@@ -719,17 +913,15 @@ export default function AppForum({
       id: createId("forum-reply"),
       thread: activeThread,
       existingReplies: replies,
-      identity: activeIdentity,
+      identity: forumIdentity,
       body,
       anonymous: replyAnonymously,
       now: Date.now(),
       replyTo: replyingTo || undefined,
     });
     const next = appendForumReply(threads, replies, reply);
-    const result = saveForumData(next.threads, next.replies);
+    const result = commitForumMutation({ threads: next.threads, replies: next.replies });
     if (result.success) {
-      setThreads(next.threads);
-      setReplies(next.replies);
       setReplyBody("");
       setReplyingTo(null);
       setReplyAnonymously(false);
@@ -747,16 +939,26 @@ export default function AppForum({
     if (!deleteTarget) return;
     if (deleteTarget.kind === "thread") {
       const next = deleteForumThread(threads, replies, deleteTarget.threadId, activeIdentity.id);
-      const result = saveForumData(next.threads, next.replies);
+      const nextTasks = removeForumGenerationTasksByThread(
+        generationTasks,
+        deleteTarget.threadId,
+      );
+      const result = commitForumMutation({
+        threads: next.threads,
+        replies: next.replies,
+        generationTasks: nextTasks,
+        actorStates: loadForumActorStates().value.filter((state) => state.threadId !== deleteTarget.threadId),
+        activityTasks: loadForumActivityTasks().value.filter((task) => task.threadId !== deleteTarget.threadId),
+        visitHistory: visitHistory.filter((item) => item.threadId !== deleteTarget.threadId),
+        likeHistory: likeHistory.filter((item) => item.threadId !== deleteTarget.threadId),
+        notifications: notifications.filter((item) => item.threadId !== deleteTarget.threadId),
+      });
       if (result.success) {
-        setThreads(next.threads);
-        setReplies(next.replies);
-        const nextTasks = removeForumGenerationTasksByThread(
-          loadForumGenerationTasks(new Set(relationships.map((relationship) => relationship.id))).value,
+        deleteForumTranslationsForThread(
+          activeIdentity.id,
           deleteTarget.threadId,
+          replies.filter((reply) => reply.threadId === deleteTarget.threadId).map((reply) => reply.id),
         );
-        saveForumGenerationTasks(nextTasks);
-        setGenerationTasks(nextTasks);
         setActiveThreadId(null);
         setReplyingTo(null);
         setReplyBody("");
@@ -767,14 +969,71 @@ export default function AppForum({
       }
     } else {
       const nextReplies = tombstoneForumReply(replies, deleteTarget.replyId, activeIdentity.id);
-      if (saveForumReplies(nextReplies).success) {
-        setReplies(nextReplies);
+      if (commitForumMutation({ replies: nextReplies, likeHistory: likeHistory.filter((item) => item.replyId !== deleteTarget.replyId), notifications: notifications.filter((item) => item.replyId !== deleteTarget.replyId && item.targetReplyId !== deleteTarget.replyId) }).success) {
+        deleteForumTranslationForReply(activeIdentity.id, deleteTarget.replyId);
         if (replyingTo?.id === deleteTarget.replyId) setReplyingTo(null);
       } else {
         reportStorageError();
       }
     }
     setDeleteTarget(null);
+  };
+
+  const getTranslationKey = (contentType: "thread" | "reply", contentId: string) =>
+    `${contentType}:${contentId}`;
+
+  const getCachedTranslation = (input: {
+    contentType: "thread" | "reply";
+    contentId: string;
+    title?: string;
+    body: string;
+  }) => getForumTranslation({
+    ownerIdentityId: activeIdentity.id,
+    contentType: input.contentType,
+    contentId: input.contentId,
+    sourceContentHash: createForumTranslationHash(input.contentType === "thread"
+      ? `${input.title || ""}\n${input.body}`
+      : input.body),
+    targetLanguage: getForumTranslationTargetLanguage(settings),
+  });
+
+  const toggleTranslation = async (input: {
+    contentType: "thread" | "reply";
+    contentId: string;
+    title?: string;
+    body: string;
+  }) => {
+    if (!input.body.trim()) return;
+    const key = getTranslationKey(input.contentType, input.contentId);
+    if (translatedContentIds[key]) {
+      setTranslatedContentIds((current) => ({ ...current, [key]: false }));
+      return;
+    }
+    const cached = getCachedTranslation(input);
+    if (cached) {
+      touchForumTranslation(cached);
+      setTranslatedContentIds((current) => ({ ...current, [key]: true }));
+      return;
+    }
+    if (translationLoadingIds[key]) return;
+    setTranslationLoadingIds((current) => ({ ...current, [key]: true }));
+    try {
+      await translateForumContent({
+        ownerIdentityId: activeIdentity.id,
+        contentType: input.contentType,
+        contentId: input.contentId,
+        ...(input.title ? { title: input.title } : {}),
+        body: input.body,
+        targetLanguage: getForumTranslationTargetLanguage(settings),
+        settings,
+      });
+      setTranslatedContentIds((current) => ({ ...current, [key]: true }));
+    } catch (translationError) {
+      const message = translationError instanceof Error ? translationError.message : "翻译失败，请检查 API 配置后重试。";
+      setError(message || "翻译失败，请检查 API 配置后重试。");
+    } finally {
+      setTranslationLoadingIds((current) => ({ ...current, [key]: false }));
+    }
   };
 
   return (
@@ -789,9 +1048,9 @@ export default function AppForum({
           <ChevronLeft className="h-5 w-5" />
         </button>
         <h1 className="absolute left-1/2 -translate-x-1/2 text-[17px] font-bold">
-          {activeThread || readonlySnapshot ? "帖子详情" : "论坛"}
+          {activeDmConversation ? activeDmConversation.participantPublicSnapshot.displayName : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : rootTab === "mine" ? "我的" : rootTab === "dm" ? "私信" : "论坛"}
         </h1>
-        {!activeThread && !readonlySnapshot ? (
+        {!activeThread && !readonlySnapshot && !secondaryPage && !activeDmConversation && rootTab === "home" ? (
           <button
             ref={homeMenuAnchorRef}
             type="button"
@@ -861,10 +1120,42 @@ export default function AppForum({
         </div>
       )}
 
-      {readonlySnapshot ? (
+      {activeDmConversation ? (
+        <ForumDmConversation conversation={activeDmConversation} messages={dmMessages.filter((message) => message.conversationId === activeDmConversation.id)} body={dmBody} setBody={setDmBody} sending={isDmSending} onSend={() => void sendDm()} />
+      ) : readonlySnapshot ? (
         <ForumSnapshotDetail snapshot={readonlySnapshot} />
+      ) : !activeThread && secondaryPage ? (
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-4">
+          {secondaryPage === "profile" && <section className="rounded-2xl bg-white p-4 shadow-sm">
+            <label className="mx-auto flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-slate-100">
+              {profileAvatarUrl || activeProfile.avatar ? <img src={profileAvatarUrl || activeProfile.avatar} alt="" className="h-full w-full object-cover" /> : <User className="h-8 w-8 text-slate-400" />}
+              <input className="hidden" type="file" accept="image/*" onChange={(event) => void uploadProfileAvatar(event.target.files?.[0])} />
+            </label>
+            <p className="mt-2 text-center text-xs text-slate-400">点击更换头像</p>
+            <label className="mt-5 block text-xs font-semibold text-slate-600">论坛昵称<input value={profileName} onChange={(event) => setProfileName(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" /></label>
+            <label className="mt-4 block text-xs font-semibold text-slate-600">简介<textarea value={profileBio} onChange={(event) => setProfileBio(event.target.value)} className="mt-2 min-h-24 w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" /></label>
+            <Button className="mt-5 w-full" onClick={saveProfile}>保存资料</Button>
+          </section>}
+          {secondaryPage === "history" && <><HistoryList title="浏览历史" empty="暂无浏览记录" items={visitHistory} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setReadonlySnapshot(item.publicSnapshot); }} /><button type="button" onClick={() => { if (window.confirm("清空全部浏览历史？")) commitForumMutation({ visitHistory: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空浏览历史</button></>}
+          {secondaryPage === "likes" && <><HistoryList title="我的点赞" empty="暂无点赞记录" items={likeHistory} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setReadonlySnapshot(item.publicSnapshot.thread); }} /><button type="button" onClick={() => { if (window.confirm("清空全部点赞记录？")) commitForumMutation({ likeHistory: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空点赞记录</button></>}
+          {secondaryPage === "notifications" && <><HistoryList title="消息提醒" empty="暂无新消息" items={notifications} onOpen={(item) => { if (item.type === "direct-message" && item.conversationId && dmConversations.some((conversation) => conversation.id === item.conversationId)) { setSecondaryPage(null); setRootTab("dm"); setActiveDmConversationId(item.conversationId); } else { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setNotice("原帖已删除或会话不可用"); } commitForumMutation({ notifications: notifications.map((value) => value.id === item.id ? { ...value, readAt: Date.now() } : value) }); }} /><button type="button" onClick={() => { if (window.confirm("清空全部消息提醒？")) commitForumMutation({ notifications: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空消息提醒</button></>}
+        </main>
+      ) : !activeThread && rootTab === "dm" ? (
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24"><ForumDmList conversations={dmConversations} messages={dmMessages} onOpen={(id) => setActiveDmConversationId(id)} /></main>
+      ) : !activeThread && rootTab === "mine" ? (
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-4">
+          <section className="rounded-2xl bg-white p-4 shadow-sm">
+            <button type="button" onClick={() => setSecondaryPage("profile")} className="flex w-full items-center gap-3 text-left">
+              {profileAvatarUrl || activeProfile.avatar ? <img src={profileAvatarUrl || activeProfile.avatar} alt="" className="h-14 w-14 rounded-full object-cover" /> : <span className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100"><User className="h-6 w-6 text-slate-400" /></span>}
+              <span className="min-w-0 flex-1"><strong className="block truncate text-base">{activeProfile.displayName}</strong><small className="mt-1 block truncate text-slate-400">{activeProfile.bio || "点击完善论坛资料"}</small></span><Pencil className="h-4 w-4 text-slate-400" />
+            </button>
+          </section>
+          <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
+            {[{ key: "history", label: "浏览历史", icon: History }, { key: "likes", label: "我的点赞", icon: ThumbsUp }, { key: "notifications", label: "消息提醒", icon: Bell }].map(({ key, label, icon: Icon }) => <button key={key} type="button" onClick={() => setSecondaryPage(key as "history" | "likes" | "notifications")} className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-4 text-left last:border-0"><Icon className="h-4 w-4 text-slate-500" /><span className="flex-1 text-sm">{label}</span>{key === "notifications" && notifications.some((item) => !item.readAt) && <span className="h-2 w-2 rounded-full bg-rose-500" />}</button>)}
+          </section>
+        </main>
       ) : !activeThread ? (
-        <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(24px,env(safe-area-inset-bottom))]">
+        <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24">
           {identityThreads.length === 0 ? (
             <div className="flex min-h-full flex-col items-center justify-center px-8 py-16 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-sm">
@@ -878,20 +1169,13 @@ export default function AppForum({
             </div>
           ) : (
             <div className="mt-3 overflow-hidden border-y border-slate-100 bg-white">
-              {identityThreads.map((thread) => (
+              {visibleThreads.map((thread) => (
                 <div key={thread.id}>
                   <ForumThreadCard
                     thread={thread}
-                    formattedTime={formatForumTime(thread.occurredAt)}
-                    onOpen={() => {
-                      setActiveThreadId(thread.id);
-                      setReplyingTo(null);
-                      setReplyBody("");
-                      setReplyAnonymously(false);
-                      setError("");
-                      setNotice("");
-                      requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
-                    }}
+                    metrics={selectForumThreadMetrics(thread, replies)}
+                    formattedTime={formatForumTime(selectForumThreadMetrics(thread, replies).updatedAt)}
+                    onOpen={() => openThread(thread)}
                   />
                   {waitingReplyThreadIds.includes(thread.id) && (
                     <div className="flex items-center gap-1.5 border-t border-slate-50 px-4 py-2 text-[10px] text-slate-400">
@@ -901,6 +1185,7 @@ export default function AppForum({
                   )}
                 </div>
               ))}
+              {identityThreads.length > visibleThreads.length && <button type="button" onClick={() => setVisibleThreadCount((count) => count + FORUM_HOME_PAGE_SIZE)} className="w-full border-t border-slate-100 py-4 text-xs font-medium text-slate-500">加载更多</button>}
             </div>
           )}
         </main>
@@ -928,12 +1213,20 @@ export default function AppForum({
                 </div>
                 <span className="text-[10px] font-medium text-slate-300">1 楼</span>
               </div>
+              {(() => {
+                const translationKey = getTranslationKey("thread", activeThread.id);
+                const translated = translatedContentIds[translationKey]
+                  ? getCachedTranslation({ contentType: "thread", contentId: activeThread.id, title: activeThread.title, body: activeThread.body })
+                  : undefined;
+                return <>
               <h2 className="mt-4 break-words text-[18px] font-bold leading-7 text-slate-950">
-                {activeThread.title}
+                {translated?.translatedTitle || activeThread.title}
               </h2>
               <p className="mt-2 whitespace-pre-wrap break-words text-[14px] leading-6 text-slate-700">
-                {activeThread.body}
+                {translated?.translatedBody || activeThread.body}
               </p>
+                </>;
+              })()}
               <div className="mt-4 grid grid-cols-4 items-center gap-1 border-t border-slate-100 pt-3">
                 <button
                   type="button"
@@ -951,7 +1244,7 @@ export default function AppForum({
                   className="inline-flex min-w-0 items-center justify-center gap-1 text-[11px] text-slate-500"
                 >
                   <MessageCircle className="h-4 w-4" />
-                  {activeThread.replyCount}
+                  {selectForumThreadMetrics(activeThread, replies).effectiveReplyCount}
                 </button>
                 <button
                   type="button"
@@ -970,6 +1263,27 @@ export default function AppForum({
                   删除
                 </button>
               </div>
+              {resolveForumDmActorFromPublicRecord({ ownerIdentityId: activeIdentity.id, thread: activeThread, relationships, characters }) && (
+                <button type="button" onClick={() => openDmFromRecord(activeThread)} className="mt-3 text-[11px] font-medium text-slate-400">发送私信</button>
+              )}
+              <div className="mt-2 flex justify-end">
+                {(() => {
+                  const key = getTranslationKey("thread", activeThread.id);
+                  return <button
+                    type="button"
+                    disabled={translationLoadingIds[key]}
+                    onClick={() => void toggleTranslation({
+                      contentType: "thread",
+                      contentId: activeThread.id,
+                      title: activeThread.title,
+                      body: activeThread.body,
+                    })}
+                    className="text-[11px] font-medium text-slate-400 disabled:text-slate-300"
+                  >
+                    {translationLoadingIds[key] ? "翻译中…" : translatedContentIds[key] ? "查看原文" : "翻译"}
+                  </button>;
+                })()}
+              </div>
             </article>
 
             <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
@@ -985,11 +1299,11 @@ export default function AppForum({
               {activeReplies.length === 0 ? (
                 <p className="px-4 py-10 text-center text-xs text-slate-400">还没有回复，来说点什么吧</p>
               ) : (
-                activeReplies.map((reply, index) => (
+                visibleReplies.map((reply, index) => (
                   <div
                     key={reply.id}
                     id={`forum-reply-${reply.id}`}
-                    ref={index === activeReplies.length - 1 ? newestReplyRef : undefined}
+                    ref={index === visibleReplies.length - 1 ? newestReplyRef : undefined}
                     className="border-b border-slate-100 px-4 py-4 last:border-b-0"
                   >
                     <div className="flex items-start gap-2.5">
@@ -1030,11 +1344,17 @@ export default function AppForum({
                       </div>
                     )}
 
-                    <p className={`ml-10 mt-2 whitespace-pre-wrap break-words text-[13px] leading-5 ${
-                      reply.isDeleted ? "italic text-slate-400" : "text-slate-700"
-                    }`}>
-                      {reply.isDeleted ? "该回复已删除" : reply.body}
-                    </p>
+                    {(() => {
+                      const translationKey = getTranslationKey("reply", reply.id);
+                      const translated = !reply.isDeleted && translatedContentIds[translationKey]
+                        ? getCachedTranslation({ contentType: "reply", contentId: reply.id, body: reply.body })
+                        : undefined;
+                      return <p className={`ml-10 mt-2 whitespace-pre-wrap break-words text-[13px] leading-5 ${
+                        reply.isDeleted ? "italic text-slate-400" : "text-slate-700"
+                      }`}>
+                        {reply.isDeleted ? "该回复已删除" : translated?.translatedBody || reply.body}
+                      </p>;
+                    })()}
 
                     {!reply.isDeleted && (
                       <div className="ml-10 mt-3 flex items-center gap-4">
@@ -1066,11 +1386,28 @@ export default function AppForum({
                           <Reply className="h-3.5 w-3.5" />
                           回复此楼
                         </button>
+                        {(() => {
+                          const key = getTranslationKey("reply", reply.id);
+                          return <button
+                            type="button"
+                            disabled={translationLoadingIds[key]}
+                            onClick={() => void toggleTranslation({
+                              contentType: "reply",
+                              contentId: reply.id,
+                              body: reply.body,
+                            })}
+                            className="text-[11px] text-slate-400 disabled:text-slate-300"
+                          >
+                            {translationLoadingIds[key] ? "翻译中…" : translatedContentIds[key] ? "查看原文" : "翻译"}
+                          </button>;
+                        })()}
+                        {resolveForumDmActorFromPublicRecord({ ownerIdentityId: activeIdentity.id, thread: activeThread, reply, relationships, characters }) && <button type="button" onClick={() => openDmFromRecord(activeThread, reply)} className="text-[11px] text-slate-400">私信</button>}
                       </div>
                     )}
                   </div>
                 ))
               )}
+              {activeReplies.length > visibleReplies.length && <button type="button" onClick={() => setVisibleReplyCount((count) => count + FORUM_REPLY_PAGE_SIZE)} className="w-full border-t border-slate-100 py-4 text-xs font-medium text-slate-500">加载更多回复</button>}
             </section>
           </main>
 
@@ -1132,6 +1469,14 @@ export default function AppForum({
             </div>
           </footer>
         </>
+      )}
+
+      {!activeThread && !readonlySnapshot && !secondaryPage && !activeDmConversation && (
+        <nav className="flex shrink-0 border-t border-slate-100 bg-white pb-[max(8px,env(safe-area-inset-bottom))] pt-2" aria-label="论坛导航">
+          <button type="button" onClick={() => setRootTab("home")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "home" ? "text-neutral-950" : "text-slate-400"}`}><MessageCircle className="h-5 w-5" />论坛</button>
+          <button type="button" onClick={() => setRootTab("dm")} className={`relative flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "dm" ? "text-neutral-950" : "text-slate-400"}`}><Mail className="h-5 w-5" />私信{dmConversations.reduce((total, item) => total + item.unreadCount, 0) > 0 && <span className="absolute ml-5 h-2 w-2 rounded-full bg-rose-500" />}</button>
+          <button type="button" onClick={() => setRootTab("mine")} className={`relative flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "mine" ? "text-neutral-950" : "text-slate-400"}`}><User className="h-5 w-5" />我的{notifications.some((item) => !item.readAt) && <span className="absolute ml-5 h-2 w-2 rounded-full bg-rose-500" />}</button>
+        </nav>
       )}
 
       <BottomSheet

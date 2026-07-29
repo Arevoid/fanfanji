@@ -1,14 +1,16 @@
 import { MessageCircle, ThumbsUp } from "lucide-react";
 import type { ForumThread } from "../../../types";
-import { getForumLikeCount } from "../../../domain/forum/forumData";
+import { getForumLikeCount, type ForumThreadMetrics } from "../../../domain/forum/forumData";
 import { ForumAvatar } from "./ForumAvatar";
 
 export function ForumThreadCard({
   thread,
+  metrics,
   formattedTime,
   onOpen,
 }: {
   thread: ForumThread;
+  metrics: ForumThreadMetrics;
   formattedTime: string;
   onOpen: () => void;
 }) {
@@ -41,7 +43,7 @@ export function ForumThreadCard({
           {thread.title}
         </h2>
         <p className="mt-1.5 line-clamp-3 whitespace-pre-wrap break-words text-[13px] leading-5 text-slate-600">
-          {thread.body}
+          {metrics.lastReplyExcerpt || thread.body}
         </p>
 
         <div className="mt-3 flex items-center gap-5 text-[11px] text-slate-400">
@@ -51,7 +53,7 @@ export function ForumThreadCard({
           </span>
           <span className="inline-flex items-center gap-1">
             <MessageCircle className="h-3.5 w-3.5" />
-            {thread.replyCount}
+            {metrics.effectiveReplyCount}
           </span>
         </div>
       </button>

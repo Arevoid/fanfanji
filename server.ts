@@ -520,7 +520,7 @@ ${historyText}
   // API Route: Translate text to Chinese (if non-Chinese)
   app.post("/api/translate", async (req, res) => {
     try {
-      const { text, apiKey, model, apiEndpoint } = req.body;
+      const { text, apiKey, model, apiEndpoint, targetLanguage } = req.body;
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
       if (!apiKeyValue) {
         return res.status(400).json({
@@ -528,7 +528,10 @@ ${historyText}
         });
       }
 
-      const prompt = `你是一个专业的翻译官。请将下面这段文本翻译成简体中文。
+      const requestedLanguage = typeof targetLanguage === "string" && targetLanguage.trim()
+        ? targetLanguage.trim()
+        : "简体中文";
+      const prompt = `你是一个专业的翻译官。请将下面这段文本忠实翻译成${requestedLanguage}。
       
 【待翻译文本】：
 ${text}
@@ -536,7 +539,8 @@ ${text}
 【翻译要求】：
 1. 如果该文本本身已经是简体中文或繁体中文，直接原样返回该文本，不做任何修改。
 2. 尽量保留原文的语气、标点符号、动作语态（如括号内的动作或描摹描述）和行文风格。
-3. 请直接输出翻译结果，不要包含任何多余的说明、解释或 markdown 格式包装。`;
+3. 如果输入包含 [FORUM_TITLE] 或 [FORUM_BODY] 标记，必须原样保留标记，仅翻译标记后的公开文本。
+4. 请直接输出翻译结果，不要包含任何多余的说明、解释或 markdown 格式包装。`;
 
       // 1. Custom endpoint
       if (apiEndpoint && apiEndpoint.trim()) {
@@ -559,7 +563,7 @@ ${text}
           body: JSON.stringify({
             model: targetModel,
             messages: [
-              { role: "system", content: "你是一个翻译助手，直接输出目标简体中文，不要带任何废话和解释。" },
+              { role: "system", content: `你是一个翻译助手，直接输出目标${requestedLanguage}，不要带任何废话和解释。` },
               { role: "user", content: prompt }
             ],
             temperature: 0.3

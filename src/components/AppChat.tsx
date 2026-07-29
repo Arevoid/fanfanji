@@ -34,7 +34,7 @@ import { generateCharacterImage } from "../features/chat/services/characterImage
 import { getPendingExplicitImageRequest } from "../features/chat/services/imageGenerationIntent";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
-import { loadForumGenerationTasks, loadForumShares, loadForumThreads, saveForumGenerationTasks, saveForumShares, saveForumThreads } from "../core/storage/repositories/forumRepository";
+import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "../core/storage/repositories/forumRepository";
 import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from "../domain/forum/forumShare";
 import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
 import { Button, Card, Modal } from "./ui";
@@ -1272,16 +1272,32 @@ export default function AppChat({
     onDeleteRelationshipMusic?.(relationId);
     const forumShares = loadForumShares().value;
     const remainingForumShares = removeForumSharesByRelation(forumShares, relationId);
-    if (remainingForumShares.length !== forumShares.length) saveForumShares(remainingForumShares);
     const forumThreads = loadForumThreads().value;
+    const forumReplies = loadForumReplies().value;
+    const forumMutation: { shares?: typeof forumShares; threads?: typeof forumThreads; replies?: typeof forumReplies; generationTasks?: ReturnType<typeof loadForumGenerationTasks>["value"]; actorStates?: ReturnType<typeof loadForumActorStates>["value"]; activityTasks?: ReturnType<typeof loadForumActivityTasks>["value"] } = {};
+    if (remainingForumShares.length !== forumShares.length) forumMutation.shares = remainingForumShares;
     const unlinkedForumThreads = unlinkForumPrivateAuthorByRelation(forumThreads, relationId);
     if (unlinkedForumThreads.some((thread, index) => thread !== forumThreads[index])) {
-      saveForumThreads(unlinkedForumThreads);
+      forumMutation.threads = unlinkedForumThreads;
     }
-    saveForumGenerationTasks(removeForumGenerationTasksByRelation(
+    const unlinkedForumReplies = forumReplies.map((reply) =>
+      reply.privateActor?.kind === "relationship" && reply.privateActor.relationId === relationId
+        ? (() => { const { privateActor: _privateActor, ...publicReply } = reply; return publicReply; })()
+        : reply);
+    if (unlinkedForumReplies.some((reply, index) => reply !== forumReplies[index])) forumMutation.replies = unlinkedForumReplies;
+    forumMutation.generationTasks = removeForumGenerationTasksByRelation(
       loadForumGenerationTasks().value,
       relationId,
-    ));
+    );
+    forumMutation.actorStates = loadForumActorStates().value.filter((state) =>
+      state.actor.kind !== "relationship" || state.actor.relationId !== relationId);
+    forumMutation.activityTasks = loadForumActivityTasks().value.map((task) => ({
+      ...task,
+      pendingEvents: task.pendingEvents.filter((event) =>
+        event.privateActor?.kind !== "relationship" || event.privateActor.relationId !== relationId),
+    }));
+    commitForumMutation(forumMutation);
+    cleanupForumDmForRelations([relationId]);
     offlineStories
       .filter((story) => story.relationId === relationId)
       .forEach((story) => onDeleteOfflineStory?.(story.id));

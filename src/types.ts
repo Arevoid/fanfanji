@@ -212,6 +212,24 @@ export interface ForumVirtualProfile {
   publicStyle: string;
 }
 
+/** Internal forum actor identity. Never copy this into a public forum DTO. */
+export type ForumActorRef =
+  | { kind: "relationship"; relationId: string; characterId: string }
+  | { kind: "virtual"; virtualProfileId: string };
+
+export interface ForumActorState {
+  ownerIdentityId: string;
+  threadId: string;
+  actorKey: string;
+  actor: ForumActorRef;
+  lastReplyAt?: number;
+  recentReplyIds: string[];
+  recentTopicFingerprints: string[];
+  hourlyReplyTimestamps: number[];
+  cooldownUntil?: number;
+  updatedAt: number;
+}
+
 export interface ForumThread {
   id: string;
   ownerIdentityId: string;
@@ -253,6 +271,150 @@ export interface ForumReply {
   /** Deleted replies remain as tombstones so floors and quote targets stay stable. */
   isDeleted?: boolean;
   deletedAt?: number;
+  /** Local scheduling metadata. It is intentionally omitted from shares and backups. */
+  privateActor?: ForumActorRef;
+}
+
+export interface ForumActivityActorSlot {
+  slotId: string;
+  publicAuthor: ForumPublicAuthor;
+  actor: ForumActorRef;
+  safePublicStyle: string;
+}
+
+export interface ForumPendingActivityEvent {
+  id: string;
+  ownerIdentityId: string;
+  threadId: string;
+  batchId: string;
+  localId: string;
+  actorSlotSnapshot: ForumActivityActorSlot;
+  privateActor?: ForumActorRef;
+  kind: "reply" | "author-update";
+  body: string;
+  replyTarget: { type: "thread" } | { type: "floor"; floor: number } | { type: "batch"; localId: string };
+  scheduledAt: number;
+  status: "pending" | "released" | "skipped";
+  resolvedReplyId?: string;
+  resolvedFloor?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumActivityTask {
+  id: string;
+  ownerIdentityId: string;
+  threadId: string;
+  trigger: "automatic" | "manual-thread-refresh" | "initial-replies" | "like-engagement";
+  status: "running" | "succeeded" | "failed" | "blocked";
+  startedAt: number;
+  completedAt?: number;
+  retryAfter?: number;
+  pendingEvents: ForumPendingActivityEvent[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumMutationEvent {
+  type: "reply-created" | "thread-updated";
+  ownerIdentityId: string;
+  threadId: string;
+  replyId?: string;
+  publicAuthor?: ForumPublicAuthor;
+  occurredAt: number;
+}
+
+export type ForumRootTab = "home" | "dm" | "mine";
+
+export interface ForumUserProfile {
+  ownerIdentityId: string;
+  displayName: string;
+  avatar?: string;
+  avatarAssetId?: string;
+  bio?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumVisitHistory {
+  id: string;
+  ownerIdentityId: string;
+  threadId: string;
+  lastVisitedAt: number;
+  visitCount: number;
+  publicSnapshot: ForumThreadPublicSnapshot;
+}
+
+export interface ForumReplyPublicSnapshot {
+  id: string;
+  floor: number;
+  body: string;
+  publicAuthor: ForumPublicAuthor;
+  occurredAt: number;
+  isDeleted?: boolean;
+}
+
+export interface ForumLikeHistoryRecord {
+  id: string;
+  ownerIdentityId: string;
+  targetType: "thread" | "reply";
+  threadId: string;
+  replyId?: string;
+  likedAt: number;
+  publicSnapshot: {
+    thread: ForumThreadPublicSnapshot;
+    reply?: ForumReplyPublicSnapshot;
+  };
+}
+
+export interface ForumNotification {
+  id: string;
+  eventKey: string;
+  ownerIdentityId: string;
+  type: "thread-reply" | "reply-reply" | "direct-message";
+  actorPublicSnapshot: ForumPublicAuthor;
+  threadId: string;
+  replyId: string;
+  targetReplyId?: string;
+  preview: string;
+  occurredAt: number;
+  readAt?: number;
+  conversationId?: string;
+}
+
+export interface ForumDmConversation {
+  id: string;
+  ownerIdentityId: string;
+  participant: ForumActorRef;
+  participantPublicSnapshot: ForumPublicAuthor;
+  originThreadId?: string;
+  originReplyId?: string;
+  lastMessageAt: number;
+  unreadCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumDmMessage {
+  id: string;
+  conversationId: string;
+  ownerIdentityId: string;
+  sender: "user" | "participant";
+  body: string;
+  occurredAt: number;
+  createdAt: number;
+}
+
+export interface ForumDmTask {
+  id: string;
+  taskKey: string;
+  ownerIdentityId: string;
+  conversationId: string;
+  status: "running" | "succeeded" | "failed" | "stale";
+  startedAt: number;
+  completedAt?: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type ForumGenerationTrigger =
@@ -308,6 +470,23 @@ export interface ForumShare {
   sourceMessageId: string;
   publicSnapshot: ForumThreadPublicSnapshot;
   createdAt: number;
+}
+
+/**
+ * A disposable, public-text-only translation cache entry. Forum source text is
+ * never replaced by this value.
+ */
+export interface ForumTranslation {
+  id: string;
+  ownerIdentityId: string;
+  contentType: "thread" | "reply";
+  contentId: string;
+  sourceContentHash: string;
+  targetLanguage: string;
+  translatedTitle?: string;
+  translatedBody: string;
+  createdAt: number;
+  lastAccessedAt: number;
 }
 
 export interface MusicTrack {

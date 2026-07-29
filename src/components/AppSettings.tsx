@@ -33,6 +33,7 @@ import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 import { inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "../features/chat/services/imageProtocol";
 import { applyDesktopModuleBackup, buildDesktopModuleBackup, parseDesktopModuleBackup } from "../features/home/desktopModuleBackup";
 import { normalizeHomeScreenLayout } from "../features/home/homeGrid";
+import { notifyForumStateChanged } from "../core/storage/repositories/forumRepository";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -110,6 +111,15 @@ const BACKUP_KEYS = [
   "phone_forum_replies",
   "phone_forum_shares",
   "phone_forum_generation_tasks",
+  "phone_forum_actor_states",
+  "phone_forum_activity_tasks",
+  "phone_forum_profiles",
+  "phone_forum_visit_history",
+  "phone_forum_like_history",
+  "phone_forum_notifications",
+  "phone_forum_dm_conversations",
+  "phone_forum_dm_messages",
+  "phone_forum_dm_tasks",
   "phone_character_relationships",
   "phone_music_playlists",
   "phone_music_tracks",
@@ -155,6 +165,19 @@ export function sanitizeSystemBackupValue(
       return "[]";
     }
   }
+  if (key === "phone_forum_replies") {
+    try {
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return "[]";
+      return JSON.stringify(parsed.map((reply) => {
+        if (!reply || typeof reply !== "object") return reply;
+        const { privateActor: _privateActor, ...publicReply } = reply as Record<string, unknown>;
+        return publicReply;
+      }));
+    } catch {
+      return "[]";
+    }
+  }
   if (key === "phone_forum_generation_tasks") {
     try {
       const parsed = JSON.parse(value);
@@ -176,6 +199,43 @@ export function sanitizeSystemBackupValue(
     } catch {
       return "[]";
     }
+  }
+  if (["phone_forum_actor_states", "phone_forum_activity_tasks"].includes(key)) {
+    try {
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return "[]";
+      // Scheduling state is optional after restore; omit private actor mappings and in-flight events.
+      return JSON.stringify(parsed.map((item) => {
+        if (!item || typeof item !== "object") return item;
+        const { actor: _actor, privateActor: _privateActor, pendingEvents: _events, ...safe } = item as Record<string, unknown>;
+        return safe;
+      }).filter((item) => item && typeof item === "object" && typeof (item as Record<string, unknown>).ownerIdentityId === "string"));
+    } catch { return "[]"; }
+  }
+  if (["phone_forum_profiles", "phone_forum_visit_history", "phone_forum_like_history", "phone_forum_notifications"].includes(key)) {
+    try {
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return "[]";
+      // Resource blobs are local-only. Never export private actor/relation metadata.
+      return JSON.stringify(parsed.map((item) => {
+        if (!item || typeof item !== "object") return item;
+        const { avatarAssetId: _asset, privateActor: _actor, privateAuthorRelationId: _relation, privateAuthorCharacterId: _character, ...safe } = item as Record<string, unknown>;
+        return safe;
+      }));
+    } catch {
+      return "[]";
+    }
+  }
+  if (["phone_forum_dm_conversations", "phone_forum_dm_messages", "phone_forum_dm_tasks"].includes(key)) {
+    try {
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return "[]";
+      return JSON.stringify(parsed.map((item) => {
+        if (!item || typeof item !== "object") return item;
+        const { privateActor: _actor, ...safe } = item as Record<string, unknown>;
+        return safe;
+      }));
+    } catch { return "[]"; }
   }
   return value;
 }
@@ -2839,6 +2899,10 @@ export default function AppSettings({
                                 throw writeError;
                               }
 
+                              // Existing forum views receive the restored state immediately.
+                              if (entries.some(([key]) => key.startsWith("phone_forum_"))) {
+                                notifyForumStateChanged();
+                              }
                               // JSON backups intentionally exclude MusicAppDB and StickerAppDB Blobs.
                               // Importing JSON never clears IndexedDB, so existing local music and stickers remain.
                               alert("导入成功！应用即将刷新加载新数据。");

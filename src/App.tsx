@@ -15,7 +15,7 @@ import { loadRelationships, saveRelationships } from "./core/storage/repositorie
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
-import { loadForumGenerationTasks, loadForumShares, loadForumThreads, saveForumGenerationTasks, saveForumShares, saveForumThreads } from "./core/storage/repositories/forumRepository";
+import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
@@ -1683,12 +1683,26 @@ export default function App() {
         relationIds,
         characterIds: deletedCharacterIds,
       });
-      saveForumShares(forumCleanup.shares);
-      saveForumThreads(forumCleanup.threads);
-      saveForumGenerationTasks(removeForumGenerationTasksByRelations(
-        loadForumGenerationTasks().value,
-        relationIds,
-      ));
+      const forumReplies = loadForumReplies().value.map((reply) =>
+        reply.privateActor?.kind === "relationship" && relationIds.includes(reply.privateActor.relationId)
+          ? (() => { const { privateActor: _privateActor, ...publicReply } = reply; return publicReply; })()
+          : reply);
+      commitForumMutation({
+        shares: forumCleanup.shares,
+        threads: forumCleanup.threads,
+        replies: forumReplies,
+        generationTasks: removeForumGenerationTasksByRelations(
+          loadForumGenerationTasks().value,
+          relationIds,
+        ),
+        actorStates: loadForumActorStates().value.filter((state) =>
+          state.actor.kind !== "relationship" || !relationIds.includes(state.actor.relationId)),
+        activityTasks: loadForumActivityTasks().value.map((task) => ({
+          ...task,
+          pendingEvents: task.pendingEvents.filter((event) => event.privateActor?.kind !== "relationship" || !relationIds.includes(event.privateActor.relationId)),
+        })),
+      });
+      cleanupForumDmForRelations(relationIds);
       relationIds.forEach((relationId) => {
         localStorage.removeItem(getOfflineModeStorageKey(relationId));
         localStorage.removeItem(getOfflineStoryStorageKey(relationId));

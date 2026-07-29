@@ -16,6 +16,19 @@ export interface ForumGeneratedThreadCandidate {
   replies?: ForumGeneratedReplyCandidate[];
 }
 
+export interface ForumGeneratedEventCandidate {
+  localId: string;
+  actorSlot: string;
+  kind: "reply" | "author-update";
+  body: string;
+  replyTo: { type: "thread" } | { type: "floor"; floor: number } | { type: "batch"; localId: string };
+  delaySeconds?: number;
+}
+
+export interface ForumGeneratedEventBatch {
+  events: ForumGeneratedEventCandidate[];
+}
+
 const normalize = (value: string): string =>
   value.normalize("NFKC").toLowerCase().replace(/\s+/g, "").replace(/[^\p{L}\p{N}]/gu, "");
 
@@ -145,6 +158,45 @@ export const parseForumReplyCandidate = (text: string): ForumGeneratedReplyCandi
         ? { replyToFloor: Number(record.replyToFloor) }
         : {}),
   };
+};
+
+/** Parses the only shape accepted from the runtime forum activity model. */
+export const parseForumGeneratedEventBatch = (text: string): ForumGeneratedEventBatch => {
+  const raw = extractJsonValue(text);
+  const record = Array.isArray(raw) ? { events: raw } : raw;
+  if (!record || typeof record !== "object") throw new Error("结构解析失败：活动批次无效。");
+  const events = (record as Record<string, unknown>).events;
+  if (!Array.isArray(events)) throw new Error("结构解析失败：缺少 events。");
+  const localIds = new Set<string>();
+  const valid: ForumGeneratedEventCandidate[] = [];
+  for (const item of events.slice(0, 4)) {
+    if (!item || typeof item !== "object") continue;
+    const event = item as Record<string, unknown>;
+    const localId = cleanText(event.localId, 48);
+    const actorSlot = cleanText(event.actorSlot, 80);
+    const kind = event.kind === "author-update" ? "author-update" : event.kind === "reply" ? "reply" : undefined;
+    const body = cleanGeneratedText(event.body, 2000, "活动回复");
+    const replyToRaw = event.replyTo as Record<string, unknown> | undefined;
+    const replyTo = replyToRaw?.type === "thread"
+      ? { type: "thread" as const }
+      : replyToRaw?.type === "floor" && Number.isInteger(replyToRaw.floor)
+        ? { type: "floor" as const, floor: Number(replyToRaw.floor) }
+        : replyToRaw?.type === "batch" && cleanText(replyToRaw.localId, 48)
+          ? { type: "batch" as const, localId: cleanText(replyToRaw.localId, 48) }
+          : undefined;
+    if (!localId || localIds.has(localId) || !actorSlot || !kind || !body || !replyTo) continue;
+    localIds.add(localId);
+    valid.push({
+      localId,
+      actorSlot,
+      kind,
+      body,
+      replyTo,
+      ...(Number.isFinite(event.delaySeconds) ? { delaySeconds: Math.max(0, Math.min(300, Number(event.delaySeconds))) } : {}),
+    });
+  }
+  if (valid.length === 0) throw new Error("生成内容无效：没有合法活动事件。");
+  return { events: valid };
 };
 
 export const validateForumReplyTimeline = (
