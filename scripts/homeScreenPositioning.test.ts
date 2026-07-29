@@ -264,10 +264,16 @@ assert.match(appSource, /onClickCapture=\{\(event\) => \{[\s\S]*isEditingHomeScr
 assert.match(appSource, /className="home-screen-drag-surface/);
 assert.match(appSource, /onContextMenu=\{\(event\) => event\.preventDefault\(\)\}/);
 assert.match(appSource, /onDragStartCapture=\{\(event\) => event\.preventDefault\(\)\}/);
+assert.match(appSource, /gridTemplateColumns:\s*`repeat\(\$\{HOME_GRID_COLUMNS\}, minmax\(0, 1fr\)\)`/);
+assert.match(appSource, /justifyContent:\s*"stretch"/);
 assert.match(appSource, /gridTemplateRows:\s*`repeat\(\$\{homeGridRows\}/);
 assert.match(appSource, /setPointerCapture\(pending\.pointerId\)/);
 assert.match(appSource, /placeItemWithDisplacement/);
 assert.match(appSource, /distance > 24/);
+assert.match(appSource, /DEFAULT_HOME_SCREEN_ITEMS/);
+assert.match(appSource, /id:\s*"album_widget_1"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*0,\s*column:\s*0\s*\}/);
+assert.match(appSource, /id:\s*"music_widget_1"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*2,\s*column:\s*2\s*\}/);
+assert.match(appSource, /id:\s*"notes"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*4,\s*column:\s*0\s*\}/);
 assert.match(appSource, /const raw = localStorage\.getItem\("phone_homescreen_items"\)/);
 assert.match(appSource, /if \(raw !== null\)[\s\S]*Array\.isArray\(parsed\) \? parsed : \[\]/);
 

@@ -144,6 +144,20 @@ interface DragSession {
   swapWithId?: string;
 }
 
+const DEFAULT_HOME_SCREEN_ITEMS: HomeScreenItem[] = [
+  { id: "album_widget_1", type: "widget", widgetType: "album", size: "2x2", page: 0, position: { page: 0, row: 0, column: 0 } },
+  { id: "archives", type: "app", size: "1x1", page: 0, position: { page: 0, row: 0, column: 2 } },
+  { id: "worldbook", type: "app", size: "1x1", page: 0, position: { page: 0, row: 0, column: 3 } },
+  { id: "chat", type: "app", size: "1x1", page: 0, position: { page: 0, row: 1, column: 2 } },
+  { id: "offline", type: "app", size: "1x1", page: 0, position: { page: 0, row: 1, column: 3 } },
+  { id: "music", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 0 } },
+  { id: "memory", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 1 } },
+  { id: "music_widget_1", type: "widget", widgetType: "music", size: "2x2", page: 0, position: { page: 0, row: 2, column: 2 } },
+  { id: "store", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 0 } },
+  { id: "settings", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 1 } },
+  { id: "notes", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 0 } },
+];
+
 const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
 
 // Default Seed Characters
@@ -708,19 +722,10 @@ export default function App() {
         items = [];
       }
     } else {
-      items = [
-        { id: "album_widget_1", type: "widget", widgetType: "album", size: "2x2", page: 0 },
-        { id: "archives", type: "app", size: "1x1", page: 0 },
-        { id: "worldbook", type: "app", size: "1x1", page: 0 },
-        { id: "chat", type: "app", size: "1x1", page: 0 },
-        { id: "offline", type: "app", size: "1x1", page: 0 },
-        { id: "music", type: "app", size: "1x1", page: 0 },
-        { id: "memory", type: "app", size: "1x1", page: 0 },
-        { id: "music_widget_1", type: "widget", widgetType: "music", size: "2x2", page: 0 },
-        { id: "store", type: "app", size: "1x1", page: 0 },
-        { id: "settings", type: "app", size: "1x1", page: 0 },
-        { id: "notes", type: "app", size: "1x1", page: 1 },
-      ];
+      items = DEFAULT_HOME_SCREEN_ITEMS.map((item) => ({
+        ...item,
+        position: item.position ? { ...item.position } : undefined,
+      }));
     }
 
     items = items
@@ -973,13 +978,14 @@ export default function App() {
   const homeGridIconWidth = settings.hideAppNames ? 60 : 52;
   const homeGridPadding = 12;
   const homeGridInnerWidth = homeGridWidth - homeGridPadding * 2;
-  const homeGridColumnGap = Math.max(
-    4,
-    (homeGridInnerWidth - HOME_GRID_COLUMNS * homeGridIconWidth) / (HOME_GRID_COLUMNS - 1),
+  const homeGridGap = 16;
+  const homeGridColumnGap = homeGridGap;
+  const homeGridRowGap = homeGridGap;
+  const homeGridTrackWidth = Math.max(
+    homeGridIconWidth,
+    (homeGridInnerWidth - homeGridColumnGap * (HOME_GRID_COLUMNS - 1)) / HOME_GRID_COLUMNS,
   );
-  const homeGridRowGap = 16;
-  const homeGridWidgetWidth = 2 * homeGridIconWidth + homeGridColumnGap;
-  const homeGridRowHeight = (homeGridWidgetWidth - homeGridRowGap) / 2;
+  const homeGridRowHeight = homeGridTrackWidth;
   const homeGridRows = getResponsiveHomeGridRowCount({
     containerHeight: homeGridHeight,
     paddingTop: 14,
@@ -2682,16 +2688,11 @@ export default function App() {
                             ? { width: "60px", height: "60px" } 
                             : { width: "52px", height: "52px" };
 
-                          // Calculate perfect 1:1 widget width/height and grid row height dynamically
                           const gridPadding = homeGridPadding; // 12px padding left/right (matches px-3 of dock!)
-                          const outerWidth = homeGridWidth;
-                          const innerWidth = outerWidth - 2 * gridPadding; // 319px
-                          const gapWidth = Math.max(4, (innerWidth - HOME_GRID_COLUMNS * iconWidth) / (HOME_GRID_COLUMNS - 1));
-                          const widgetWidthValue = 2 * iconWidth + gapWidth;
-                          const widgetHeight = `${widgetWidthValue}px`;
-
+                          const gapWidth = homeGridColumnGap;
+                          const widgetHeight = `${2 * homeGridRowHeight + homeGridRowGap}px`;
                           const rowGapValue = homeGridRowGap;
-                          const rowHeightValue = (widgetWidthValue - rowGapValue) / 2;
+                          const rowHeightValue = homeGridRowHeight;
 
                           const gridStyle = {
                             paddingLeft: `${gridPadding}px`,
@@ -2699,8 +2700,8 @@ export default function App() {
                             paddingTop: "14px",
                             paddingBottom: "14px",
                             display: "grid",
-                            gridTemplateColumns: `repeat(4, ${iconWidth}px)`,
-                            justifyContent: "start",
+                            gridTemplateColumns: `repeat(${HOME_GRID_COLUMNS}, minmax(0, 1fr))`,
+                            justifyContent: "stretch",
                             columnGap: `${gapWidth}px`,
                             gridTemplateRows: `repeat(${homeGridRows}, ${rowHeightValue}px)`,
                             gridAutoRows: `${rowHeightValue}px`,
@@ -2805,7 +2806,7 @@ export default function App() {
                                         key={item.id}
                                         data-id={item.id}
                                         data-page={pageIdx}
-                                        className={`grid-item col-span-1 row-span-1 flex flex-col ${alignClass} justify-start relative group transition-opacity duration-200 ${
+                                        className={`grid-item col-span-1 row-span-1 flex flex-col ${alignClass} justify-start relative group transition-opacity duration-200 min-w-0 ${
                                           isDragged ? "z-30 opacity-30 scale-95 cursor-grabbing" : "cursor-pointer"
                                         }`}
                                         style={explicitGridStyle}
@@ -2846,7 +2847,7 @@ export default function App() {
                                             )}
                                           </div>
                                           {!isHiddenNames && (
-                                            <span className="desktop-app-label text-[10px] font-extrabold mt-1 truncate w-[72px] -mx-3.5 block select-none tracking-tight font-sans text-center">
+                                            <span className="desktop-app-label text-[10px] font-extrabold mt-1 truncate max-w-[72px] w-[calc(100%+20px)] block select-none tracking-tight font-sans text-center">
                                               {app.name}
                                             </span>
                                           )}
