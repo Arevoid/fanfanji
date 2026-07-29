@@ -555,6 +555,8 @@ export interface UserSettings {
   apiKey: string;
   selectedModel: string;
   wallpaper: string; // Wallpaper URL or base64
+  /** Distinguishes an explicit user/preset wallpaper from legacy placeholder defaults. */
+  wallpaperSource?: "user" | "preset" | "legacy-default";
   customIcons: Record<string, string>; // appKey -> image base64/URL or empty
   bubbleCss: string; // Custom bubble CSS
   globalCss: string; // Custom global CSS

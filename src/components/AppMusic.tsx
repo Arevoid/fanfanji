@@ -271,7 +271,7 @@ export default function AppMusic({
   const progressPercent = duration > 0 ? currentTime / duration : 0;
 
   return (
-    <div className="flex flex-col h-full bg-stone-50 text-stone-850 font-sans overflow-hidden relative">
+    <div data-theme-page="music" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans overflow-hidden relative">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
@@ -413,37 +413,37 @@ export default function AppMusic({
       {/* 置顶悬浮播放列表面板 */}
       {/* 宽度：页面宽度左右保留约 16px 边距 (left-4 right-4)，高度：约为屏幕高度的 35%–45% (h-[40vh]) */}
       <div
-        className={`absolute left-4 right-4 z-40 h-[40vh] bg-white rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] border border-stone-200/80 flex flex-col overflow-hidden transition-all duration-300 ease-out origin-bottom-right ${
+        className={`absolute left-4 right-4 z-40 h-[40vh] bg-[var(--surface)] text-[var(--text-primary)] rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] border border-[var(--border)] flex flex-col overflow-hidden transition-all duration-300 ease-out origin-bottom-right ${
           showPlaylist
             ? "bottom-[88px] opacity-100 translate-y-0 scale-100 pointer-events-auto"
             : "bottom-[50px] opacity-0 translate-y-4 scale-95 pointer-events-none"
         }`}
       >
-        <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3 bg-stone-50/80 backdrop-blur-sm shrink-0">
-          <h3 className="text-xs font-bold text-stone-600 flex items-center gap-1.5 uppercase tracking-wider">
-            <ListMusic className="w-3.5 h-3.5 text-neutral-950" />
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 bg-[var(--surface-muted)] backdrop-blur-sm shrink-0">
+          <h3 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5 uppercase tracking-wider">
+            <ListMusic className="w-3.5 h-3.5" />
             <span>当前播放列表 ({(allTracks || []).length}首)</span>
           </h3>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsShowingImportModal(true)}
-              className="text-[10px] text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg transition-colors"
+              className="text-[10px] text-[var(--button-secondary-text)] hover:bg-[var(--surface-raised)] font-bold flex items-center gap-1 bg-[var(--button-secondary-bg)] border border-[var(--button-secondary-border)] px-2 py-1 rounded-lg transition-colors disabled:bg-[var(--button-disabled-bg)] disabled:text-[var(--button-disabled-text)]"
             >
               <Plus className="w-3 h-3" />
               <span>添加歌曲</span>
             </button>
             <button
               onClick={() => setShowPlaylist(false)}
-              className="p-1 rounded-full hover:bg-stone-200 text-stone-500 transition-colors"
+              className="p-1 rounded-full hover:bg-[var(--surface-raised)] text-[var(--text-secondary)] transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 bg-white">
+        <div className="flex-1 overflow-y-auto p-4 bg-[var(--surface)]">
           {(allTracks || []).length === 0 ? (
-            <div className="text-center py-12 text-stone-400 text-xs">
+            <div className="text-center py-12 text-[var(--text-tertiary)] text-xs">
               播放队列中暂无音乐。点击右上角“添加歌曲”导入音乐。
             </div>
           ) : (
@@ -455,8 +455,8 @@ export default function AppMusic({
                     key={track.id}
                     className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
                       isActive
-                        ? "bg-neutral-950 border-neutral-950 text-white shadow"
-                        : "bg-white border-stone-200/60 text-stone-800 hover:bg-stone-100"
+                        ? "bg-[var(--surface-selected)] border-[var(--accent)] text-[var(--text-primary)] shadow"
+                        : "bg-[var(--surface-raised)] border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--surface-muted)]"
                     }`}
                   >
                     <div
@@ -468,7 +468,7 @@ export default function AppMusic({
                       <span className="text-[10px] font-mono opacity-50 w-4">{(idx + 1).toString().padStart(2, "0")}</span>
                       <div className="min-w-0">
                         <p className="text-xs font-bold truncate leading-snug">{track.title}</p>
-                        <p className={`text-[10px] truncate mt-0.5 ${isActive ? "text-stone-300" : "text-stone-500"}`}>
+                        <p className="text-[10px] truncate mt-0.5 text-[var(--text-secondary)]">
                           {track.artist}
                         </p>
                       </div>
@@ -487,7 +487,7 @@ export default function AppMusic({
                         <button
                           onClick={() => onDeleteTrack(track.id)}
                           className={`p-1.5 transition-colors rounded-lg ${
-                            isActive ? "text-stone-300 hover:text-white" : "text-stone-400 hover:text-rose-500"
+                            isActive ? "text-[var(--text-secondary)] hover:text-[var(--danger)]" : "text-[var(--text-tertiary)] hover:text-[var(--danger)]"
                           }`}
                           title="从列表删除"
                         >
@@ -584,7 +584,7 @@ export default function AppMusic({
               <button
                 onClick={() => setImportMethod("upload")}
                 className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 ${
-                  importMethod === "upload" ? "bg-neutral-950 text-white" : "text-stone-500"
+                    importMethod === "upload" ? "bg-[var(--tab-active-bg)] text-[var(--tab-active-text)]" : "text-[var(--tab-inactive-text)]"
                 }`}
               >
                 <Upload className="w-3.5 h-3.5" />
@@ -593,7 +593,7 @@ export default function AppMusic({
               <button
                 onClick={() => setImportMethod("link")}
                 className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 ${
-                  importMethod === "link" ? "bg-neutral-950 text-white" : "text-stone-500"
+                    importMethod === "link" ? "bg-[var(--tab-active-bg)] text-[var(--tab-active-text)]" : "text-[var(--tab-inactive-text)]"
                 }`}
               >
                 <Link className="w-3.5 h-3.5" />

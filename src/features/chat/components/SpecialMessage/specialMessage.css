@@ -1,13 +1,13 @@
 .message-quote {
-  --quote-bg: rgba(120, 113, 108, 0.08);
-  --quote-border: #94a3b8;
-  --quote-author: #334155;
-  --quote-content: #64748b;
+  --quote-bg: color-mix(in srgb, var(--surface-muted) 72%, transparent);
+  --quote-border: var(--border-strong);
+  --quote-author: var(--text-primary);
+  --quote-content: var(--text-secondary);
 }
 
 .message-quote__content {
   background: transparent;
-  border: 2px solid #d2dde1;
+  border: 2px solid var(--quote-border);
   border-radius: 1.35rem;
   color: var(--quote-content);
 }
@@ -51,7 +51,7 @@
   overflow: hidden;
   padding: 14px 16px 12px;
   border-radius: 18px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 10px 24px var(--shadow-color);
   cursor: pointer;
   transition: transform 150ms ease, filter 150ms ease;
 }

@@ -27,6 +27,50 @@
   box-shadow: var(--shadow-sm);
 }
 
+:root[data-theme="dark"] .offline-page {
+  --offline-bg: var(--app-bg);
+  --offline-surface: var(--surface);
+  --offline-surface-muted: var(--surface-raised);
+  --offline-text: var(--text-primary);
+  --offline-text-secondary: var(--text-secondary);
+  --offline-text-tertiary: var(--text-tertiary);
+  --offline-border: var(--border);
+}
+
+:root[data-theme="dark"] .offline-page :is(.offline-icon-button, .offline-story-session span:last-child, .offline-author-placeholder, .offline-node-trigger:hover, .offline-guidance-content em) {
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+}
+
+:root[data-theme="dark"] .offline-page :is(.offline-story-card, .offline-empty-state button, .offline-composer-wrap) {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+:root[data-theme="dark"] .offline-page .offline-chat-link-card {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+}
+
+:root[data-theme="dark"] .offline-page .offline-chat-link-action {
+  color: var(--accent);
+}
+
+:root[data-theme="dark"] .offline-page .offline-raw-content :is(p, strong, b, blockquote, span) {
+  color: inherit;
+}
+
+:root[data-theme="dark"] .offline-page :is(.offline-story-author strong, .offline-reading-range-heading, .offline-reading-color-title, .offline-guidance-header h2, .offline-guidance-content label > span, .offline-editor-author strong) {
+  color: var(--text-primary);
+}
+
+:root[data-theme="dark"] .offline-page :is(.offline-guidance-content textarea, .offline-reading-color-inputs input) {
+  border-color: var(--border);
+  background: var(--input-bg);
+  color: var(--text-primary);
+}
+
 .offline-story-card-header,
 .offline-panel-header,
 .offline-reading-setting-row,

@@ -21,7 +21,10 @@ import {
   Download,
   Upload,
   Volume2,
-  VolumeX
+  VolumeX,
+  Monitor,
+  Moon,
+  Sun
 } from "lucide-react";
 
 import {
@@ -34,6 +37,10 @@ import { inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageFor
 import { applyDesktopModuleBackup, buildDesktopModuleBackup, parseDesktopModuleBackup } from "../features/home/desktopModuleBackup";
 import { normalizeHomeScreenLayout } from "../features/home/homeGrid";
 import { notifyForumStateChanged } from "../core/storage/repositories/forumRepository";
+import { notifyAppearanceSettingsChanged } from "../features/theme/appearanceRepository";
+import { useTheme } from "../features/theme/ThemeProvider";
+import { sanitizeAppearanceSettings, type ThemeMode } from "../features/theme/theme";
+import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -129,6 +136,7 @@ const BACKUP_KEYS = [
   "phone_offline_stories",
   "phone_presets",
   "phone_settings",
+  "phone_appearance_settings",
   "phone_worldbook_entries",
 ] as const;
 
@@ -141,6 +149,13 @@ export function sanitizeSystemBackupValue(
   source?: Record<string, unknown>,
 ): string | null {
   if (!value) return value;
+  if (key === "phone_appearance_settings") {
+    try {
+      return JSON.stringify(sanitizeAppearanceSettings(JSON.parse(value)));
+    } catch {
+      return JSON.stringify({ themeMode: "light" });
+    }
+  }
   if (key === "phone_homescreen_items") {
     try {
       const parsed = JSON.parse(value);
@@ -260,7 +275,8 @@ export default function AppSettings({
   onDeletePreset,
   onClose,
 }: AppSettingsProps) {
-  const [activeTab, setActiveTab] = useState<"profile" | "api" | "image_api" | "beauty" | "system_config" | "system" | "minimax" | null>(null);
+  const [activeTab, setActiveTab] = useState<"profile" | "api" | "image_api" | "appearance" | "beauty" | "system_config" | "system" | "minimax" | null>(null);
+  const { themeMode, resolvedTheme, setThemeMode } = useTheme();
 
   // PWA states
   const [isPwaInstallable, setIsPwaInstallable] = useState(false);
@@ -846,7 +862,7 @@ export default function AppSettings({
       try {
         const compressed = await compressImage(file, 1000, 1000, 0.7);
         setWallpaper(compressed);
-        handleSave({ wallpaper: compressed });
+        handleSave({ wallpaper: compressed, wallpaperSource: "user" });
       } catch (err) {
         console.error("Wallpaper compression failed:", err);
       }
@@ -919,6 +935,7 @@ export default function AppSettings({
     onSaveSettings({
       ...settings,
       wallpaper: preset.wallpaper,
+      wallpaperSource: "preset",
       bubbleCss: preset.bubbleCss,
       globalCss: preset.globalCss,
       activePreset: preset.name
@@ -949,6 +966,8 @@ export default function AppSettings({
         return "API 设置";
       case "image_api":
         return "图片 API 设置";
+      case "appearance":
+        return "外观设置";
       case "beauty":
         return "美化设置";
       case "system_config":
@@ -971,7 +990,7 @@ export default function AppSettings({
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 text-slate-800 font-sans">
+    <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans" data-settings-shell>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
@@ -992,7 +1011,7 @@ export default function AppSettings({
       <div className="flex-1 flex overflow-hidden">
         {activeTab === null ? (
           /* Settings Main Entrance Menu (QQ Style) */
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[var(--app-bg)]">
             {/* QQ Style User Profile Card */}
             <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm flex flex-col gap-4 relative overflow-hidden">
               {/* Background decorative soft blur gradients */}
@@ -1145,6 +1164,42 @@ export default function AppSettings({
             <div className="max-w-md mx-auto space-y-4">
           
           {/* PROFILE SETTINGS TAB */}
+          {activeTab === "appearance" && (
+            <div className="flex-1 overflow-y-auto bg-slate-50/50 p-4">
+              <div className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm">
+                <h2 className="text-base font-extrabold text-slate-800">应用显示外观</h2>
+                <p className="mt-1 text-xs leading-5 text-slate-500">切换后会立即保存并应用到整个应用，不会随身份切换而改变。</p>
+                <div className="mt-5 space-y-3">
+                  {([
+                    { mode: "light", title: "浅色", description: "始终使用浅色外观", icon: <Sun className="h-5 w-5" /> },
+                    { mode: "dark", title: "深色", description: "始终使用深色外观", icon: <Moon className="h-5 w-5" /> },
+                    { mode: "system", title: `跟随系统（当前${resolvedTheme === "dark" ? "深色" : "浅色"}）`, description: "根据设备的显示偏好自动切换", icon: <Monitor className="h-5 w-5" /> },
+                  ] as Array<{ mode: ThemeMode; title: string; description: string; icon: React.ReactNode }>).map((option) => {
+                    const selected = themeMode === option.mode;
+                    return (
+                      <button
+                        key={option.mode}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setThemeMode(option.mode)}
+                        className={`flex w-full items-center gap-3 rounded-[18px] border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${selected ? "border-[var(--accent)] bg-[var(--surface-selected)]" : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)]"}`}
+                      >
+                        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${selected ? "bg-[var(--accent)] text-[var(--accent-contrast)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>{option.icon}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-bold text-[var(--text-primary)]">{option.title}</span>
+                          <span className="mt-0.5 block text-xs text-[var(--text-secondary)]">{option.description}</span>
+                        </span>
+                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${selected ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-contrast)]" : "border-[var(--border-strong)]"}`} aria-hidden="true">
+                          {selected && <Check className="h-3.5 w-3.5" />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === "profile" && (
             <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">个人资料</h3>
@@ -1512,13 +1567,12 @@ export default function AppSettings({
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <div className="flex justify-between items-center pb-1 border-b border-slate-50">
                       <span className="text-xs font-bold text-slate-700">手机壁纸设置</span>
-                      {wallpaper && !wallpaper.startsWith("linear-gradient") && (
+                      {hasUserDesktopWallpaper({ wallpaper, wallpaperSource: settings.wallpaperSource }) && (
                         <button
                           type="button"
                           onClick={() => {
-                            const fallback = "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)";
-                            setWallpaper(fallback);
-                            handleSave({ wallpaper: fallback });
+                            setWallpaper("");
+                            handleSave({ wallpaper: "", wallpaperSource: undefined });
                           }}
                           className="text-[10px] text-red-500 hover:text-red-600 font-semibold"
                         >
@@ -1547,9 +1601,8 @@ export default function AppSettings({
                           <button
                             type="button"
                             onClick={() => {
-                              const fallback = "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)";
-                              setWallpaper(fallback);
-                              handleSave({ wallpaper: fallback });
+                              setWallpaper("");
+                              handleSave({ wallpaper: "", wallpaperSource: undefined });
                             }}
                             className="bg-red-500/90 hover:bg-red-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors"
                           >
@@ -2621,6 +2674,24 @@ export default function AppSettings({
               {/* 3. 主题预设模块 */}
               {beautySubTab === "preset" && (
                 <div className="space-y-4 animate-fade-in">
+                  <div className="bg-[var(--surface)] p-5 rounded-[24px] border border-[var(--border)] shadow-sm space-y-3">
+                    <div>
+                      <span className="text-xs font-bold text-[var(--text-primary)]">显示主题</span>
+                      <p className="mt-1 text-[10px] text-[var(--text-secondary)]">主题为全局设置，不会覆盖壁纸、Dock、图标或聊天气泡的自定义颜色。</p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(["light", "dark", "system"] as ThemeMode[]).map((mode) => {
+                        const selected = themeMode === mode;
+                        const label = mode === "light" ? "浅色" : mode === "dark" ? "深色" : "跟随系统";
+                        const Icon = mode === "light" ? Sun : mode === "dark" ? Moon : Monitor;
+                        return <button key={mode} type="button" aria-pressed={selected} onClick={() => setThemeMode(mode)} className={`min-w-0 rounded-[16px] border px-2 py-3 text-center transition-colors ${selected ? "border-[var(--accent)] bg-[var(--surface-selected)] text-[var(--text-primary)]" : "border-[var(--border)] bg-[var(--surface-muted)] text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]"}`}>
+                          <Icon className="mx-auto h-4 w-4" />
+                          <span className="mt-1 block truncate text-[10px] font-bold">{label}</span>
+                          {mode === "system" && <span className="mt-0.5 block truncate text-[9px]">当前{resolvedTheme === "dark" ? "深色" : "浅色"}</span>}
+                        </button>;
+                      })}
+                    </div>
+                  </div>
                   {/* 保存预设 */}
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <span className="text-xs font-bold text-slate-700">保存当前样式为新预设</span>
@@ -2902,6 +2973,13 @@ export default function AppSettings({
                               // Existing forum views receive the restored state immediately.
                               if (entries.some(([key]) => key.startsWith("phone_forum_"))) {
                                 notifyForumStateChanged();
+                              }
+                              if (entries.some(([key]) => key === "phone_appearance_settings")) {
+                                notifyAppearanceSettingsChanged();
+                              }
+                              if (entries.length === 1 && entries[0][0] === "phone_appearance_settings") {
+                                alert("外观设置已恢复并立即应用。");
+                                return;
                               }
                               // JSON backups intentionally exclude MusicAppDB and StickerAppDB Blobs.
                               // Importing JSON never clears IndexedDB, so existing local music and stickers remain.

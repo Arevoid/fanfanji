@@ -2,7 +2,7 @@ import type { HomeScreenItem, UserSettings } from "../../types";
 import { normalizeHomeScreenLayout } from "./homeGrid";
 
 export const DESKTOP_SETTING_KEYS = [
-  "wallpaper", "customIcons", "dockColor", "dockOpacity", "dockBorderRadius",
+  "wallpaper", "wallpaperSource", "customIcons", "dockColor", "dockOpacity", "dockBorderRadius",
   "widgetOpacity", "widgetBorderRadius", "iconBorderRadius", "iconBgOpacity",
   "iconBorderWidth", "iconBorderOpacity", "iconBorderEnabled", "hideAppNames",
   "desktopAppTextColor", "desktopIconMode", "hideHomeWelcomeWidget", "homeButtonPosition",

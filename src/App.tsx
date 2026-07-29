@@ -66,6 +66,8 @@ import {
 } from "./features/home/homeGrid";
 import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./features/music/services/dualMusicRecommendationService";
 import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./features/music/services/musicPlayback";
+import { resolveDesktopBackground } from "./features/theme/desktopBackground";
+import { useTheme } from "./features/theme/ThemeProvider";
 import StatusBar from "./components/StatusBar";
 import AppChat from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
@@ -261,6 +263,7 @@ const DEFAULT_SETTINGS: UserSettings = {
 const DEFAULT_MESSAGES: Message[] = [];
 
 export default function App() {
+  const { resolvedTheme } = useTheme();
   // Load initial states from LocalStorage or fallbacks
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
 
@@ -2169,6 +2172,7 @@ export default function App() {
   return (
     <div
       className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
+      data-app-shell
       data-pwa-standalone={isStandaloneMode ? "true" : "false"}
       style={{
         position: (typeof window !== "undefined" && window.innerWidth < 768) ? "fixed" : "relative",
@@ -2267,16 +2271,16 @@ export default function App() {
         .phone-screen-container .bg-stone-900/20,
         .phone-screen-container .bg-stone-900/80,
         .phone-screen-container .bg-neutral-900/95 {
-          background-color: #ffffff !important;
+          background-color: var(--surface) !important;
           background-image: none !important;
-          color: #0f0f10 !important;
+          color: var(--text-primary) !important;
         }
 
         /* Ensure all card/panel containers are white */
         .phone-screen-container div.bg-white:not(.app-icon-surface),
         .phone-screen-container div.bg-stone-50,
         .phone-screen-container div.bg-slate-50 {
-          background-color: #ffffff !important;
+          background-color: var(--surface) !important;
         }
 
         /* 2. Unified Border Radius: Strict 32px Rounding */
@@ -2343,7 +2347,7 @@ export default function App() {
         .phone-screen-container .border-neutral-200/20 {
           border-width: 1px !important;
           border-style: solid !important;
-          border-color: rgba(229, 231, 235, 0.8) !important;
+          border-color: var(--border) !important;
         }
 
         /* For inputs, add clean padding and force the 32px rounding */
@@ -2351,9 +2355,9 @@ export default function App() {
         .phone-screen-container textarea,
         .phone-screen-container select {
           border-radius: 32px !important;
-          background-color: #ffffff !important;
-          color: #0f0f10 !important;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.03) !important;
+          background-color: var(--input-bg) !important;
+          color: var(--text-primary) !important;
+          box-shadow: 0 4px 12px var(--shadow-color) !important;
           outline: none !important;
         }
 
@@ -2364,7 +2368,7 @@ export default function App() {
         .phone-screen-container .shadow-lg,
         .phone-screen-container .shadow-xl,
         .phone-screen-container .shadow-2xl {
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03) !important;
+          box-shadow: 0 4px 12px var(--shadow-color) !important;
         }
 
         /* 6. Typography & Text Levels Hierarchy */
@@ -2372,7 +2376,7 @@ export default function App() {
         .phone-screen-container h2,
         .phone-screen-container .font-bold.text-slate-800,
         .phone-screen-container .font-extrabold:not(.desktop-app-label) {
-          color: #0f0f10 !important;
+          color: var(--text-primary) !important;
           font-weight: 800 !important;
           letter-spacing: -0.025em !important;
         }
@@ -2380,7 +2384,7 @@ export default function App() {
         .phone-screen-container h3,
         .phone-screen-container h4,
         .phone-screen-container .font-semibold {
-          color: #27272a !important;
+          color: var(--text-primary) !important;
           font-weight: 600 !important;
         }
 
@@ -2396,7 +2400,7 @@ export default function App() {
         .phone-screen-container [class*="text-xs"][class*="font-semibold"][class*="text-slate-"],
         .phone-screen-container [class*="text-xs"][class*="font-bold"][class*="text-stone-"] {
           font-size: 11px !important;
-          color: #52525b !important;
+          color: var(--text-secondary) !important;
           font-weight: 700 !important;
           letter-spacing: 0.02em !important;
         }
@@ -2415,7 +2419,7 @@ export default function App() {
         .phone-screen-container span[class*="text-slate-400"],
         .phone-screen-container div[class*="text-stone-400"],
         .phone-screen-container div[class*="text-slate-400"] {
-          color: #a1a1aa !important;
+          color: var(--text-tertiary) !important;
           font-size: 10px !important;
         }
 
@@ -2429,9 +2433,9 @@ export default function App() {
         .phone-screen-container button.bg-violet-600,
         .phone-screen-container button.bg-[#3b82f6],
         .phone-screen-container .bg-neutral-950 {
-          background-color: #0f0f10 !important;
-          color: #ffffff !important;
-          border-color: #0f0f10 !important;
+          background-color: var(--accent) !important;
+          color: var(--accent-contrast) !important;
+          border-color: var(--accent) !important;
           border-radius: 32px !important;
         }
 
@@ -2440,7 +2444,7 @@ export default function App() {
         .phone-screen-container .bg-neutral-950 *,
         .phone-screen-container button.bg-neutral-950,
         .phone-screen-container button.bg-neutral-950 * {
-          color: #ffffff !important;
+          color: var(--accent-contrast) !important;
         }
 
         /* Secondary text-based button links -> Clean support gray text with link look */
@@ -2448,7 +2452,7 @@ export default function App() {
         .phone-screen-container .text-blue-600,
         .phone-screen-container .text-purple-600,
         .phone-screen-container .text-emerald-500 {
-          color: #52525b !important;
+          color: var(--text-secondary) !important;
         }
 
         /* Back/Close buttons (x/arrow) -> Circle with 1px light grey outline, rounded standardized */
@@ -2457,9 +2461,9 @@ export default function App() {
         .phone-screen-container #schedule_back_btn,
         .phone-screen-container .back-btn {
           border-radius: 32px !important;
-          background-color: #ffffff !important;
-          border: 1px solid rgba(229, 231, 235, 0.8) !important;
-          color: #0f0f10 !important;
+          background-color: var(--surface) !important;
+          border: 1px solid var(--border) !important;
+          color: var(--text-primary) !important;
           width: 32px !important;
           height: 32px !important;
           display: flex !important;
@@ -2472,24 +2476,24 @@ export default function App() {
         /* Self bubble: Solid charcoal black, crisp white text, 32px round */
         .phone-screen-container .chat-bubble-self,
         .phone-screen-container div[class*="bg-indigo-600"] {
-          background-color: #0f0f10 !important;
-          color: #ffffff !important;
+          background-color: var(--chat-user-bg) !important;
+          color: var(--chat-user-text) !important;
           border-radius: 32px !important;
           border: none !important;
         }
         .phone-screen-container .chat-bubble-self *,
         .phone-screen-container div[class*="bg-indigo-600"] * {
-          color: #ffffff !important;
+          color: var(--chat-user-text) !important;
         }
 
         /* Other bubble: Soft light gray, charcoal text, 32px round */
         .phone-screen-container .chat-bubble-other,
         .phone-screen-container div[class*="bg-slate-200"],
         .phone-screen-container div[class*="bg-stone-100"] {
-          background-color: #f4f4f5 !important;
-          color: #0f0f10 !important;
+          background-color: var(--chat-ai-bg) !important;
+          color: var(--chat-ai-text) !important;
           border-radius: 32px !important;
-          border: 1px solid rgba(229, 231, 235, 0.8) !important;
+          border: 1px solid var(--border) !important;
         }
 
         /* Double segment buttons (such as stays/experiences, notes/todo tabs) */
@@ -2513,9 +2517,9 @@ export default function App() {
         .phone-screen-container input[type="range"]::-webkit-slider-runnable-track {
           width: 100% !important;
           height: 6px !important;
-          background-color: #e4e4e7 !important; /* Light grey track background (#e4e4e7) */
+          background-color: var(--surface-muted) !important;
           border-radius: 32px !important; /* Unified border radius size */
-          border: 1px solid rgba(228, 228, 231, 0.8) !important;
+          border: 1px solid var(--border) !important;
         }
 
         /* Thumb style - Webkit */
@@ -2525,8 +2529,8 @@ export default function App() {
           height: 16px !important;
           width: 16px !important;
           border-radius: 32px !important; /* Unified border radius size */
-          background-color: #0f0f10 !important; /* Solid charcoal */
-          border: 2px solid #ffffff !important;
+          background-color: var(--accent) !important;
+          border: 2px solid var(--surface) !important;
           box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
           cursor: pointer !important;
           margin-top: -5px !important; /* Center on track */
@@ -2540,9 +2544,9 @@ export default function App() {
         .phone-screen-container input[type="range"]::-moz-range-track {
           width: 100% !important;
           height: 6px !important;
-          background-color: #e4e4e7 !important; /* Light grey track background */
+          background-color: var(--surface-muted) !important;
           border-radius: 32px !important;
-          border: 1px solid rgba(228, 228, 231, 0.8) !important;
+          border: 1px solid var(--border) !important;
         }
 
         /* Thumb style - Firefox */
@@ -2550,8 +2554,8 @@ export default function App() {
           height: 16px !important;
           width: 16px !important;
           border-radius: 32px !important;
-          background-color: #0f0f10 !important;
-          border: 2px solid #ffffff !important;
+          background-color: var(--accent) !important;
+          border: 2px solid var(--surface) !important;
           box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
           cursor: pointer !important;
         }
@@ -2599,9 +2603,14 @@ export default function App() {
         ref={phoneScreenRef}
         className="w-full md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl overflow-hidden relative flex flex-col bg-slate-100 border-none phone-screen-container"
         style={{
-          background: settings.wallpaper.startsWith("linear-gradient")
-            ? settings.wallpaper
-            : `url(${settings.wallpaper}) center/cover no-repeat`,
+          background: resolveDesktopBackground({
+            resolvedTheme,
+            wallpaper: settings.wallpaper,
+            wallpaperSource: settings.wallpaperSource,
+          }).background,
+          // Remains visible when a previously saved image URL or Blob can no longer load.
+          // The configured wallpaper is never overwritten just because its resource is unavailable.
+          backgroundColor: "var(--desktop-default-bg)",
           position: "relative",
           height: (typeof window !== "undefined" && window.innerWidth < 768) ? "100%" : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
@@ -3358,10 +3367,19 @@ export default function App() {
           {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) - Overlaid absolutely on top of everything */}
           {(() => {
             const activeChar = characters.find(c => c.id === activeChatCharId);
-            const activeWallpaper = (activeApp === "chat" && activeChar && activeChar.chatBg) 
-              ? activeChar.chatBg 
-              : settings.wallpaper;
-            return <StatusBar wallpaper={activeWallpaper} />;
+            const desktopBackground = resolveDesktopBackground({
+              resolvedTheme,
+              wallpaper: settings.wallpaper,
+              wallpaperSource: settings.wallpaperSource,
+            });
+            const activeWallpaper = (activeApp === "chat" && activeChar && activeChar.chatBg)
+              ? activeChar.chatBg
+              : (desktopBackground.hasUserWallpaper ? settings.wallpaper : undefined);
+            return <StatusBar
+              wallpaper={activeWallpaper}
+              hasUserWallpaper={Boolean(activeWallpaper)}
+              fallbackTheme={resolvedTheme}
+            />;
           })()}
         </div>
 

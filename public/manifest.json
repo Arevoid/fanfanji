@@ -5,8 +5,8 @@
   "description": "饭饭的专属虚拟手机智能体",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#e0f2fe",
-  "theme_color": "#e0f2fe",
+  "background_color": "#f7f7f5",
+  "theme_color": "#f7f7f5",
   "orientation": "portrait",
   "scope": "/",
   "icons": [

@@ -543,7 +543,7 @@ export default function AppArchives({
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 text-slate-800 font-sans">
+    <div data-theme-page="archives" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans">
       {/* App Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
@@ -871,7 +871,7 @@ export default function AppArchives({
                   
                   <h2 className="text-xl font-bold text-slate-800 mt-3">{char.name}</h2>
                   <p className="text-xs text-slate-400 mt-1 flex items-center justify-center gap-1.5 font-semibold">
-                    <span className="px-2 py-0.5 bg-neutral-950 text-white rounded-md text-[10px] tracking-wide font-black">
+                    <span className="px-2 py-0.5 bg-[var(--badge-bg)] text-[var(--badge-text)] rounded-md text-[10px] tracking-wide font-black">
                       {char.mbti}
                     </span>
                     <span className="w-1 h-1 rounded-full bg-slate-300" />
@@ -1136,10 +1136,10 @@ export default function AppArchives({
                   >
                     {/* Character Tag */}
                     <div className="absolute top-3 right-3 flex items-center space-x-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
-                      <span className="px-1.5 py-0.5 bg-neutral-950 text-white text-[10px] font-bold rounded-md">
+                      <span className="px-1.5 py-0.5 bg-[var(--badge-bg)] text-[var(--badge-text)] text-[10px] font-bold rounded-md">
                         {char.mbti}
                       </span>
-                      <span className="px-1.5 py-0.5 bg-slate-50 text-slate-600 text-[10px] font-bold rounded-md">
+                      <span className="px-1.5 py-0.5 bg-[var(--badge-muted-bg)] text-[var(--badge-muted-text)] text-[10px] font-bold rounded-md">
                         {char.age}岁
                       </span>
                     </div>

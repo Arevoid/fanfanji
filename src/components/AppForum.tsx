@@ -1059,7 +1059,7 @@ export default function AppForum({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900">
+    <div data-theme-page="forum" className="flex h-full min-h-0 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
       <header className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4">
         <button
           type="button"
@@ -1112,7 +1112,7 @@ export default function AppForum({
           role="menuitem"
           onClick={() => void runRefreshGeneration()}
           disabled={isRefreshing}
-          className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-stone-700 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-muted)] disabled:cursor-not-allowed disabled:text-[var(--button-disabled-text)] disabled:opacity-100"
         >
           <RefreshCw className={`h-3.5 w-3.5 shrink-0 ${isRefreshing ? "animate-spin" : ""}`} />
           <span>{isRefreshing ? "正在生成…" : "刷新论坛"}</span>
@@ -1124,7 +1124,7 @@ export default function AppForum({
             setShowHomeActions(false);
             setShowComposer(true);
           }}
-          className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-stone-700 transition-colors hover:bg-stone-100"
+          className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-muted)]"
         >
           <Plus className="h-3.5 w-3.5 shrink-0" />
           <span>我要发帖</span>

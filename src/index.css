@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @import "./styles/tokens.css";
+@import "./styles/theme-b1.css";
+@import "./styles/theme-b2.css";
+
+.theme-memory-range {
+  accent-color: var(--progress-value);
+  background-color: var(--progress-track);
+}
 @import "./features/chat/components/SpecialMessage/specialMessage.css";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @font-face {
   font-family: "Athena Unicode";
@@ -32,11 +41,13 @@
 
 html, body, #root {
   height: 100%;
+  min-height: 100dvh;
   width: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
-  background-color: #f5f5f7;
+  background-color: var(--app-bg);
+  color: var(--text-primary);
 }
 
 /* Hide default scrollbars globally */

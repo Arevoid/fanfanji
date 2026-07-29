@@ -225,7 +225,7 @@ export default function AppMemory({
   };
 
   return (
-    <div className="w-full h-full bg-slate-50 flex flex-col font-sans select-none relative overflow-hidden">
+    <div data-theme-page="memory" className="w-full h-full bg-[var(--app-bg)] text-[var(--text-primary)] flex flex-col font-sans select-none relative overflow-hidden">
       {/* Upper Navigation Bar */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button

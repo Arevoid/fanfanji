@@ -393,7 +393,7 @@ export default function StickerSettings({
   };
 
   return (
-    <div className="space-y-4">
+    <div data-theme-page="stickers" className="space-y-4 text-[var(--text-primary)]">
       {/* Hidden inputs & status info */}
       <input
         type="file"

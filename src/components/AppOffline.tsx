@@ -314,8 +314,8 @@ export default function AppOffline({
     "--offline-reading-letter-spacing": `${readingPreferences.letterSpacing}em`,
     "--offline-reading-line-height": String(readingPreferences.lineHeight),
     "--offline-reading-paragraph-gap": `${readingPreferences.paragraphSpacing}px`,
-    "--offline-reading-text": readingPreferences.textColor,
-    "--offline-reading-card": readingPreferences.cardBackground,
+    "--offline-reading-text": readingPreferences.textColor.toUpperCase() === "#1D1D1F" ? "var(--text-primary)" : readingPreferences.textColor,
+    "--offline-reading-card": readingPreferences.cardBackground.toUpperCase() === "#FFFFFF" ? "var(--surface)" : readingPreferences.cardBackground,
   } as React.CSSProperties;
   const linkedChatTarget = activeStory
     ? resolveOfflineChatNavigationTarget({
@@ -903,6 +903,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
 
   return (
     <div
+      data-theme-page="offline"
       className="offline-page w-full h-full flex flex-col relative overflow-hidden font-sans select-none"
       style={readingStyle}
     >

@@ -1,0 +1,128 @@
+/* Stage B1: legacy shell, settings and chat utility classes.
+ * These rules intentionally only change system chrome. Inline user colours,
+ * wallpapers, photos, avatars, custom icon surfaces and colour controls stay
+ * outside this mapping. */
+:root[data-theme="dark"] [data-app-shell] {
+  background: var(--app-bg) !important;
+  color: var(--text-primary);
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) :is(.bg-white, .bg-slate-50, .bg-slate-100, .bg-neutral-50, .bg-neutral-100, .bg-stone-50, .bg-stone-100, .bg-gray-50, .bg-gray-100, .bg-zinc-50, .bg-zinc-100):not(.app-icon-surface):not(.transparent-custom-icon),
+:root[data-theme="dark"] [data-chat-shell] .chat-page,
+:root[data-theme="dark"] [data-chat-shell] .chat-page__background {
+  background-color: var(--surface) !important;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) :is(.bg-slate-50\/50, .bg-slate-50\/60, .bg-white\/80, .bg-white\/90, .bg-white\/95):not(.transparent-custom-icon) {
+  background-color: var(--surface-raised) !important;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) :is(.border-slate-100, .border-slate-200, .border-stone-100, .border-stone-200, .border-gray-100, .divide-slate-100, .divide-stone-100),
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) .border {
+  border-color: var(--border) !important;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) :is(.text-slate-800, .text-slate-850, .text-stone-800, .text-stone-900, .text-neutral-800, .text-neutral-900, .text-gray-800) {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) :is(.text-slate-700, .text-slate-600, .text-stone-700, .text-stone-600, .text-neutral-700, .text-gray-700) {
+  color: var(--text-secondary) !important;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) :is(.text-slate-500, .text-slate-400, .text-stone-500, .text-stone-400, .text-neutral-500, .text-gray-500, .text-gray-400) {
+  color: var(--text-tertiary) !important;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) input:not([type="color"]):not([type="range"]),
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) textarea,
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) select {
+  background-color: var(--input-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border) !important;
+  color-scheme: dark;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) input::placeholder,
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) textarea::placeholder {
+  color: var(--input-placeholder) !important;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell]) button:is(.bg-neutral-950, .bg-slate-900, .bg-slate-800, .bg-black) {
+  background-color: var(--button-primary-bg) !important;
+  color: var(--button-primary-text) !important;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell]) button:is(.bg-neutral-950, .bg-slate-900, .bg-slate-800, .bg-black) :is(svg, path) {
+  color: currentColor;
+  stroke: currentColor;
+}
+
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell]) button:disabled {
+  background-color: var(--button-disabled-bg) !important;
+  border-color: var(--button-disabled-border) !important;
+  color: var(--button-disabled-text) !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme="dark"] .phone-screen-container .chat-bubble-self {
+  background-color: var(--chat-user-bg) !important;
+  color: var(--chat-user-text) !important;
+}
+
+:root[data-theme="dark"] .phone-screen-container .chat-bubble-other {
+  background-color: var(--chat-ai-bg) !important;
+  color: var(--chat-ai-text) !important;
+  border-color: var(--border) !important;
+}
+
+:root[data-theme="dark"] .phone-screen-container .dock-container:not([style*="background"]) {
+  background-color: color-mix(in srgb, var(--surface-raised) 78%, transparent) !important;
+  border-color: var(--border) !important;
+}
+
+:root[data-theme="dark"] .phone-screen-container .home-screen-drag-surface .bg-white:not(.app-icon-surface):not(.transparent-custom-icon) {
+  background-color: var(--surface-raised) !important;
+}
+
+:root[data-theme="dark"] .phone-screen-container [data-home-delete] {
+  box-shadow: 0 4px 14px rgb(0 0 0 / 36%);
+}
+
+/* Portaled sheets and transient system feedback are outside .phone-screen-container. */
+:root[data-theme="dark"] :is([role="dialog"], [role="menu"]) {
+  color: var(--text-primary);
+}
+
+:root[data-theme="dark"] .theme-widget-sheet :is(.bg-white, .bg-stone-50, .bg-slate-50) {
+  background-color: var(--surface) !important;
+}
+
+:root[data-theme="dark"] .theme-widget-sheet :is(.text-stone-900, .text-stone-800, .text-slate-800) {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme="dark"] .theme-widget-sheet :is(.text-stone-700, .text-stone-600, .text-slate-700, .text-slate-600) {
+  color: var(--text-secondary) !important;
+}
+
+:root[data-theme="dark"] .theme-widget-sheet :is(.text-stone-500, .text-stone-400, .text-slate-500, .text-slate-400) {
+  color: var(--text-tertiary) !important;
+}
+
+:root[data-theme="dark"] .message-quote {
+  --quote-bg: rgb(148 163 184 / 14%);
+  --quote-border: var(--border-strong);
+  --quote-author: var(--text-primary);
+  --quote-content: var(--text-secondary);
+}
+
+:root[data-theme="dark"] .message-quote__content {
+  border-color: var(--border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="dark"] .phone-screen-container * {
+    scroll-behavior: auto;
+  }
+}

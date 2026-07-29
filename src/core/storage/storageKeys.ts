@@ -1,5 +1,6 @@
 export const storageKeys = {
   settings: "phone_settings",
+  appearanceSettings: "phone_appearance_settings",
   characters: "phone_characters_v3",
   legacyCharacters: "phone_characters",
   messages: "phone_messages_v3",

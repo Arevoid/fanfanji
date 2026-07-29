@@ -105,7 +105,7 @@ export default function AppSchedule({
   const filteredEvents = getFilteredEvents();
 
   return (
-    <div className="flex flex-col h-full bg-white text-neutral-950 font-sans relative">
+    <div data-theme-page="schedule" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans relative">
       
       {/* 1. Header with Close Button and Stays/Experiences Tab Switches */}
       <div className="flex items-center justify-between px-4 py-3 shrink-0 relative border-b border-stone-100">

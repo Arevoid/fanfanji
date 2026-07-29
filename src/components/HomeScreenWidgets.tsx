@@ -286,14 +286,14 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
       )}
 
       {isSettingsOpen && createPortal(
-        <div className="fixed inset-0 z-[100] bg-black/35 flex items-end justify-center p-4" onClick={cancelSettings}>
-          <div className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-stone-100 px-5 py-4">
+        <div className="theme-widget-sheet fixed inset-0 z-[100] bg-[var(--overlay)] flex items-end justify-center p-4" onClick={cancelSettings}>
+          <div className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-[28px] bg-[var(--surface)] text-[var(--text-primary)] shadow-[var(--shadow-modal)]" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[var(--divider)] px-5 py-4">
               <div>
-                <h3 className="text-sm font-black text-stone-900">日历相册</h3>
-                <p className="mt-0.5 text-[11px] text-stone-400">背景图与日期文字颜色</p>
+                <h3 className="text-sm font-black text-[var(--text-primary)]">日历相册</h3>
+                <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">背景图与日期文字颜色</p>
               </div>
-              <button type="button" onClick={cancelSettings} className="rounded-full p-1 text-lg font-bold text-stone-400" aria-label="关闭">×</button>
+              <button type="button" onClick={cancelSettings} className="rounded-full p-1 text-lg font-bold text-[var(--text-tertiary)]" aria-label="关闭">×</button>
             </div>
             <div className="space-y-4 overflow-y-auto px-5 py-4">
             <div className="relative h-28 overflow-hidden rounded-2xl border border-stone-100" style={{ backgroundImage: `url(${draftBackgroundImage})`, backgroundSize: "cover", backgroundPosition: "center" }}>
@@ -303,8 +303,8 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
               </div>
             </div>
             <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
-            <button type="button" onClick={() => uploadRef.current?.click()} className="w-full rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold text-stone-700">上传背景图片</button>
-            <label className="flex items-center justify-between text-xs font-bold text-stone-700">
+            <button type="button" onClick={() => uploadRef.current?.click()} className="w-full rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-xs font-bold text-[var(--text-primary)]">上传背景图片</button>
+            <label className="flex items-center justify-between text-xs font-bold text-[var(--text-primary)]">
               日期文字颜色
               <span className="flex items-center gap-2">
                 <input value={draftFontColor.toUpperCase()} onChange={(event) => { const value = event.target.value; setDraftFontColor(value); if (/^#[0-9a-f]{6}$/i.test(value)) setFontColor(value); }} className="w-[76px] rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 font-mono text-[10px] font-medium text-stone-600 outline-none" aria-label="颜色 HEX 值" />
@@ -312,9 +312,9 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
               </span>
             </label>
             </div>
-            <div className="flex gap-2 border-t border-stone-100 p-4">
-              <button type="button" onClick={cancelSettings} className="flex-1 rounded-xl bg-stone-100 py-2.5 text-xs font-bold text-stone-600">取消</button>
-              <button type="button" onClick={saveSettings} className="flex-1 rounded-xl bg-stone-950 py-2.5 text-xs font-bold text-white">保存</button>
+            <div className="flex gap-2 border-t border-[var(--divider)] p-4">
+              <button type="button" onClick={cancelSettings} className="flex-1 rounded-xl bg-[var(--surface-muted)] py-2.5 text-xs font-bold text-[var(--text-secondary)]">取消</button>
+              <button type="button" onClick={saveSettings} className="flex-1 rounded-xl bg-[var(--accent)] py-2.5 text-xs font-bold text-[var(--accent-contrast)]">保存</button>
             </div>
           </div>
         </div>,
@@ -516,7 +516,7 @@ function LegacyAnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widge
 
   const getResolvedColor = (colorStr: string, hasBg: boolean) => {
     if (colorStr === "default") {
-      return hasBg ? "#ffffff" : "#1c1917";
+      return hasBg ? "#ffffff" : "var(--text-primary)";
     }
     if (colorStr === "white") return "#ffffff";
     if (colorStr === "dark") return "#1c1917";
@@ -557,9 +557,6 @@ function LegacyAnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widge
           borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined
         }}
       >
-        {/* Dark overlay for readability on user background images */}
-        {bgImage && <div className="absolute inset-0 bg-black/40 z-0 pointer-events-none" />}
-
         <div className="w-full h-full flex flex-col justify-between z-10">
           {/* Top Row: Title on Left */}
           <div className="flex justify-between items-start w-full">

@@ -183,7 +183,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
   const progressPercent = todos.length > 0 ? Math.round((completedCount / todos.length) * 100) : 0;
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 text-slate-800 font-sans">
+    <div data-theme-page="notes" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
@@ -227,7 +227,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
           <button
             onClick={() => setActiveTab("notes")}
             className={`flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-2 ${
-              activeTab === "notes" ? "bg-neutral-950 text-white shadow-sm" : "text-slate-500 hover:text-slate-800"
+              activeTab === "notes" ? "bg-[var(--tab-active-bg)] text-[var(--tab-active-text)] shadow-sm" : "text-[var(--tab-inactive-text)] hover:text-[var(--text-primary)]"
             }`}
           >
             <StickyNote className="w-4 h-4" />
@@ -236,7 +236,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
           <button
             onClick={() => setActiveTab("todo")}
             className={`flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-2 ${
-              activeTab === "todo" ? "bg-neutral-950 text-white shadow-sm" : "text-slate-500 hover:text-slate-800"
+              activeTab === "todo" ? "bg-[var(--tab-active-bg)] text-[var(--tab-active-text)] shadow-sm" : "text-[var(--tab-inactive-text)] hover:text-[var(--text-primary)]"
             }`}
           >
             <ClipboardList className="w-4 h-4" />
@@ -344,15 +344,15 @@ export default function AppNotes({ onClose }: AppNotesProps) {
           /* TODOS TAB VIEW */
           <div className="p-4 space-y-4 max-w-md mx-auto">
             {/* Progress Card */}
-            <div className="bg-neutral-950 rounded-2xl p-4 text-white shadow-md relative overflow-hidden flex items-center justify-between">
+            <div className="bg-[var(--surface-raised)] border border-[var(--border)] rounded-2xl p-4 text-[var(--text-primary)] shadow-md relative overflow-hidden flex items-center justify-between">
               <div className="space-y-1 z-10">
-                <span className="bg-white/20 px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase">
+                <span className="bg-[var(--badge-bg)] text-[var(--badge-text)] px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase">
                   自律待办管家
                 </span>
                 <h3 className="text-sm font-extrabold mt-1">
                   今日完成进度 {progressPercent}%
                 </h3>
-                <p className="text-[10px] text-stone-300">
+                <p className="text-[10px] text-[var(--text-secondary)]">
                   共 {todos.length} 项，已完成 {completedCount} 项
                 </p>
               </div>
@@ -363,7 +363,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
                     cx="24"
                     cy="24"
                     r="18"
-                    stroke="rgba(255,255,255,0.15)"
+                    stroke="var(--progress-track)"
                     strokeWidth="3.5"
                     fill="transparent"
                   />
@@ -371,7 +371,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
                     cx="24"
                     cy="24"
                     r="18"
-                    stroke="#ffffff"
+                    stroke="var(--progress-value)"
                     strokeWidth="3.5"
                     fill="transparent"
                     strokeDasharray={2 * Math.PI * 18}

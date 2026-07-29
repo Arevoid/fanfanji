@@ -144,7 +144,7 @@ export default function AppStore({
   );
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 text-slate-800 font-sans">
+    <div data-theme-page="store" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button

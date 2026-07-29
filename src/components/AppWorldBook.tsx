@@ -495,7 +495,7 @@ export default function AppWorldBook({
   });
 
   return (
-    <div className="flex flex-col h-full bg-stone-50 text-stone-800 font-sans">
+    <div data-theme-page="worldbook" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
@@ -685,8 +685,8 @@ export default function AppWorldBook({
                       onClick={() => setBindingType("global")}
                       className={`py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
                         bindingType === "global"
-                          ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                          : "bg-white border-stone-200 text-stone-500 hover:bg-stone-50"
+                          ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                          : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                       }`}
                     >
                       全局生效
@@ -701,8 +701,8 @@ export default function AppWorldBook({
                       }}
                       className={`py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
                         bindingType === "character"
-                          ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                          : "bg-white border-stone-200 text-stone-500 hover:bg-stone-50"
+                          ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                          : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                       }`}
                     >
                       特定角色专属
@@ -743,8 +743,8 @@ export default function AppWorldBook({
                     onClick={() => setTriggerType("keys")}
                     className={`py-2 rounded-xl text-xs font-extrabold border transition-all ${
                       triggerType === "keys"
-                        ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                        : "bg-stone-50 border-stone-200 text-stone-500 hover:bg-stone-100"
+                        ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                        : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                     }`}
                   >
                     关键词
@@ -754,8 +754,8 @@ export default function AppWorldBook({
                     onClick={() => setTriggerType("constant")}
                     className={`py-2 rounded-xl text-xs font-extrabold border transition-all ${
                       triggerType === "constant"
-                        ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                        : "bg-stone-50 border-stone-200 text-stone-500 hover:bg-stone-100"
+                        ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                        : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                     }`}
                   >
                     常驻
@@ -765,8 +765,8 @@ export default function AppWorldBook({
                     onClick={() => setTriggerType("vector")}
                     className={`py-2 rounded-xl text-xs font-extrabold border transition-all ${
                       triggerType === "vector"
-                        ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                        : "bg-stone-50 border-stone-200 text-stone-500 hover:bg-stone-100"
+                        ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                        : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                     }`}
                   >
                     向量化
