@@ -274,8 +274,15 @@ assert.match(appSource, /DEFAULT_HOME_SCREEN_ITEMS/);
 assert.match(appSource, /id:\s*"album_widget_1"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*0,\s*column:\s*0\s*\}/);
 assert.match(appSource, /id:\s*"music_widget_1"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*2,\s*column:\s*2\s*\}/);
 assert.match(appSource, /id:\s*"notes"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*4,\s*column:\s*0\s*\}/);
+assert.match(appSource, /let parsed: string\[\] = \["chat", "archives", "worldbook", "music", "notes", "offline", "store", "settings"\]/);
+assert.match(appSource, /installedAppIds\.includes\("chat"\)[\s\S]*installedAppIds\.includes\("music"\)[\s\S]*installedAppIds\.includes\("archives"\)[\s\S]*setActiveApp\("settings"\)/);
 assert.match(appSource, /const raw = localStorage\.getItem\("phone_homescreen_items"\)/);
 assert.match(appSource, /if \(raw !== null\)[\s\S]*Array\.isArray\(parsed\) \? parsed : \[\]/);
+assert.doesNotMatch(
+  appSource,
+  /normalizeHomeScreenLayout\(current,\s*homeGridRows\)/,
+  "saved desktop positions must not be re-normalized during responsive height measurement",
+);
 
 const restoredSystemLayout = JSON.parse(sanitizeSystemBackupValue(
   "phone_homescreen_items",

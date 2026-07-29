@@ -270,7 +270,7 @@ export default function AppSettings({
   const [iconBorderOpacity, setIconBorderOpacity] = useState(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100);
   const [hideAppNames, setHideAppNames] = useState(!!settings.hideAppNames);
   const [desktopAppTextColor, setDesktopAppTextColor] = useState(settings.desktopAppTextColor || "#ffffff");
-  const [desktopIconMode, setDesktopIconMode] = useState<"light" | "dark">(settings.desktopIconMode || "light");
+  const [desktopIconMode, setDesktopIconMode] = useState<"light" | "dark">(settings.desktopIconMode || "dark");
 
   // Beginner-friendly manual styling states
   const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);

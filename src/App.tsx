@@ -244,6 +244,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   widgetOpacity: 70,
   dockBorderRadius: 26,
   widgetBorderRadius: 22,
+  desktopIconMode: "dark",
   iconBorderEnabled: true,
   selfBubbleRadius: 6,
   otherBubbleRadius: 6,
@@ -506,7 +507,7 @@ export default function App() {
 
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
     const raw = localStorage.getItem("phone_installed_apps");
-    let parsed: string[] = ["chat", "archives", "worldbook", "music", "notes", "offline"];
+    let parsed: string[] = ["chat", "archives", "worldbook", "music", "notes", "offline", "store", "settings"];
     if (raw) {
       try {
         const candidate = JSON.parse(raw);
@@ -1033,22 +1034,6 @@ export default function App() {
     observer.observe(grid);
     return () => observer.disconnect();
   }, [currentPage, visibleHomePageCount]);
-
-  useEffect(() => {
-    setHomeScreenItems((current) => {
-      const normalized = normalizeHomeScreenLayout(current, homeGridRows);
-      const unchanged = normalized.length === current.length
-        && normalized.every((item, index) => {
-          const previous = current[index];
-          return previous?.id === item.id
-            && previous.page === item.page
-            && previous.position?.page === item.position?.page
-            && previous.position?.row === item.position?.row
-            && previous.position?.column === item.position?.column;
-        });
-      return unchanged ? current : normalized;
-    });
-  }, [homeGridRows]);
 
   const handleInstallApp = (id: string) => {
     if (installedAppIds.includes(id)) return;
