@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
@@ -974,7 +974,9 @@ export default function App() {
   const [isShowingAddWidget, setIsShowingAddWidget] = useState(false);
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const pageViewportRef = useRef<HTMLDivElement | null>(null);
-  const [homeGridWidth, setHomeGridWidth] = useState(343);
+  const [homeGridWidth, setHomeGridWidth] = useState(() =>
+    typeof window === "undefined" ? 343 : Math.max(0, window.innerWidth - 32),
+  );
   const [homeGridHeight, setHomeGridHeight] = useState(0);
   const homeGridIconWidth = settings.hideAppNames ? 60 : 52;
   const homeGridPadding = 12;
@@ -1021,17 +1023,22 @@ export default function App() {
     setCurrentPage((page) => Math.max(0, Math.min(page, visibleHomePageCount - 1)));
   }, [visibleHomePageCount]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const grid = pageContainerRef.current;
-    if (!grid) return;
+    const viewport = pageViewportRef.current;
+    if (!grid && !viewport) return;
     const updateGridSize = () => {
-      const rect = grid.getBoundingClientRect();
-      setHomeGridWidth(rect.width);
-      setHomeGridHeight(rect.height);
+      const gridRect = grid?.getBoundingClientRect();
+      const viewportRect = viewport?.getBoundingClientRect();
+      const width = gridRect?.width || viewportRect?.width || 0;
+      const height = gridRect?.height || 0;
+      if (width > 0) setHomeGridWidth(width);
+      if (height > 0) setHomeGridHeight(height);
     };
     updateGridSize();
     const observer = new ResizeObserver(updateGridSize);
-    observer.observe(grid);
+    if (grid) observer.observe(grid);
+    if (viewport && viewport !== grid) observer.observe(viewport);
     return () => observer.disconnect();
   }, [currentPage, visibleHomePageCount]);
 

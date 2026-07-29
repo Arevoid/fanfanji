@@ -267,6 +267,9 @@ assert.match(appSource, /onDragStartCapture=\{\(event\) => event\.preventDefault
 assert.match(appSource, /gridTemplateColumns:\s*`repeat\(\$\{HOME_GRID_COLUMNS\}, minmax\(0, 1fr\)\)`/);
 assert.match(appSource, /justifyContent:\s*"stretch"/);
 assert.match(appSource, /gridTemplateRows:\s*`repeat\(\$\{homeGridRows\}/);
+assert.match(appSource, /useState\(\(\) =>\s*typeof window === "undefined" \? 343 : Math\.max\(0, window\.innerWidth - 32\)/);
+assert.match(appSource, /useLayoutEffect\(\(\) => \{[\s\S]*pageViewportRef\.current/);
+assert.match(appSource, /if \(viewport && viewport !== grid\) observer\.observe\(viewport\)/);
 assert.match(appSource, /setPointerCapture\(pending\.pointerId\)/);
 assert.match(appSource, /placeItemWithDisplacement/);
 assert.match(appSource, /distance > 24/);
