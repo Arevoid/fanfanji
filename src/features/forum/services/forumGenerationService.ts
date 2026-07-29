@@ -37,6 +37,12 @@ import {
   FORUM_MANUAL_REFRESH_PROBABILITY,
   shouldGenerateForumActivity,
 } from "../../../domain/forum/forumGenerationGuard";
+import {
+  DEFAULT_FORUM_POST_AUTHOR_POLICY,
+  canUseRelationshipThreadAuthor,
+  chooseForumThreadAuthorKind,
+} from "../../../domain/forum/forumPostAuthorPolicy";
+import { inferForumStoryArc } from "../../../domain/forum/forumStoryArc";
 
 export interface ForumRelationContext {
   relationship: CharacterRelationship;
@@ -95,6 +101,8 @@ const FORUM_PUBLIC_TEXT_RULES = `论坛内容只能是普通纯文本。
 不得声称执行点赞、发布、转发、删除、发送媒体等操作。
 不得公开输入中未在帖子或公开楼层出现的私人姓名、昵称、身份或可识别细节。
 回复必须直接回应主楼主题或指定楼层，不得拼接无关私人故事。`;
+
+const FORUM_TOPIC_POOL = "情感、恋爱求助、友情与家庭、校园/宿舍/社团、职场、日常求助、分享安利、捞人偶遇、吐槽、奇怪经历、都市怪谈、微恐悬疑、规则怪谈、幻想种族、宠物邻里、网络社交、树洞、连载故事、事情后续与吃瓜讨论";
 
 const correctionInstruction = `上一次候选不符合论坛公开内容规则。请重新生成一次：
 只保留与公开帖子直接相关的自然论坛文字；移除动作旁白、情绪标签、伪媒体、私人姓名和无关故事。`;
@@ -256,12 +264,14 @@ ${FORUM_PUBLIC_TEXT_RULES}
 {"title":"1-80字","body":"1-5000字","anonymous":false,"replies":[{"body":"相关回复","replyToFloor":null}]}
 replies 为 0-5 条，由普通论坛路人发表。replyToFloor 只能引用本次候选中此前已出现的真实回复楼层；直接回复主楼必须为 null。
 禁止输出 relationId、characterId、threadId、replyId、作者姓名或真实网络账号。`,
-  message: input.relationContext
+  message: `从以下话题池自然选一个，不要把类别名机械写进标题：${FORUM_TOPIC_POOL}。
+标题和正文要像不同真实论坛用户：长短、语气、标点和信息完整度可以不同，不要套用“求助：”模板。
+${input.relationContext
     ? `以该角色的公开论坛表达方式生成一条帖子，可选择实名或匿名。
 ${input.relationContext.promptContext}`
     : `以应用内虚拟论坛账号“${input.virtualProfile.displayName}”的风格生成一条帖子。
 公开风格：${input.virtualProfile.publicStyle}
-不得冒充任何已有角色，不读取聊天、Memory 或 WorldBook。`,
+不得冒充任何已有角色，不读取聊天、Memory 或 WorldBook。`}`,
 });
 
 const isThreadCandidatePublicSafe = (input: {
@@ -354,6 +364,13 @@ const createGeneratedThread = (input: {
     replyCount: 0,
     createdAt: input.now,
     updatedAt: input.now,
+    ...(inferForumStoryArc({ source: character
+      ? anonymous ? "ai-character-anonymous" : "ai-character"
+      : "ai-virtual", title: input.candidate.title, body: input.candidate.body })
+      ? { storyArc: inferForumStoryArc({ source: character
+        ? anonymous ? "ai-character-anonymous" : "ai-character"
+        : "ai-virtual", title: input.candidate.title, body: input.candidate.body }) }
+      : {}),
   };
   const replies: ForumReply[] = [];
   for (const [candidateIndex, candidate] of (input.candidate.replies || []).entries()) {
@@ -431,17 +448,27 @@ export async function generateForumThreads(input: {
   const fingerprints = new Set<string>();
   const aiCall = input.aiCall || defaultAiCall;
   for (let index = 0; index < planned; index += 1) {
-    const useVirtual = relationContexts.length === 0
-      || (input.trigger === "refresh" && random() < 0.4);
-    const relationContext = useVirtual
-      ? undefined
-      : relationContexts[index % relationContexts.length];
+    const relationCandidates = relationContexts.filter((context) => canUseRelationshipThreadAuthor({
+      relationId: context.relationship.id,
+      threads: [...input.existingThreads, ...threads],
+      now: input.now,
+      policy: DEFAULT_FORUM_POST_AUTHOR_POLICY,
+    }));
+    const chosenKind = chooseForumThreadAuthorKind({
+      relationAvailable: relationContexts.length > 0,
+      relationshipAllowed: relationCandidates.length > 0,
+      random,
+      policy: DEFAULT_FORUM_POST_AUTHOR_POLICY,
+    });
+    const relationContext = chosenKind === "relationship"
+      ? relationCandidates[index % relationCandidates.length]
+      : undefined;
     const virtualProfile = getForumVirtualProfile(
       `${input.ownerIdentityId}:${input.trigger}:${input.now}`,
       index,
     );
     const prompt = buildThreadPrompt({ relationContext, virtualProfile });
-    const candidate = await generateValidatedCandidate({
+    const rawCandidate = await generateValidatedCandidate({
       aiCall,
       request: toAiRequest(input.settings, prompt),
       parse: parseForumThreadCandidate,
@@ -452,7 +479,11 @@ export async function generateForumThreads(input: {
         protectedNames,
       }),
     });
-    if (!candidate) continue;
+    if (!rawCandidate) continue;
+    const candidate = relationContext
+      ? { ...rawCandidate, anonymous: random() < DEFAULT_FORUM_POST_AUTHOR_POLICY.anonymousRelationshipProbability }
+      : rawCandidate;
+    if (!isThreadCandidatePublicSafe({ candidate, relationContext, virtualProfile, protectedNames })) continue;
     const occurredAt = Math.min(input.now, input.now - (planned - index - 1) * 61_000);
     const generated = createGeneratedThread({
       ownerIdentityId: input.ownerIdentityId,

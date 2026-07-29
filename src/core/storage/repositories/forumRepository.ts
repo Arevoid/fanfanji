@@ -119,6 +119,18 @@ const isPublicAuthor = (value: unknown): boolean => {
     && (author.avatar === undefined || typeof author.avatar === "string");
 };
 
+const isForumStoryArc = (value: unknown): boolean => {
+  if (!value || typeof value !== "object") return false;
+  const arc = value as Record<string, unknown>;
+  return ["emotion", "campus", "mystery", "mild-horror", "fantasy", "urban-legend", "help", "rant", "encounter", "other"].includes(String(arc.category))
+    && ["open", "resolved", "abandoned"].includes(String(arc.status))
+    && Number.isInteger(arc.episode) && Number(arc.episode) >= 1
+    && typeof arc.continuationProbability === "number"
+    && (arc.lastUpdateAt === undefined || typeof arc.lastUpdateAt === "number")
+    && (arc.nextUpdateAfter === undefined || typeof arc.nextUpdateAfter === "number")
+    && (arc.publicRecap === undefined || typeof arc.publicRecap === "string");
+};
+
 const isForumThread = (value: unknown): value is ForumThread => {
   if (!value || typeof value !== "object") return false;
   const thread = value as Record<string, unknown>;
@@ -133,7 +145,8 @@ const isForumThread = (value: unknown): value is ForumThread => {
     && isStringArray(thread.likedByIdentityIds)
     && typeof thread.replyCount === "number"
     && typeof thread.createdAt === "number"
-    && typeof thread.updatedAt === "number";
+    && typeof thread.updatedAt === "number"
+    && (thread.storyArc === undefined || isForumStoryArc(thread.storyArc));
 };
 
 const isForumReply = (value: unknown): value is ForumReply => {

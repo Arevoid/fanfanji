@@ -13,7 +13,8 @@ import type {
   WorldBookEntry,
 } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
-import { createForumVirtualAuthor, getForumVirtualProfile } from "../../../domain/forum/forumVirtualProfiles";
+import { createForumVirtualAuthor, getForumVirtualProfile, FORUM_VIRTUAL_PROFILES } from "../../../domain/forum/forumVirtualProfiles";
+import { canScheduleStoryContinuation } from "../../../domain/forum/forumStoryArc";
 import { parseForumGeneratedEventBatch, type ForumGeneratedEventBatch } from "../../../domain/forum/forumValidation";
 import { buildForumProtectedNames, findForumPrivateNameViolation, isForumGeneratedReplyRelevant, validateForumGeneratedText } from "../../../domain/forum/forumContentSafety";
 import { buildForumRelationGenerationContext } from "./forumGenerationService";
@@ -96,13 +97,33 @@ export const buildForumActivityActorSlots = (input: Omit<ForumActivityPlanInput,
       safePublicStyle: profile.publicStyle,
     };
   });
-  return [...relationshipSlots, ...virtualSlots];
+  const relationshipAuthor = input.thread.privateAuthorRelationId
+    ? relationshipSlots.find((slot) => slot.actor.kind === "relationship" && slot.actor.relationId === input.thread.privateAuthorRelationId)
+    : undefined;
+  const relationAuthorSlot = relationshipAuthor ? [{
+    ...relationshipAuthor,
+    slotId: "thread-relationship-author",
+    publicAuthor: { ...input.thread.publicAuthor },
+  }] : [];
+  const virtualAuthor = input.thread.source === "ai-virtual"
+    ? FORUM_VIRTUAL_PROFILES.find((profile) => profile.displayName === input.thread.publicAuthor.displayName)
+    : undefined;
+  const authorSlot = virtualAuthor ? [{
+    slotId: "thread-virtual-author",
+    publicAuthor: createForumVirtualAuthor(virtualAuthor),
+    actor: { kind: "virtual" as const, virtualProfileId: virtualAuthor.id },
+    safePublicStyle: virtualAuthor.publicStyle,
+  }] : [];
+  return [...relationshipSlots, ...relationAuthorSlot, ...authorSlot, ...virtualSlots];
 };
 
 const actorIsThreadAuthor = (slot: ForumActivityActorSlot, thread: ForumThread): boolean =>
-  slot.actor.kind === "relationship"
-  && slot.actor.relationId === thread.privateAuthorRelationId
-  && slot.actor.characterId === thread.privateAuthorCharacterId;
+  (slot.actor.kind === "relationship"
+    && slot.actor.relationId === thread.privateAuthorRelationId
+    && slot.actor.characterId === thread.privateAuthorCharacterId)
+  || (slot.actor.kind === "virtual"
+    && thread.source === "ai-virtual"
+    && slot.publicAuthor.displayName === thread.publicAuthor.displayName);
 
 const validateBatch = (input: {
   batch: ForumGeneratedEventBatch;
@@ -155,8 +176,10 @@ export const planForumActivity = async (input: ForumActivityPlanInput): Promise<
     return !state?.cooldownUntil || state.cooldownUntil <= input.now;
   });
   if (!eligible.length) return [];
+  const storyContinuation = canScheduleStoryContinuation(input.thread, input.replies, input.now)
+    && (input.random || Math.random)() < (input.thread.storyArc?.continuationProbability || 0);
   const prompt = {
-    systemInstruction: `你只生成一批公开论坛活动候选，不执行任何写操作。严格输出 JSON：{"events":[{"localId":"e1","actorSlot":"slot","kind":"reply","body":"回复","replyTo":{"type":"thread"},"delaySeconds":30}]}。每批 1-4 条；actorSlot 只能来自白名单；不得输出任意 ID、私人聊天、Memory、关系、点赞、转发、删除、图片或动作描写。author-update 只可由真实 AI 楼主发出。`,
+    systemInstruction: `你只生成一批公开论坛活动候选，不执行任何写操作。严格输出 JSON：{"events":[{"localId":"e1","actorSlot":"slot","kind":"reply","body":"回复","replyTo":{"type":"thread"},"delaySeconds":30}]}。每批 1-4 条；actorSlot 只能来自白名单；不得输出任意 ID、私人聊天、Memory、关系、点赞、转发、删除、图片或动作描写。author-update 只可由真实 AI 楼主发出。${storyContinuation ? "当前是开放连载帖的合理后续窗口：第一条必须是楼主的 author-update，延续公开前文，不得改名或编造私密背景。" : ""}`,
     message: `${publicThreadText(input.thread, input.replies)}\n可用 actorSlots：${eligible.map((slot) => `${slot.slotId}｜${slot.publicAuthor.displayName}｜${slot.safePublicStyle}`).join("\n")}`,
   };
   const result = await (input.aiCall || defaultAiCall)({

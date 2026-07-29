@@ -246,6 +246,8 @@ export interface ForumThread {
   replyCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Public-only continuity metadata for eligible AI/NPC story threads. */
+  storyArc?: import("./domain/forum/forumStoryArc").ForumStoryArc;
 }
 
 export interface ForumReply {
@@ -393,6 +395,8 @@ export interface ForumDmConversation {
   unreadCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Changes whenever the conversation is recreated, preventing late replies from reviving it. */
+  revision?: number;
 }
 
 export interface ForumDmMessage {
@@ -415,6 +419,7 @@ export interface ForumDmTask {
   completedAt?: number;
   createdAt: number;
   updatedAt: number;
+  conversationRevision?: number;
 }
 
 export type ForumGenerationTrigger =

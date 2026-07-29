@@ -2,6 +2,7 @@ import type { Character, ForumActivityTask, ForumReply, ForumThread, MemoryItem,
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { commitForumMutation, getForumSnapshotForIdentity } from "../../../core/storage/repositories/forumRepository";
 import { planForumActivity, releaseForumPendingEvents, shouldAttemptAutomaticForumActivity } from "./forumActivityService";
+import { applyForumStoryUpdate, canScheduleStoryContinuation } from "../../../domain/forum/forumStoryArc";
 
 const id = (prefix: string): string => `${prefix}-${typeof crypto !== "undefined" && "randomUUID" in crypto
   ? crypto.randomUUID()
@@ -19,10 +20,12 @@ export interface ForumActivityRuntimeContext {
   random?: () => number;
 }
 
-const updateThreadsForReplies = (threads: readonly ForumThread[], replies: readonly ForumReply[]): ForumThread[] => threads.map((thread) => {
+const updateThreadsForReplies = (threads: readonly ForumThread[], replies: readonly ForumReply[], now = Date.now()): ForumThread[] => threads.map((thread) => {
   const latest = replies.filter((reply) => reply.threadId === thread.id && reply.ownerIdentityId === thread.ownerIdentityId)
     .reduce((value, reply) => Math.max(value, reply.updatedAt, reply.occurredAt), thread.updatedAt);
-  return latest === thread.updatedAt ? thread : { ...thread, updatedAt: latest };
+  const authorUpdate = replies.filter((reply) => reply.threadId === thread.id && reply.kind === "author-update").sort((a, b) => b.occurredAt - a.occurredAt)[0];
+  const withArc = authorUpdate ? applyForumStoryUpdate(thread, authorUpdate, now) : thread;
+  return latest === thread.updatedAt && withArc === thread ? thread : { ...withArc, updatedAt: latest };
 });
 
 export const releaseDueForumActivity = (context: ForumActivityRuntimeContext, limit = 1): ForumReply[] => {
@@ -48,7 +51,7 @@ export const releaseDueForumActivity = (context: ForumActivityRuntimeContext, li
     updatedAt: now,
   }));
   const newReplies = released.replies.slice(snapshot.replies.length);
-  const nextThreads = updateThreadsForReplies(snapshot.threads, released.replies);
+  const nextThreads = updateThreadsForReplies(snapshot.threads, released.replies, now);
   const result = commitForumMutation({ replies: released.replies, threads: nextThreads, actorStates: released.actorStates, activityTasks: nextTasks },
     newReplies.map((reply) => ({ type: "reply-created" as const, ownerIdentityId: reply.ownerIdentityId, threadId: reply.threadId, replyId: reply.id, publicAuthor: reply.publicAuthor, occurredAt: reply.occurredAt })));
   return result.success ? newReplies : [];
@@ -122,8 +125,14 @@ export const runAutomaticForumActivityCheck = async (context: ForumActivityRunti
     || !shouldAttemptAutomaticForumActivity({ activityTasks: snapshot.activityTasks, ownerIdentityId: context.ownerIdentityId, now })) {
     return { attempted: false, released: [] };
   }
-  const thread = [...snapshot.threads]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
+  const eligibleThreads = [...snapshot.threads]
+    .filter((candidate) => candidate.source !== "user" && candidate.source !== "user-anonymous")
+    .sort((a, b) => {
+      const storyA = canScheduleStoryContinuation(a, snapshot.replies, now) ? 1 : 0;
+      const storyB = canScheduleStoryContinuation(b, snapshot.replies, now) ? 1 : 0;
+      return storyB - storyA || b.updatedAt - a.updatedAt;
+    });
+  const thread = eligibleThreads
     .find((candidate) => !snapshot.activityTasks.some((task) => task.threadId === candidate.id && task.trigger === "automatic" && now - task.startedAt < 12 * 60 * 1000));
   if (!thread) return { attempted: false, released: [] };
   try {

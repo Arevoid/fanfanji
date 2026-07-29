@@ -1,4 +1,4 @@
-import type { Character, ForumActorRef, ForumDmConversation, ForumDmMessage, ForumDmTask, ForumPublicAuthor, ForumReply, ForumThread } from "../../types";
+import type { Character, ForumActorRef, ForumDmConversation, ForumDmMessage, ForumDmTask, ForumNotification, ForumPublicAuthor, ForumReply, ForumThread } from "../../types";
 import type { CharacterRelationship } from "../relationship/characterRelationship";
 import { FORUM_VIRTUAL_PROFILES } from "./forumVirtualProfiles";
 
@@ -29,7 +29,7 @@ export const resolveForumDmActorFromPublicRecord = (input: { ownerIdentityId: st
 export const openForumDmConversation = (input: { ownerIdentityId: string; conversations: readonly ForumDmConversation[]; actor: ForumActorRef; publicAuthor: ForumPublicAuthor; originThreadId?: string; originReplyId?: string; now?: number }): { conversation: ForumDmConversation; conversations: ForumDmConversation[] } => {
   const now = input.now || Date.now(); const key = forumDmConversationKey(input.ownerIdentityId, input.actor);
   const existing = input.conversations.find((item) => forumDmConversationKey(item.ownerIdentityId, item.participant) === key);
-  const conversation: ForumDmConversation = existing ? { ...existing, participantPublicSnapshot: input.publicAuthor, updatedAt: now } : { id: id("forum-dm"), ownerIdentityId: input.ownerIdentityId, participant: input.actor, participantPublicSnapshot: input.publicAuthor, ...(input.originThreadId ? { originThreadId: input.originThreadId } : {}), ...(input.originReplyId ? { originReplyId: input.originReplyId } : {}), lastMessageAt: now, unreadCount: 0, createdAt: now, updatedAt: now };
+  const conversation: ForumDmConversation = existing ? { ...existing, participantPublicSnapshot: input.publicAuthor, updatedAt: now } : { id: id("forum-dm"), ownerIdentityId: input.ownerIdentityId, participant: input.actor, participantPublicSnapshot: input.publicAuthor, ...(input.originThreadId ? { originThreadId: input.originThreadId } : {}), ...(input.originReplyId ? { originReplyId: input.originReplyId } : {}), lastMessageAt: now, unreadCount: 0, createdAt: now, updatedAt: now, revision: 1 };
   return { conversation, conversations: [conversation, ...input.conversations.filter((item) => item.id !== conversation.id)].sort((a, b) => b.lastMessageAt - a.lastMessageAt).slice(0, FORUM_DM_MAX_CONVERSATIONS) };
 };
 
@@ -40,4 +40,16 @@ export const appendForumDmMessage = (input: { messages: readonly ForumDmMessage[
 };
 
 export const markForumDmRead = (conversations: readonly ForumDmConversation[], conversationId: string, now = Date.now()) => conversations.map((item) => item.id === conversationId ? { ...item, unreadCount: 0, updatedAt: now } : item);
+/** Idempotent, narrow deletion. No public forum or ordinary chat state is touched. */
+export const deleteForumDmConversation = (input: { conversationId: string; ownerIdentityId: string; conversations: readonly ForumDmConversation[]; messages: readonly ForumDmMessage[]; tasks: readonly ForumDmTask[]; notifications: readonly ForumNotification[] }) => {
+  const exists = input.conversations.some((item) => item.id === input.conversationId && item.ownerIdentityId === input.ownerIdentityId);
+  if (!exists) return { conversations: [...input.conversations], messages: [...input.messages], tasks: [...input.tasks], notifications: [...input.notifications], deleted: false };
+  return {
+    conversations: input.conversations.filter((item) => item.id !== input.conversationId),
+    messages: input.messages.filter((item) => item.conversationId !== input.conversationId),
+    tasks: input.tasks.filter((item) => item.conversationId !== input.conversationId),
+    notifications: input.notifications.filter((item) => item.conversationId !== input.conversationId),
+    deleted: true,
+  };
+};
 export const removeForumDmConversationsByRelation = (conversations: readonly ForumDmConversation[], messages: readonly ForumDmMessage[], tasks: readonly ForumDmTask[], relationId: string) => { const ids = new Set(conversations.filter((item) => item.participant.kind === "relationship" && item.participant.relationId === relationId).map((item) => item.id)); return { conversations: conversations.filter((item) => !ids.has(item.id)), messages: messages.filter((item) => !ids.has(item.conversationId)), tasks: tasks.filter((item) => !ids.has(item.conversationId)) }; };

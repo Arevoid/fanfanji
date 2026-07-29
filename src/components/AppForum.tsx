@@ -99,7 +99,7 @@ import { imageAssetDb } from "../utils/imageAssetDb";
 import { compressImage } from "../utils/stickerDb";
 import { ForumDmList } from "../features/forum/components/ForumDmList";
 import { ForumDmConversation } from "../features/forum/components/ForumDmConversation";
-import { appendForumDmMessage, markForumDmRead, openForumDmConversation, resolveForumDmActorFromPublicRecord } from "../domain/forum/forumDmData";
+import { appendForumDmMessage, deleteForumDmConversation, markForumDmRead, openForumDmConversation, resolveForumDmActorFromPublicRecord } from "../domain/forum/forumDmData";
 import { requestForumDmReply } from "../features/forum/services/forumDmService";
 import { FORUM_HOME_PAGE_SIZE, FORUM_REPLY_PAGE_SIZE } from "../domain/forum/forumCapacity";
 
@@ -212,6 +212,7 @@ export default function AppForum({
   const [activeDmConversationId, setActiveDmConversationId] = useState<string | null>(null);
   const [dmBody, setDmBody] = useState("");
   const [isDmSending, setIsDmSending] = useState(false);
+  const [showDeleteDmConfirmation, setShowDeleteDmConfirmation] = useState(false);
   const [visibleThreadCount, setVisibleThreadCount] = useState(FORUM_HOME_PAGE_SIZE);
   const [visibleReplyCount, setVisibleReplyCount] = useState(FORUM_REPLY_PAGE_SIZE);
   const [translatedContentIds, setTranslatedContentIds] = useState<Record<string, boolean>>({});
@@ -777,9 +778,30 @@ export default function AppForum({
     if (!commitForumMutation({ dmConversations: appended.conversations, dmMessages: appended.messages }).success) { reportStorageError(); return; }
     setDmBody(""); setIsDmSending(true); setError("");
     try {
-      await requestForumDmReply({ conversation: activeDmConversation, conversations: appended.conversations, messages: appended.messages, tasks: dmTasks, threads, notifications, relationships, characters, settings, profileName: activeProfile.displayName, activeConversationId: activeDmConversation.id, commit: (mutation) => commitForumMutation(mutation).success });
+      await requestForumDmReply({ conversation: activeDmConversation, conversations: appended.conversations, messages: appended.messages, tasks: dmTasks, threads, notifications, relationships, characters, settings, profileName: activeProfile.displayName, activeConversationId: activeDmConversation.id, isConversationCurrent: (conversationId, revision) => {
+        const current = getForumSnapshotForIdentity(activeIdentity.id).dmConversations.find((item) => item.id === conversationId);
+        return Boolean(current && current.revision === revision);
+      }, commit: (mutation) => commitForumMutation(mutation).success });
     } catch (dmError) { setError(dmError instanceof Error ? dmError.message : "论坛私信回复失败，请稍后重试"); }
     finally { setIsDmSending(false); }
+  };
+
+  const confirmDeleteDmConversation = () => {
+    if (!activeDmConversation) return;
+    const next = deleteForumDmConversation({
+      conversationId: activeDmConversation.id,
+      ownerIdentityId: activeIdentity.id,
+      conversations: dmConversations,
+      messages: dmMessages,
+      tasks: dmTasks,
+      notifications,
+    });
+    if (!commitForumMutation({ dmConversations: next.conversations, dmMessages: next.messages, dmTasks: next.tasks, notifications: next.notifications }).success) { reportStorageError(); return; }
+    setShowDeleteDmConfirmation(false);
+    setActiveDmConversationId(null);
+    setDmBody("");
+    setIsDmSending(false);
+    setNotice("私信会话已删除");
   };
 
   const openThread = (thread: ForumThread) => {
@@ -1121,7 +1143,7 @@ export default function AppForum({
       )}
 
       {activeDmConversation ? (
-        <ForumDmConversation conversation={activeDmConversation} messages={dmMessages.filter((message) => message.conversationId === activeDmConversation.id)} body={dmBody} setBody={setDmBody} sending={isDmSending} onSend={() => void sendDm()} />
+        <ForumDmConversation conversation={activeDmConversation} messages={dmMessages.filter((message) => message.conversationId === activeDmConversation.id)} body={dmBody} setBody={setDmBody} sending={isDmSending} onSend={() => void sendDm()} onDelete={() => setShowDeleteDmConfirmation(true)} />
       ) : readonlySnapshot ? (
         <ForumSnapshotDetail snapshot={readonlySnapshot} />
       ) : !activeThread && secondaryPage ? (
@@ -1614,6 +1636,16 @@ export default function AppForum({
         cancelLabel="取消"
         onClose={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
+      />
+      <ConfirmDialog
+        open={showDeleteDmConfirmation}
+        title="删除会话？"
+        description="删除后将清除当前论坛私信记录，不会删除论坛帖子、普通聊天好友或角色档案。"
+        tone="danger"
+        confirmLabel="删除会话"
+        cancelLabel="取消"
+        onClose={() => setShowDeleteDmConfirmation(false)}
+        onConfirm={confirmDeleteDmConversation}
       />
     </div>
   );
