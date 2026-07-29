@@ -2647,7 +2647,7 @@ export default function App() {
         <div className="flex-1 relative overflow-hidden flex flex-col">
           {activeApp === null ? (
             <div 
-              className="home-screen-drag-surface flex-1 flex flex-col justify-between p-4 select-none touch-none"
+              className="home-screen-drag-surface flex-1 min-h-0 overflow-hidden flex flex-col p-4 select-none touch-none"
               style={{
                 paddingTop: "calc(env(safe-area-inset-top, 0px) + 40px)",
                 paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 24px)"
@@ -2670,8 +2670,8 @@ export default function App() {
                   activeOffset = -Math.pow(-activeOffset, 0.82); // elastic boundary feel
                 }
                 return (
-                  <div className="flex-1 overflow-hidden flex flex-col relative py-2 select-none">
-                    <div ref={pageViewportRef} className="flex-1 overflow-hidden relative">
+                  <div className="flex-1 min-h-0 overflow-hidden flex flex-col relative py-2 select-none">
+                    <div ref={pageViewportRef} className="flex-1 min-h-0 overflow-hidden relative">
                       {/* Sliding track for page push effect */}
                       <div 
                         className="flex h-full w-full"
@@ -2710,7 +2710,7 @@ export default function App() {
                           return (
                             <div 
                               key={pageIdx}
-                              className="w-full h-full flex-shrink-0 flex flex-col select-none px-0"
+                              className="w-full h-full min-h-0 flex-shrink-0 flex flex-col select-none px-0"
                             >
                               {/* Home Widget Card (Clock / Welcoming Card) inside Page 0 only */}
                               {pageIdx === 0 && !settings.hideHomeWelcomeWidget && (
@@ -2757,7 +2757,7 @@ export default function App() {
                               {/* The grid of apps and widgets for this page */}
                               <div 
                                 ref={pageIdx === currentPage ? pageContainerRef : undefined}
-                                className="flex-1 content-start select-none"
+                                className="flex-1 min-h-0 content-start select-none"
                                 style={gridStyle}
                               >
                                 {dragSession?.target?.page === pageIdx && draggedItem && (() => {
@@ -2990,7 +2990,7 @@ export default function App() {
 
                 return (
                   <div 
-                    className="dock-container backdrop-blur-xl border border-neutral-200/20 py-2.5 shadow-lg shrink-0 mx-0 px-3"
+                    className="dock-container relative z-20 w-full flex-none backdrop-blur-xl border border-neutral-200/20 py-2.5 shadow-lg mx-0 px-3"
                     style={{
                       display: "grid",
                       gridTemplateColumns: `repeat(4, ${iconWidth}px)`,
