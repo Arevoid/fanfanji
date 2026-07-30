@@ -6,6 +6,12 @@ export const buildRelationDiaryContext = (input: { ownerIdentityId: string; rela
   const recentMessageIds = new Set(input.messages.slice(-20).map((message) => message.id));
   const share = [...input.shares].reverse().find((item) => item.ownerIdentityId === input.ownerIdentityId && item.targetRelationId === input.relationId && item.conversationId === input.conversationId && (recentMessageIds.has(item.messageId) || now - item.createdAt <= 24 * 60 * 60 * 1000));
   if (!share) return "";
+
   const snapshot = share.snapshot;
-  return `[明确分享的日记快照]\n作者：${snapshot.authorName}\n日期：${new Date(snapshot.occurredAt).toLocaleString("zh-CN")}\n${snapshot.title ? `标题：${snapshot.title}\n` : ""}${snapshot.body}\n${snapshot.emotionalState ? `心情：${snapshot.emotionalState}` : ""}\n只讨论这份用户明确分享的快照；不要声称读取过其他日记。`;
+  const authorRole = snapshot.authorType === "character" ? "the character you are speaking as" : "the user";
+  const authorResponseRule = snapshot.authorType === "character"
+    ? "This is your own diary entry. Never describe it as something the user wrote; respond as its author."
+    : "This is the user's diary entry. Do not claim that you wrote it.";
+
+  return `[Explicitly shared diary snapshot]\nAuthor role: ${authorRole}\nAuthor name: ${snapshot.authorName}\nDate: ${new Date(snapshot.occurredAt).toLocaleString("zh-CN")}\n${snapshot.title ? `Title: ${snapshot.title}\n` : ""}${snapshot.body}\n${snapshot.emotionalState ? `Mood: ${snapshot.emotionalState}\n` : ""}${authorResponseRule}\nDiscuss only this explicitly shared snapshot; do not claim to have read any other diary entries.`;
 };
