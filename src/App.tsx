@@ -21,6 +21,8 @@ import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from 
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
 import { cleanupForumDataForDeletedCharacter } from "./domain/forum/forumShare";
+import { cleanupDiaryForRelations } from "./domain/diary/diaryCleanup";
+import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryTranslations, saveDiaryEntries, saveDiaryGenerationTasks, saveDiaryShares, saveDiaryTranslations } from "./core/storage/repositories/diaryRepository";
 import { removeForumGenerationTasksByRelations } from "./domain/forum/forumGenerationGuard";
 import { loadImageGenerationRecords, removeImageGenerationRecordsByCharacter, saveImageGenerationRecords } from "./core/storage/repositories/imageGenerationRepository";
 import {
@@ -78,6 +80,7 @@ import AppForum from "./components/AppForum";
 import AppStore from "./components/AppStore";
 import AppSettings from "./components/AppSettings";
 import AppNotes from "./components/AppNotes";
+import AppDiary from "./components/AppDiary";
 import AppMemory from "./components/AppMemory";
 import AppOffline from "./components/AppOffline";
 import {
@@ -92,6 +95,7 @@ import {
   Music2,
   NotebookTabs,
   NotebookText,
+  BookHeart,
   Palette,
   PartyPopper,
   ScanLine,
@@ -108,6 +112,7 @@ const AppIcons = {
   offline: (className = "w-6 h-6") => <Layers3 className={className} strokeWidth={1.8} />,
   music: (className = "w-6 h-6") => <Music2 className={className} strokeWidth={1.8} />,
   notes: (className = "w-6 h-6") => <NotebookText className={className} strokeWidth={1.8} />,
+  diary: (className = "w-6 h-6") => <BookHeart className={className} strokeWidth={1.8} />,
   memory: (className = "w-6 h-6") => <NotebookTabs className={className} strokeWidth={1.8} />,
   store: (className = "w-6 h-6") => <ShoppingBag className={className} strokeWidth={1.8} />,
   settings: (className = "w-6 h-6") => <SettingsIcon className={className} strokeWidth={1.8} />,
@@ -318,6 +323,7 @@ export default function App() {
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
   const [pendingForumShareMessageId, setPendingForumShareMessageId] = useState<string | null>(null);
+  const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
 
@@ -1705,6 +1711,17 @@ export default function App() {
         })),
       });
       cleanupForumDmForRelations(relationIds);
+      const diaryCleanup = cleanupDiaryForRelations({
+        relationIds,
+        entries: loadDiaryEntries().value,
+        shares: loadDiaryShares().value,
+        tasks: loadDiaryGenerationTasks().value,
+        translations: loadDiaryTranslations().value,
+      });
+      saveDiaryEntries(diaryCleanup.entries);
+      saveDiaryShares(diaryCleanup.shares);
+      saveDiaryGenerationTasks(diaryCleanup.tasks);
+      saveDiaryTranslations(diaryCleanup.translations);
       relationIds.forEach((relationId) => {
         localStorage.removeItem(getOfflineModeStorageKey(relationId));
         localStorage.removeItem(getOfflineStoryStorageKey(relationId));
@@ -2126,6 +2143,11 @@ export default function App() {
       id: "notes",
       name: "备忘录",
       icon: AppIcons.notes(),
+    },
+    {
+      id: "diary",
+      name: "日记",
+      icon: AppIcons.diary(),
     },
     {
       id: "memory",
@@ -3179,6 +3201,8 @@ export default function App() {
                     relationshipMusicStates={relationshipMusicStates}
                     pendingForumShareMessageId={pendingForumShareMessageId}
                     onForumShareHandled={() => setPendingForumShareMessageId(null)}
+                    pendingDiaryShareMessageId={pendingDiaryShareMessageId}
+                    onDiaryShareHandled={() => setPendingDiaryShareMessageId(null)}
                     onOpenForumShare={(shareId) => {
                       setOpenForumShareId(shareId);
                       setActiveApp("forum");
@@ -3254,6 +3278,24 @@ export default function App() {
 
                 {activeApp === "notes" && (
                   <AppNotes
+                    onClose={() => setActiveApp(null)}
+                  />
+                )}
+
+                {activeApp === "diary" && (
+                  <AppDiary
+                    activeIdentity={activeIdentity}
+                    characters={characters}
+                    relationships={relationships}
+                    messages={messages}
+                    settings={settings}
+                    onSendMessage={handleSendMessage}
+                    onOpenChat={(characterId, relationId, sourceMessageId) => {
+                      setActiveChatCharId(characterId);
+                      setActiveChatRelationId(relationId);
+                      setPendingDiaryShareMessageId(sourceMessageId || null);
+                      setActiveApp("chat");
+                    }}
                     onClose={() => setActiveApp(null)}
                   />
                 )}

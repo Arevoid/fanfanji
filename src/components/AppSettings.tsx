@@ -127,6 +127,10 @@ const BACKUP_KEYS = [
   "phone_forum_dm_conversations",
   "phone_forum_dm_messages",
   "phone_forum_dm_tasks",
+  "phone_diary_entries",
+  "phone_diary_shares",
+  "phone_diary_generation_tasks",
+  "phone_diary_drafts",
   "phone_character_relationships",
   "phone_music_playlists",
   "phone_music_tracks",
@@ -162,6 +166,42 @@ export function sanitizeSystemBackupValue(
       return JSON.stringify(normalizeHomeScreenLayout(
         Array.isArray(parsed) ? parsed as HomeScreenItem[] : [],
       ));
+    } catch {
+      return "[]";
+    }
+  }
+  if (["phone_diary_entries", "phone_diary_shares", "phone_diary_generation_tasks", "phone_diary_drafts"].includes(key)) {
+    try {
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return "[]";
+      const relationshipRaw = source?.phone_character_relationships;
+      const relationships = typeof relationshipRaw === "string"
+        ? JSON.parse(relationshipRaw)
+        : JSON.parse(localStorage.getItem("phone_character_relationships") || "[]");
+      const relationMap = new Map(Array.isArray(relationships)
+        ? relationships.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && typeof (item as Record<string, unknown>).id === "string"))
+          .map((item) => [item.id as string, item])
+        : []);
+      const safe = parsed.filter((item) => {
+        if (!item || typeof item !== "object") return false;
+        const record = item as Record<string, unknown>;
+        if (typeof record.id !== "string" || typeof record.ownerIdentityId !== "string") return false;
+        if (key === "phone_diary_entries") {
+          if (record.authorType === "user") return typeof record.body === "string";
+          const relation = typeof record.relationId === "string" ? relationMap.get(record.relationId) : undefined;
+          return Boolean(relation && relation.userIdentityId === record.ownerIdentityId && relation.characterId === record.characterId && relation.conversationId === record.conversationId && typeof record.body === "string");
+        }
+        if (key === "phone_diary_shares") {
+          const relation = typeof record.targetRelationId === "string" ? relationMap.get(record.targetRelationId) : undefined;
+          return Boolean(relation && relation.userIdentityId === record.ownerIdentityId && relation.conversationId === record.conversationId && record.snapshot && typeof record.snapshot === "object");
+        }
+        if (key === "phone_diary_generation_tasks") {
+          const relation = typeof record.relationId === "string" ? relationMap.get(record.relationId) : undefined;
+          return Boolean(relation && relation.userIdentityId === record.ownerIdentityId);
+        }
+        return typeof record.body === "string";
+      });
+      return JSON.stringify(safe);
     } catch {
       return "[]";
     }
@@ -945,6 +985,7 @@ export default function AppSettings({
   const activePresetsList = [...DEFAULT_PRESETS, ...presets];
 
   const appKeys = [
+    { key: "diary", label: "日记" },
     { key: "chat", label: "聊天" },
     { key: "archives", label: "档案馆" },
     { key: "worldbook", label: "世界书" },

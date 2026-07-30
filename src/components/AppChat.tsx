@@ -25,6 +25,7 @@ import { analyzeRecentConversation, formatProactiveConversationGuidance } from "
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import { buildRelationMusicContext } from "../domain/prompt/musicContext";
 import { buildRelationForumContext } from "../domain/prompt/forumContext";
+import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
@@ -37,6 +38,7 @@ import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, remov
 import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "../core/storage/repositories/forumRepository";
 import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from "../domain/forum/forumShare";
 import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
+import { loadDiaryShares } from "../core/storage/repositories/diaryRepository";
 import { Button, Card, Modal } from "./ui";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
@@ -415,6 +417,8 @@ interface AppChatProps {
   relationshipMusicStates?: RelationshipMusicState[];
   pendingForumShareMessageId?: string | null;
   onForumShareHandled?: () => void;
+  pendingDiaryShareMessageId?: string | null;
+  onDiaryShareHandled?: () => void;
   onOpenForumShare?: (shareId: string) => void;
 }
 
@@ -685,11 +689,14 @@ export default function AppChat({
   relationshipMusicStates = [],
   pendingForumShareMessageId,
   onForumShareHandled,
+  pendingDiaryShareMessageId,
+  onDiaryShareHandled,
   onOpenForumShare,
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
   const [forumShareReplyError, setForumShareReplyError] = useState("");
   const forumShareReplyInFlightRef = useRef<Set<string>>(new Set());
+  const diaryShareReplyInFlightRef = useRef<Set<string>>(new Set());
 
   // MiniMax Real-time TTS Playback States
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
@@ -1090,6 +1097,8 @@ export default function AppChat({
     : m.characterId === activeChatCharId && activeCharacter?.isGroupChat));
   const activeIdentityId = settings.activeIdentityId || "identity-1";
   const forumSharesForCurrentIdentity = loadForumShares().value.filter((share) =>
+    share.ownerIdentityId === activeIdentityId);
+  const diarySharesForCurrentIdentity = loadDiaryShares().value.filter((share) =>
     share.ownerIdentityId === activeIdentityId);
   // Old records may contain model-facing scheduling metadata. Never render it
   // as a chat bubble, but retain the underlying history record untouched.
@@ -2654,6 +2663,15 @@ ${activeCharacter.disableBracketActions
           threads: loadForumThreads().value,
         })
         : "";
+      const diaryContext = activeRelationship
+        ? buildRelationDiaryContext({
+          ownerIdentityId: activeRelationship.userIdentityId,
+          relationId: activeRelationship.id,
+          conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
+          messages: finalMsgs,
+          shares: loadDiaryShares().value,
+        })
+        : "";
 
       // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
       const scanContextParts = [
@@ -2676,6 +2694,7 @@ ${activeCharacter.disableBracketActions
       if (relationshipContext) assembledInstructions.push(relationshipContext);
       if (musicContext) assembledInstructions.push(musicContext);
       if (forumContext) assembledInstructions.push(forumContext);
+      if (diaryContext) assembledInstructions.push(diaryContext);
 
       // 1.2 Red Packet Reaction Prompt
       if (isRedPacket && userMsg) {
@@ -3664,6 +3683,23 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     messages.length,
     onForumShareHandled,
   ]);
+
+  useEffect(() => {
+    if (!pendingDiaryShareMessageId || !activeRelationship || !activeCharacter || activeCharacter.isGroupChat) return;
+    if (activeRelationship.userIdentityId !== activeIdentityId) return;
+    const shareMessage = messages.find((message) =>
+      message.id === pendingDiaryShareMessageId
+      && message.diaryShareId
+      && message.relationId === activeRelationship.id
+      && message.conversationId === (activeRelationship.conversationId || getConversationId(activeRelationship.id)));
+    if (!shareMessage || diaryShareReplyInFlightRef.current.has(shareMessage.id)) return;
+    diaryShareReplyInFlightRef.current.add(shareMessage.id);
+    const relationHistory = messages.filter((message) => message.relationId === activeRelationship.id && message.conversationId === shareMessage.conversationId && !message.isOffline);
+    void generateResponseForUserMessage(shareMessage, relationHistory).finally(() => {
+      diaryShareReplyInFlightRef.current.delete(shareMessage.id);
+      onDiaryShareHandled?.();
+    });
+  }, [pendingDiaryShareMessageId, activeRelationship?.id, activeRelationship?.conversationId, activeRelationship?.userIdentityId, activeCharacter?.id, activeCharacter?.isGroupChat, activeIdentityId, messages.length, onDiaryShareHandled]);
 
   const handleRegenerateResponse = async (targetMsg: Message, oocComment: string) => {
     if (!activeChatCharId || !activeCharacter) return;
@@ -6520,7 +6556,10 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                   >
                     {/* Actual chat bubble */}
                     <div className="max-w-full">
-                      {msg.forumShareId ? (() => {
+                      {msg.diaryShareId ? (() => {
+                        const share = diarySharesForCurrentIdentity.find((item) => item.id === msg.diaryShareId && item.messageId === msg.id && item.targetRelationId === msg.relationId && item.conversationId === msg.conversationId);
+                        return share ? <div className="w-[210px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-sm"><div className="flex items-center gap-2 text-xs font-bold"><BookOpen size={15}/>日记分享</div><p className="mt-2 text-[11px] text-[var(--text-secondary)]">{share.snapshot.authorName} · {new Date(share.snapshot.occurredAt).toLocaleDateString("zh-CN")}</p><p className="mt-2 line-clamp-3 text-xs leading-5">{share.snapshot.body}</p></div> : <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">日记分享已不可用</div>;
+                      })() : msg.forumShareId ? (() => {
                         const share = forumSharesForCurrentIdentity.find((item) =>
                           item.id === msg.forumShareId
                           && item.sourceMessageId === msg.id

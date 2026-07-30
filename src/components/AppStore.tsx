@@ -81,6 +81,17 @@ const APPS_LIST: AppItem[] = [
     description: "清爽纯净的本地记事与日程待办工具，支持多栏笔记管理及每日待办，与桌面代办小组件完全同步，助您轻松打理生活与灵感。"
   },
   {
+    id: "diary",
+    name: "日记",
+    category: "生活记录与私密书写",
+    icon: "📖",
+    iconBg: "bg-stone-600",
+    rating: 4.9,
+    reviews: "1.2万",
+    size: "7.6 MB",
+    description: "记录自己的心情，也可以查看角色基于专属聊天写下的私密日记；所有内容都按身份和关系隔离保存。"
+  },
+  {
     id: "offline",
     name: "线下模式",
     category: "剧本创作与演练",

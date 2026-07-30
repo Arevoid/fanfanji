@@ -112,6 +112,93 @@ export interface Message {
   imageSource?: "uploaded" | "generated";
   /** Resolves a frozen, public-only forum snapshot from the ForumShare repository. */
   forumShareId?: string;
+  /** Resolves a frozen diary snapshot shared explicitly with this direct relation. */
+  diaryShareId?: string;
+}
+
+export type DiaryAuthorType = "user" | "character";
+export type DiarySource = "manual" | "ai-auto" | "ai-manual";
+
+/** A private local diary entry. Character entries are scoped to one relation. */
+export interface DiaryEntry {
+  id: string;
+  ownerIdentityId: string;
+  authorType: DiaryAuthorType;
+  characterId?: string;
+  relationId?: string;
+  conversationId?: string;
+  authorNameSnapshot: string;
+  authorAvatarSnapshot?: string;
+  title?: string;
+  body: string;
+  emotionalState?: string;
+  weather?: string;
+  location?: string;
+  tags: string[];
+  occurredAt: number;
+  createdAt: number;
+  updatedAt: number;
+  source: DiarySource;
+  isFavorite: boolean;
+}
+
+/** A frozen, explicit diary disclosure for exactly one direct conversation. */
+export interface DiaryShareSnapshot {
+  authorType: DiaryAuthorType;
+  authorName: string;
+  title?: string;
+  body: string;
+  emotionalState?: string;
+  occurredAt: number;
+}
+
+export interface DiaryShare {
+  id: string;
+  diaryEntryId: string;
+  ownerIdentityId: string;
+  targetRelationId: string;
+  conversationId: string;
+  messageId: string;
+  snapshot: DiaryShareSnapshot;
+  createdAt: number;
+}
+
+export interface DiaryGenerationTask {
+  id: string;
+  ownerIdentityId: string;
+  relationId: string;
+  taskKey: string;
+  trigger: "lazy" | "manual";
+  status: "running" | "completed" | "failed";
+  startedAt: number;
+  updatedAt: number;
+}
+
+export interface DiaryTranslation {
+  id: string;
+  ownerIdentityId: string;
+  diaryEntryId: string;
+  sourceContentHash: string;
+  targetLanguage: string;
+  translatedTitle?: string;
+  translatedBody: string;
+  translatedEmotionalState?: string;
+  createdAt: number;
+  lastAccessedAt: number;
+}
+
+export interface DiaryDraft {
+  id: string;
+  ownerIdentityId: string;
+  entryId?: string;
+  title?: string;
+  body: string;
+  emotionalState?: string;
+  weather?: string;
+  location?: string;
+  tags: string[];
+  occurredAt: number;
+  updatedAt: number;
 }
 
 export type ImageApiProtocol = "openai-images" | "gemini-native-image" | "imagen-text";
