@@ -1018,7 +1018,7 @@ export default function AppWorldBook({
                             <span className="text-xs font-extrabold text-stone-600 truncate">
                               {catName}
                             </span>
-                            <span className="text-[10px] text-[var(--badge-text)] bg-[var(--badge-bg)] px-1.5 py-0.5 rounded-md font-bold shrink-0">
+                            <span className="text-[10px] text-[var(--badge-muted-text)] bg-[var(--badge-muted-bg)] px-1.5 py-0.5 rounded-md font-bold shrink-0">
                               {groupEntries.length}
                             </span>
                           </button>
