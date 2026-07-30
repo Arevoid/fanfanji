@@ -9,7 +9,6 @@ import {
   Plus,
   Search,
   Send,
-  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -319,6 +318,16 @@ export default function AppDiary({
     else window.alert("生成失败，请检查模型设置后重试。");
     setBusyRelationId(null);
   };
+  const generateFromHeader = () => {
+    const target = directRelations.find(
+      ({ relation }) => relation.id === relationFilterId,
+    ) || directRelations[0];
+    if (!target) {
+      window.alert("请先创建一位可写日记的好友关系。");
+      return;
+    }
+    void generate(target.relation, target.character);
+  };
   const translate = async (entry: DiaryEntry) => {
     try {
       const result = await translateDiaryEntry(entry, settings);
@@ -526,12 +535,23 @@ export default function AppDiary({
           <ChevronLeft size={19} />
         </button>
         <h1 className="truncate text-center text-base font-bold">日记</h1>
-        <button
-          onClick={() => beginEdit()}
-          className="grid h-9 w-9 place-items-center rounded-full bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)]"
-        >
-          <Plus size={19} />
-        </button>
+        {tab === "counterpart" ? (
+          <button
+            onClick={generateFromHeader}
+            title="让 TA 写一篇日记"
+            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)]"
+          >
+            <BookHeart size={18} />
+          </button>
+        ) : (
+          <button
+            onClick={() => beginEdit()}
+            title="新建日记"
+            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)]"
+          >
+            <Plus size={19} />
+          </button>
+        )}
       </header>
       <div className="grid shrink-0 grid-cols-3 gap-2 px-4 py-2">
         {(["counterpart", "mine", "calendar"] as Tab[]).map((item) => (
@@ -592,23 +612,6 @@ export default function AppDiary({
                     </button>
                   ))}{" "}
                 </div>
-                <div className="diary-generate-row mt-2 flex gap-2">
-                  {directRelations
-                    .filter(
-                      ({ relation }) =>
-                        !relationFilterId || relation.id === relationFilterId,
-                    )
-                    .map(({ relation, character }) => (
-                      <button
-                        key={relation.id}
-                        onClick={() => generate(relation, character)}
-                        className="flex items-center gap-1 text-xs text-[var(--text-secondary)]"
-                      >
-                        <Sparkles size={14} />让{" "}
-                        {character.remark || character.name} 写一篇
-                      </button>
-                    ))}
-                </div>
               </section>
             )}
             <section className="mt-3 space-y-3">
@@ -647,7 +650,7 @@ export default function AppDiary({
           </>
         )}
       </main>
-      <style>{`.diary-action{display:flex;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:8px 4px;font-size:13px;line-height:1.2}.diary-action svg{flex-shrink:0}.diary-action:disabled{opacity:.42}.diary-filter-hint{display:none}.diary-generate-row{overflow-x:auto;padding-bottom:4px}.diary-generate-row button{flex:0 0 auto;white-space:nowrap;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:9px 12px}`}</style>
+      <style>{`.diary-action{display:flex;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:8px 4px;font-size:13px;line-height:1.2}.diary-action svg{flex-shrink:0}.diary-action:disabled{opacity:.42}.diary-filter-hint{display:none}`}</style>
     </div>
   );
 }

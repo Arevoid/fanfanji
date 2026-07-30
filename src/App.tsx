@@ -1047,7 +1047,11 @@ export default function App() {
     if (installedAppIds.includes(id)) return;
     setHomeScreenItems((current) => {
       if (current.some((item) => item.id === id)) {
-        setInstalledAppIds((previous) => previous.includes(id) ? previous : [...previous, id]);
+        setInstalledAppIds((previous) => {
+          const next = previous.includes(id) ? previous : [...previous, id];
+          localStorage.setItem("phone_installed_apps", JSON.stringify(next));
+          return next;
+        });
         return current;
       }
       const position = findFirstAvailablePosition(current, "1x1", 0, homeGridRows);
@@ -1055,9 +1059,15 @@ export default function App() {
         setHomeLayoutError(`桌面已达到 ${MAX_HOME_PAGES} 页上限，无法安装更多应用。`);
         return current;
       }
-      setInstalledAppIds((previous) => previous.includes(id) ? previous : [...previous, id]);
+      setInstalledAppIds((previous) => {
+        const next = previous.includes(id) ? previous : [...previous, id];
+        localStorage.setItem("phone_installed_apps", JSON.stringify(next));
+        return next;
+      });
       setTimeout(() => setCurrentPage(position.page), 50);
-      return [...current, { id, type: "app", size: "1x1", page: position.page, position }];
+      const next = [...current, { id, type: "app" as const, size: "1x1" as const, page: position.page, position }];
+      localStorage.setItem("phone_homescreen_items", JSON.stringify(next));
+      return next;
     });
   };
 
