@@ -52,7 +52,7 @@ export function Modal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--color-overlay)] px-[var(--space-4)]"
+          className="app-viewport-overlay fixed inset-x-0 top-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--color-overlay)] px-[var(--space-4)]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -67,7 +67,8 @@ export function Modal({
             aria-label={ariaLabel}
             aria-labelledby={title ? titleId : undefined}
             aria-describedby={description ? descriptionId : undefined}
-            className={`flex max-h-[60vh] w-[90vw] flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-[var(--shadow-modal)] ${sizeClassName[size]} ${className}`}
+            className={`flex w-[90vw] flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-[var(--shadow-modal)] ${sizeClassName[size]} ${className}`}
+            style={{ maxHeight: "min(60vh, calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom)))" }}
             initial={{ opacity: 0, scale: 0.97, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: 8 }}

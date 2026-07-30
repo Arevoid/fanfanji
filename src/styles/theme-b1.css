@@ -34,7 +34,7 @@
   color: var(--text-tertiary) !important;
 }
 
-:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) input:not([type="color"]):not([type="range"]),
+:root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
 :root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) textarea,
 :root[data-theme="dark"] :is([data-settings-shell], [data-chat-shell], .home-screen-drag-surface) select {
   background-color: var(--input-bg) !important;

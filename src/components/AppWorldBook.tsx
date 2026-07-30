@@ -711,13 +711,13 @@ export default function AppWorldBook({
 
                   {/* Target Character (conditional row) */}
                   {bindingType === "character" && characters.length > 0 && (
-                    <div className="rounded-xl border border-stone-200 bg-stone-50/30 p-2.5 space-y-1 animate-fade-in">
-                      <label className="text-[10px] font-extrabold text-stone-400">选择绑定的专属角色</label>
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-2.5 space-y-1 animate-fade-in">
+                      <label className="text-[10px] font-extrabold text-[var(--text-secondary)]">选择绑定的专属角色</label>
                       <div className="relative">
                         <select
                           value={boundCharacterId}
                           onChange={(e) => setBoundCharacterId(e.target.value)}
-                          className="w-full pl-3 pr-8 py-1.5 rounded-[8px] bg-white border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold appearance-none cursor-pointer"
+                          className="w-full pl-3 pr-8 py-1.5 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] text-[var(--text-primary)] text-xs font-semibold appearance-none cursor-pointer"
                         >
                           {characterOptions.map(({ id, label }) => (
                             <option key={id} value={id}>
@@ -725,7 +725,7 @@ export default function AppWorldBook({
                             </option>
                           ))}
                         </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-stone-400">
+                        <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-[var(--text-secondary)]">
                           <ChevronDown className="w-3.5 h-3.5" />
                         </div>
                       </div>

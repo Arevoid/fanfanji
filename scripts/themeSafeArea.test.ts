@@ -7,7 +7,7 @@ const statusBar = readFileSync(new URL("../src/components/StatusBar.tsx", import
 
 assert.match(index, /viewport-fit=cover/);
 assert.equal((index.match(/name="viewport"/g) ?? []).length, 1, "only one viewport declaration is allowed");
-assert.match(css, /html, body, #root\s*\{[\s\S]*min-height: 100dvh/);
+assert.match(css, /html, body, #root\s*\{[\s\S]*height: var\(--app-viewport-height, 100dvh\)[\s\S]*min-height: 0/);
 assert.match(statusBar, /env\(safe-area-inset-top, 0px\)/);
 assert.match(statusBar, /backgroundColor: hasUserWallpaper \? "transparent" : "var\(--status-bar-bg\)"/);
 console.log("PASS safe-area shell uses the existing flow layout without a fixed status-bar overlay band");

@@ -68,6 +68,7 @@ import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./feat
 import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./features/music/services/musicPlayback";
 import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
+import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import StatusBar from "./components/StatusBar";
 import AppChat from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
@@ -264,6 +265,7 @@ const DEFAULT_MESSAGES: Message[] = [];
 
 export default function App() {
   const { resolvedTheme } = useTheme();
+  useVisualViewport();
   // Load initial states from LocalStorage or fallbacks
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
 
@@ -383,14 +385,6 @@ export default function App() {
       const standalone = isStandalonePwa();
       setIsStandaloneMode(standalone);
 
-      // iOS Safari does not always keep 100vh in sync with the standalone app
-      // viewport. Expose a pixel value as a stable fallback for full-screen shells.
-      const visualHeight = window.visualViewport?.height ?? window.innerHeight;
-      const keyboardIsOpen = window.innerHeight - visualHeight > 120;
-      const viewportHeight = standalone && !keyboardIsOpen
-        ? window.innerHeight
-        : visualHeight;
-      document.documentElement.style.setProperty("--app-height", `${Math.round(viewportHeight)}px`);
     };
 
     const handleDisplayModeChange = () => updateAppFrame();
@@ -402,7 +396,6 @@ export default function App() {
     } else {
       standaloneQuery.addListener(handleDisplayModeChange);
     }
-    window.visualViewport?.addEventListener("resize", updateAppFrame);
 
     return () => {
       window.removeEventListener("resize", updateAppFrame);
@@ -411,7 +404,6 @@ export default function App() {
       } else {
         standaloneQuery.removeListener(handleDisplayModeChange);
       }
-      window.visualViewport?.removeEventListener("resize", updateAppFrame);
     };
   }, []);
 
@@ -2171,7 +2163,7 @@ export default function App() {
 
   return (
     <div
-      className="min-h-[100dvh] md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
+      className="app-viewport-root min-h-0 md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
       data-app-shell
       data-pwa-standalone={isStandaloneMode ? "true" : "false"}
       style={{
@@ -2179,12 +2171,8 @@ export default function App() {
         top: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
         left: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
         width: "100%",
-        height: (typeof window !== "undefined" && window.innerWidth < 768) ? "var(--app-height, 100dvh)" : "100dvh",
-        // `min-h-[100dvh]` is useful before the app mounts, but on Android Edge it can
-        // retain the layout viewport height after the IME opens. Override it with the
-        // visual viewport height so the flex layout keeps the chat composer above the
-        // keyboard instead of leaving an empty area below the messages.
-        minHeight: (typeof window !== "undefined" && window.innerWidth < 768) ? "var(--app-height, 100dvh)" : undefined,
+        height: (typeof window !== "undefined" && window.innerWidth < 768) ? "var(--app-viewport-height, 100dvh)" : "100dvh",
+        minHeight: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
       }}
     >
       
@@ -2296,7 +2284,7 @@ export default function App() {
         .phone-screen-container .rounded-[40px],
         .phone-screen-container .rounded-full:not(img):not(.avatar-img):not(.avatar-icon),
         .phone-screen-container button,
-        .phone-screen-container input:not([type="checkbox"]),
+        .phone-screen-container input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
         .phone-screen-container select,
         .phone-screen-container textarea,
         .phone-screen-container [class*="rounded-"]:not(img):not(.avatar-img):not(.avatar-icon),
@@ -2332,7 +2320,7 @@ export default function App() {
         }
 
         /* 4. Stroke Style: 1px Inside Subtle Outlines on Inputs, Cards, and Selectors */
-        .phone-screen-container input,
+        .phone-screen-container input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
         .phone-screen-container textarea,
         .phone-screen-container select,
         .phone-screen-container .border,
@@ -2347,7 +2335,7 @@ export default function App() {
         }
 
         /* For inputs, add clean padding and force the 32px rounding */
-        .phone-screen-container input,
+        .phone-screen-container input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
         .phone-screen-container textarea,
         .phone-screen-container select {
           border-radius: 32px !important;
@@ -2500,6 +2488,11 @@ export default function App() {
           -webkit-appearance: none !important;
           appearance: none !important;
           background: transparent !important;
+          border: 0 !important;
+          border-radius: 0 !important;
+          box-shadow: none !important;
+          padding: 0 !important;
+          min-height: 0 !important;
           width: 100% !important;
           height: 24px !important;
           display: flex !important;

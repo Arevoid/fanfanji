@@ -904,7 +904,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
   return (
     <div
       data-theme-page="offline"
-      className="offline-page w-full h-full flex flex-col relative overflow-hidden font-sans select-none"
+      className="offline-page w-full h-full min-h-0 flex flex-col relative overflow-hidden font-sans select-none"
       style={readingStyle}
     >
       
@@ -930,7 +930,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50"
+            className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50"
           >
             {/* Header */}
             <div className="px-4 py-3.5 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm">
@@ -1090,11 +1090,11 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50 offline-workspace-container"
+            className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50 offline-workspace-container"
           >
             {isSettingsOpen ? (
               /* ================= STORY SETTINGS PAGE ================= */
-              <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
+              <div className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50">
                 {/* Header */}
                 <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm z-10 shrink-0 relative">
                   <button 
@@ -1496,12 +1496,12 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>
         {showCreateModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="app-viewport-overlay fixed inset-x-0 top-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white border border-slate-150 rounded-2xl w-full max-w-sm p-5 text-slate-800 space-y-4 shadow-2xl"
+              className="max-h-full w-full max-w-sm overflow-y-auto rounded-2xl border border-slate-150 bg-white p-5 text-slate-800 space-y-4 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="border-b border-slate-100 pb-2 flex items-center justify-between">

@@ -1433,7 +1433,7 @@ export default function AppForum({
             </section>
           </main>
 
-          <footer className="shrink-0 border-t border-slate-100 bg-white px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2">
+          <footer className="shrink-0 border-t border-slate-100 bg-white px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2" data-keyboard-safe-composer>
             {replyingTo && (
               <div className="mb-2 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[10px] text-slate-500">
                 <button

@@ -49,6 +49,7 @@ import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/componen
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
 import { ChatComposer } from "../features/chat/components/ChatComposer";
 import { ChatTextInput } from "../features/chat/components/ChatTextInput";
+import { VISUAL_VIEWPORT_CHANGE_EVENT } from "../features/viewport/visualViewport";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
 import { MomentsApp } from "../features/moments/MomentsApp";
@@ -3489,25 +3490,22 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     }
   }, [messages.length, activeChatCharId, activeChatRelationId, isTyping]);
 
-  // The app shell owns the visual viewport height. Keep the latest message visible
-  // without sizing this nested overlay independently during keyboard transitions.
+  // The root viewport controller owns sizing. Only keep the latest message visible
+  // when the reader was already near the bottom; opening the keyboard must not pull
+  // someone away from older history they are reading.
   useEffect(() => {
-    if (typeof window === "undefined" || !window.visualViewport) return;
+    if (typeof window === "undefined") return;
 
-    const handleViewportResize = () => {
+    const handleViewportChange = () => {
       if (!activeChatCharId) return;
-      // Scroll to bottom when height changes (e.g., keyboard pops up or dismisses)
-      setTimeout(() => {
-        if (chatEndRef.current) {
-          chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-        }
-      }, 100);
+      const container = scrollContainerRef.current;
+      if (!container || container.scrollHeight - container.scrollTop - container.clientHeight > 250) return;
+      requestAnimationFrame(() => chatEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" }));
     };
 
-    const vv = window.visualViewport;
-    vv.addEventListener("resize", handleViewportResize);
+    window.addEventListener(VISUAL_VIEWPORT_CHANGE_EVENT, handleViewportChange);
     return () => {
-      vv.removeEventListener("resize", handleViewportResize);
+      window.removeEventListener(VISUAL_VIEWPORT_CHANGE_EVENT, handleViewportChange);
     };
   }, [activeChatCharId]);
 
@@ -6319,7 +6317,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
           <MessageList
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
-            className="flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list chat-message-list"
+            className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
