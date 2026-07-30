@@ -9,4 +9,3 @@ export const buildRelationDiaryContext = (input: { ownerIdentityId: string; rela
   const snapshot = share.snapshot;
   return `[明确分享的日记快照]\n作者：${snapshot.authorName}\n日期：${new Date(snapshot.occurredAt).toLocaleString("zh-CN")}\n${snapshot.title ? `标题：${snapshot.title}\n` : ""}${snapshot.body}\n${snapshot.emotionalState ? `心情：${snapshot.emotionalState}` : ""}\n只讨论这份用户明确分享的快照；不要声称读取过其他日记。`;
 };
-

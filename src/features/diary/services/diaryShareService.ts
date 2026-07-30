@@ -7,4 +7,3 @@ export const createDiaryShareMessage = (input: { entry: DiaryEntry; relation: Ch
   const share: DiaryShare = { id: createDiaryId("diary-share"), diaryEntryId: input.entry.id, ownerIdentityId: input.entry.ownerIdentityId, targetRelationId: input.relation.id, conversationId: input.relation.conversationId, messageId, snapshot: { authorType: input.entry.authorType, authorName: input.entry.authorNameSnapshot, ...(input.entry.title ? { title: input.entry.title } : {}), body: input.entry.body, ...(input.entry.emotionalState ? { emotionalState: input.entry.emotionalState } : {}), occurredAt: input.entry.occurredAt }, createdAt: now };
   return { share, message: { id: messageId, characterId: input.relation.characterId, relationId: input.relation.id, conversationId: input.relation.conversationId, sender: "user", content: "[日记分享]", timestamp: now, diaryShareId: share.id } };
 };
-

@@ -17,4 +17,3 @@ export const translateDiaryEntry = async (entry: DiaryEntry, settings: UserSetti
   if (!upsertDiaryTranslation(translation).success) throw new Error("翻译缓存保存失败。");
   return translation;
 };
-

@@ -18,7 +18,6 @@ export const isValidDiaryEntry = (value: unknown): value is DiaryEntry => {
     ? entry.relationId === undefined && entry.characterId === undefined && entry.conversationId === undefined
     : typeof entry.relationId === "string" && typeof entry.characterId === "string" && typeof entry.conversationId === "string";
 };
-
 export const validateGeneratedDiaryContent = (value: unknown): { title?: string; body: string; emotionalState?: string; weather?: string; location?: string; tags: string[] } | null => {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
@@ -35,4 +34,3 @@ export const validateGeneratedDiaryContent = (value: unknown): { title?: string;
     ...(typeof raw.location === "string" && raw.location.trim() ? { location: raw.location.trim().slice(0, 80) } : {}), tags,
   };
 };
-

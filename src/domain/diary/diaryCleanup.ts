@@ -19,4 +19,3 @@ export const cleanupDiaryForRelations = (input: {
 
 export const cleanupDiaryForIdentity = <T extends { ownerIdentityId: string }>(records: readonly T[], ownerIdentityId: string): T[] =>
   records.filter((record) => record.ownerIdentityId !== ownerIdentityId);
-
