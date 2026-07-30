@@ -2912,7 +2912,8 @@ ${stickerListStr}
       } else if (promptMessage.startsWith("[音乐]")) {
         const parts = promptMessage.split("|");
         const title = parts[1] || "音乐";
-        promptMessage = `[分享音乐] 我给你分享了一首好听的音乐：《${title}》。请以此为话题，表达符合你人设的简短、真实的感受。`;
+        promptMessage = `[分享音乐] 我给你分享了一首音乐：《${title}》。这是一次线上音乐分享聊天；请围绕这首歌，用符合你人设的简短、真实文字回复。
+禁止为了回应这次分享而补写地点、动作或双方共同场景，也不要新增未提供的现场状态。`;
       } else if (promptMessage.startsWith("[文件]")) {
         const parts = promptMessage.split("|");
         const title = parts[1] || "无标题";
