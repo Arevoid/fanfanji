@@ -3,12 +3,10 @@ import {
   BookHeart,
   ChevronLeft,
   Heart,
-  Languages,
   MessageCircle,
   Pencil,
   Plus,
   Search,
-  Send,
   Trash2,
   X,
 } from "lucide-react";
@@ -26,20 +24,16 @@ import {
   loadDiaryDrafts,
   loadDiaryEntries,
   loadDiaryGenerationTasks,
-  loadDiaryShares,
   removeDiaryEntryArtifacts,
   saveDiaryDrafts,
   saveDiaryEntries,
   saveDiaryGenerationTasks,
-  saveDiaryShares,
   subscribeDiaryState,
 } from "../core/storage/repositories/diaryRepository";
-import { createDiaryShareMessage } from "../features/diary/services/diaryShareService";
 import {
   generateDiaryEntry,
   canGenerateDiary,
 } from "../features/diary/services/diaryGenerationService";
-import { translateDiaryEntry } from "../features/diary/services/diaryTranslationService";
 
 interface AppDiaryProps {
   activeIdentity: UserIdentity;
@@ -89,12 +83,6 @@ export default function AppDiary({
     emotionalState: "",
     tags: "",
   });
-  const [translated, setTranslated] = useState<{
-    id: string;
-    body: string;
-    title?: string;
-    emotion?: string;
-  } | null>(null);
   const [busyRelationId, setBusyRelationId] = useState<string | null>(null);
   const [relationFilterId, setRelationFilterId] = useState<string | null>(null);
 
@@ -237,54 +225,6 @@ export default function AppDiary({
     persist(entries.filter((item) => item.id !== entry.id));
     setSelectedId(null);
   };
-  const share = (entry: DiaryEntry, relation: CharacterRelationship) => {
-    const { share: snapshot, message } = createDiaryShareMessage({
-      entry,
-      relation,
-    });
-    saveDiaryShares([snapshot, ...loadDiaryShares().value]);
-    onSendMessage(message);
-    onOpenChat(relation.characterId, relation.id, message.id);
-  };
-  const shareSelected = (entry: DiaryEntry) => {
-    const ownRelation =
-      entry.relationId &&
-      directRelations.find((item) => item.relation.id === entry.relationId)
-        ?.relation;
-    if (ownRelation) {
-      share(entry, ownRelation);
-      return;
-    }
-    const choices = directRelations
-      .map(
-        ({ relation, character }, index) =>
-          `${index + 1}. ${character.remark || character.name}`,
-      )
-      .join("\n");
-    const answer = window.prompt(
-      `分享给哪位好友？\n${choices}\n可用逗号选择多个。`,
-    );
-    if (!answer) return;
-    const targets = Array.from(
-      new Set(answer.split(/[,，]/).map((value) => Number(value.trim()) - 1)),
-    )
-      .map((index) => directRelations[index])
-      .filter(Boolean);
-    if (targets.length === 0) {
-      window.alert("请选择有效的好友。 ");
-      return;
-    }
-    targets.forEach(({ relation }) => {
-      const { share: snapshot, message } = createDiaryShareMessage({
-        entry,
-        relation,
-      });
-      saveDiaryShares([snapshot, ...loadDiaryShares().value]);
-      onSendMessage(message);
-    });
-    const first = targets[0].relation;
-    onOpenChat(first.characterId, first.id, "");
-  };
   const generate = async (
     relation: CharacterRelationship,
     character: Character,
@@ -327,19 +267,6 @@ export default function AppDiary({
       return;
     }
     void generate(target.relation, target.character);
-  };
-  const translate = async (entry: DiaryEntry) => {
-    try {
-      const result = await translateDiaryEntry(entry, settings);
-      setTranslated({
-        id: entry.id,
-        body: result.translatedBody,
-        title: result.translatedTitle,
-        emotion: result.translatedEmotionalState,
-      });
-    } catch {
-      window.alert("翻译失败，请检查模型设置。");
-    }
   };
 
   if (editing)
@@ -418,13 +345,23 @@ export default function AppDiary({
             <ChevronLeft size={19} />
           </button>
           <h1 className="truncate text-center text-sm font-bold">日记详情</h1>
-          <button
-            onClick={() => beginEdit(selected)}
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)]"
-            title="Edit diary"
-          >
-            <Pencil size={16} />
-          </button>
+          {selected.authorType === "character" ? (
+            <button
+              onClick={() => removeEntry(selected)}
+              className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)] text-rose-500"
+              title="删除日记"
+            >
+              <Trash2 size={16} />
+            </button>
+          ) : (
+            <button
+              onClick={() => beginEdit(selected)}
+              className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)]"
+              title="编辑日记"
+            >
+              <Pencil size={16} />
+            </button>
+          )}
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto px-5 pb-8">
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
@@ -454,18 +391,12 @@ export default function AppDiary({
                 />
               </button>
             </div>
-            <h2 className="mt-4 text-xl font-bold">
-              {translated?.id === selected.id
-                ? translated.title || selected.title
-                : selected.title}
-            </h2>
+            <h2 className="mt-4 text-xl font-bold">{selected.title}</h2>
             <p className="mt-4 whitespace-pre-wrap text-[15px] leading-7">
-              {translated?.id === selected.id ? translated.body : selected.body}
+              {selected.body}
             </p>
             <p className="mt-4 text-sm text-[var(--text-secondary)]">
-              {translated?.id === selected.id
-                ? translated.emotion
-                : selected.emotionalState}
+              {selected.emotionalState}
             </p>
             {selected.tags.length > 0 && (
               <div className="mt-4 flex flex-wrap gap-2">
@@ -480,29 +411,17 @@ export default function AppDiary({
               </div>
             )}
           </div>
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            <button
-              onClick={() => translate(selected)}
-              className="diary-action"
-            >
-              <Languages size={16} />
-              翻译
-            </button>
-            <button
-              onClick={() => shareSelected(selected)}
-              className="diary-action"
-            >
-              <Send size={16} />
-              分享
-            </button>
-            <button
-              onClick={() => removeEntry(selected)}
-              className="diary-action text-rose-500"
-            >
-              <Trash2 size={16} />
-              删除
-            </button>
-          </div>
+          {selected.authorType === "user" && (
+            <div className="mt-4">
+              <button
+                onClick={() => removeEntry(selected)}
+                className="diary-action w-full text-rose-500"
+              >
+                <Trash2 size={16} />
+                删除
+              </button>
+            </div>
+          )}
           {selected.authorType === "character" && selected.relationId && (
             <button
               onClick={() => {
