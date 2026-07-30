@@ -2377,6 +2377,11 @@ export default function App() {
           outline: none !important;
         }
 
+        /* Diary editing follows the compact offline-story card geometry. */
+        .phone-screen-container [data-theme-page="diary"] .diary-editor-field {
+          border-radius: 16px !important;
+        }
+
         /* 5. Minimal Shadow Style (Shadows/Base/6) */
         .phone-screen-container .shadow,
         .phone-screen-container .shadow-sm,

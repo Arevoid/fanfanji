@@ -297,7 +297,7 @@ export default function AppDiary({
               setDraft({ ...draft, title: event.target.value })
             }
             placeholder="标题（可选）"
-            className="w-full border-0 bg-transparent px-0 text-xl font-bold outline-none"
+            className="diary-editor-field w-full border-0 bg-transparent px-0 text-xl font-bold outline-none"
           />
           <textarea
             autoFocus
@@ -307,7 +307,7 @@ export default function AppDiary({
             }
             placeholder="写下这一刻…"
             maxLength={4000}
-            className="mt-5 min-h-[48vh] w-full resize-none border-0 bg-transparent px-0 text-[15px] leading-7 outline-none"
+            className="diary-editor-field mt-5 min-h-[48vh] w-full resize-none border-0 bg-transparent px-0 text-[15px] leading-7 outline-none"
           />
           <div className="mt-4 grid gap-3">
             <input
@@ -316,7 +316,7 @@ export default function AppDiary({
                 setDraft({ ...draft, emotionalState: event.target.value })
               }
               placeholder="此刻心情（可选）"
-              className="rounded-xl border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm"
+              className="diary-editor-field rounded-xl border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm"
             />
             <input
               value={draft.tags}
@@ -324,7 +324,7 @@ export default function AppDiary({
                 setDraft({ ...draft, tags: event.target.value })
               }
               placeholder="标签，用逗号分隔"
-              className="rounded-xl border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm"
+              className="diary-editor-field rounded-xl border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm"
             />
           </div>
         </main>
@@ -569,7 +569,7 @@ export default function AppDiary({
           </>
         )}
       </main>
-      <style>{`.diary-action{display:flex;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:8px 4px;font-size:13px;line-height:1.2}.diary-action svg{flex-shrink:0}.diary-action:disabled{opacity:.42}.diary-filter-hint{display:none}`}</style>
+      <style>{`.diary-editor-field{border-radius:16px !important}.diary-action{display:flex;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:8px 4px;font-size:13px;line-height:1.2}.diary-action svg{flex-shrink:0}.diary-action:disabled{opacity:.42}.diary-filter-hint{display:none}`}</style>
     </div>
   );
 }
