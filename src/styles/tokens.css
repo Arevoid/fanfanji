@@ -51,6 +51,12 @@
   --segmented-active-text: #ffffff;
   --segmented-inactive-bg: #f1f2f4;
   --segmented-inactive-text: #5f5f67;
+  --segmented-border: #cfcfcb;
+  --toggle-mono-on-bg: #18181b;
+  --toggle-mono-on-thumb: #ffffff;
+  --toggle-mono-off-bg: #d6d6da;
+  --toggle-mono-off-thumb: #1d1d1f;
+  --toggle-mono-border: #c5c5c7;
   --media-placeholder-bg: #f1f2f4;
   --media-placeholder-text: #5f5f67;
   --progress-track: #d6d6da;
@@ -167,6 +173,12 @@
   --segmented-active-text: #151517;
   --segmented-inactive-bg: #303034;
   --segmented-inactive-text: #c0c0c6;
+  --segmented-border: #56565d;
+  --toggle-mono-on-bg: #f3f3f5;
+  --toggle-mono-on-thumb: #151517;
+  --toggle-mono-off-bg: #4a4a50;
+  --toggle-mono-off-thumb: #f3f3f5;
+  --toggle-mono-border: #66666d;
   --media-placeholder-bg: #303034;
   --media-placeholder-text: #c0c0c6;
   --progress-track: #4a4a50;

@@ -1216,8 +1216,8 @@ export default function AppSettings({
                         onClick={() => handleSwitchIdentity(idty.id)}
                         className={`flex items-center justify-center py-2 px-3 rounded-[16px] border text-center transition-all ${
                           isSelected
-                            ? "border-neutral-950 ring-1 ring-neutral-950 text-neutral-950 font-bold bg-white"
-                            : "border-slate-200 text-slate-400 bg-white hover:bg-slate-50 hover:text-slate-600"
+                            ? "border-[var(--segmented-border)] bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] font-bold shadow-sm hover:bg-[var(--segmented-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                            : "border-[var(--segmented-border)] bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
                         }`}
                       >
                         <span className="text-[10px] font-bold truncate max-w-full block w-full">
@@ -1524,14 +1524,14 @@ export default function AppSettings({
           {activeTab === "beauty" && (
             <div className="space-y-4 text-left">
               {/* Classification Navigation Bar */}
-              <div className="flex items-center p-1 bg-slate-100 rounded-[16px] gap-1.5 select-none mb-4">
+              <div className="flex items-center p-1 bg-[var(--surface-muted)] border border-[var(--segmented-border)] rounded-[16px] gap-1.5 select-none mb-4">
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("desktop")}
                   className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
                     beautySubTab === "desktop"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-500 hover:text-slate-700"
+                      ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
+                      : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   桌面模块
@@ -1541,8 +1541,8 @@ export default function AppSettings({
                   onClick={() => setBeautySubTab("chat")}
                   className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
                     beautySubTab === "chat"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-500 hover:text-slate-700"
+                      ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
+                      : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   聊天页面模块
@@ -1552,8 +1552,8 @@ export default function AppSettings({
                   onClick={() => setBeautySubTab("preset")}
                   className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
                     beautySubTab === "preset"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-500 hover:text-slate-700"
+                      ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
+                      : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   主题预设模块
