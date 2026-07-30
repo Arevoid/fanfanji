@@ -2336,10 +2336,6 @@ export default function App() {
         .phone-screen-container textarea,
         .phone-screen-container select,
         .phone-screen-container .border,
-        .phone-screen-container .border-b,
-        .phone-screen-container .border-t,
-        .phone-screen-container .border-l,
-        .phone-screen-container .border-r,
         .phone-screen-container .border-slate-100,
         .phone-screen-container .border-slate-200,
         .phone-screen-container .border-stone-100,
@@ -2374,16 +2370,14 @@ export default function App() {
         /* 6. Typography & Text Levels Hierarchy */
         .phone-screen-container h1,
         .phone-screen-container h2,
-        .phone-screen-container .font-bold.text-slate-800,
-        .phone-screen-container .font-extrabold:not(.desktop-app-label) {
+        .phone-screen-container .font-bold.text-slate-800 {
           color: var(--text-primary) !important;
           font-weight: 800 !important;
           letter-spacing: -0.025em !important;
         }
 
         .phone-screen-container h3,
-        .phone-screen-container h4,
-        .phone-screen-container .font-semibold {
+        .phone-screen-container h4 {
           color: var(--text-primary) !important;
           font-weight: 600 !important;
         }

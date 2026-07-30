@@ -1012,7 +1012,7 @@ export default function AppWorldBook({
                             <span className="text-xs font-extrabold text-stone-600 truncate">
                               {catName}
                             </span>
-                            <span className="text-[10px] text-stone-500 bg-stone-200/50 px-1.5 py-0.5 rounded-md font-bold shrink-0">
+                            <span className="text-[10px] text-[var(--badge-text)] bg-[var(--badge-bg)] px-1.5 py-0.5 rounded-md font-bold shrink-0">
                               {groupEntries.length}
                             </span>
                           </button>
@@ -1058,15 +1058,15 @@ export default function AppWorldBook({
                                   key={entry.id}
                                   className={`flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl border transition-all ${
                                     isActive
-                                      ? "bg-white border-stone-200/60 shadow-sm hover:border-stone-300"
-                                      : "bg-stone-50/70 border-stone-200/40 opacity-75"
+                                      ? "bg-[var(--surface-raised)] border-[var(--border)] shadow-sm hover:border-[var(--border-strong)]"
+                                      : "bg-[var(--surface-muted)] border-[var(--border)]"
                                   }`}
                                 >
                                   {/* Left: Trigger Icon + Title */}
                                   <div className="flex items-center gap-3 min-w-0 flex-1">
                                     {/* 1. Trigger Condition Icon */}
                                     <div
-                                      className="w-8 h-8 flex items-center justify-center text-stone-400 shrink-0"
+                                      className={`w-8 h-8 flex items-center justify-center shrink-0 ${isActive ? "text-[var(--text-secondary)]" : "text-[var(--text-disabled)]"}`}
                                       title={
                                         entry.triggerType === "constant"
                                           ? "常驻无条件生效"
@@ -1086,8 +1086,8 @@ export default function AppWorldBook({
 
                                     {/* 2. Template Name */}
                                     <span
-                                      className={`text-xs md:text-sm font-bold text-stone-800 truncate select-none ${
-                                        !isActive ? "line-through text-stone-400" : ""
+                                      className={`text-xs md:text-sm font-bold truncate select-none ${
+                                        isActive ? "text-[var(--text-primary)]" : "line-through text-[var(--text-disabled)]"
                                       }`}
                                       title={entry.title}
                                     >
@@ -1100,7 +1100,7 @@ export default function AppWorldBook({
                                     {/* 3. Link Icon (Hide if global, show link icon only if bound) */}
                                     {!isGlobal && boundChar && (
                                       <div
-                                        className="w-8 h-8 flex items-center justify-center text-stone-400 shrink-0"
+                                        className={`w-8 h-8 flex items-center justify-center shrink-0 ${isActive ? "text-[var(--text-secondary)]" : "text-[var(--text-disabled)]"}`}
                                         title={`绑定专属角色: ${boundChar.name}`}
                                       >
                                         <Link2 className="w-3.5 h-3.5 shrink-0" />
@@ -1111,7 +1111,7 @@ export default function AppWorldBook({
                                     <button
                                       type="button"
                                       onClick={() => handleEdit(entry)}
-                                      className="w-8 h-8 flex items-center justify-center text-stone-400 hover:text-stone-800 hover:bg-stone-100 rounded-full transition-colors shrink-0"
+                                      className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors shrink-0 ${isActive ? "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]" : "text-[var(--text-disabled)] hover:bg-[var(--surface-raised)]"}`}
                                       title="编辑词条设定"
                                     >
                                       <Edit className="w-3.5 h-3.5 shrink-0" />
@@ -1122,7 +1122,7 @@ export default function AppWorldBook({
                                       type="button"
                                       onClick={() => onSaveEntry({ ...entry, isActive: !isActive })}
                                       className={`relative inline-flex h-4 w-7.5 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none shrink-0 ${
-                                        isActive ? "bg-emerald-500" : "bg-stone-300"
+                                        isActive ? "bg-[var(--success)] border-[var(--success)]" : "bg-[var(--button-disabled-bg)] border-[var(--button-disabled-border)]"
                                       }`}
                                       title={isActive ? "已启用此词条" : "已禁用此词条"}
                                     >

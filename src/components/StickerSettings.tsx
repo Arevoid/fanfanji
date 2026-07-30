@@ -471,7 +471,7 @@ export default function StickerSettings({
                   ) : (
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="text-xs font-bold text-stone-700 truncate">{group.name}</span>
-                      <span className="text-[10px] text-stone-500 bg-stone-200/50 px-2 py-0.5 rounded-full font-extrabold shrink-0">
+                      <span className="text-[10px] text-[var(--badge-text)] bg-[var(--badge-bg)] px-2 py-0.5 rounded-full font-extrabold shrink-0">
                         {group.stickers.length}
                       </span>
 
@@ -546,13 +546,13 @@ export default function StickerSettings({
                             handleAiAutoNaming();
                           }}
                           disabled={isAiNamingActive}
-                          className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-extrabold bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-lg shadow-sm hover:shadow transition-all disabled:opacity-50"
+                          className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-extrabold bg-[var(--button-secondary-bg)] hover:bg-[var(--surface-raised)] text-[var(--button-secondary-text)] border border-[var(--button-secondary-border)] rounded-lg shadow-sm hover:shadow transition-all disabled:bg-[var(--button-disabled-bg)] disabled:text-[var(--button-disabled-text)] disabled:border-[var(--button-disabled-border)] disabled:opacity-100"
                           title="智能分析图片内容，批量起传神名字"
                         >
                           {isAiNamingActive && activeGroupIdx === idx ? (
-                            <Loader2 className="w-2.5 h-2.5 animate-spin text-purple-500" />
+                            <Loader2 className="w-2.5 h-2.5 animate-spin text-current" />
                           ) : (
-                            <Sparkles className="w-2.5 h-2.5 text-purple-500" />
+                            <Sparkles className="w-2.5 h-2.5 text-current" />
                           )}
                           <span>AI 批量命名</span>
                         </button>

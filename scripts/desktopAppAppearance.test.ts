@@ -15,7 +15,7 @@ assert.match(app, /settings\.desktopIconMode === "dark" \? "#1d1d1f" : "#f3f3f5"
 assert.match(app, /--app-default-icon-surface: \$\{hexToRgba\(settings\.desktopIconMode === "dark" \? "#ffffff" : "#17181b", settings\.iconBgOpacity/);
 assert.match(app, /--desktop-app-text-color: \$\{settings\.desktopAppTextColor \|\| "#ffffff"\}/);
 assert.match(app, /desktop-app-label/);
-assert.match(app, /font-extrabold:not\(\.desktop-app-label\)/);
+assert.doesNotMatch(app, /font-extrabold:not\(\.desktop-app-label\)/);
 assert.match(app, /:not\(\.app-icon-surface\)/);
 assert.match(app, /div\.bg-white:not\(\.app-icon-surface\)/);
 

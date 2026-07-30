@@ -1122,7 +1122,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     <button
                       type="button"
                       onClick={() => void handleSyncMemoryToBrain(activeStory)}
-                      className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-[16px] border border-indigo-200/50 transition-all text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                      className="w-full py-2 bg-[var(--button-secondary-bg)] hover:bg-[var(--surface-raised)] text-[var(--button-secondary-text)] font-bold rounded-[16px] border border-[var(--button-secondary-border)] transition-all text-xs flex items-center justify-center gap-1.5 shadow-sm disabled:bg-[var(--button-disabled-bg)] disabled:text-[var(--button-disabled-text)] disabled:border-[var(--button-disabled-border)] disabled:opacity-100"
                     >
                       <Cpu className="w-3.5 h-3.5" />
                       <span>同步当前进展记忆至角色大脑</span>
@@ -1571,12 +1571,12 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                         onClick={() => setNewMode(m.id as any)}
                         className={`p-2.5 rounded-xl border flex flex-col items-center text-center transition-all ${
                           newMode === m.id 
-                            ? "bg-indigo-50 border-indigo-500 text-indigo-600 font-bold" 
-                            : "bg-slate-50 border-slate-200 text-slate-500 hover:border-slate-300"
+                            ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] font-bold"
+                            : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                         }`}
                       >
                         <span className="font-bold text-[11px]">{m.label}</span>
-                        <span className="text-[8px] text-slate-400 mt-0.5">{m.desc}</span>
+                        <span className={`text-[8px] mt-0.5 ${newMode === m.id ? "text-[var(--segmented-active-text)]" : "text-[var(--segmented-inactive-text)]"}`}>{m.desc}</span>
                       </button>
                     ))}
                   </div>

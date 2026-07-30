@@ -441,20 +441,22 @@ export default function AppNotes({ onClose }: AppNotesProps) {
             )}
 
             {/* Todo List */}
-            <div className="space-y-2 bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
+            <div className="space-y-2 bg-[var(--surface-raised)] p-3 rounded-2xl border border-[var(--border)] shadow-sm">
               {todos.map((todo) => (
                 <div
                   key={todo.id}
                   onClick={() => handleToggleTodo(todo.id)}
-                  className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-50/50 transition-colors cursor-pointer group/todo"
+                  className="flex items-center justify-between p-2.5 rounded-xl hover:bg-[var(--surface-muted)] transition-colors cursor-pointer group/todo"
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     {todo.checked ? (
-                      <Check className="w-4 h-4 text-emerald-600 stroke-[3px] shrink-0" />
+                      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-md border border-[var(--success)] bg-[var(--success)] text-white">
+                        <Check className="h-3 w-3 stroke-[3px]" />
+                      </span>
                     ) : (
-                      <div className="w-4 h-4 rounded-md border-2 border-slate-300 shrink-0 group-hover/todo:border-neutral-950 transition-colors"></div>
+                      <div className="w-4 h-4 rounded-md border-2 border-[var(--border-strong)] bg-[var(--surface)] shrink-0 group-hover/todo:border-[var(--accent)] group-active/todo:bg-[var(--surface-muted)] transition-colors"></div>
                     )}
-                    <span className={`text-base truncate font-semibold leading-none ${todo.checked ? "text-slate-300 line-through" : "text-slate-700"}`}>
+                    <span className={`text-base truncate font-semibold leading-none ${todo.checked ? "text-[var(--text-secondary)] line-through" : "text-[var(--text-primary)]"}`}>
                       {todo.text}
                     </span>
                   </div>
