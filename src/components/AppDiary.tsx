@@ -4,7 +4,6 @@ import {
   ChevronLeft,
   Heart,
   MessageCircle,
-  Pencil,
   Plus,
   Search,
   Trash2,
@@ -345,23 +344,13 @@ export default function AppDiary({
             <ChevronLeft size={19} />
           </button>
           <h1 className="truncate text-center text-sm font-bold">日记详情</h1>
-          {selected.authorType === "character" ? (
-            <button
-              onClick={() => removeEntry(selected)}
-              className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)] text-rose-500"
-              title="删除日记"
-            >
-              <Trash2 size={16} />
-            </button>
-          ) : (
-            <button
-              onClick={() => beginEdit(selected)}
-              className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)]"
-              title="编辑日记"
-            >
-              <Pencil size={16} />
-            </button>
-          )}
+          <button
+            onClick={() => removeEntry(selected)}
+            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)] text-rose-500"
+            title="删除日记"
+          >
+            <Trash2 size={16} />
+          </button>
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto px-5 pb-8">
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
@@ -411,17 +400,6 @@ export default function AppDiary({
               </div>
             )}
           </div>
-          {selected.authorType === "user" && (
-            <div className="mt-4">
-              <button
-                onClick={() => removeEntry(selected)}
-                className="diary-action w-full text-rose-500"
-              >
-                <Trash2 size={16} />
-                删除
-              </button>
-            </div>
-          )}
           {selected.authorType === "character" && selected.relationId && (
             <button
               onClick={() => {
