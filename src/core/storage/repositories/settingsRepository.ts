@@ -1,4 +1,4 @@
-import type { UserSettings } from "../../../types";
+import type { UserSettings, UserSettingsUpdate } from "../../../types";
 import { readJson, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
@@ -42,4 +42,8 @@ export function loadSettings(defaultSettings: UserSettings): StorageResult<UserS
 
 export function saveSettings(settings: UserSettings): StorageWriteResult {
   return writeJson(storageKeys.settings, settings);
+}
+
+export function resolveSettingsUpdate(previous: UserSettings, update: UserSettingsUpdate): UserSettings {
+  return typeof update === "function" ? update(previous) : update;
 }

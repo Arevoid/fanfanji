@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { UserSettings, StylePreset, ApiPreset, ImageApiPreset, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type HomeScreenItem } from "../types";
+import { UserSettings, StylePreset, ApiPreset, ImageApiPreset, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type HomeScreenItem, type UserSettingsUpdate } from "../types";
 import { apiFetchModels, apiTestKey, apiFetchImageModels, apiTestImageConnection } from "../utils/apiHelper";
 import {
   ChevronLeft,
@@ -64,7 +64,7 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
 interface AppSettingsProps {
   settings: UserSettings;
   presets: StylePreset[];
-  onSaveSettings: (settings: UserSettings) => void;
+  onSaveSettings: (update: UserSettingsUpdate) => void;
   onSavePreset: (preset: StylePreset) => void;
   onDeletePreset: (id: string) => void;
   onClose: () => void;
@@ -560,8 +560,8 @@ export default function AppSettings({
   };
 
   const handleSaveMiniMaxSettings = () => {
-    onSaveSettings({
-      ...settings,
+    onSaveSettings((previous) => ({
+      ...previous,
       enableMiniMaxTts,
       minimaxApiKey: minimaxApiKey.trim(),
       minimaxGroupId: minimaxGroupId.trim(),
@@ -570,7 +570,7 @@ export default function AppSettings({
       minimaxPitch: Number(minimaxPitch),
       minimaxVol: Number(minimaxVol),
       minimaxProxyUrl: minimaxProxyUrl.trim(),
-    });
+    }));
     alert("MiniMax 语音设置保存成功！");
   };
 
@@ -657,8 +657,8 @@ export default function AppSettings({
     
     setApiPresets(updatedPresets);
     
-    onSaveSettings({
-      ...settings,
+    onSaveSettings((previous) => ({
+      ...previous,
       apiPresets: updatedPresets,
       activeApiPresetId,
       apiKey: apiKey.trim(),
@@ -666,7 +666,7 @@ export default function AppSettings({
       apiEndpoint: apiEndpoint.trim(),
       apiTemperature,
       streamCompatible
-    });
+    }));
     
     alert("API 配置保存成功！");
   };
@@ -702,7 +702,7 @@ export default function AppSettings({
       referenceImageSupported: supportsReferenceImageForModel(protocol, selectedModel),
     } : preset);
     setImageApiPresets(next);
-    onSaveSettings({ ...settings, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId });
+    onSaveSettings((previous) => ({ ...previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
   };
   const updateCurrentImageModel = (model: string) => {
     setImageSelectedModel(model);
@@ -738,7 +738,7 @@ export default function AppSettings({
   };
   const updateImageGenerationEnabled = (enabled: boolean) => {
     setEnableImageGeneration(enabled);
-    onSaveSettings({ ...settings, enableImageGeneration: enabled });
+    onSaveSettings((previous) => ({ ...previous, enableImageGeneration: enabled }));
   };
   const saveImageApiConfig = () => {
     if (!imageSelectedModel.trim()) {
@@ -753,30 +753,31 @@ export default function AppSettings({
       referenceImageSupported: supportsReferenceImageForModel(protocol, imageSelectedModel),
     } : preset);
     setImageApiPresets(next);
-    onSaveSettings({ ...settings, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId });
+    onSaveSettings((previous) => ({ ...previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
     alert("图片 API 设置已保存。");
   };
 
   const handleSave = (updatedFields: Partial<UserSettings>) => {
-    const updatedIdentities = (settings.identities || []).map(idty => {
-      if (idty.id === (settings.activeIdentityId || "identity-1")) {
-        return {
-          ...idty,
-          name: updatedFields.name !== undefined ? updatedFields.name : idty.name,
-          avatar: updatedFields.avatar !== undefined ? updatedFields.avatar : idty.avatar,
-          signature: updatedFields.signature !== undefined ? updatedFields.signature : idty.signature,
-          bio: updatedFields.bio !== undefined ? updatedFields.bio : idty.bio,
-        };
-      }
-      return idty;
-    });
+    onSaveSettings((previous) => {
+      const updatedIdentities = (previous.identities || []).map(idty => {
+        if (idty.id === (previous.activeIdentityId || "identity-1")) {
+          return {
+            ...idty,
+            name: updatedFields.name !== undefined ? updatedFields.name : idty.name,
+            avatar: updatedFields.avatar !== undefined ? updatedFields.avatar : idty.avatar,
+            signature: updatedFields.signature !== undefined ? updatedFields.signature : idty.signature,
+            bio: updatedFields.bio !== undefined ? updatedFields.bio : idty.bio,
+          };
+        }
+        return idty;
+      });
 
-    const updated = {
-      ...settings,
-      ...updatedFields,
-      identities: updatedIdentities
-    };
-    onSaveSettings(updated);
+      return {
+        ...previous,
+        ...updatedFields,
+        identities: updatedIdentities
+      };
+    });
   };
 
   const updateChatIcon = (key: ChatIconKey, value: string) => {
@@ -865,14 +866,14 @@ export default function AppSettings({
       setSignature(idty.signature);
       setBio(idty.bio);
       
-      onSaveSettings({
-        ...settings,
+      onSaveSettings((previous) => ({
+        ...previous,
         activeIdentityId: id,
         name: idty.name,
         avatar: idty.avatar,
         signature: idty.signature,
         bio: idty.bio
-      });
+      }));
     }
   };
 
@@ -972,14 +973,14 @@ export default function AppSettings({
     setBubbleCss(preset.bubbleCss);
     setGlobalCss(preset.globalCss);
     
-    onSaveSettings({
-      ...settings,
+    onSaveSettings((previous) => ({
+      ...previous,
       wallpaper: preset.wallpaper,
       wallpaperSource: "preset",
       bubbleCss: preset.bubbleCss,
       globalCss: preset.globalCss,
       activePreset: preset.name
-    });
+    }));
   };
 
   const activePresetsList = [...DEFAULT_PRESETS, ...presets];

@@ -723,6 +723,8 @@ export interface UserSettings {
   activeImageApiPresetId?: string;
 }
 
+export type UserSettingsUpdate = UserSettings | ((previous: UserSettings) => UserSettings);
+
 export interface ApiPreset {
   id: string;
   name: string;

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
-import { loadSettings, saveSettings } from "./core/storage/repositories/settingsRepository";
+import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
@@ -41,7 +41,7 @@ import {
 import { imageAssetDb } from "./utils/imageAssetDb";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
 import { DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
-import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState } from "./types";
+import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
 import { 
   AlbumWidget, 
   CalendarAlbumWidget,
@@ -276,11 +276,20 @@ export default function App() {
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
 
   const [settings, setSettingsState] = useState<UserSettings>(() => loadSettings(DEFAULT_SETTINGS).value);
-
+  const settingsRef = useRef<UserSettings>(settings);
   const settingsChangedByUser = useRef(false);
-  const setSettings: React.Dispatch<React.SetStateAction<UserSettings>> = (next) => {
+  const setSettings = (update: UserSettingsUpdate): void => {
+    const nextSettings = resolveSettingsUpdate(settingsRef.current, update);
+    settingsRef.current = nextSettings;
     settingsChangedByUser.current = true;
-    setSettingsState(next);
+    setSettingsState(nextSettings);
+
+    const result = saveSettings(nextSettings);
+    if (result.success) {
+      settingsChangedByUser.current = false;
+    } else {
+      console.error("Failed to save settings to localStorage:", result.error);
+    }
   };
 
   const [messages, setMessages] = useState<Message[]>(() => loadMessages(DEFAULT_MESSAGES).value);
@@ -1507,11 +1516,12 @@ export default function App() {
   useEffect(() => {
     if (!settingsChangedByUser.current) return;
 
-    const result = saveSettings(settings);
-    if (!result.success) {
+    const result = saveSettings(settingsRef.current);
+    if (result.success) {
+      settingsChangedByUser.current = false;
+    } else {
       console.error("Failed to save settings to localStorage:", result.error);
     }
-    settingsChangedByUser.current = false;
   }, [settings]);
 
   useEffect(() => {
