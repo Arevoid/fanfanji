@@ -9,7 +9,7 @@ import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, User
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { collectOfflineHandoffContent, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
+import { collectOfflineHandoffContent, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 import "./offline/offlineStory.css";
@@ -379,6 +379,9 @@ export default function AppOffline({
     return memories.some((memory) => isOfflineStoryHandoffMemory(memory, story) && !memory.content.includes(summaryMarker));
   };
 
+  const needsMissingSummaryRepair = (story: OfflineStory) =>
+    Boolean(story.archivedAt || story.memorySyncStatus === "synced") && !hasOfflineStorySummary(story, memories);
+
   const shouldSyncStoryMemory = (story: OfflineStory) =>
     shouldAutoSyncOnlineContinuation(story) || needsLegacyHandoffRepair(story);
 
@@ -526,7 +529,8 @@ export default function AppOffline({
   const handleSyncMemoryToBrain = async (story: OfflineStory): Promise<OfflineStory> => {
     if (memorySyncInFlightRef.current.has(story.id)) return story;
     const repairingLegacyHandoff = needsLegacyHandoffRepair(story);
-    if (!hasUnsyncedOfflineMemoryProgress(story) && !repairingLegacyHandoff) return story;
+    const repairingMissingSummary = needsMissingSummaryRepair(story);
+    if (!hasUnsyncedOfflineMemoryProgress(story) && !repairingLegacyHandoff && !repairingMissingSummary) return story;
     // A story owns one replaceable summary. Re-reading its source prevents a
     // later incremental sync from discarding facts saved by an earlier one.
     const sourceMessages = getOfflineMemorySourceMessages(story, { includeSynced: true });

@@ -20,6 +20,13 @@ export function isOfflineStoryHandoffMemory(memory: MemoryItem, story: OfflineSt
     && memory.content.includes(getOfflineStoryMarkerPrefix(story));
 }
 
+export function hasOfflineStorySummary(story: OfflineStory, memories: readonly MemoryItem[]): boolean {
+  const summaryMarker = getOfflineStorySummaryMarker(story);
+  return memories.some((memory) =>
+    isOfflineStoryHandoffMemory(memory, story) && memory.content.includes(summaryMarker),
+  );
+}
+
 export function getOfflineMemorySourceMessages(story: OfflineStory, options: { includeSynced?: boolean } = {}): Message[] {
   const syncStart = options.includeSynced
     ? 0
