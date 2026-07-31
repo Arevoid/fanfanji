@@ -9,7 +9,7 @@ import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, User
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { collectOfflineHandoffContent, createOfflineStoryHandoffMemory, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
+import { collectOfflineHandoffContent, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 import "./offline/offlineStory.css";
@@ -374,6 +374,14 @@ export default function AppOffline({
     }
   };
 
+  const needsLegacyHandoffRepair = (story: OfflineStory) => {
+    const summaryMarker = getOfflineStorySummaryMarker(story);
+    return memories.some((memory) => isOfflineStoryHandoffMemory(memory, story) && !memory.content.includes(summaryMarker));
+  };
+
+  const shouldSyncStoryMemory = (story: OfflineStory) =>
+    shouldAutoSyncOnlineContinuation(story) || needsLegacyHandoffRepair(story);
+
   // Exit story workspace back to list
   const handleExitStoryWorkspace = async () => {
     // Only an explicitly linked online continuation may write a handoff on
@@ -381,7 +389,7 @@ export default function AppOffline({
     // chat history as writing reference.
     const latestStory = activeStoryRef.current;
     let completedStory = latestStory;
-    if (latestStory && shouldAutoSyncOnlineContinuation(latestStory)) {
+    if (latestStory && shouldSyncStoryMemory(latestStory)) {
       completedStory = await handleSyncMemoryToBrain(latestStory);
     }
     if (completedStory) clearOfflineSession(completedStory);
@@ -403,7 +411,7 @@ export default function AppOffline({
       return;
     }
     let completedStory = latestStory;
-    if (shouldAutoSyncOnlineContinuation(latestStory)) {
+    if (shouldSyncStoryMemory(latestStory)) {
       completedStory = await handleSyncMemoryToBrain(latestStory);
     }
     clearOfflineSession(completedStory);
@@ -517,8 +525,11 @@ export default function AppOffline({
   // Sync memory manually
   const handleSyncMemoryToBrain = async (story: OfflineStory): Promise<OfflineStory> => {
     if (memorySyncInFlightRef.current.has(story.id)) return story;
-    if (!hasUnsyncedOfflineMemoryProgress(story)) return story;
-    const sourceMessages = getOfflineMemorySourceMessages(story);
+    const repairingLegacyHandoff = needsLegacyHandoffRepair(story);
+    if (!hasUnsyncedOfflineMemoryProgress(story) && !repairingLegacyHandoff) return story;
+    // A story owns one replaceable summary. Re-reading its source prevents a
+    // later incremental sync from discarding facts saved by an earlier one.
+    const sourceMessages = getOfflineMemorySourceMessages(story, { includeSynced: true });
 
     const character = characters.find((item) => item.id === story.characterId);
     if (!character || character.isGroupChat) {
@@ -527,12 +538,12 @@ export default function AppOffline({
     }
 
     const now = Date.now();
-    const syncMarker = getOfflineStorySyncMarker(story);
+    const syncMarker = getOfflineStorySummaryMarker(story);
     const markSynced = (memoryIds: string[] = []): OfflineStory => ({
       ...story,
       archivedAt: now,
-      archivedMemoryIds: [...(story.archivedMemoryIds || []), ...memoryIds],
-      syncedSourceMessageIds: [...(story.syncedSourceMessageIds || []), ...sourceMessages.map((message) => message.id)],
+      archivedMemoryIds: Array.from(new Set([...(story.archivedMemoryIds || []), ...memoryIds])),
+      syncedSourceMessageIds: Array.from(new Set([...(story.syncedSourceMessageIds || []), ...sourceMessages.map((message) => message.id)])),
       lastSyncedMessageCount: story.messages.length,
       lastMemorySyncAt: now,
       memorySyncStatus: "synced",
@@ -568,45 +579,36 @@ export default function AppOffline({
             : recallSettings.extractModel,
           apiEndpoint: settings.apiEndpoint,
           templateType: character.archiveTemplateType,
+          filterItems: filterOfflineExtractedFacts,
           createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           currentTime: () => Date.now(),
           // Source-derived third-person facts are the authoritative record for
           // actor/recipient direction; ambiguous extraction text is excluded.
-          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, filterOfflineExtractedFacts(items))}\n[${syncMarker}]\n【确认事件（主体与客体固定）】\n${collectOfflineHandoffContent(story, character.remark || character.name)}`,
+          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]\n【确认事件（主体与客体固定）】\n${collectOfflineHandoffContent(story, character.remark || character.name)}`,
         }, apiExtractMemories);
         if (result.apiError) throw new Error(result.apiError);
         extractedMemories = result.extractedMemories;
       } catch (error) {
-        console.warn("Offline memory extraction unavailable; saving a local handoff instead:", error);
+        console.warn("Offline memory extraction unavailable; keeping the story retryable:", error);
       }
 
-      const additions = extractedMemories.length > 0
-        ? extractedMemories
-        : (MemoryService.hasMarker(memories, story.characterId, story.relationId, syncMarker) ? [] : [createOfflineStoryHandoffMemory({
-          story,
-          sourceMessages,
-          characterId: story.characterId,
-          relationId: story.relationId,
-          characterName: character.remark || character.name,
-          id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          timestamp: now,
-        })]);
-      if (additions.length > 0) {
-        const mergedMemories = MemoryService.mergeMemories(memories, additions);
-        const persisted = onPersistMemories
-          ? await onPersistMemories(mergedMemories)
-          : (onSaveMemories(mergedMemories), true);
-        if (!persisted) throw new Error("Offline story handoff memory persistence failed");
+      if (extractedMemories.length === 0) {
+        throw new Error("Offline story summary did not contain confirmed, safe facts");
       }
 
-      const syncedStory = markSynced(additions.map((memory) => memory.id));
+      // Replace all previous incremental handoffs for this story. They may be
+      // legacy generic fallbacks or prior batches; neither should accumulate.
+      const retainedMemories = memories.filter((memory) => !isOfflineStoryHandoffMemory(memory, story));
+      const mergedMemories = MemoryService.mergeMemories(retainedMemories, extractedMemories);
+      const persisted = onPersistMemories
+        ? await onPersistMemories(mergedMemories)
+        : (onSaveMemories(mergedMemories), true);
+      if (!persisted) throw new Error("Offline story summary persistence failed");
+
+      const syncedStory = markSynced(extractedMemories.map((memory) => memory.id));
       if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
       else onSaveOfflineStory(syncedStory);
-      showToast(extractedMemories.length > 0
-        ? "线下剧情记忆已同步到当前角色"
-        : additions.length > 0
-          ? "线下剧情已保存为线上交接记忆"
-          : "线下剧情未提取到新的记忆，已完成去重同步");
+      showToast("线下剧情摘要已同步到当前角色");
       return syncedStory;
     } catch (error) {
       console.error("Failed to sync offline story memories:", error);

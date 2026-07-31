@@ -5,8 +5,25 @@ export function getOfflineStorySyncMarker(story: OfflineStory): string {
   return `offline-story:${story.id}:${syncStart}-${story.messages.length}`;
 }
 
-export function getOfflineMemorySourceMessages(story: OfflineStory): Message[] {
-  const syncStart = story.lastSyncedMessageCount ?? (story.archivedAt ? story.messages.length : 0);
+/** A single canonical marker lets later syncs replace, rather than append to, a story handoff. */
+export function getOfflineStorySummaryMarker(story: OfflineStory): string {
+  return `offline-story:${story.id}:summary`;
+}
+
+export function getOfflineStoryMarkerPrefix(story: OfflineStory): string {
+  return `offline-story:${story.id}:`;
+}
+
+export function isOfflineStoryHandoffMemory(memory: MemoryItem, story: OfflineStory): boolean {
+  return memory.characterId === story.characterId
+    && memory.relationId === story.relationId
+    && memory.content.includes(getOfflineStoryMarkerPrefix(story));
+}
+
+export function getOfflineMemorySourceMessages(story: OfflineStory, options: { includeSynced?: boolean } = {}): Message[] {
+  const syncStart = options.includeSynced
+    ? 0
+    : (story.lastSyncedMessageCount ?? (story.archivedAt ? story.messages.length : 0));
   return story.messages
     .slice(syncStart)
     .map((message, index) => ({ message, index }))
@@ -76,7 +93,9 @@ export function filterOfflineExtractedFacts(items: readonly string[]): string[] 
   return items
     .map((item) => item.trim())
     .filter(Boolean)
-    .filter((item) => !/(?:^|[，。；：])(?:我|你|他|她|我们|你们|他们|她们)(?:[，。；：]|$)/.test(item))
+    // Any unresolved personal pronoun can reverse actor/recipient meaning
+    // after the story returns to online chat. Require named third-person facts.
+    .filter((item) => !/(?:我们|你们|他们|她们|我|你|他|她|它)/.test(item))
     // The source-derived facts below are authoritative for these directional
     // events, so a model summary cannot reverse their actor and recipient.
     .filter((item) => !/(水管|漏水|感谢|谢谢|请.*吃饭)/.test(item));

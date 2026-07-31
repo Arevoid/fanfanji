@@ -430,7 +430,9 @@ export async function apiExtractMemories(params: {
   model: string;
   apiEndpoint?: string;
   templateType?: "refined" | "delicate";
-}): Promise<{ text: string; items: string[] }> {
+  /** Offline continuations need factual handoff summaries, not screenplay prose. */
+  scenario?: "offline";
+}): Promise<{ text: string; items: string[]; error?: string }> {
   try {
     const res = await fetch("/api/extract-memories", {
       method: "POST",
@@ -482,6 +484,10 @@ ${historyText}
 6. 请直接输出每一条记忆，每行一条，以星号 * 开头。不要有任何多余的寒暄、解释或 markdown 格式，也不要加标题。`;
       }
 
+      if (params.scenario === "offline") {
+        prompt += `\n\n【线下剧情交接额外要求】：\n1. 仅总结双方明确表达的关系变化、约定、偏好或可在后续线上聊天延续的事实。\n2. 不要写入地点、肢体动作、舞台调度、环境描写、演出对白或未经确认的共同场景。\n3. 使用第三人称明确主体；无法确认主体或事实时不要输出该条。\n4. 至少输出一条可确认事实；没有可确认事实时直接输出空。`;
+      }
+
       let targetModel = params.model;
       if (params.apiEndpoint && params.apiEndpoint.trim()) {
         if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
@@ -510,7 +516,11 @@ ${historyText}
       return { text: aiText, items };
     } catch (fallbackErr) {
       console.error("Direct extract memories fallback failed:", fallbackErr);
-      return { text: "", items: [] };
+      return {
+        text: "",
+        items: [],
+        error: fallbackErr instanceof Error ? fallbackErr.message : "记忆提取服务不可用",
+      };
     }
   }
 }

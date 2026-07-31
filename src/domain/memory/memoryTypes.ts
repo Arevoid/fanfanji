@@ -31,6 +31,12 @@ export interface MemoryExtractionContext {
   templateType?: Character["archiveTemplateType"];
   createId: () => string;
   currentTime: () => number;
+  /**
+   * Allows callers with stricter provenance requirements (such as an offline
+   * story returning to chat) to reject ambiguous model output before a memory
+   * record is created.
+   */
+  filterItems?: (items: readonly string[]) => string[];
   formatContent: (items: readonly string[]) => string;
 }
 
@@ -41,6 +47,7 @@ export interface MemoryExtractionApiParams {
   model: string;
   apiEndpoint?: string;
   templateType?: Character["archiveTemplateType"];
+  scenario?: "offline";
 }
 
 export interface MemoryExtractionApiResult {

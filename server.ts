@@ -414,7 +414,7 @@ ${historyText}
   // API Route: Extract individual memories
   app.post("/api/extract-memories", async (req, res) => {
     try {
-      const { history, characterName, apiKey, model, apiEndpoint } = req.body;
+      const { history, characterName, apiKey, model, apiEndpoint, scenario } = req.body;
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
       if (!apiKeyValue) {
         return res.status(400).json({
@@ -426,7 +426,7 @@ ${historyText}
         .map((h: any) => `${h.role === "user" ? "用户" : characterName}: ${h.text || h.content}`)
         .join("\n");
 
-      const prompt = `你是一个高超的记忆提取和整理助手。你的任务是从角色“${characterName}”与用户的对话历史中，提取出值得长期记住的事情。
+      let prompt = `你是一个高超的记忆提取和整理助手。你的任务是从角色“${characterName}”与用户的对话历史中，提取出值得长期记住的事情。
 请阅读下面的对话记录，并将其拆解提取为多条【独立、简短、核心】的记忆条目。
 
 【对话记录】：
@@ -442,6 +442,10 @@ ${historyText}
 4. 丢弃一切无意义的闲聊、问候和没有长远价值的信息。
 5. 每次提取最多生成 5 条最核心的记忆，最少生成 1 条（如果没有核心信息则不用生成任何条目）。
 6. 请直接输出每一条记忆，每行一条，以星号 * 开头。不要有任何多余的寒暄、解释或 markdown 格式，也不要加标题。`;
+
+      if (scenario === "offline") {
+        prompt += `\n\n【线下剧情交接额外要求】：\n1. 仅总结双方明确表达的关系变化、约定、偏好或可在后续线上聊天延续的事实。\n2. 不要写入地点、肢体动作、舞台调度、环境描写、演出对白或未经确认的共同场景。\n3. 使用第三人称明确主体；无法确认主体或事实时不要输出该条。\n4. 至少输出一条可确认事实；没有可确认事实时直接输出空。`;
+      }
 
       let aiText = "";
 

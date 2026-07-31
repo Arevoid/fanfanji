@@ -17,19 +17,21 @@ export async function extractMemories(
     model: context.model,
     apiEndpoint: context.apiEndpoint,
     templateType: context.templateType,
+    ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
 
   if (!Array.isArray(data.items)) {
     return { extractedMemories: [], apiError: data.error || "提炼失败，未提取到有效记忆或API请求出错" };
   }
   const validItems = data.items.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean);
-  if (validItems.length === 0) return { extractedMemories: [] };
+  const acceptedItems = context.filterItems ? context.filterItems(validItems) : validItems;
+  if (acceptedItems.length === 0) return { extractedMemories: [] };
 
   const candidate: MemoryItem = {
     id: context.createId(),
     characterId: context.characterId,
     ...(context.relationId ? { relationId: context.relationId } : {}),
-    content: context.formatContent(validItems),
+    content: context.formatContent(acceptedItems),
     timestamp: context.currentTime(),
     // Offline extraction records a recent event, not a permanent personality
     // fact. Existing memories retain their stored importance unchanged.
