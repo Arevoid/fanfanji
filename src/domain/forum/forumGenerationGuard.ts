@@ -3,8 +3,10 @@ import type { ForumGenerationTask, ForumGenerationTrigger } from "../../types";
 export const FORUM_LAZY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 export const FORUM_FAILED_RETRY_MS = 5 * 60 * 1000;
 export const FORUM_THREAD_REFRESH_COOLDOWN_MS = 60 * 1000;
-export const FORUM_LIKE_ENGAGEMENT_PROBABILITY = 0.3;
-export const FORUM_MANUAL_REFRESH_PROBABILITY = 0.6;
+export const FORUM_LIKE_ENGAGEMENT_PROBABILITY = 0.5;
+export const FORUM_MANUAL_REFRESH_PROBABILITY = 0.7;
+export const FORUM_AUTHOR_UPDATE_PROBABILITY = 0.65;
+export const FORUM_RELATION_REPLY_PROBABILITY = 0.6;
 
 const inFlightTaskKeys = new Set<string>();
 

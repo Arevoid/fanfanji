@@ -3,6 +3,7 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import { commitForumMutation, getForumSnapshotForIdentity } from "../../../core/storage/repositories/forumRepository";
 import { planForumActivity, releaseForumPendingEvents, shouldAttemptAutomaticForumActivity } from "./forumActivityService";
 import { applyForumStoryUpdate, canScheduleStoryContinuation } from "../../../domain/forum/forumStoryArc";
+import { getForumThreadActivityAt } from "../../../domain/forum/forumData";
 
 const id = (prefix: string): string => `${prefix}-${typeof crypto !== "undefined" && "randomUUID" in crypto
   ? crypto.randomUUID()
@@ -25,7 +26,12 @@ const updateThreadsForReplies = (threads: readonly ForumThread[], replies: reado
     .reduce((value, reply) => Math.max(value, reply.updatedAt, reply.occurredAt), thread.updatedAt);
   const authorUpdate = replies.filter((reply) => reply.threadId === thread.id && reply.kind === "author-update").sort((a, b) => b.occurredAt - a.occurredAt)[0];
   const withArc = authorUpdate ? applyForumStoryUpdate(thread, authorUpdate, now) : thread;
-  return latest === thread.updatedAt && withArc === thread ? thread : { ...withArc, updatedAt: latest };
+  const lastActivityAt = getForumThreadActivityAt(thread, replies);
+  return latest === thread.updatedAt
+    && withArc === thread
+    && thread.lastActivityAt === lastActivityAt
+    ? thread
+    : { ...withArc, updatedAt: latest, lastActivityAt };
 });
 
 export const releaseDueForumActivity = (context: ForumActivityRuntimeContext, limit = 1): ForumReply[] => {

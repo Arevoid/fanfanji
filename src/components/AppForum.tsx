@@ -228,8 +228,8 @@ export default function AppForum({
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const identityThreads = useMemo(
-    () => listForumThreadsForIdentity(threads, activeIdentity.id),
-    [threads, activeIdentity.id],
+    () => listForumThreadsForIdentity(threads, activeIdentity.id, replies),
+    [threads, replies, activeIdentity.id],
   );
   const activeThread = identityThreads.find((thread) => thread.id === activeThreadId);
   const activeDmConversation = dmConversations.find((conversation) => conversation.id === activeDmConversationId);
@@ -607,6 +607,7 @@ export default function AppForum({
                 ...item,
                 replyCount: item.replyCount + generatedReplies.length,
                 updatedAt: Math.max(item.updatedAt, ...generatedReplies.map((reply) => reply.updatedAt)),
+                lastActivityAt: Math.max(item.lastActivityAt || item.createdAt, ...generatedReplies.map((reply) => reply.occurredAt)),
               }
             : item);
         if (!commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
@@ -725,6 +726,7 @@ export default function AppForum({
                 ...item,
                 replyCount: item.replyCount + result.replies.length,
                 updatedAt: Math.max(item.updatedAt, ...result.replies.map((reply) => reply.updatedAt)),
+                lastActivityAt: Math.max(item.lastActivityAt || item.createdAt, ...result.replies.map((reply) => reply.occurredAt)),
               }
             : item);
         if (!commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
@@ -1197,7 +1199,9 @@ export default function AppForum({
                     thread={thread}
                     metrics={selectForumThreadMetrics(thread, replies)}
                     formattedTime={formatForumTime(selectForumThreadMetrics(thread, replies).updatedAt)}
+                    liked={thread.likedByIdentityIds.includes(activeIdentity.id)}
                     onOpen={() => openThread(thread)}
+                    onToggleLike={() => handleToggleThreadLike(thread.id)}
                   />
                   {waitingReplyThreadIds.includes(thread.id) && (
                     <div className="flex items-center gap-1.5 border-t border-slate-50 px-4 py-2 text-[10px] text-slate-400">

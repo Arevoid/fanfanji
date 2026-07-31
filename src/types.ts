@@ -333,6 +333,8 @@ export interface ForumThread {
   replyCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Public thread activity time. Likes and views must not advance this value. */
+  lastActivityAt?: number;
   /** Public-only continuity metadata for eligible AI/NPC story threads. */
   storyArc?: import("./domain/forum/forumStoryArc").ForumStoryArc;
 }

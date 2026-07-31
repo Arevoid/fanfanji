@@ -33,10 +33,13 @@ import {
   validateForumReplyTimeline,
 } from "../../../domain/forum/forumValidation";
 import {
+  FORUM_AUTHOR_UPDATE_PROBABILITY,
   FORUM_LIKE_ENGAGEMENT_PROBABILITY,
   FORUM_MANUAL_REFRESH_PROBABILITY,
+  FORUM_RELATION_REPLY_PROBABILITY,
   shouldGenerateForumActivity,
 } from "../../../domain/forum/forumGenerationGuard";
+import { getForumBaselineLikeCount } from "../../../domain/forum/forumData";
 import {
   DEFAULT_FORUM_POST_AUTHOR_POLICY,
   canUseRelationshipThreadAuthor,
@@ -239,7 +242,8 @@ export const selectForumReplyAuthors = (input: {
     kind: "virtual" as const,
     profile: getForumVirtualProfile(input.seed, index),
   }));
-  const includeFriend = input.relationContexts.length > 0 && input.random() < 0.35;
+  const includeFriend = input.relationContexts.length > 0
+    && input.random() < FORUM_RELATION_REPLY_PROBABILITY;
   if (includeFriend) {
     const contextIndex = Math.min(
       input.relationContexts.length - 1,
@@ -359,11 +363,14 @@ const createGeneratedThread = (input: {
       ? anonymous ? "ai-character-anonymous" : "ai-character"
       : "ai-virtual",
     occurredAt: Math.min(input.now, input.occurredAt),
-    baseLikeCount: 0,
+    baseLikeCount: getForumBaselineLikeCount(threadId, character
+      ? anonymous ? "ai-character-anonymous" : "ai-character"
+      : "ai-virtual"),
     likedByIdentityIds: [],
     replyCount: 0,
     createdAt: input.now,
     updatedAt: input.now,
+    lastActivityAt: input.now,
     ...(inferForumStoryArc({ source: character
       ? anonymous ? "ai-character-anonymous" : "ai-character"
       : "ai-virtual", title: input.candidate.title, body: input.candidate.body })
@@ -776,7 +783,7 @@ export async function generateThreadActivity(input: {
     && (input.thread.source === "ai-virtual"
       || input.thread.source === "virtual"
       || Boolean(originalAuthorContext));
-  const chooseAuthorUpdate = canAuthorUpdate && random() < 0.5;
+  const chooseAuthorUpdate = canAuthorUpdate && random() < FORUM_AUTHOR_UPDATE_PROBABILITY;
   const aiCall = input.aiCall || defaultAiCall;
   const threadReplies = input.existingReplies
     .filter((reply) => reply.threadId === input.thread.id)

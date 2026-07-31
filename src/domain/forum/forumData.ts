@@ -9,9 +9,67 @@ export interface ForumThreadMetrics {
   effectiveReplyCount: number;
   maxFloor: number;
   latestReplyAt?: number;
+  latestAuthorUpdateAt?: number;
+  hasAuthorUpdate: boolean;
   updatedAt: number;
   lastReplyExcerpt?: string;
 }
+
+const AUTOMATIC_THREAD_SOURCES = new Set<ForumThread["source"]>([
+  "ai-character",
+  "ai-character-anonymous",
+  "ai-virtual",
+  "virtual",
+]);
+
+/** Stable baseline likes for generated public posts; user posts remain organic. */
+export const getForumBaselineLikeCount = (
+  threadId: string,
+  source: ForumThread["source"],
+): number => {
+  if (!AUTOMATIC_THREAD_SOURCES.has(source)) return 0;
+  let hash = 2166136261;
+  for (const character of threadId) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return 2 + (hash >>> 0) % 19;
+};
+
+const getLatestLiveReplyAt = (
+  thread: ForumThread,
+  replies: readonly ForumReply[],
+): number => replies
+  .filter((reply) => reply.threadId === thread.id
+    && reply.ownerIdentityId === thread.ownerIdentityId
+    && !reply.isDeleted)
+  .reduce((latest, reply) => Math.max(latest, reply.occurredAt), 0);
+
+export const getForumThreadActivityAt = (
+  thread: ForumThread,
+  replies: readonly ForumReply[],
+): number => Math.max(thread.createdAt, getLatestLiveReplyAt(thread, replies));
+
+/**
+ * Derives fields introduced after the original forum schema. The function is
+ * deterministic so refreshes and backups never change a user's layout or
+ * social counts. The normalized result is persisted by the next forum write.
+ */
+export const normalizeForumThreadEngagement = (
+  threads: readonly ForumThread[],
+  replies: readonly ForumReply[],
+): ForumThread[] => threads.map((thread) => {
+  const latestReplyAt = getLatestLiveReplyAt(thread, replies);
+  const lastActivityAt = Math.max(thread.createdAt, latestReplyAt);
+  const baseLikeCount = thread.baseLikeCount > 0
+    ? thread.baseLikeCount
+    : getForumBaselineLikeCount(thread.id, thread.source);
+  return {
+    ...thread,
+    baseLikeCount,
+    ...(thread.lastActivityAt === lastActivityAt ? {} : { lastActivityAt }),
+  };
+});
 
 /** Derives list-card values from the canonical thread/reply collections. */
 export const selectForumThreadMetrics = (
@@ -24,11 +82,21 @@ export const selectForumThreadMetrics = (
   const liveReplies = threadReplies.filter((reply) => !reply.isDeleted);
   const latest = liveReplies.reduce<ForumReply | undefined>((current, reply) =>
     !current || reply.occurredAt > current.occurredAt ? reply : current, undefined);
+  const latestAuthorUpdate = liveReplies.reduce<ForumReply | undefined>((current, reply) =>
+    reply.kind !== "author-update" || (current && current.occurredAt >= reply.occurredAt)
+      ? current
+      : reply, undefined);
+  const activityAt = Math.max(
+    thread.lastActivityAt || thread.createdAt,
+    latest?.occurredAt || 0,
+  );
   return {
     effectiveReplyCount: liveReplies.length,
     maxFloor: Math.max(1, ...threadReplies.map((reply) => reply.floor)),
     ...(latest ? { latestReplyAt: latest.occurredAt } : {}),
-    updatedAt: Math.max(thread.updatedAt, latest?.updatedAt || 0, latest?.occurredAt || 0),
+    ...(latestAuthorUpdate ? { latestAuthorUpdateAt: latestAuthorUpdate.occurredAt } : {}),
+    hasAuthorUpdate: Boolean(latestAuthorUpdate),
+    updatedAt: activityAt,
     ...(latest ? { lastReplyExcerpt: latest.body.replace(/\s+/g, " ").trim().slice(0, 120) } : {}),
   };
 };
@@ -69,6 +137,7 @@ export const createForumThread = (input: {
   replyCount: 0,
   createdAt: input.now,
   updatedAt: input.now,
+  lastActivityAt: input.now,
 });
 
 export const nextForumReplyFloor = (
@@ -141,9 +210,16 @@ export const toggleForumReplyLike = (
 export const listForumThreadsForIdentity = (
   threads: readonly ForumThread[],
   ownerIdentityId: string,
+  replies: readonly ForumReply[] = [],
 ): ForumThread[] => threads
   .filter((thread) => thread.ownerIdentityId === ownerIdentityId)
-  .sort((left, right) => right.occurredAt - left.occurredAt);
+  .sort((left, right) => {
+    const leftActivity = Math.max(left.lastActivityAt || left.createdAt, getLatestLiveReplyAt(left, replies));
+    const rightActivity = Math.max(right.lastActivityAt || right.createdAt, getLatestLiveReplyAt(right, replies));
+    return rightActivity - leftActivity
+      || right.occurredAt - left.occurredAt
+      || left.id.localeCompare(right.id);
+  });
 
 export const listForumRepliesForThread = (
   replies: readonly ForumReply[],
@@ -159,7 +235,12 @@ export const appendForumReply = (
 ): ForumData => ({
   threads: threads.map((thread) =>
     thread.id === reply.threadId && thread.ownerIdentityId === reply.ownerIdentityId
-      ? { ...thread, replyCount: thread.replyCount + 1, updatedAt: reply.createdAt }
+      ? {
+          ...thread,
+          replyCount: thread.replyCount + 1,
+          updatedAt: reply.createdAt,
+          lastActivityAt: Math.max(thread.lastActivityAt || thread.createdAt, reply.occurredAt),
+        }
       : thread),
   replies: [...replies, reply],
 });

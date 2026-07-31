@@ -18,6 +18,7 @@ import type {
 } from "../../../types";
 import { sanitizeStoredForumContent } from "../../../domain/forum/forumContentSafety";
 import { compactForumState, estimateForumStorageUsage } from "../../../domain/forum/forumCapacity";
+import { normalizeForumThreadEngagement } from "../../../domain/forum/forumData";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readArray, writeArray } from "./repositoryUtils";
@@ -146,6 +147,7 @@ const isForumThread = (value: unknown): value is ForumThread => {
     && typeof thread.replyCount === "number"
     && typeof thread.createdAt === "number"
     && typeof thread.updatedAt === "number"
+    && (thread.lastActivityAt === undefined || typeof thread.lastActivityAt === "number")
     && (thread.storyArc === undefined || isForumStoryArc(thread.storyArc));
 };
 
@@ -488,10 +490,13 @@ export const loadForumGenerationTasks = (
   };
 };
 
-const buildForumSnapshot = (): ForumStateSnapshot => ({
+const buildForumSnapshot = (): ForumStateSnapshot => {
+  const replies = loadForumReplies().value;
+  const threads = normalizeForumThreadEngagement(loadForumThreads().value, replies);
+  return {
   revision: forumRevision,
-  threads: loadForumThreads().value,
-  replies: loadForumReplies().value,
+  threads,
+  replies,
   shares: loadForumShares().value,
   generationTasks: loadForumGenerationTasks().value,
   actorStates: loadForumActorStates().value,
@@ -503,7 +508,8 @@ const buildForumSnapshot = (): ForumStateSnapshot => ({
   dmConversations: loadForumDmConversations().value,
   dmMessages: loadForumDmMessages().value,
   dmTasks: loadForumDmTasks().value,
-});
+  };
+};
 
 /** Returns a stable object until forum storage actually changes. */
 export const getForumStateSnapshot = (): ForumStateSnapshot => {
