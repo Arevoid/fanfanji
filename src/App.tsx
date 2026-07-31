@@ -7,6 +7,7 @@ import { loadCharacters, saveCharacters } from "./core/storage/repositories/char
 import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
+import { removeMemoriesForMoment } from "./features/moments/services/momentMemory";
 import { sanitizeMomentPublishText } from "./features/moments/services/momentContent";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
@@ -1885,11 +1886,14 @@ export default function App() {
   };
 
   const handleDeleteMoment = (momentId: string) => {
-    setMoments((prev) => {
-      const deletedMoment = prev.find((moment) => moment.id === momentId);
-      if (deletedMoment && !recordDeletedCharacterMoment(deletedMoment)) {
+    const deletedMoment = moments.find((moment) => moment.id === momentId);
+    if (deletedMoment) {
+      if (!recordDeletedCharacterMoment(deletedMoment)) {
         console.error("Failed to persist deleted character Moment generation task.");
       }
+      setMemories((previous) => removeMemoriesForMoment(previous, deletedMoment));
+    }
+    setMoments((prev) => {
       return prev.filter((moment) => moment.id !== momentId);
     });
   };

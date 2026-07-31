@@ -794,6 +794,8 @@ export interface MemoryItem {
   characterId: string;
   /** The direct relationship that owns this remembered interaction. */
   relationId?: string;
+  /** The Moment that created this automatic memory, when applicable. */
+  sourceMomentId?: string;
   content: string;
   timestamp: number;
   importance?: number; // 1-10, default 5

@@ -39,6 +39,7 @@ const input = () => ({
 
 const [first, duplicateEffect] = await Promise.all([requestCharacterMomentOnce(input()), requestCharacterMomentOnce(input())]);
 assert.ok(first.moment);
+assert.equal(first.memory?.sourceMomentId, first.moment?.id, "自动朋友圈记忆必须关联来源动态");
 assert.equal(duplicateEffect.skipped, true);
 assert.equal(apiCalls, 1, "重复 effect 不应再次请求 AI");
 
