@@ -1,10 +1,12 @@
 import type { Character, MemoryItem, Moment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
 import { sanitizeMomentPublishText } from "./momentContent";
+import { assessMomentUniqueness, isMomentSkipResponse } from "./momentUniqueness";
 import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
 import {
   claimCharacterMomentGeneration,
   completeCharacterMomentGeneration,
+  completeSkippedCharacterMomentGeneration,
   releaseCharacterMomentGeneration,
 } from "./momentGenerationGuard";
 
@@ -66,13 +68,16 @@ export async function requestCharacterMoment(input: {
   now?: () => number;
   random?: () => number;
   temporalContext?: MomentTemporalContext;
+  existingMoments?: readonly Moment[];
 }): Promise<{ moment?: Moment; memory?: MemoryItem }> {
   const response = await input.requestAi(input.request);
   if (!response?.text) return {};
   const now = input.occurredAt || input.now || Date.now;
   const random = input.random || Math.random;
   const cleanedContent = sanitizeMomentPublishText(response.text).replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+  if (isMomentSkipResponse(cleanedContent)) return {};
   const parsed = input.parseContent(sanitizeMomentPublishText(cleanedContent));
+  if (isMomentSkipResponse(parsed.content) || !parsed.content.trim()) return {};
   const temporalConflicts = input.temporalContext
     ? [parsed.content, ...parsed.selfComments]
       .flatMap((content) => findMomentTemporalConflicts(content, input.temporalContext!, input.character))
@@ -81,6 +86,12 @@ export async function requestCharacterMoment(input: {
     console.warn("[moments] Rejected temporally inconsistent generated post:", temporalConflicts);
     return {};
   }
+  const uniqueness = assessMomentUniqueness(parsed.content, input.existingMoments || [], {
+    ownerIdentityId: input.ownerIdentityId,
+    characterId: input.character.id,
+    relationId: input.relationId,
+  });
+  if (!uniqueness.accepted) return {};
   let image: string | undefined;
   if (!parsed.imageDescription && input.character.album?.length && random() < 0.4) {
     image = input.character.album[Math.floor(random() * input.character.album.length)];
@@ -134,8 +145,8 @@ export async function requestCharacterMomentOnce(input: Parameters<typeof reques
   try {
     const result = await requestCharacterMoment(input);
     if (!result.moment) {
-      releaseCharacterMomentGeneration(taskKey);
-      return result;
+      completeSkippedCharacterMomentGeneration(taskKey, input.character.id, input.relationId, generatedAt);
+      return { ...result, skipped: true };
     }
 
     if (!completeCharacterMomentGeneration(taskKey, result.moment, generatedAt)) {

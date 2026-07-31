@@ -45,6 +45,27 @@ export function completeCharacterMomentGeneration(taskKey: string, moment: Momen
   return result.success;
 }
 
+export function completeSkippedCharacterMomentGeneration(
+  taskKey: string,
+  characterId: string,
+  relationId: string | undefined,
+  now: Date,
+): boolean {
+  const tasks = loadMomentGenerationTasks().value;
+  const task: MomentGenerationTask = {
+    taskKey,
+    characterId,
+    relationId,
+    date: getLocalMomentGenerationDate(now),
+    type: "character-moment",
+    status: "skipped",
+    updatedAt: now.getTime(),
+  };
+  const result = saveMomentGenerationTasks({ ...tasks, [taskKey]: task });
+  inFlightTaskKeys.delete(taskKey);
+  return result.success;
+}
+
 export function releaseCharacterMomentGeneration(taskKey: string): void {
   inFlightTaskKeys.delete(taskKey);
 }

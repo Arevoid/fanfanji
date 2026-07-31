@@ -56,6 +56,18 @@ assert.equal(apiCalls, 2);
 const secondTaskKey = getCharacterMomentTaskKey(character.id, new Date(fixedNow), "relation-two");
 assert.equal(loadMomentGenerationTasks().value[secondTaskKey]?.status, "generated");
 
+const skipInput = {
+  ...input(),
+  relationId: "relation-skip",
+  requestAi: async () => { apiCalls += 1; return { text: "SKIP" }; },
+};
+const firstSkipped = await requestCharacterMomentOnce(skipInput);
+assert.equal(firstSkipped.skipped, true, "没有新内容时应记录当天跳过，而不是继续生成");
+assert.equal(loadMomentGenerationTasks().value[getCharacterMomentTaskKey(character.id, new Date(fixedNow), "relation-skip")]?.status, "skipped");
+const repeatedSkip = await requestCharacterMomentOnce(skipInput);
+assert.equal(repeatedSkip.skipped, true, "当天跳过后再次进入不应重复请求 AI");
+assert.equal(apiCalls, 3);
+
 assert.equal(saveMoments([first.moment!]).success, true);
 assert.equal(recordDeletedCharacterMoment(first.moment!, new Date(fixedNow + 1)), true);
 assert.equal(loadMomentGenerationTasks().value[taskKey]?.status, "deleted");
@@ -65,10 +77,10 @@ assert.equal(loadMoments([]).value.some((moment) => moment.id === first.moment!.
 resetMomentGenerationRuntimeForTests();
 const afterRefresh = await requestCharacterMomentOnce(input());
 assert.equal(afterRefresh.skipped, true, "删除后刷新不得恢复或重新生成当天任务");
-assert.equal(apiCalls, 2);
+assert.equal(apiCalls, 3);
 
 const concurrentAfterDeletion = await Promise.all([requestCharacterMomentOnce(input()), requestCharacterMomentOnce(input())]);
 assert.ok(concurrentAfterDeletion.every((result) => result.skipped), "两个入口同时触发也必须保持删除墓碑");
-assert.equal(apiCalls, 2);
+assert.equal(apiCalls, 3);
 
 console.log("PASS moment auto-generation idempotency, duplicate effects/entries, concurrent triggers, deletion persistence, and refresh tombstone");

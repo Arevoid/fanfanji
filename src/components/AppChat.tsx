@@ -4620,6 +4620,16 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
         .slice(0, recallSettings?.recallCount || 5);
       const historicalFallback = friendMsgs.slice(-(friend.retrievalHistoryLimit || 100));
       const fullWorldBook = getFullCharacterWorldBook(worldBookEntries || [], friend.id);
+      const ownerMomentHistory = moments
+        .filter((moment) => Boolean(moment.characterId))
+        .filter((moment) => (moment.ownerIdentityId || "identity-1") === (relationship.userIdentityId || "identity-1"))
+        .sort((left, right) => right.timestamp - left.timestamp)
+        .slice(0, 12);
+      const recentMomentHistory = ownerMomentHistory.length > 0
+        ? ownerMomentHistory
+          .map((moment) => `* ${moment.authorName}：${renderMomentContent(moment.content)}`)
+          .join("\n")
+        : "(No previous friend Moments in this identity feed)";
       const temporalContext = createMomentTemporalContext(new Date(occurredAt));
       const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
@@ -4644,6 +4654,8 @@ ${archivedMemories.length ? archivedMemories.map(m => `* ${m.content}`).join("\n
 ${historicalFallback.length > 0 ? historicalFallback.map(m => `* ${m.sender === "user" ? "User" : friend.name}: ${m.content}`).join("\n") : "(No historical chat)"}
 4. Complete active world book (always obey):
 ${fullWorldBook || "(No world book entries)"}
+5. Recent friend Moments in this identity feed (do not repeat or paraphrase these):
+${recentMomentHistory}
 
 User Profile (Machine Owner / 机主):
 - Nickname: ${settings.name}
@@ -4662,11 +4674,13 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 6. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)".
 7. If this post needs an image, add one final separate line in exactly this format: "(配图：图片描述)". This line will be rendered as a text-image card, never as post body text.
 8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
+9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the recent Moments above. Avoid generic filler such as weather, tiredness, coffee, work, or vague feelings unless a specific detail from your personality, world book, or real conversation makes it genuinely new.
+10. If you cannot produce a fresh, natural post grounded in your personality, world book, or supported conversation, output exactly "SKIP" and nothing else. It is valid to publish nothing.
 `;
 
       const composedPrompt = PromptComposer.compose({
         scenario: "moment-post",
-        message: "请根据你的设定以及与机主的历史记忆，写一条朋友圈内容（内容可以与你自己有关，也可以与机主有关）：",
+        message: "请根据你的人设、专属世界书和与机主的真实历史，先判断是否有值得发布且明显不同于历史动态的新内容；有则写一条，没有则只输出 SKIP。不要为了完成任务硬发。",
         history,
         systemInstruction,
       });
@@ -4685,6 +4699,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         relationId: relationship.id,
         occurredAt: () => occurredAt,
         temporalContext,
+        existingMoments: ownerMomentHistory,
       });
       if (generated.moment) onAddMoment(generated.moment);
       if (generated.memory) onSaveMemories(MemoryService.mergeMemories(memories || [], [{ ...generated.memory, relationId: relationship.id }]));

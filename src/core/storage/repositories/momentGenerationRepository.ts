@@ -3,7 +3,7 @@ import { readObject } from "./repositoryUtils";
 import { writeJson } from "../storageAdapter";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 
-export type MomentGenerationTaskStatus = "generated" | "deleted";
+export type MomentGenerationTaskStatus = "generated" | "deleted" | "skipped";
 
 export interface MomentGenerationTask {
   taskKey: string;
