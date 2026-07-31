@@ -32,7 +32,10 @@ import { createRelationship, findRelationship, findRelationshipForCanonicalChara
 import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords, type InnerVoiceScope } from "../core/storage/repositories/innerVoiceRepository";
 import { generateInnerVoice } from "../features/chat/services/innerVoiceService";
 import { generateCharacterImage } from "../features/chat/services/characterImageService";
-import { getPendingExplicitImageRequest } from "../features/chat/services/imageGenerationIntent";
+import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
+import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
+import { useChatController } from "../features/chat/hooks/useChatController";
+import { createChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
 import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "../core/storage/repositories/forumRepository";
@@ -1021,7 +1024,7 @@ export default function AppChat({
   useEffect(() => {
     const chatKey = activeChatRelationId || activeChatCharId;
     if (chatKey && !initiatedChatIds.includes(chatKey)) {
-      setInitiatedChatIds((prev) => [...prev, chatKey]);
+      setInitiatedChatIds((prev) => markChatInitiated(prev, chatKey));
     }
   }, [activeChatCharId, activeChatRelationId, initiatedChatIds]);
 
@@ -1046,10 +1049,7 @@ export default function AppChat({
   useEffect(() => {
     const chatKey = activeChatRelationId || activeChatCharId;
     if (chatKey) {
-      setLastReadTimestamps((prev) => ({
-        ...prev,
-        [chatKey]: Date.now(),
-      }));
+      setLastReadTimestamps((prev) => markChatRead(prev, chatKey, Date.now()));
     }
   }, [activeChatCharId, activeChatRelationId, messages.length]);
 
@@ -1496,7 +1496,6 @@ export default function AppChat({
   }, [isEditingProfile, settings]);
 
   // Inputs
-  const [chatInputText, setChatInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [typingCharacterOverride, setTypingCharacterOverride] = useState<Character | null>(null);
   const [manualLocationText, setManualLocationText] = useState("");
@@ -1822,7 +1821,6 @@ export default function AppChat({
 
   // New features: Notes attachment, Quoting, Bubble Menu, Note Reader, OOC Annotation
   const [memoNotes, setMemoNotes] = useState<any[]>([]);
-  const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
   const [activeMenuMsg, setActiveMenuMsg] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [voicePlayed, setVoicePlayed] = useState<Record<string, boolean>>({});
@@ -1921,7 +1919,8 @@ export default function AppChat({
   // back to the canonical character for a direct chat.
   useEffect(() => {
     if (!activeRelationship) return;
-    onSaveRelationships(relationships.map((relation) => relation.id === activeRelationship.id ? { ...relation, lastActiveTime: Date.now(), updatedAt: Date.now() } : relation));
+    const timestamp = Date.now();
+    onSaveRelationships(touchRelationshipSession(relationships, activeRelationship.id, timestamp));
   }, [activeChatRelationId]);
 
   // Send character's custom opening speech / greeting if there are no messages in the chat history
@@ -2405,17 +2404,11 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     });
   };
 
-  const generateResponseForUserMessage = async (
+  const executeDirectReplyPipeline = async (
     userMsg: Message | null,
     customHistoryOverride?: Message[],
     options?: { forumShareTrigger?: boolean },
   ) => {
-    if (!activeChatCharId || !activeCharacter) return;
-
-    if (activeCharacter.isGroupChat) {
-      return generateResponseForGroupChat(userMsg, customHistoryOverride);
-    }
-
     setIsTyping(true);
     if (options?.forumShareTrigger) setForumShareReplyError("");
 
@@ -3024,18 +3017,17 @@ ${stickerListStr}
             }
           }
 
-          // Save each segment to the active offline story
-          if (activeOfflineStoryId && onSaveOfflineStory) {
-            const targetStory = offlineStories.find(s => s.id === activeOfflineStoryId);
-            if (targetStory) {
-              const updatedStory = {
-                ...targetStory,
-                messages: [...targetStory.messages, ...newMsgs],
-                updatedAt: Date.now()
-              };
-              onSaveOfflineStory(updatedStory);
-            }
-          }
+          chatSideEffectController.afterReplySuccess({
+            userMsg,
+            currentChatMessages,
+            createdMessages: newMsgs,
+            activeCharacter,
+            activeRelationship,
+            relationships,
+            isOffline: true,
+            activeOfflineStoryId,
+            extractInterval: recallSettings?.extractInterval,
+          });
         } else {
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
           const replyCandidates = createDirectReplyCandidates({
@@ -3073,57 +3065,17 @@ ${stickerListStr}
             }
           }
 
-          // Check if auto extraction is enabled and we have reached the trigger round count
-          const isAutoExtractEnabled = activeCharacter.enableAutoSummary === true;
-
-          const extractIntervalRounds = activeCharacter.summaryTriggerRound !== undefined
-            ? activeCharacter.summaryTriggerRound
-            : (recallSettings?.extractInterval || 10);
-
-          if (isAutoExtractEnabled) {
-            const triggerCount = extractIntervalRounds * 2;
-            const currentMsgs = userMsg ? [...currentChatMessages, userMsg, ...createdMessages] : [...currentChatMessages, ...createdMessages];
-            
-            let eligibleMsgs = currentMsgs;
-            if (activeRelationship?.lastImmediateSummaryMsgId) {
-              const idx = currentMsgs.findIndex(m => m.id === activeRelationship.lastImmediateSummaryMsgId);
-              if (idx !== -1) {
-                eligibleMsgs = currentMsgs.slice(idx + 1);
-              }
-            }
-
-            if (eligibleMsgs.length >= triggerCount) {
-              // Trigger automatic memory extraction in background
-              setTimeout(async () => {
-                const count = await handleExtractMemories(eligibleMsgs);
-                if (count > 0) {
-                  // Do NOT delete user's chat history! Keep all logs.
-                  // Save the last summarized message ID to character so auto-summary can skip them next time
-                  const lastMsg = eligibleMsgs[eligibleMsgs.length - 1];
-                  if (lastMsg) {
-                    if (activeRelationship) onSaveRelationships(relationships.map((relation) => relation.id === activeRelationship.id ? { ...relation, lastImmediateSummaryMsgId: lastMsg.id, updatedAt: Date.now() } : relation));
-                  }
-                }
-              }, 200);
-            }
-          }
-
-          // AI autonomously decides on Moments background cover from their own album
-          if (activeCharacter.album && activeCharacter.album.length > 0) {
-            const needsCover = !activeCharacter.momentsCover;
-            const shouldChangeCover = needsCover || Math.random() < 0.35;
-            if (shouldChangeCover) {
-              const albumList = activeCharacter.album;
-              const randomIndex = Math.floor(Math.random() * albumList.length);
-              const selectedCover = albumList[randomIndex];
-              if (selectedCover !== activeCharacter.momentsCover) {
-                onSaveCharacter({
-                  ...activeCharacter,
-                  momentsCover: selectedCover,
-                });
-              }
-            }
-          }
+          chatSideEffectController.afterReplySuccess({
+            userMsg,
+            currentChatMessages,
+            createdMessages,
+            activeCharacter,
+            activeRelationship,
+            relationships,
+            isOffline: false,
+            activeOfflineStoryId,
+            extractInterval: recallSettings?.extractInterval,
+          });
         }
       } else {
         const errMsg: Message = {
@@ -3167,6 +3119,36 @@ ${stickerListStr}
       setIsTyping(false);
     }
   };
+
+  const chatReplyController = createChatReplyController({
+    getContext: () => createChatRuntimeContext({
+      characterId: activeChatCharId && activeCharacter ? activeChatCharId : null,
+      relationId: activeRelationship?.id,
+      conversationId: activeCharacter?.isGroupChat
+        ? `group:${activeCharacter.id}`
+        : (activeRelationship?.conversationId || (activeRelationship ? getConversationId(activeRelationship.id) : null)),
+      userIdentityId: activeIdentityId,
+      isGroup: Boolean(activeCharacter?.isGroupChat),
+      groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
+    }),
+    generateGroupReply: generateResponseForGroupChat,
+    generateDirectReply: ({ userMsg, customHistoryOverride, options }) =>
+      executeDirectReplyPipeline(userMsg, customHistoryOverride, options),
+  });
+
+  const chatSideEffectController = createChatSideEffectController({
+    offlineStories,
+    onSaveOfflineStory,
+    extractMemories: (messagesToCompress) => handleExtractMemories(messagesToCompress),
+    onSaveRelationships,
+    onSaveCharacter,
+  });
+
+  const generateResponseForUserMessage = async (
+    userMsg: Message | null,
+    customHistoryOverride?: Message[],
+    options?: { forumShareTrigger?: boolean },
+  ) => chatReplyController.generate({ userMsg, customHistoryOverride, options });
 
   const sendCustomMessage = (contentString: string) => {
     if (!activeChatCharId || !activeCharacter) return;
@@ -3224,6 +3206,27 @@ ${stickerListStr}
       setIsGeneratingImage(false);
     }
   };
+
+  const {
+    chatInputText,
+    setChatInputText,
+    quotedMessage,
+    setQuotedMessage,
+    handleSendOnly,
+    handleSendAndReply,
+  } = useChatController({
+    activeChatCharId,
+    activeCharacter,
+    currentChatMessages,
+    onSendMessage,
+    generateResponseForUserMessage,
+    generateAndSendCharacterImage,
+    offlineStories,
+    onSaveOfflineStory,
+    isOfflineModeActive,
+    isInputNarration,
+    activeOfflineStoryId,
+  });
 
   const deleteMessageAndLinkedImage = (messageId: string) => {
     const records = loadImageGenerationRecords([]).value;
@@ -3528,128 +3531,6 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
       window.removeEventListener(VISUAL_VIEWPORT_CHANGE_EVENT, handleViewportChange);
     };
   }, [activeChatCharId]);
-
-  // Handle Send Message (User sends only, no immediate reply)
-  const handleSendOnly = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
-
-    let userMsgText = chatInputText.trim();
-    if (quotedMessage) {
-      const senderName = quotedMessage.sender === "user" ? "我" : (activeCharacter.remark || activeCharacter.name);
-      let shortContent = quotedMessage.content;
-      if (shortContent.startsWith("[文件]")) {
-        const parts = shortContent.split("|");
-        shortContent = `[文件] ${parts[1] || "笔记"}`;
-      } else if (shortContent.startsWith("[红包]")) {
-        shortContent = "[红包]";
-      } else if (shortContent.startsWith("[位置]")) {
-        shortContent = "[位置]";
-      } else if (shortContent.startsWith("[音乐]")) {
-        shortContent = "[音乐]";
-      }
-      userMsgText = `「引用 ${senderName}：${shortContent}」\n${userMsgText}`;
-      setQuotedMessage(null);
-    }
-
-    setChatInputText("");
-
-    const userMsg = createUserTextMessage({
-      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      characterId: activeChatCharId,
-      content: userMsgText,
-      timestamp: Date.now(),
-      isOffline: isOfflineModeActive ? true : undefined,
-      isNarration: isOfflineModeActive ? isInputNarration : undefined
-    });
-
-    onSendMessage(userMsg);
-
-    if (isOfflineModeActive && activeOfflineStoryId && onSaveOfflineStory) {
-      const targetStory = offlineStories.find(s => s.id === activeOfflineStoryId);
-      if (targetStory) {
-        const updatedStory = {
-          ...targetStory,
-          messages: [...targetStory.messages, userMsg],
-          updatedAt: Date.now()
-        };
-        onSaveOfflineStory(updatedStory);
-      }
-    }
-  };
-
-  // Handle Send Message and Trigger AI reply
-  const handleSendAndReply = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!activeChatCharId || !activeCharacter) return;
-
-    if (!chatInputText.trim()) {
-      // If user input is empty, trigger AI response directly (continue the story)
-      generateResponseForUserMessage(null, currentChatMessages);
-      return;
-    }
-
-    const rawUserRequest = chatInputText.trim();
-    const pendingImageRequest = !isOfflineModeActive ? getPendingExplicitImageRequest(rawUserRequest, currentChatMessages) : null;
-    const shouldGenerateExplicitImage = Boolean(pendingImageRequest);
-    let userMsgText = rawUserRequest;
-    if (quotedMessage) {
-      const senderName = quotedMessage.sender === "user" ? "我" : (activeCharacter.remark || activeCharacter.name);
-      let shortContent = quotedMessage.content;
-      if (shortContent.startsWith("[文件]")) {
-        const parts = shortContent.split("|");
-        shortContent = `[文件] ${parts[1] || "笔记"}`;
-      } else if (shortContent.startsWith("[红包]")) {
-        shortContent = "[红包]";
-      } else if (shortContent.startsWith("[位置]")) {
-        shortContent = "[位置]";
-      } else if (shortContent.startsWith("[音乐]")) {
-        shortContent = "[音乐]";
-      }
-      userMsgText = `「引用 ${senderName}：${shortContent}」\n${userMsgText}`;
-      setQuotedMessage(null);
-    }
-
-    setChatInputText("");
-
-    const userMsg = createUserTextMessage({
-      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      characterId: activeChatCharId,
-      content: userMsgText,
-      timestamp: Date.now(),
-      isOffline: isOfflineModeActive ? true : undefined,
-      isNarration: isOfflineModeActive ? isInputNarration : undefined
-    });
-
-    onSendMessage(userMsg);
-
-    // An explicit image request is an image-only turn: the real image must be
-    // persisted before any character text is allowed. On failure the visible
-    // toast carries the sanitized proxy error; never fall through to a fake
-    // “sending a photo” text reply.
-    if (shouldGenerateExplicitImage) {
-      await generateAndSendCharacterImage("explicit-user-text", pendingImageRequest!);
-      return;
-    }
-
-    let currentMessagesWithNewUser = currentChatMessages;
-    if (isOfflineModeActive && activeOfflineStoryId && onSaveOfflineStory) {
-      const targetStory = offlineStories.find(s => s.id === activeOfflineStoryId);
-      if (targetStory) {
-        const updatedStory = {
-          ...targetStory,
-          messages: [...targetStory.messages, userMsg],
-          updatedAt: Date.now()
-        };
-        onSaveOfflineStory(updatedStory);
-        currentMessagesWithNewUser = updatedStory.messages;
-      }
-    } else {
-      currentMessagesWithNewUser = [...currentChatMessages, userMsg];
-    }
-
-    generateResponseForUserMessage(userMsg, currentMessagesWithNewUser);
-  };
 
   useEffect(() => {
     if (!pendingForumShareMessageId || !activeRelationship || !activeCharacter || activeCharacter.isGroupChat) return;

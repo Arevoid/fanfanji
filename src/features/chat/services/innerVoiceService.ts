@@ -2,15 +2,17 @@ import type { Character, InnerVoiceRecord, Message, UserSettings } from "../../.
 import { apiChat } from "../../../utils/apiHelper";
 import { buildInnerVoicePrompt } from "../../../domain/prompt/innerVoicePrompt";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
+import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 
 export interface GenerateInnerVoiceInput {
   character: Character;
   relationship?: CharacterRelationship;
   triggerMessage: Message;
   recentMessages: Message[];
-  conversationId: string;
+  conversationId?: string;
   relationId?: string;
   groupId?: string;
+  context?: ChatRuntimeContext;
   settings: UserSettings;
 }
 
@@ -33,15 +35,18 @@ function parseInnerVoice(text: string): { content: string; emotionalState: strin
 
 /** Generates one standalone record. Persistence is intentionally owned by the repository caller. */
 export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promise<InnerVoiceRecord | null> {
+  const relationId = input.relationId ?? input.context?.relationId ?? undefined;
+  const groupId = input.groupId ?? input.context?.groupId ?? undefined;
+  const conversationId = input.conversationId ?? input.context?.conversationId ?? undefined;
   // A record is valid only when it has an explicit direct or group boundary.
-  if (!input.relationId && !input.groupId) return null;
+  if ((!relationId && !groupId) || conversationId === undefined) return null;
   const response = await apiChat({
     message: "请根据指令生成这一次的角色心声。",
     history: [],
     systemInstruction: buildInnerVoicePrompt({
       character: input.character,
       relationship: input.relationship,
-      relationId: input.relationId,
+      relationId,
       triggerMessage: input.triggerMessage,
       recentMessages: input.recentMessages,
       userName: input.settings.name,
@@ -58,10 +63,10 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
   return {
     id: `inner-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     characterId: input.character.id,
-    relationId: input.relationId,
-    groupId: input.groupId,
+    relationId,
+    groupId,
     messageId: input.triggerMessage.id,
-    conversationId: input.conversationId,
+    conversationId,
     triggerMessageSummary: input.triggerMessage.content.slice(0, 120),
     emotionalState: parsed.emotionalState,
     // Keep the legacy field populated for old consumers; UI uses emotionalState for new records.
