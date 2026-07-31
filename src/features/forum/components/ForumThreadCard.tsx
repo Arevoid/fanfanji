@@ -41,7 +41,7 @@ export function ForumThreadCard({
             </div>
             <time className="text-[10px] text-[var(--text-tertiary)]">{formattedTime}</time>
           </div>
-          {metrics.hasAuthorUpdate && (
+          {metrics.hasUnreadAuthorUpdate && (
             <span className="shrink-0 rounded-full bg-[var(--badge-muted-bg)] px-2 py-1 text-[10px] font-medium text-[var(--badge-muted-text)]">
               楼主更新
             </span>

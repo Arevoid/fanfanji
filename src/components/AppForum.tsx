@@ -976,7 +976,7 @@ export default function AppForum({
         visitHistory: visitHistory.filter((item) => item.threadId !== deleteTarget.threadId),
         likeHistory: likeHistory.filter((item) => item.threadId !== deleteTarget.threadId),
         notifications: notifications.filter((item) => item.threadId !== deleteTarget.threadId),
-      });
+      }, [], { replaceReplies: true });
       if (result.success) {
         deleteForumTranslationsForThread(
           activeIdentity.id,
@@ -1193,24 +1193,31 @@ export default function AppForum({
             </div>
           ) : (
             <div className="mt-3 overflow-hidden border-y border-slate-100 bg-white">
-              {visibleThreads.map((thread) => (
-                <div key={thread.id}>
-                  <ForumThreadCard
-                    thread={thread}
-                    metrics={selectForumThreadMetrics(thread, replies)}
-                    formattedTime={formatForumTime(selectForumThreadMetrics(thread, replies).updatedAt)}
-                    liked={thread.likedByIdentityIds.includes(activeIdentity.id)}
-                    onOpen={() => openThread(thread)}
-                    onToggleLike={() => handleToggleThreadLike(thread.id)}
-                  />
+              {visibleThreads.map((thread) => {
+                const metrics = selectForumThreadMetrics(
+                  thread,
+                  replies,
+                  visitHistory.find((visit) => visit.threadId === thread.id)?.lastVisitedAt,
+                );
+                return (
+                  <div key={thread.id}>
+                    <ForumThreadCard
+                      thread={thread}
+                      metrics={metrics}
+                      formattedTime={formatForumTime(metrics.updatedAt)}
+                      liked={thread.likedByIdentityIds.includes(activeIdentity.id)}
+                      onOpen={() => openThread(thread)}
+                      onToggleLike={() => handleToggleThreadLike(thread.id)}
+                    />
                   {waitingReplyThreadIds.includes(thread.id) && (
                     <div className="flex items-center gap-1.5 border-t border-slate-50 px-4 py-2 text-[10px] text-slate-400">
                       <LoaderCircle className="h-3 w-3 animate-spin" />
                       正在等待回复…
                     </div>
                   )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
               {identityThreads.length > visibleThreads.length && <button type="button" onClick={() => setVisibleThreadCount((count) => count + FORUM_HOME_PAGE_SIZE)} className="w-full border-t border-slate-100 py-4 text-xs font-medium text-slate-500">加载更多</button>}
             </div>
           )}

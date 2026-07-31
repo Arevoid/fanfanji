@@ -47,6 +47,11 @@ export interface ForumIdentitySnapshot extends ForumStateSnapshot {
 export type ForumStateMutation = Partial<Pick<ForumStateSnapshot,
   "threads" | "replies" | "shares" | "generationTasks" | "actorStates" | "activityTasks" | "profiles" | "visitHistory" | "likeHistory" | "notifications" | "dmConversations" | "dmMessages" | "dmTasks">>;
 
+export interface ForumMutationOptions {
+  /** Explicit destructive/full-state writes may replace the reply collection. */
+  replaceReplies?: boolean;
+}
+
 const forumListeners = new Set<() => void>();
 const forumMutationListeners = new Set<(event: ForumMutationEvent) => void>();
 const identitySnapshotCache = new Map<string, { revision: number; snapshot: ForumIdentitySnapshot }>();
@@ -570,10 +575,25 @@ export const notifyForumStateChanged = (): ForumStateSnapshot => {
 };
 
 /**
+ * Merge a reply collection by stable reply ID. Async activity and user actions
+ * can both start from an older snapshot; preserving IDs that appeared after
+ * that snapshot prevents a late whole-array write from erasing new replies.
+ */
+const mergeForumReplies = (current: readonly ForumReply[], incoming: readonly ForumReply[]): ForumReply[] => {
+  const incomingById = new Map(incoming.map((reply) => [reply.id, reply]));
+  const currentIds = new Set(current.map((reply) => reply.id));
+  const merged = current.map((reply) => incomingById.get(reply.id) || reply);
+  for (const reply of incoming) {
+    if (!currentIds.has(reply.id)) merged.push(reply);
+  }
+  return merged;
+};
+
+/**
  * Writes every supplied collection as one logical mutation. Subscribers only
  * observe a new revision after every storage write has succeeded.
  */
-export const commitForumMutation = (mutation: ForumStateMutation, events: readonly ForumMutationEvent[] = []): {
+export const commitForumMutation = (mutation: ForumStateMutation, events: readonly ForumMutationEvent[] = [], options: ForumMutationOptions = {}): {
   success: boolean;
   snapshot?: ForumStateSnapshot;
   error?: StorageWriteResult["error"];
@@ -581,7 +601,9 @@ export const commitForumMutation = (mutation: ForumStateMutation, events: readon
   const current = getForumStateSnapshot();
   const next: ForumStateMutation = {
     ...(mutation.threads ? { threads: mutation.threads } : {}),
-    ...(mutation.replies ? { replies: mutation.replies } : {}),
+    ...(mutation.replies ? {
+      replies: options.replaceReplies ? mutation.replies : mergeForumReplies(current.replies, mutation.replies),
+    } : {}),
     ...(mutation.shares ? { shares: mutation.shares } : {}),
     ...(mutation.generationTasks ? { generationTasks: mutation.generationTasks } : {}),
     ...(mutation.actorStates ? { actorStates: mutation.actorStates } : {}),
@@ -671,7 +693,7 @@ export const saveForumThreads = (threads: ForumThread[]): StorageWriteResult => 
 };
 
 export const saveForumReplies = (replies: ForumReply[]): StorageWriteResult => {
-  const result = commitForumMutation({ replies });
+  const result = commitForumMutation({ replies }, [], { replaceReplies: true });
   return { success: result.success, ...(result.error ? { error: result.error } : {}) };
 };
 
@@ -697,7 +719,7 @@ export const cleanupForumIdentityData = (ownerIdentityId: string): StorageWriteR
     dmConversations: current.dmConversations.filter((item) => item.ownerIdentityId !== ownerIdentityId),
     dmMessages: current.dmMessages.filter((item) => item.ownerIdentityId !== ownerIdentityId),
     dmTasks: current.dmTasks.filter((item) => item.ownerIdentityId !== ownerIdentityId),
-  });
+  }, [], { replaceReplies: true });
   return { success: result.success, ...(result.error ? { error: result.error } : {}) };
 };
 
@@ -719,7 +741,7 @@ export const compactPersistedForumState = (now = Date.now()): { success: boolean
   const current = getForumStateSnapshot();
   const beforeBytes = estimateForumStorageUsage(current).bytes;
   const compacted = compactForumState({ ...current, now });
-  const result = commitForumMutation(compacted);
+  const result = commitForumMutation(compacted, [], { replaceReplies: true });
   return { success: result.success, beforeBytes, afterBytes: result.success ? estimateForumStorageUsage(result.snapshot).bytes : beforeBytes, ...(result.error ? { error: result.error } : {}) };
 };
 
@@ -745,7 +767,7 @@ export const repairForumState = (): StorageWriteResult => {
     dmConversations: unique(current.dmConversations, (item) => item.id),
     dmMessages: unique(current.dmMessages, (item) => item.id).filter((item) => conversationIds.has(item.conversationId)),
     dmTasks: unique(current.dmTasks, (item) => item.id).filter((item) => conversationIds.has(item.conversationId)),
-  });
+  }, [], { replaceReplies: true });
   return { success: result.success, ...(result.error ? { error: result.error } : {}) };
 };
 
@@ -759,13 +781,13 @@ export const saveForumData = (threads: ForumThread[], replies: ForumReply[]): {
   replies: StorageWriteResult;
   success: boolean;
 } => {
-  const result = commitForumMutation({ threads, replies });
+  const result = commitForumMutation({ threads, replies }, [], { replaceReplies: true });
   const writeResult: StorageWriteResult = { success: result.success, ...(result.error ? { error: result.error } : {}) };
   return { threads: writeResult, replies: writeResult, success: result.success };
 };
 
-export const saveForumDataAtomically = (threads: ForumThread[], replies: ForumReply[]): { success: boolean } =>
-  ({ success: commitForumMutation({ threads, replies }).success });
+export const saveForumDataAtomically = (threads: ForumThread[], replies: ForumReply[], options: ForumMutationOptions = {}): { success: boolean } =>
+  ({ success: commitForumMutation({ threads, replies }, [], options).success });
 
 export const loadForumDataSafely = (input: {
   validRelationIds?: ReadonlySet<string>;
@@ -778,7 +800,7 @@ export const loadForumDataSafely = (input: {
     replies: loadedReplies,
     protectedNames: input.protectedNames,
   });
-  if (safe.changed) saveForumDataAtomically(safe.threads, safe.replies);
+  if (safe.changed) saveForumDataAtomically(safe.threads, safe.replies, { replaceReplies: true });
   return {
     threads: safe.threads,
     replies: safe.replies,

@@ -47,6 +47,33 @@ assert.equal(commitForumMutation({ replies: tombstoned }).success, true);
 assert.equal(selectForumThreadMetrics(getForumSnapshotForIdentity("a").threads[0], getForumSnapshotForIdentity("a").replies).effectiveReplyCount, 0);
 assert.equal(selectForumThreadMetrics(getForumSnapshotForIdentity("a").threads[0], getForumSnapshotForIdentity("a").replies).maxFloor, 2);
 
+const staleReplies = getForumStateSnapshot().replies;
+const userReplyAfterSnapshot = createForumReply({
+  id: "reply-user-after-snapshot",
+  thread: threadA,
+  existingReplies: staleReplies,
+  identity: identityA,
+  body: "用户回复",
+  anonymous: false,
+  now: 30,
+});
+const activityReplyAfterSnapshot = createForumReply({
+  id: "reply-activity-after-snapshot",
+  thread: threadA,
+  existingReplies: staleReplies,
+  identity: identityA,
+  body: "活动回复",
+  anonymous: false,
+  now: 31,
+});
+assert.equal(commitForumMutation({ replies: [...staleReplies, userReplyAfterSnapshot] }).success, true);
+assert.equal(commitForumMutation({ replies: [...staleReplies, activityReplyAfterSnapshot] }).success, true);
+assert.deepEqual(
+  new Set(getForumStateSnapshot().replies.map((item) => item.id)),
+  new Set([...staleReplies, userReplyAfterSnapshot, activityReplyAfterSnapshot].map((item) => item.id)),
+  "stale reply snapshots merge by stable ID instead of erasing concurrently added replies",
+);
+
 localStorageStub.setItem("phone_forum_threads", JSON.stringify([threadB]));
 notifyForumStateChanged();
 assert.deepEqual(getForumSnapshotForIdentity("a").threads, [], "external restore notification immediately switches identity snapshot");

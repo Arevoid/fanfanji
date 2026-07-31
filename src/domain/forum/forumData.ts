@@ -11,6 +11,7 @@ export interface ForumThreadMetrics {
   latestReplyAt?: number;
   latestAuthorUpdateAt?: number;
   hasAuthorUpdate: boolean;
+  hasUnreadAuthorUpdate: boolean;
   updatedAt: number;
   lastReplyExcerpt?: string;
 }
@@ -75,6 +76,7 @@ export const normalizeForumThreadEngagement = (
 export const selectForumThreadMetrics = (
   thread: ForumThread,
   replies: readonly ForumReply[],
+  lastVisitedAt?: number,
 ): ForumThreadMetrics => {
   const threadReplies = replies
     .filter((reply) => reply.threadId === thread.id && reply.ownerIdentityId === thread.ownerIdentityId)
@@ -96,6 +98,7 @@ export const selectForumThreadMetrics = (
     ...(latest ? { latestReplyAt: latest.occurredAt } : {}),
     ...(latestAuthorUpdate ? { latestAuthorUpdateAt: latestAuthorUpdate.occurredAt } : {}),
     hasAuthorUpdate: Boolean(latestAuthorUpdate),
+    hasUnreadAuthorUpdate: Boolean(latestAuthorUpdate && (lastVisitedAt === undefined || latestAuthorUpdate.occurredAt > lastVisitedAt)),
     updatedAt: activityAt,
     ...(latest ? { lastReplyExcerpt: latest.body.replace(/\s+/g, " ").trim().slice(0, 120) } : {}),
   };

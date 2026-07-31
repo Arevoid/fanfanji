@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { selectForumThreadMetrics } from "../src/domain/forum/forumData";
+import { recordForumVisit } from "../src/domain/forum/forumProfileData";
 import type { ForumReply, ForumThread } from "../src/types";
 
 const thread: ForumThread = {
@@ -34,11 +35,24 @@ const authorUpdate: ForumReply = {
   updatedAt: 200,
 };
 assert.equal(selectForumThreadMetrics(thread, [authorUpdate]).hasAuthorUpdate, true);
+assert.equal(selectForumThreadMetrics(thread, [authorUpdate]).hasUnreadAuthorUpdate, true);
+assert.equal(selectForumThreadMetrics(thread, [authorUpdate], 199).hasUnreadAuthorUpdate, true);
+assert.equal(selectForumThreadMetrics(thread, [authorUpdate], 200).hasUnreadAuthorUpdate, false);
+assert.equal(selectForumThreadMetrics(thread, [authorUpdate], 201).hasUnreadAuthorUpdate, false);
+const visitsAfterOpeningThread = recordForumVisit([], "identity-1", thread, [authorUpdate]);
+assert.equal(
+  selectForumThreadMetrics(thread, [authorUpdate], visitsAfterOpeningThread[0]?.lastVisitedAt).hasUnreadAuthorUpdate,
+  false,
+  "opening a thread records a visit that clears its current author-update badge",
+);
 assert.equal(selectForumThreadMetrics(thread, [{ ...authorUpdate, isDeleted: true }]).hasAuthorUpdate, false);
+assert.equal(selectForumThreadMetrics(thread, [{ ...authorUpdate, isDeleted: true }]).hasUnreadAuthorUpdate, false);
 
 const card = readFileSync(new URL("../src/features/forum/components/ForumThreadCard.tsx", import.meta.url), "utf8");
-assert.match(card, /metrics\.hasAuthorUpdate/);
+const appForum = readFileSync(new URL("../src/components/AppForum.tsx", import.meta.url), "utf8");
+assert.match(card, /metrics\.hasUnreadAuthorUpdate/);
 assert.match(card, /楼主更新/);
 assert.match(card, /aria-pressed=\{liked\}/);
+assert.match(appForum, /visitHistory\.find\(\(visit\) => visit\.threadId === thread\.id\)\?\.lastVisitedAt/);
 
 console.log("PASS forum cards expose the author-update badge and preserve live/deleted state");
