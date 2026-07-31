@@ -72,11 +72,13 @@ export function formatMomentTemporalContext(context: MomentTemporalContext, char
   const birthdayRule = birthday
     ? `The character's recorded birthday is ${pad(birthday.month)}-${pad(birthday.day)}. Only call it "today" when the occurrence date has that month and day.`
     : "Do not claim that today is the character's birthday unless a recorded birthday matches the occurrence date.";
+  const occurrenceTime = `${pad(context.generatedAt.getHours())}:${pad(context.generatedAt.getMinutes())}`;
 
   return `[MOMENT OCCURRENCE-TIME CONTEXT — HIGHEST PRIORITY]
-This Moment occurred and was published at: ${context.currentDate}.
+This Moment occurred and was published at: ${context.currentDate} ${occurrenceTime} (local time).
 Current season: ${context.currentSeason}. Current solar term: ${context.currentSolarTerm}.
-Write the post as if this occurrence time is "today" and "now". Do not use the real app-open time. Use this date for season, solar terms, holidays, and birthdays.
+Write the post as if this occurrence time is "today" and "now". Do not use the real app-open time. Use this date and clock time for day-period references, season, solar terms, holidays, and birthdays.
+Do not refer to a later part of the same day as if it has already happened: for example, do not write "今晚" or "今天晚上" before evening, and do not write "今天下午" before afternoon.
 Historical chat and memory are dated past events only; they must not replace this occurrence time. Offline-story time is fictional and is valid only inside that story.
 Do not describe a season, solar term, holiday, or weather scene that conflicts with this occurrence time unless explicitly referring to a clearly marked historical memory.
 ${birthdayRule}`;
@@ -114,6 +116,17 @@ export function findMomentTemporalConflicts(
 ): string[] {
   const conflicts: string[] = [];
   const allowedSeasonWords = new Set(SEASONAL_WORDS[context.currentSeason]);
+  const occurrenceHour = context.generatedAt.getHours();
+
+  if (occurrenceHour < 17 && /(?:今晚|今天晚上|今夜)/.test(content)) {
+    conflicts.push("evening reference is later than the Moment occurrence time");
+  }
+  if (occurrenceHour < 12 && /(?:今天下午|今下午)/.test(content)) {
+    conflicts.push("afternoon reference is later than the Moment occurrence time");
+  }
+  if (occurrenceHour < 11 && /(?:今天中午|今中午)/.test(content)) {
+    conflicts.push("noon reference is later than the Moment occurrence time");
+  }
 
   for (const [season, words] of Object.entries(SEASONAL_WORDS) as [MomentSeason, readonly string[]][]) {
     if (season === context.currentSeason) continue;

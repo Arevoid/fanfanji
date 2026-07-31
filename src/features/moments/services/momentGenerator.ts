@@ -45,16 +45,31 @@ export function calculateCharacterMomentOccurredAt(input: CharacterMomentOccurre
     ? Math.min(now, lastMomentAt + Math.max(0, input.intervalMs))
     : Math.max(scheduledAt, timelineAnchor);
   const earliest = Math.min(now, eligibleAt || now);
-  const latest = Math.max(earliest, now - 1_000);
+  const currentDate = new Date(now);
+  const currentHour = currentDate.getHours();
+  const currentDaypartStart = currentHour >= 17
+    ? 17
+    : currentHour >= 12
+      ? 12
+      : currentHour >= 6
+        ? 6
+        : 0;
+  if (currentDaypartStart > 0) {
+    currentDate.setHours(currentDaypartStart, 0, 0, 0);
+  }
+  const daypartEarliest = currentDaypartStart > 0
+    ? Math.max(earliest, currentDate.getTime())
+    : earliest;
+  const latest = Math.max(daypartEarliest, now - 1_000);
 
-  if (now - earliest <= 15 * 60 * 1000) return now;
+  if (now - daypartEarliest <= 15 * 60 * 1000) return now;
 
-  const spread = latest - earliest;
-  let occurredAt = earliest + Math.floor(spread * (0.2 + stableFraction(input.relationId) * 0.6));
-  const occupied = new Set((input.occupiedTimestamps || []).filter((timestamp) => timestamp >= earliest && timestamp <= latest));
+  const spread = latest - daypartEarliest;
+  let occurredAt = daypartEarliest + Math.floor(spread * (0.2 + stableFraction(input.relationId) * 0.6));
+  const occupied = new Set((input.occupiedTimestamps || []).filter((timestamp) => timestamp >= daypartEarliest && timestamp <= latest));
   while (occupied.has(occurredAt) && occurredAt < latest) occurredAt += 1_000;
-  while (occupied.has(occurredAt) && occurredAt > earliest) occurredAt -= 1_000;
-  return Math.min(now, Math.max(earliest, occurredAt));
+  while (occupied.has(occurredAt) && occurredAt > daypartEarliest) occurredAt -= 1_000;
+  return Math.min(now, Math.max(daypartEarliest, occurredAt));
 }
 
 export async function requestCharacterMoment(input: {
