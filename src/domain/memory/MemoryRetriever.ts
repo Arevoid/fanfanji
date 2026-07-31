@@ -1,6 +1,11 @@
 import type { MemoryItem } from "../../types";
 
-/** Preserves the legacy keyword-overlap and timestamp ranking exactly. */
+/**
+ * Preserves the legacy keyword-overlap and timestamp ranking exactly while
+ * keeping relationship-scoped records isolated. An omitted relationId is a
+ * legacy/unscoped read and may only see legacy records that are also missing a
+ * relationId; it must never act as a wildcard over every relationship.
+ */
 export function retrieveRelevantMemories(
   memories: readonly MemoryItem[],
   characterId: string,
@@ -8,7 +13,10 @@ export function retrieveRelevantMemories(
   topK: number = 5,
   relationId?: string,
 ): MemoryItem[] {
-  const characterMemories = memories.filter((memory) => memory.characterId === characterId && (!relationId || memory.relationId === relationId));
+  const characterMemories = memories.filter((memory) =>
+    memory.characterId === characterId
+    && (relationId ? memory.relationId === relationId : !memory.relationId),
+  );
   if (characterMemories.length === 0) return [];
 
   if (!userQuery.trim()) return characterMemories.slice(0, topK);

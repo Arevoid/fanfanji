@@ -17,6 +17,7 @@ import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from 
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { buildOfflineHandoffPromptBlock } from "../domain/memory/offlineMemorySync";
+import { createOocCorrectionMemory } from "../domain/memory/oocMemory";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
@@ -9817,16 +9818,19 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
               <button
                 onClick={() => {
                   if (!oocCommentText.trim()) return;
-                  
-                  const oocMemory: MemoryItem = {
-                    id: "ooc-" + Date.now(),
-                    characterId: activeChatCharId || "",
-                    content: `[OOC 修正记录] 原回答：“${showOocCommentModal.content}” 被指出不符合人设。用户修正意见：${oocCommentText.trim()}`,
-                    timestamp: Date.now(),
-                    importance: 8,
-                  };
-                  
-                  onSaveMemories(MemoryService.mergeMemories(memories, [oocMemory]));
+
+                  const relationId = activeRelationship?.id;
+                  if (relationId && activeChatCharId) {
+                    const oocMemory = createOocCorrectionMemory({
+                      id: "ooc-" + Date.now(),
+                      characterId: activeChatCharId,
+                      relationId,
+                      originalResponse: showOocCommentModal.content,
+                      feedback: oocCommentText.trim(),
+                      timestamp: Date.now(),
+                    });
+                    onSaveMemories(MemoryService.mergeMemories(memories, [oocMemory]));
+                  }
                   
                   const comment = oocCommentText.trim();
                   setShowOocCommentModal(null);
