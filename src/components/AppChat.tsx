@@ -11,6 +11,7 @@ import { createDirectReplyCandidates } from "../features/chat/services/directCha
 import { createRegeneratedReplyCandidates } from "../features/chat/services/regenerateService";
 import { generateGroupReplyCandidates } from "../features/chat/services/groupChatService";
 import { generateProactiveReplyCandidates } from "../features/chat/services/proactiveMessageService";
+import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
@@ -1131,6 +1132,11 @@ export default function AppChat({
     ? m.relationId === activeRelationship.id
     : m.characterId === activeChatCharId && activeCharacter?.isGroupChat));
   const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const activeVoiceCallScope = resolveDirectVoiceCallScope({
+    activeIdentityId,
+    relationship: activeRelationship,
+    isGroupChat: Boolean(activeCharacter?.isGroupChat),
+  });
   const forumSharesForCurrentIdentity = loadForumShares().value.filter((share) =>
     share.ownerIdentityId === activeIdentityId);
   const diarySharesForCurrentIdentity = loadDiaryShares().value.filter((share) =>
@@ -1714,6 +1720,7 @@ export default function AppChat({
   const [callStartTime, setCallStartTime] = useState<number>(0);
   const [callingInputText, setCallingInputText] = useState("");
   const [callTranscript, setCallTranscript] = useState<CallTranscriptItem[]>([]);
+  const [voiceCallRelationId, setVoiceCallRelationId] = useState<string | null>(null);
   const callTranscriptEndRef = useRef<HTMLDivElement | null>(null);
   const [callRecordDetail, setCallRecordDetail] = useState<ReturnType<typeof parseCallRecord> | null>(null);
   const [redPacketAmount, setRedPacketAmount] = useState("8.88");
@@ -2134,6 +2141,21 @@ export default function AppChat({
     return () => clearInterval(timer);
   }, [activeAttachModal, callingStatus]);
 
+  // Calls are direct-relationship sessions. Never let a session started by a
+  // previous identity remain open after the active relationship changes.
+  useEffect(() => {
+    if (activeAttachModal !== "calling" || !voiceCallRelationId) return;
+    if (isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) return;
+
+    if (activeTtsAudio) activeTtsAudio.pause();
+    callSpeechQueueRef.current = [];
+    isCallSpeechPlayingRef.current = false;
+    setCallingStatus("ended");
+    setCallingInputText("");
+    setActiveAttachModal(null);
+    setVoiceCallRelationId(null);
+  }, [activeAttachModal, activeTtsAudio, activeVoiceCallScope?.relationId, voiceCallRelationId]);
+
   useEffect(() => {
     if (activeAttachModal !== "calling" || callingStatus !== "connected") return;
     requestAnimationFrame(() => {
@@ -2156,8 +2178,9 @@ export default function AppChat({
   }, [activeAttachModal, callingStatus, isIncomingCall]);
 
   const beginVoiceCall = (incoming: boolean) => {
-    if (!activeCharacter || activeCharacter.isGroupChat) return;
+    if (!activeCharacter || activeCharacter.isGroupChat || !activeVoiceCallScope) return;
     setIsIncomingCall(incoming);
+    setVoiceCallRelationId(activeVoiceCallScope.relationId);
     setCallingStatus("ringing");
     setCallingDuration(0);
     setCallStartTime(0);
@@ -2168,34 +2191,38 @@ export default function AppChat({
   };
 
   const endVoiceCall = () => {
-    if (!activeChatCharId || callingStatus !== "connected") {
+    if (!activeChatCharId || callingStatus !== "connected" || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
       setActiveAttachModal(null);
+      setVoiceCallRelationId(null);
       return;
     }
     const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
     const secs = (callingDuration % 60).toString().padStart(2, "0");
-    onSendMessageRaw({
+    onSendMessageRaw(createVoiceCallRecordMessage({
       id: `call-record-${Date.now()}`,
       characterId: activeChatCharId,
-      sender: "user",
+      scope: activeVoiceCallScope,
       content: `[通话记录]|语音通话|${mins}:${secs}|${encodeURIComponent(JSON.stringify(callTranscript))}`,
       timestamp: Date.now(),
-    });
+    }));
     if (activeTtsAudio) activeTtsAudio.pause();
     callSpeechQueueRef.current = [];
     isCallSpeechPlayingRef.current = false;
     setCallingStatus("ended");
     setCallingInputText("");
     setActiveAttachModal(null);
+    setVoiceCallRelationId(null);
   };
 
   const sendVoiceCallMessage = () => {
     const text = callingInputText.trim();
-    if (!activeChatCharId || !text) return;
+    if (!activeChatCharId || !text || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
       characterId: activeChatCharId,
+      relationId: activeVoiceCallScope.relationId,
+      conversationId: activeVoiceCallScope.conversationId,
       sender: "user",
       content: text,
       timestamp: Date.now(),
@@ -2209,17 +2236,17 @@ export default function AppChat({
   // The cooldown keeps this feeling spontaneous rather than intrusive.
   const proactiveCallCooldownRef = useRef<Record<string, number>>({});
   useEffect(() => {
-    if (!activeChatCharId || !activeCharacter || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
+    if (!activeChatCharId || !activeCharacter || !activeVoiceCallScope || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
     const timer = setInterval(() => {
-      if (activeAttachModal || isOfflineStoryActiveFor(activeChatCharId)) return;
-      const callCooldownKey = activeRelationship?.id || activeChatCharId;
+      if (activeAttachModal || isOfflineStoryActiveFor(activeVoiceCallScope.relationId)) return;
+      const callCooldownKey = activeVoiceCallScope.relationId;
       const lastCallAt = proactiveCallCooldownRef.current[callCooldownKey] || 0;
       if (Date.now() - lastCallAt < 5 * 60 * 1000 || Math.random() >= 0.18) return;
       proactiveCallCooldownRef.current[callCooldownKey] = Date.now();
       beginVoiceCall(true);
     }, 60 * 1000);
     return () => clearInterval(timer);
-  }, [activeChatCharId, activeCharacter, activeAttachModal]);
+  }, [activeChatCharId, activeCharacter?.enableProactiveCall, activeCharacter?.isGroupChat, activeAttachModal, activeIdentityId, activeVoiceCallScope?.relationId]);
 
   const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return;
@@ -7788,6 +7815,7 @@ ${instructionsPrompt}`;
                       <button
                         onClick={() => {
                           setActiveAttachModal(null);
+                          setVoiceCallRelationId(null);
                         }}
                         className="flex flex-col items-center gap-2"
                       >
@@ -7817,6 +7845,7 @@ ${instructionsPrompt}`;
                       <button
                         onClick={() => {
                           setActiveAttachModal(null);
+                          setVoiceCallRelationId(null);
                         }}
                         className="flex flex-col items-center gap-2"
                       >
