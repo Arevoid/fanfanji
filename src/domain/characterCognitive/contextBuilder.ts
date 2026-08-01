@@ -8,6 +8,7 @@ import {
 } from "./characterCognitiveTypes";
 import type { RelationshipTimeline } from "../characterLife/relationshipTimelineTypes";
 import type { RelationshipState } from "../characterLife/relationshipStateTypes";
+import { classifyTimeOfDay, getCurrentRoutineState } from "../characterLife/characterRoutine/characterRoutinePolicy";
 import { selectKnownFacts, selectRecentEvents } from "./contextPolicy";
 
 function assertRelationshipScope(input: BuildCharacterCognitiveContextInput): CharacterCognitiveIdentityScope {
@@ -52,6 +53,14 @@ function projectTimeContext(input: BuildCharacterCognitiveContextInput): Charact
   };
 }
 
+function projectRoutineContext(input: BuildCharacterCognitiveContextInput) {
+  if (!input.routine) return undefined;
+  return {
+    period: classifyTimeOfDay(input.timeContext.now, input.routine.timezone),
+    state: getCurrentRoutineState(input.routine, input.timeContext.now),
+  };
+}
+
 const matchesCognitiveScope = (
   value: Pick<RelationshipTimeline, "relationId" | "characterId" | "userIdentityId"> | RelationshipState,
   scope: CharacterCognitiveIdentityScope,
@@ -84,6 +93,7 @@ export function buildCharacterCognitiveContext(
   const scope = assertRelationshipScope(input);
   const { relation } = input;
   const relationshipProjection = projectRelationshipTimeline(input.relationshipTimeline, scope);
+  const routineContext = projectRoutineContext(input);
 
   return {
     schemaVersion: CHARACTER_COGNITIVE_CONTEXT_SCHEMA_VERSION,
@@ -105,6 +115,7 @@ export function buildCharacterCognitiveContext(
     knownFacts: selectKnownFacts(input.memories, scope),
     recentEvents: selectRecentEvents(input.events, scope),
     temporalContext: projectTimeContext(input),
+    ...(routineContext ? { routineContext } : {}),
     knowledgeBoundary: {
       known: [...input.knowledgeBoundary.known],
       unknown: [...input.knowledgeBoundary.unknown],

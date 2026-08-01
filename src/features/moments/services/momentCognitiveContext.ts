@@ -1,6 +1,9 @@
 import { buildCharacterCognitiveContext } from "../../../domain/characterCognitive/contextBuilder";
 import { createDirectChatKnowledgeBoundary } from "../../../domain/characterCognitive/contextPolicy";
 import type {
+  CharacterRoutine,
+} from "../../../domain/characterLife/characterRoutine/characterRoutineTypes";
+import type {
   CharacterCognitiveContext,
   CharacterCognitiveEventCandidate,
 } from "../../../domain/characterCognitive/characterCognitiveTypes";
@@ -26,6 +29,7 @@ export function buildMomentCognitiveContext(input: {
   memories: readonly MemoryItem[];
   events: readonly CharacterEvent[];
   occurredAt: number;
+  routine?: CharacterRoutine;
 }): CharacterCognitiveContext {
   return buildCharacterCognitiveContext({
     character: input.character,
@@ -38,5 +42,6 @@ export function buildMomentCognitiveContext(input: {
     timeContext: { now: input.occurredAt },
     knowledgeBoundary: createDirectChatKnowledgeBoundary(),
     conversationId: input.relationship.conversationId,
+    routine: input.routine,
   });
 }

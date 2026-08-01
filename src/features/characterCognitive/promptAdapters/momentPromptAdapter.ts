@@ -4,7 +4,10 @@ import {
   selectMomentPublicFacts,
 } from "./promptVisibilityPolicy";
 import type { MomentPromptAdapterOptions, MomentPromptContext } from "./types";
-import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import type {
+  CharacterCognitiveContext,
+  CharacterCognitiveRoutineContext,
+} from "../../../domain/characterCognitive/characterCognitiveTypes";
 
 const DEFAULT_PUBLIC_HISTORY_LIMIT = 8;
 const DEFAULT_PUBLIC_COMMENT_LIMIT = 12;
@@ -14,6 +17,22 @@ const bounded = (requested: number | undefined, fallback: number): number =>
   Math.max(0, Math.floor(requested ?? fallback));
 
 const compactPublicText = (value: string): string => value.trim().slice(0, MAX_PUBLIC_HISTORY_ITEM_LENGTH);
+
+type MomentPromptContextWithRoutine = MomentPromptContext & {
+  routineContext?: CharacterCognitiveRoutineContext;
+};
+
+function projectMomentRoutineContext(
+  context: CharacterCognitiveContext,
+): Pick<MomentPromptContextWithRoutine, "routineContext"> {
+  if (!context.routineContext) return {};
+  return {
+    routineContext: {
+      period: context.routineContext.period,
+      state: context.routineContext.state,
+    },
+  };
+}
 
 function projectPublicMomentPersona(
   context: CharacterCognitiveContext,
@@ -53,7 +72,7 @@ function projectPublicMomentTime(
 export function buildMomentPromptContext(
   context: CharacterCognitiveContext,
   options?: MomentPromptAdapterOptions,
-): MomentPromptContext {
+): MomentPromptContextWithRoutine {
   const publicContext = options?.publicContext;
   const publicMomentHistory = publicContext
     ? [...publicContext.publicMomentHistory]
@@ -91,6 +110,7 @@ export function buildMomentPromptContext(
     publicCommentHistory,
     behaviorConstraints: publicContext?.publicBehaviorConstraints.map(({ description }) => ({ description })) ?? [],
     time: projectPublicMomentTime(context, options),
+    ...projectMomentRoutineContext(context),
   };
 }
 
@@ -99,7 +119,7 @@ export function buildMomentPromptContext(
  * prompt remains responsible for the task, history, WorldBook, and UI-facing
  * wording; this block supplies only adapter-projected context.
  */
-export function formatMomentPromptContext(context: MomentPromptContext | undefined): string {
+export function formatMomentPromptContext(context: MomentPromptContextWithRoutine | undefined): string {
   if (!context) return "";
 
   const persona = [
@@ -113,6 +133,15 @@ export function formatMomentPromptContext(context: MomentPromptContext | undefin
   const momentHistory = context.publicMomentHistory.map((moment) => `- ${moment.authorName}: ${moment.content}`);
   const commentHistory = context.publicCommentHistory.map((comment) => `- ${comment.authorName}: ${comment.content}`);
   const constraints = context.behaviorConstraints.map((constraint) => `- ${constraint.description}`);
+  const routine = context.routineContext;
+  const routineContext = routine ? [
+    "Routine context (behavior reference only):",
+    `- Current time period: ${routine.period}`,
+    `- Current routine state: ${routine.state}`,
+    ...(routine.state === "sleeping"
+      ? ["- Prefer quiet, low-activity topics; do not invent a high-activity scene and do not block generation."]
+      : []),
+  ] : [];
 
   return [
     "[PUBLIC-SAFE MOMENT COGNITIVE CONTEXT]",
@@ -126,5 +155,6 @@ export function formatMomentPromptContext(context: MomentPromptContext | undefin
     ...(commentHistory.length > 0 ? ["Recent public comment history:", ...commentHistory] : []),
     ...(constraints.length > 0 ? ["Behavior constraints:", ...constraints] : []),
     `Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`,
+    ...routineContext,
   ].join("\n");
 }

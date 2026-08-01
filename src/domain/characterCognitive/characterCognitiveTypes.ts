@@ -1,5 +1,10 @@
 import type { Character, MemoryItem } from "../../types";
 import type { CharacterEvent } from "../characterLife/characterEventTypes";
+import type {
+  CharacterRoutine,
+  CharacterRoutinePeriod,
+  CharacterRoutineState,
+} from "../characterLife/characterRoutine/characterRoutineTypes";
 import type { RelationshipTimeline } from "../characterLife/relationshipTimelineTypes";
 import type { RelationshipState } from "../characterLife/relationshipStateTypes";
 import type { CharacterRelationship, CharacterRelationshipState } from "../relationship/characterRelationship";
@@ -101,6 +106,12 @@ export interface CharacterCognitiveTemporalContext {
   period?: string;
 }
 
+/** Prompt-safe routine signal; routine configuration remains outside the snapshot. */
+export interface CharacterCognitiveRoutineContext {
+  period: CharacterRoutinePeriod;
+  state: CharacterRoutineState;
+}
+
 /** Metadata only. Phase 1 never derives or adds behavior constraints. */
 export interface CharacterCognitiveBehaviorConstraint {
   id: string;
@@ -121,6 +132,7 @@ export interface CharacterCognitiveContext {
   knownFacts: readonly CharacterCognitiveKnownFact[];
   recentEvents: readonly CharacterCognitiveRecentEvent[];
   temporalContext: CharacterCognitiveTemporalContext;
+  routineContext?: CharacterCognitiveRoutineContext;
   knowledgeBoundary: CharacterCognitiveKnowledgeBoundary;
   behaviorConstraints: readonly CharacterCognitiveBehaviorConstraint[];
 }
@@ -135,4 +147,5 @@ export interface BuildCharacterCognitiveContextInput {
   conversationId?: string;
   behaviorConstraints?: readonly CharacterCognitiveBehaviorConstraint[];
   relationshipTimeline?: RelationshipTimeline;
+  routine?: CharacterRoutine;
 }
