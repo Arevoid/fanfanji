@@ -46,6 +46,16 @@ import {
   chooseForumThreadAuthorKind,
 } from "../../../domain/forum/forumPostAuthorPolicy";
 import { inferForumStoryArc } from "../../../domain/forum/forumStoryArc";
+import { buildPublicForumCognitiveContext } from "../../../domain/publicCognitive/publicContextBuilder";
+import type {
+  PublicCharacterEventCandidate,
+  PublicForumCognitiveContext,
+  PublicWorldSettingCandidate,
+} from "../../../domain/publicCognitive/publicForumCognitiveTypes";
+import {
+  buildPublicForumPostPromptContext,
+  formatPublicForumPostPromptContext,
+} from "../../characterCognitive/promptAdapters/publicForumPostPromptAdapter";
 
 export interface ForumRelationContext {
   relationship: CharacterRelationship;
@@ -54,6 +64,8 @@ export interface ForumRelationContext {
   promptContext: string;
   /** Canonical public style only, used when this character replies to a public thread. */
   publicReplyPersona: string;
+  /** Optional public-only context for a generated thread; never used for replies or activity. */
+  publicCognitiveContext?: PublicForumCognitiveContext;
 }
 
 export interface ForumGenerationBundle {
@@ -272,7 +284,11 @@ replies 为 0-5 条，由普通论坛路人发表。replyToFloor 只能引用本
 标题和正文要像不同真实论坛用户：长短、语气、标点和信息完整度可以不同，不要套用“求助：”模板。
 ${input.relationContext
     ? `以该角色的公开论坛表达方式生成一条帖子，可选择实名或匿名。
-${input.relationContext.promptContext}`
+${input.relationContext.publicCognitiveContext
+      ? formatPublicForumPostPromptContext(
+        buildPublicForumPostPromptContext(input.relationContext.publicCognitiveContext),
+      )
+      : input.relationContext.promptContext}`
     : `以应用内虚拟论坛账号“${input.virtualProfile.displayName}”的风格生成一条帖子。
 公开风格：${input.virtualProfile.publicStyle}
 不得冒充任何已有角色，不读取聊天、Memory 或 WorldBook。`}`,
@@ -431,6 +447,10 @@ export async function generateForumThreads(input: {
   random?: () => number;
   aiCall?: ForumAiCall;
   preferredRelationId?: string;
+  /** Explicitly classified public candidates only; omitted records remain denied. */
+  publicEventCandidates?: readonly PublicCharacterEventCandidate[];
+  /** Explicitly classified public world knowledge only; omitted records remain denied. */
+  publicWorldSettings?: readonly PublicWorldSettingCandidate[];
 }): Promise<ForumGenerationBundle> {
   requireTextAiConfig(input.settings);
   const random = input.random || Math.random;
@@ -443,7 +463,17 @@ export async function generateForumThreads(input: {
       relationship,
       identities: input.settings.identities,
     }))
-    .filter((value): value is ForumRelationContext => Boolean(value));
+    .filter((value): value is ForumRelationContext => Boolean(value))
+    .map((context) => ({
+      ...context,
+      publicCognitiveContext: buildPublicForumCognitiveContext({
+        character: context.character,
+        events: (input.publicEventCandidates || [])
+          .filter((candidate) => candidate.event.characterId === context.character.id),
+        worldSettings: input.publicWorldSettings || [],
+        currentTime: { now: input.now },
+      }),
+    }));
   const protectedNames = getProtectedNames(
     input.settings,
     input.characters,
