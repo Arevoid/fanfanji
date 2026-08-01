@@ -59,6 +59,16 @@ export interface PromptAdapterOptions {
 export interface ChatPromptContext {
   persona: CognitivePromptPersona;
   relationship: CognitivePromptRelationship;
+  /** Optional relation-scoped projection with all storage metadata removed. */
+  relationshipState?: {
+    stage: string;
+    tone: string;
+  };
+  relationshipTimeline?: {
+    recentEvents: readonly CognitivePromptEvent[];
+    openLoops: readonly string[];
+    boundaries: readonly string[];
+  };
   relevantMemories: readonly CognitivePromptFact[];
   safeEvents: readonly CognitivePromptEvent[];
   boundaries: CognitivePromptBoundary;
