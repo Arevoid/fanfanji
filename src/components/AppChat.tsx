@@ -68,7 +68,6 @@ import { MomentsApp } from "../features/moments/MomentsApp";
 import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
-import { buildMomentCognitiveContext } from "../features/moments/services/momentCognitiveContext";
 import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
 import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext, formatMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
@@ -438,13 +437,6 @@ const PRESEED_MOMENTS: Moment[] = [];
 
 const isOfflineStoryActiveFor = (relationId: string) =>
   localStorage.getItem(getOfflineModeStorageKey(relationId)) === "true";
-
-const getFullCharacterWorldBook = (entries: WorldBookEntry[], characterId: string) =>
-  getLatestWorldBookEntries(entries)
-    .filter((entry) => entry.isActive !== false && (!entry.characterId || entry.characterId === "global" || entry.characterId === characterId))
-    .sort((a, b) => (a.depth || 5) - (b.depth || 5))
-    .map((entry) => `【${entry.title}】\n${entry.content}`)
-    .join("\n\n");
 
 const cleanAndExtractMoment = (content: string) => {
   let cleanContent = stripMomentVoiceMarkup(content).trim();
@@ -4360,26 +4352,6 @@ ${instructionsPrompt}`;
     }
   };
 
-  const getMomentCognitiveContext = (
-    character: Character,
-    relationship: CharacterRelationship,
-    occurredAt: number,
-  ): CharacterCognitiveContext | undefined => {
-    try {
-      return buildMomentCognitiveContext({
-        character,
-        relationship,
-        memories: memories || [],
-        events: listCharacterEventsByRelation(relationship.id),
-        occurredAt,
-      });
-    } catch {
-      // This read-only snapshot must not block legacy Moment generation when
-      // malformed legacy relationship data cannot be projected.
-      return undefined;
-    }
-  };
-
   const handleAutoCommentOnUserMoment = async (newMo: Moment) => {
     if (activeRelationships.length === 0) return;
 
@@ -4396,20 +4368,7 @@ ${instructionsPrompt}`;
       const delay = Math.random() * 8000 + 4000; // 4 to 12 seconds delay
       setTimeout(async () => {
         try {
-          const friendMsgs = messages
-            .filter((message) => message.relationId === relationship.id)
-            .sort((a, b) => a.timestamp - b.timestamp);
-          const slicedMsgs = friendMsgs.slice(-60); // 30 rounds of dialogue
-
-          const history = slicedMsgs.map((m) => ({
-            role: m.sender === "user" ? "user" : "model",
-            text: m.content,
-          }));
-
-          const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, newMo.content || "");
-          const wbPrompt = wbBlocks.formattedAll;
           const temporalContext = createMomentTemporalContext(new Date());
-          const cognitiveContext = getMomentCognitiveContext(friend, relationship, temporalContext.generatedAt.getTime());
           const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
           const systemInstruction = `${momentTimeContext}
@@ -4419,29 +4378,22 @@ Character Profile:
 - Personality: ${friend.personality}
 - Background: ${friend.backstory}
 
-User Profile (Machine Owner / 机主):
-- Nickname: ${settings.name}
-- Personality/Bio: ${settings.bio}
-
 The user just posted a new WeChat Moment (朋友圈).
 Moment Content: "${newMo.content}"
 ${newMo.image ? "[User attached an image to this Moment]" : ""}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或口癖，必须在评论中体现。\n\n` : ""}Below is your recent direct chat history with the user (up to 30 rounds). It represents your current relationship context and shared history:
-${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n") : "(No prior chat history)"}
-
 Your task: Write a short, natural comment on this Moment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
-1. The comment must be brief, extremely natural (like a real person typing on WeChat), and perfectly fit your personality, relationship, and recent chat memories with the user.
+1. The comment must be brief, extremely natural, and fit your public character profile.
 2. Keep it under 35 characters. Speak in Chinese.
 3. No OOC, no narrative brackets like (微笑), just the direct comment text.
-4. Try to make it feel deeply personal or reference recent chats subtly if applicable.
+4. Respond only to the public Moment content. Do not infer or mention private messages, shared experiences, relationship status, or user profile details.
 `;
 
           const composedPrompt = PromptComposer.compose({
             scenario: "moment-comment",
-            message: "请根据以上内容，为机主的新朋友圈写一条符合你人设和记忆的简短微信评论：",
-            history,
+            message: "请仅根据公开朋友圈内容和角色公开资料，写一条简短自然的微信评论：",
+            history: [],
             systemInstruction,
           });
           const comment = await requestAutomaticMomentComment({
@@ -4456,7 +4408,6 @@ Your task: Write a short, natural comment on this Moment.
             character: friend,
             cleanText: (text) => cleanOnlineMessage(text, true),
             temporalContext,
-            cognitiveContext,
           });
           if (comment) onAddCommentToMoment(newMo.id, comment);
         } catch (err) {
@@ -4504,24 +4455,11 @@ Your task: Write a short, natural comment on this Moment.
     
     setTimeout(async () => {
       try {
-        const friendMsgs = messages
-          .filter((message) => message.relationId === relationship.id)
-          .sort((a, b) => a.timestamp - b.timestamp);
-        const slicedMsgs = friendMsgs.slice(-40);
-
-        const history = slicedMsgs.map((m) => ({
-          role: m.sender === "user" ? "user" : "model",
-          text: m.content,
-        }));
-
         const existingCommentsContext = targetMoment.comments
           .map(c => `* ${c.authorName}: ${c.content}`)
           .join("\n");
 
-        const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, userCommentText || "");
-        const wbPrompt = wbBlocks.formattedAll;
         const temporalContext = createMomentTemporalContext(new Date());
-        const cognitiveContext = getMomentCognitiveContext(friend, relationship, temporalContext.generatedAt.getTime());
         const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
         const systemInstruction = `${momentTimeContext}
@@ -4531,37 +4469,29 @@ Character Profile:
 - Personality: ${friend.personality}
 - Background: ${friend.backstory}
 
-User Profile (Machine Owner / 机主):
-- Nickname: ${settings.name}
-- Personality/Bio: ${settings.bio}
-
 Context:
 The user has just commented/replied on a WeChat Moment.
 Moment Author: ${targetMoment.authorName}
 Moment Content: "${targetMoment.content}"
 ${targetMoment.image ? "[Attached an image]" : ""}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或口癖，必须在评论回复中体现。\n\n` : ""}Existing Comments on this Moment:
+Existing public comments on this Moment:
 ${existingCommentsContext || "(No other comments)"}
 
-The User's latest comment/reply:
-* ${settings.name}: "${userCommentText}"
+Latest public comment/reply: "${userCommentText}"
 
-Below is your recent direct chat history with the user (up to 20 rounds). It represents your current relationship context and shared history:
-${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n") : "(No prior chat history)"}
-
-Your task: Write a short, extremely natural WeChat reply/comment to the user's latest comment "${userCommentText}".
+Your task: Write a short, extremely natural WeChat reply/comment to that public comment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
-1. The reply must be brief, lively, extremely natural (like a real person replying on WeChat), and perfectly match your character's personality, tone of voice, relationship depth, and memories with the user.
+1. The reply must be brief, lively, extremely natural, and match your public character profile.
 2. Keep it under 35 characters. Speak in Chinese.
 3. Speak directly to the user (e.g. use "你怎么...", "哈哈就是说啊", etc. without any formal prefixes). Do not write narrative actions or brackets like "(害羞)", just output the comment text.
-4. Try to make it feel responsive to their comment.
+4. Respond only to the public Moment and public comments. Do not infer or mention private messages, shared experiences, relationship status, or user profile details.
 `;
 
         const composedPrompt = PromptComposer.compose({
           scenario: "moment-reply",
-          message: `请针对用户在朋友圈下对你（或他人）发表的最新评论 "${userCommentText}"，写一条符合你人设和记忆的简短微信回复：`,
-          history,
+          message: `请仅针对这条公开朋友圈评论 "${userCommentText}"，写一条符合角色公开人设的简短微信回复：`,
+          history: [],
           systemInstruction,
         });
         const reply = await requestMomentCommentReply({
@@ -4577,7 +4507,6 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
           userName: settings.name,
           cleanText: (text) => cleanOnlineMessage(text, true),
           temporalContext,
-          cognitiveContext,
         });
         if (reply) onAddCommentToMoment(momentId, reply);
       } catch (err) {
@@ -4590,18 +4519,6 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
     const friend = characters.find((character) => character.id === relationship.characterId);
     if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return;
     try {
-      const cognitiveContext = getMomentCognitiveContext(friend, relationship, occurredAt);
-      const friendMsgs = messages
-        .filter((message) => message.relationId === relationship.id)
-        .sort((a, b) => a.timestamp - b.timestamp);
-      const contextLimit = friend.contextMemoryLimit || 20;
-      const slicedMsgs = friendMsgs.slice(-contextLimit * 2);
-      const archivedMemories = (memories || [])
-        .filter((memory) => memory.relationId === relationship.id)
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, recallSettings?.recallCount || 5);
-      const historicalFallback = friendMsgs.slice(-(friend.retrievalHistoryLimit || 100));
-      const fullWorldBook = getFullCharacterWorldBook(worldBookEntries || [], friend.id);
       const ownerMomentHistory = moments
         .filter((moment) => Boolean(moment.characterId))
         .filter((moment) => (moment.ownerIdentityId || "identity-1") === (relationship.userIdentityId || "identity-1"))
@@ -4615,11 +4532,6 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
       const temporalContext = createMomentTemporalContext(new Date(occurredAt));
       const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
-      const history = slicedMsgs.map((m) => ({
-        role: m.sender === "user" ? "user" : "model",
-        text: m.content,
-      }));
-
       const systemInstruction = `${momentTimeContext}
 
 You are roleplaying as "${friend.name}".
@@ -4627,28 +4539,12 @@ Character Profile:
 - Personality: ${friend.personality}
 - Background: ${friend.backstory}
 
-Memory source policy, in strict order: do not make up events, dates, shared experiences, or emotions that are not supported below.
-1. Recent real-time conversation (highest priority, ${contextLimit} rounds):
-${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "User" : friend.name}: ${m.content}`).join("\n") : "(No recent chat)"}
-2. Long-term archived summaries:
-${archivedMemories.length ? archivedMemories.map(m => `* ${m.content}`).join("\n") : "(No archived summaries)"}
-3. Historical fallback (only if the above has no usable material; capped at ${friend.retrievalHistoryLimit || 100} messages):
-${historicalFallback.length > 0 ? historicalFallback.map(m => `* ${m.sender === "user" ? "User" : friend.name}: ${m.content}`).join("\n") : "(No historical chat)"}
-4. Complete active world book (always obey):
-${fullWorldBook || "(No world book entries)"}
-5. Recent friend Moments in this identity feed (do not repeat or paraphrase these):
+Public feed history (do not repeat or paraphrase these):
 ${recentMomentHistory}
-
-User Profile (Machine Owner / 机主):
-- Nickname: ${settings.name}
-- Personality/Bio: ${settings.bio}
-
-Below is your recent direct chat history with the user (up to 30 rounds). It represents your current relationship context and shared history/topics:
-${slicedMsgs.length > 0 ? slicedMsgs.map(m => `* ${m.sender === "user" ? "我" : friend.name}: ${m.content}`).join("\n") : "(No prior chat history)"}
 
 Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 🚨 [CRITICAL WECHAT MOMENT RULES]:
-1. The post must fit your personality. It can be about your own personal life (feelings, work, hobbies) OR about your relationship/recent chats/interactions with the user.
+1. The post must fit your public character profile and be grounded only in public-safe material supplied to this request.
 2. The post content must be natural, engaging, and in Chinese.
 3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
 4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, or talk like an AI. Just output the text of the Moment post.
@@ -4656,14 +4552,14 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 6. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)".
 7. If this post needs an image, add one final separate line in exactly this format: "(配图：图片描述)". This line will be rendered as a text-image card, never as post body text.
 8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
-9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the recent Moments above. Avoid generic filler such as weather, tiredness, coffee, work, or vague feelings unless a specific detail from your personality, world book, or real conversation makes it genuinely new.
-10. If you cannot produce a fresh, natural post grounded in your personality, world book, or supported conversation, output exactly "SKIP" and nothing else. It is valid to publish nothing.
+9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the public feed history above. Avoid generic filler such as weather, tiredness, coffee, work, or vague feelings unless a specific public character detail makes it genuinely new.
+10. Never infer private messages, Memory, shared experiences, relationship status, OfflineStory content, or user profile details. If there is no fresh public-safe topic, output exactly "SKIP" and nothing else.
 `;
 
       const composedPrompt = PromptComposer.compose({
         scenario: "moment-post",
-        message: "请根据你的人设、专属世界书和与机主的真实历史，先判断是否有值得发布且明显不同于历史动态的新内容；有则写一条，没有则只输出 SKIP。不要为了完成任务硬发。",
-        history,
+        message: "请仅根据角色公开资料与公开动态历史，判断是否有值得发布且明显不同于历史动态的新内容；有则写一条，没有则只输出 SKIP。不要为了完成任务硬发。",
+        history: [],
         systemInstruction,
       });
       const generated = await requestCharacterMomentOnce({
@@ -4682,7 +4578,6 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         occurredAt: () => occurredAt,
         temporalContext,
         existingMoments: ownerMomentHistory,
-        cognitiveContext,
       });
       if (generated.moment) onAddMoment(generated.moment);
       if (generated.memory) onSaveMemories(MemoryService.mergeMemories(memories || [], [{ ...generated.memory, relationId: relationship.id }]));
