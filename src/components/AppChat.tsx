@@ -24,6 +24,9 @@ import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
+import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
+import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
+import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
 import { buildRelationMusicContext } from "../domain/prompt/musicContext";
 import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
@@ -38,6 +41,7 @@ import { createChatSideEffectController, markChatInitiated, markChatRead, touchR
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { createChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
 import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
+import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
 import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "../core/storage/repositories/forumRepository";
@@ -2411,7 +2415,11 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     userMsg: Message | null,
     customHistoryOverride?: Message[],
     options?: { forumShareTrigger?: boolean },
+    cognitiveContext?: CharacterCognitiveContext,
   ) => {
+    // Phase 2 only transports the read-only snapshot. Prompt assembly and AI
+    // request behavior remain intentionally unchanged until a later phase.
+    void cognitiveContext;
     setIsTyping(true);
     if (options?.forumShareTrigger) setForumShareReplyError("");
 
@@ -3134,9 +3142,46 @@ ${stickerListStr}
       isGroup: Boolean(activeCharacter?.isGroupChat),
       groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
     }),
+    getCognitiveContext: (runtimeContext) => {
+      if (runtimeContext.isGroup
+        || !activeCharacter
+        || !activeRelationship
+        || !runtimeContext.characterId
+        || !runtimeContext.relationId
+        || runtimeContext.characterId !== activeCharacter.id
+        || runtimeContext.relationId !== activeRelationship.id
+        || runtimeContext.userIdentityId !== activeRelationship.userIdentityId) return undefined;
+
+      const events: CharacterCognitiveEventCandidate[] = listCharacterEventsByRelation(activeRelationship.id).map((event) => ({
+        event,
+        // These are the only deterministic event kinds currently captured.
+        // Any future kind remains private until its prompt visibility is
+        // deliberately reviewed by its own source adapter.
+        promptVisibility: event.status === "active"
+          && (event.kind === "relationship_created" || event.kind === "offline_story_completed")
+          ? "safe"
+          : "private",
+      }));
+
+      try {
+        return buildCharacterCognitiveContext({
+          character: activeCharacter,
+          relation: activeRelationship,
+          memories: memories || [],
+          events,
+          timeContext: { now: Date.now() },
+          knowledgeBoundary: createDirectChatKnowledgeBoundary(),
+          conversationId: runtimeContext.conversationId || undefined,
+        });
+      } catch {
+        // Cognitive context is read-only and must never block the legacy reply
+        // path when a malformed legacy relationship cannot be projected.
+        return undefined;
+      }
+    },
     generateGroupReply: generateResponseForGroupChat,
-    generateDirectReply: ({ userMsg, customHistoryOverride, options }) =>
-      executeDirectReplyPipeline(userMsg, customHistoryOverride, options),
+    generateDirectReply: ({ userMsg, customHistoryOverride, options, cognitiveContext }) =>
+      executeDirectReplyPipeline(userMsg, customHistoryOverride, options, cognitiveContext),
   });
 
   const chatSideEffectController = createChatSideEffectController({

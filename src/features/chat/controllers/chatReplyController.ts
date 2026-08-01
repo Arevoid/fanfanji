@@ -1,4 +1,5 @@
 import type { Message } from "../../../types";
+import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 
 export interface ChatReplyRequest {
@@ -9,8 +10,13 @@ export interface ChatReplyRequest {
 
 export interface ChatReplyControllerDependencies {
   getContext: () => ChatRuntimeContext;
+  /** Optional Phase-2 read-only context factory. It must not alter reply behavior. */
+  getCognitiveContext?: (context: ChatRuntimeContext) => CharacterCognitiveContext | undefined;
   generateGroupReply: (userMsg: Message | null, customHistoryOverride?: Message[]) => Promise<void> | void;
-  generateDirectReply: (input: ChatReplyRequest & { context: ChatRuntimeContext }) => Promise<void> | void;
+  generateDirectReply: (input: ChatReplyRequest & {
+    context: ChatRuntimeContext;
+    cognitiveContext?: CharacterCognitiveContext;
+  }) => Promise<void> | void;
 }
 
 /**
@@ -32,7 +38,8 @@ export function createChatReplyController(dependencies: ChatReplyControllerDepen
         return;
       }
 
-      await dependencies.generateDirectReply({ ...request, context });
+      const cognitiveContext = dependencies.getCognitiveContext?.(context);
+      await dependencies.generateDirectReply({ ...request, context, ...(cognitiveContext ? { cognitiveContext } : {}) });
     },
   };
 }
