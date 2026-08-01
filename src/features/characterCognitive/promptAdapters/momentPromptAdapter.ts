@@ -6,6 +6,15 @@ import {
 import type { MomentPromptAdapterOptions, MomentPromptContext } from "./types";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 
+const DEFAULT_PUBLIC_HISTORY_LIMIT = 8;
+const DEFAULT_PUBLIC_COMMENT_LIMIT = 12;
+const MAX_PUBLIC_HISTORY_ITEM_LENGTH = 180;
+
+const bounded = (requested: number | undefined, fallback: number): number =>
+  Math.max(0, Math.floor(requested ?? fallback));
+
+const compactPublicText = (value: string): string => value.trim().slice(0, MAX_PUBLIC_HISTORY_ITEM_LENGTH);
+
 function projectPublicMomentPersona(
   context: CharacterCognitiveContext,
   options: MomentPromptAdapterOptions | undefined,
@@ -46,19 +55,41 @@ export function buildMomentPromptContext(
   options?: MomentPromptAdapterOptions,
 ): MomentPromptContext {
   const publicContext = options?.publicContext;
+  const publicMomentHistory = publicContext
+    ? [...publicContext.publicMomentHistory]
+      .sort((left, right) => right.timestamp - left.timestamp)
+      .slice(0, bounded(options?.maxPublicHistory, DEFAULT_PUBLIC_HISTORY_LIMIT))
+      .map(({ authorName, content, timestamp, imageDescription }) => ({
+        authorName,
+        content: compactPublicText(content),
+        timestamp,
+        ...(imageDescription ? { imageDescription: compactPublicText(imageDescription) } : {}),
+      }))
+    : [];
+  const publicCommentHistory = publicContext
+    ? [...publicContext.publicCommentHistory]
+      .sort((left, right) => right.timestamp - left.timestamp)
+      .slice(0, bounded(options?.maxPublicComments, DEFAULT_PUBLIC_COMMENT_LIMIT))
+      .map(({ authorName, content, timestamp }) => ({
+        authorName,
+        content: compactPublicText(content),
+        timestamp,
+      }))
+    : [];
   return {
     persona: projectPublicMomentPersona(context, options),
-    publicFacts: selectMomentPublicFacts(context),
+    publicFacts: publicContext?.authorizedPublicFacts.map(({ content }) => ({ content })) ?? selectMomentPublicFacts(context),
     publicEvents: publicContext?.publicEvents.map(({ kind, summary, occurredAt, confidence }) => ({
       kind,
       summary,
       occurredAt,
       confidence,
     })) ?? [],
-    publicWorldKnowledge: publicContext?.publicWorldSettings.map(({ title, content }) => ({ title, content })) ?? [],
-    // CharacterCognitiveContext constraints are relation-private until a
-    // separate explicit public-constraint contract exists.
-    behaviorConstraints: [],
+    // MomentPublicCognitiveContext intentionally has no Forum/WorldBook input.
+    publicWorldKnowledge: [],
+    publicMomentHistory,
+    publicCommentHistory,
+    behaviorConstraints: publicContext?.publicBehaviorConstraints.map(({ description }) => ({ description })) ?? [],
     time: projectPublicMomentTime(context, options),
   };
 }
@@ -79,6 +110,8 @@ export function formatMomentPromptContext(context: MomentPromptContext | undefin
   const facts = context.publicFacts.map((fact) => `- ${fact.content}`);
   const events = context.publicEvents.map((event) => `- ${event.summary}`);
   const worldKnowledge = context.publicWorldKnowledge.map((setting) => `- ${setting.title}: ${setting.content}`);
+  const momentHistory = context.publicMomentHistory.map((moment) => `- ${moment.authorName}: ${moment.content}`);
+  const commentHistory = context.publicCommentHistory.map((comment) => `- ${comment.authorName}: ${comment.content}`);
   const constraints = context.behaviorConstraints.map((constraint) => `- ${constraint.description}`);
 
   return [
@@ -89,6 +122,8 @@ export function formatMomentPromptContext(context: MomentPromptContext | undefin
     ...(facts.length > 0 ? ["Verified public facts:", ...facts] : []),
     ...(events.length > 0 ? ["Verified public events:", ...events] : []),
     ...(worldKnowledge.length > 0 ? ["Public world knowledge:", ...worldKnowledge] : []),
+    ...(momentHistory.length > 0 ? ["Recent public Moment history (avoid repeating these topics):", ...momentHistory] : []),
+    ...(commentHistory.length > 0 ? ["Recent public comment history:", ...commentHistory] : []),
     ...(constraints.length > 0 ? ["Behavior constraints:", ...constraints] : []),
     `Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`,
   ].join("\n");

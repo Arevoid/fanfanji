@@ -1,5 +1,5 @@
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
-import type { PublicForumCognitiveContext } from "../../../domain/publicCognitive/publicForumCognitiveTypes";
+import type { MomentPublicCognitiveContext } from "../../../domain/momentCognitive/momentPublicCognitiveTypes";
 
 /**
  * Prompt-safe projections deliberately omit every internal identifier. The
@@ -58,13 +58,15 @@ export interface CognitivePromptWorldSetting {
 export interface PromptAdapterOptions {
   maxFacts?: number;
   maxEvents?: number;
+  maxPublicHistory?: number;
+  maxPublicComments?: number;
   /** Existing callers may pass their already-ranked Memory IDs without exposing them in adapter output. */
   relevantMemoryIds?: readonly string[];
 }
 
-/** Explicit public input required by Moment adapters; unknown visibility is denied. */
+/** Explicit Moment-public input; unknown visibility is denied before this boundary. */
 export interface MomentPromptAdapterOptions extends PromptAdapterOptions {
-  publicContext?: PublicForumCognitiveContext;
+  publicContext?: MomentPublicCognitiveContext;
 }
 
 export interface ChatPromptContext {
@@ -91,6 +93,17 @@ export interface MomentPromptContext {
   publicFacts: readonly CognitivePromptFact[];
   publicEvents: readonly CognitivePromptEvent[];
   publicWorldKnowledge: readonly CognitivePromptWorldSetting[];
+  publicMomentHistory: readonly {
+    authorName: string;
+    content: string;
+    timestamp: number;
+    imageDescription?: string;
+  }[];
+  publicCommentHistory: readonly {
+    authorName: string;
+    content: string;
+    timestamp: number;
+  }[];
   behaviorConstraints: readonly CognitivePromptBehaviorConstraint[];
   time: CognitivePromptTimeContext;
 }

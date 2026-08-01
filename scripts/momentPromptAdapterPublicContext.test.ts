@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { buildCharacterCognitiveContext } from "../src/domain/characterCognitive/contextBuilder";
 import type { CharacterCognitiveEventCandidate } from "../src/domain/characterCognitive/characterCognitiveTypes";
 import type { CharacterEvent } from "../src/domain/characterLife/characterEventTypes";
-import { buildPublicForumCognitiveContext } from "../src/domain/publicCognitive/publicContextBuilder";
+import { buildMomentPublicCognitiveContext } from "../src/domain/momentCognitive/momentPublicContextBuilder";
 import { createRelationship } from "../src/domain/relationship/characterRelationship";
 import { buildMomentPromptContext, formatMomentPromptContext } from "../src/features/characterCognitive/promptAdapters/momentPromptAdapter";
 import type { Character, MemoryItem } from "../src/types";
@@ -50,42 +50,54 @@ const contextA = buildCharacterCognitiveContext({
   knowledgeBoundary: { known: ["private boundary"], unknown: [], forbidden: ["Private relation boundary."] },
   behaviorConstraints: [{ id: "private-constraint", description: "Private relationship constraint." }],
 });
-const contextB = buildCharacterCognitiveContext({
+
+const publicContext = buildMomentPublicCognitiveContext({
   character,
-  relation: relationB,
-  memories,
-  events: cognitiveEvents,
-  timeContext: { now: 12, date: "2026-08-01", time: "20:00" },
-  knowledgeBoundary: { known: [], unknown: [], forbidden: [] },
-});
-const publicContextA = buildPublicForumCognitiveContext({
-  character,
-  events: [
+  publicMomentHistory: [
+    { characterId: character.id, visibility: "public", authorName: "Test Character", content: "A recent public post", timestamp: 2 },
+    { characterId: character.id, visibility: "public", authorName: "Test Character", content: "B older public post", timestamp: 1 },
+    { characterId: "other-character", visibility: "public", authorName: "Other", content: "Other character post", timestamp: 3 },
+  ],
+  publicCommentHistory: [
+    { characterId: character.id, visibility: "public", authorName: "Visitor", content: "A public comment", timestamp: 4 },
+    { characterId: "other-character", visibility: "public", authorName: "Visitor", content: "Other character comment", timestamp: 5 },
+  ],
+  publicFacts: [
+    { characterId: character.id, visibility: "public", content: "Explicit public fact" },
+    { characterId: character.id, visibility: "public", isRelationshipScoped: true, content: "Unauthorized shared experience" },
+  ],
+  publicEvents: [
     { event: publicEvent, visibility: "public" },
     { event: privateEvent, visibility: "private" },
     { event: relationEventB, visibility: "relationship" },
   ],
-  worldSettings: [
-    { title: "Public setting", content: "Everyone can know this.", visibility: "public" },
-    { title: "Private setting", content: "Never expose this.", visibility: "private" },
-  ],
+  publicBehaviorConstraints: [{ visibility: "public", description: "Do not invent private experiences." }],
   currentTime: { now: 12, date: "2026-08-01", time: "20:00" },
 });
 
-const publicPrompt = buildMomentPromptContext(contextA, { publicContext: publicContextA });
+const publicPrompt = buildMomentPromptContext(contextA, { publicContext, maxPublicHistory: 1, maxPublicComments: 1 });
 const formatted = formatMomentPromptContext(publicPrompt);
+assert.deepEqual(publicPrompt.publicFacts, [{ content: "Explicit public fact" }]);
 assert.deepEqual(publicPrompt.publicEvents.map((event) => event.summary), ["Public book-club announcement."]);
-assert.deepEqual(publicPrompt.publicWorldKnowledge, [{ title: "Public setting", content: "Everyone can know this." }]);
-assert.deepEqual(publicPrompt.publicFacts, [], "Memory is never projected into Moments");
-assert.deepEqual(publicPrompt.behaviorConstraints, [], "private behavior constraints are denied by default");
+assert.deepEqual(publicPrompt.publicMomentHistory.map((item) => item.content), ["A recent public post"]);
+assert.deepEqual(publicPrompt.publicCommentHistory.map((item) => item.content), ["A public comment"]);
+assert.deepEqual(publicPrompt.behaviorConstraints, [{ description: "Do not invent private experiences." }]);
+assert.match(formatted, /A recent public post/);
+assert.match(formatted, /A public comment/);
+assert.match(formatted, /Explicit public fact/);
 assert.match(formatted, /Public book-club announcement/);
-assert.match(formatted, /Public setting: Everyone can know this/);
+assert.match(formatted, /Do not invent private experiences/);
+assert.match(formatted, /2026-08-01 20:00/);
+
 for (const forbidden of [
   "Private argument.",
   "Identity B relationship event.",
   "Private chat memory.",
   "Private relationship constraint.",
   "Private relation boundary.",
+  "Unauthorized shared experience",
+  "Other character post",
+  "Other character comment",
   relationA.id,
   relationB.id,
   relationA.userIdentityId,
@@ -95,13 +107,12 @@ for (const forbidden of [
   assert.equal(formatted.includes(forbidden), false, `${forbidden} must not enter Moment prompt output`);
 }
 
-const contextBPrompt = buildMomentPromptContext(contextB);
-assert.deepEqual(contextBPrompt.publicEvents, [], "a relation context cannot promote its safe events to public");
-assert.equal(formatMomentPromptContext(contextBPrompt).includes("Identity B relationship event."), false);
-
 const legacyPrompt = buildMomentPromptContext(contextA);
-assert.deepEqual(legacyPrompt.publicEvents, [], "missing public context keeps public event projection empty");
-assert.deepEqual(legacyPrompt.publicWorldKnowledge, [], "missing public context keeps world projection empty");
+assert.deepEqual(legacyPrompt.publicFacts, [], "missing public context keeps facts empty");
+assert.deepEqual(legacyPrompt.publicEvents, [], "missing public context keeps events empty");
+assert.deepEqual(legacyPrompt.publicMomentHistory, [], "missing public context keeps history empty");
+assert.deepEqual(legacyPrompt.publicCommentHistory, [], "missing public context keeps comments empty");
+assert.deepEqual(legacyPrompt.behaviorConstraints, [], "missing public context keeps constraints empty");
 assert.equal(formatMomentPromptContext(undefined), "", "missing adapter context remains compatible");
 
-console.log("PASS Moment prompt adapter public visibility, relation isolation, and legacy fallback");
+console.log("PASS Moment Prompt Adapter uses MomentPublicCognitiveContext with public isolation, bounded history, and legacy fallback");
