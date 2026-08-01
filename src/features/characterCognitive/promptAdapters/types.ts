@@ -52,6 +52,8 @@ export interface CognitivePromptBehaviorConstraint {
 export interface PromptAdapterOptions {
   maxFacts?: number;
   maxEvents?: number;
+  /** Existing callers may pass their already-ranked Memory IDs without exposing them in adapter output. */
+  relevantMemoryIds?: readonly string[];
 }
 
 export interface ChatPromptContext {

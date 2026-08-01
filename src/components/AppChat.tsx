@@ -27,6 +27,7 @@ import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } fro
 import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
 import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
 import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
+import { buildChatPromptContext, formatChatPromptContext } from "../features/characterCognitive/promptAdapters/chatPromptAdapter";
 import { buildRelationMusicContext } from "../domain/prompt/musicContext";
 import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
@@ -2418,9 +2419,6 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     options?: { forumShareTrigger?: boolean },
     cognitiveContext?: CharacterCognitiveContext,
   ) => {
-    // Phase 2 only transports the read-only snapshot. Prompt assembly and AI
-    // request behavior remain intentionally unchanged until a later phase.
-    void cognitiveContext;
     setIsTyping(true);
     if (options?.forumShareTrigger) setForumShareReplyError("");
 
@@ -2648,6 +2646,13 @@ ${activeCharacter.disableBracketActions
       const relationshipContext = activeRelationship
         ? `\n[Current direct relationship]\n- Relationship state: ${activeRelationship.relationship}\n- This is the only user-identity relationship whose chat history and memories may be used.`
         : "";
+      const chatPromptContext = cognitiveContext
+        ? buildChatPromptContext(cognitiveContext, {
+          maxFacts: topK,
+          relevantMemoryIds: relevantMemories.map((memory) => memory.id),
+        })
+        : undefined;
+      const cognitivePromptBlock = formatChatPromptContext(chatPromptContext);
       const musicContext = activeRelationship && userMsg
         ? buildRelationMusicContext({
           userText: userMsg.content,
@@ -2810,6 +2815,11 @@ ${isLastVoiceOld
 
       // 4. Character Definition
       assembledInstructions.push(charDefText);
+
+      // The adapter receives the relation-scoped cognitive snapshot and emits
+      // a redacted prompt-safe supplement. It intentionally does not replace
+      // the established persona, relationship, time, or Memory sections.
+      if (cognitivePromptBlock) assembledInstructions.push(cognitivePromptBlock);
 
       // 5. After Character Definition entries
       if (wbBlocks.after_char_def.length > 0) {

@@ -68,7 +68,9 @@ export function selectChatPromptFacts(
   context: CharacterCognitiveContext,
   options?: PromptAdapterOptions,
 ): CognitivePromptFact[] {
+  const relevantMemoryIds = options?.relevantMemoryIds ? new Set(options.relevantMemoryIds) : undefined;
   return context.knownFacts
+    .filter((fact) => !relevantMemoryIds || relevantMemoryIds.has(fact.id))
     .slice(0, bounded(options?.maxFacts, DEFAULT_FACT_LIMIT))
     .map(({ content, importance }) => ({ content, ...(importance === undefined ? {} : { importance }) }));
 }
