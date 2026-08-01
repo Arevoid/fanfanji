@@ -1,5 +1,7 @@
 import type { Character, MemoryItem } from "../../types";
 import type { CharacterEvent } from "../characterLife/characterEventTypes";
+import type { RelationshipTimeline } from "../characterLife/relationshipTimelineTypes";
+import type { RelationshipState } from "../characterLife/relationshipStateTypes";
 import type { CharacterRelationship, CharacterRelationshipState } from "../relationship/characterRelationship";
 
 export const CHARACTER_COGNITIVE_CONTEXT_SCHEMA_VERSION = 1;
@@ -112,6 +114,10 @@ export interface CharacterCognitiveContext {
   scope: CharacterCognitiveIdentityScope;
   persona: CharacterCognitivePersona;
   relationship: CharacterCognitiveRelationshipContext;
+  /** Optional read-only CharacterEvent projection, admitted only for this exact scope. */
+  relationshipState?: RelationshipState;
+  /** Optional read-only timeline, never persisted or used as a cross-relation lookup. */
+  relationshipTimeline?: RelationshipTimeline;
   knownFacts: readonly CharacterCognitiveKnownFact[];
   recentEvents: readonly CharacterCognitiveRecentEvent[];
   temporalContext: CharacterCognitiveTemporalContext;
@@ -128,4 +134,5 @@ export interface BuildCharacterCognitiveContextInput {
   knowledgeBoundary: CharacterCognitiveKnowledgeBoundary;
   conversationId?: string;
   behaviorConstraints?: readonly CharacterCognitiveBehaviorConstraint[];
+  relationshipTimeline?: RelationshipTimeline;
 }

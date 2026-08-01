@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { buildCharacterCognitiveContext } from "../src/domain/characterCognitive/contextBuilder";
 import type { CharacterCognitiveEventCandidate } from "../src/domain/characterCognitive/characterCognitiveTypes";
 import type { CharacterEvent } from "../src/domain/characterLife/characterEventTypes";
+import { buildRelationshipTimeline } from "../src/domain/characterLife/relationshipTimelineQuery";
+import type { RelationshipState } from "../src/domain/characterLife/relationshipStateTypes";
 import { createRelationship } from "../src/domain/relationship/characterRelationship";
 import type { Character, MemoryItem } from "../src/types";
 
@@ -58,6 +60,27 @@ const events: CharacterCognitiveEventCandidate[] = [
   { event: event("event-private", relationA.id, relationA.userIdentityId, "private event"), promptVisibility: "private" },
 ];
 
+const relationshipStateA: RelationshipState = {
+  relationId: relationA.id,
+  characterId: character.id,
+  userIdentityId: relationA.userIdentityId,
+  stage: "friend",
+  tone: "warm",
+  openLoops: [{ id: "tea", kind: "promise", description: "Have tea", createdAt: 55, sourceEventId: "event-a" }],
+  boundaries: ["No late-night calls."],
+  updatedAt: 65,
+  version: 1,
+};
+const relationshipEvents = events.map((candidate) => candidate.event);
+const timelineA = buildRelationshipTimeline({
+  relationId: relationA.id,
+  characterId: character.id,
+  userIdentityId: relationA.userIdentityId,
+  events: relationshipEvents,
+  state: relationshipStateA,
+  generatedAt: 70,
+});
+
 const contextA = buildCharacterCognitiveContext({
   character,
   relation: relationA,
@@ -75,6 +98,7 @@ const contextA = buildCharacterCognitiveContext({
     unknown: ["other identity private facts"],
     forbidden: ["invented shared scenes"],
   },
+  relationshipTimeline: timelineA,
 });
 
 // A/B relation isolation: neither scoped nor legacy data may cross into A.
@@ -86,6 +110,68 @@ assert.equal(contextA.recentEvents.some((item) => item.summary.includes("B knows
 
 // Event admission is explicit: private event candidates never enter context.
 assert.equal(contextA.recentEvents.some((item) => item.id === "event-private"), false);
+
+// Timeline and its state are admitted only as a scope-matched, read-only projection.
+assert.equal(contextA.relationshipTimeline, timelineA);
+assert.equal(contextA.relationshipState, relationshipStateA);
+assert.deepEqual(contextA.relationshipState?.openLoops.map((loop) => loop.id), ["tea"]);
+assert.deepEqual(contextA.relationshipState?.boundaries, ["No late-night calls."]);
+
+const timelineB = buildRelationshipTimeline({
+  relationId: relationB.id,
+  characterId: character.id,
+  userIdentityId: relationB.userIdentityId,
+  events: relationshipEvents,
+  generatedAt: 71,
+});
+const contextWithForeignTimeline = buildCharacterCognitiveContext({
+  character,
+  relation: relationA,
+  memories: [],
+  events: [],
+  timeContext: { now: 72 },
+  knowledgeBoundary: { known: [], unknown: [] },
+  relationshipTimeline: timelineB,
+});
+assert.equal(contextWithForeignTimeline.relationshipTimeline, undefined, "other relation timeline is rejected");
+assert.equal(contextWithForeignTimeline.relationshipState, undefined, "other identity state is rejected");
+
+const sameRelationOtherIdentityTimeline = buildRelationshipTimeline({
+  relationId: relationA.id,
+  characterId: character.id,
+  userIdentityId: relationB.userIdentityId,
+  events: [],
+  generatedAt: 72,
+});
+const contextWithForeignIdentityTimeline = buildCharacterCognitiveContext({
+  character,
+  relation: relationA,
+  memories: [],
+  events: [],
+  timeContext: { now: 72 },
+  knowledgeBoundary: { known: [], unknown: [] },
+  relationshipTimeline: sameRelationOtherIdentityTimeline,
+});
+assert.equal(contextWithForeignIdentityTimeline.relationshipTimeline, undefined, "same relation with another identity is rejected");
+
+const emptyTimeline = buildRelationshipTimeline({
+  relationId: relationA.id,
+  characterId: character.id,
+  userIdentityId: relationA.userIdentityId,
+  events: [],
+  generatedAt: 73,
+});
+const contextWithEmptyTimeline = buildCharacterCognitiveContext({
+  character,
+  relation: relationA,
+  memories: [],
+  events: [],
+  timeContext: { now: 74 },
+  knowledgeBoundary: { known: [], unknown: [] },
+  relationshipTimeline: emptyTimeline,
+});
+assert.equal(contextWithEmptyTimeline.relationshipTimeline?.eventCount, 0, "empty timeline remains compatible");
+assert.equal(contextWithEmptyTimeline.relationshipState, undefined, "empty timeline has no state");
 
 // Persona is compact and contains no UI/contact configuration or full Character copy.
 assert.deepEqual(Object.keys(contextA.persona).sort(), ["age", "backstory", "gender", "id", "mbti", "name", "personality"]);

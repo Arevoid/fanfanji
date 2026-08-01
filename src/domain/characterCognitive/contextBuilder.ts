@@ -6,6 +6,8 @@ import {
   type CharacterCognitivePersona,
   type CharacterCognitiveTemporalContext,
 } from "./characterCognitiveTypes";
+import type { RelationshipTimeline } from "../characterLife/relationshipTimelineTypes";
+import type { RelationshipState } from "../characterLife/relationshipStateTypes";
 import { selectKnownFacts, selectRecentEvents } from "./contextPolicy";
 
 function assertRelationshipScope(input: BuildCharacterCognitiveContextInput): CharacterCognitiveIdentityScope {
@@ -50,6 +52,28 @@ function projectTimeContext(input: BuildCharacterCognitiveContextInput): Charact
   };
 }
 
+const matchesCognitiveScope = (
+  value: Pick<RelationshipTimeline, "relationId" | "characterId" | "userIdentityId"> | RelationshipState,
+  scope: CharacterCognitiveIdentityScope,
+): boolean => value.relationId === scope.relationId
+  && value.characterId === scope.characterId
+  && value.userIdentityId === scope.userIdentityId;
+
+function projectRelationshipTimeline(
+  timeline: RelationshipTimeline | undefined,
+  scope: CharacterCognitiveIdentityScope,
+): Pick<CharacterCognitiveContext, "relationshipState" | "relationshipTimeline"> {
+  if (!timeline || !matchesCognitiveScope(timeline, scope)) return {};
+  const state = timeline.state && matchesCognitiveScope(timeline.state, scope)
+    ? timeline.state
+    : undefined;
+  const safeTimeline = state === timeline.state ? timeline : { ...timeline, state: undefined };
+  return {
+    relationshipTimeline: safeTimeline,
+    ...(state ? { relationshipState: state } : {}),
+  };
+}
+
 /**
  * Builds a read-only cognitive snapshot from caller-provided data. This domain
  * function has no storage, API, React, AI, or prompt-string dependency.
@@ -59,6 +83,7 @@ export function buildCharacterCognitiveContext(
 ): CharacterCognitiveContext {
   const scope = assertRelationshipScope(input);
   const { relation } = input;
+  const relationshipProjection = projectRelationshipTimeline(input.relationshipTimeline, scope);
 
   return {
     schemaVersion: CHARACTER_COGNITIVE_CONTEXT_SCHEMA_VERSION,
@@ -76,6 +101,7 @@ export function buildCharacterCognitiveContext(
       ...(relation.scheduledProactiveTime === undefined ? {} : { scheduledProactiveTime: relation.scheduledProactiveTime }),
       updatedAt: relation.updatedAt,
     },
+    ...relationshipProjection,
     knownFacts: selectKnownFacts(input.memories, scope),
     recentEvents: selectRecentEvents(input.events, scope),
     temporalContext: projectTimeContext(input),
