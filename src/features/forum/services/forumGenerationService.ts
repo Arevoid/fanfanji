@@ -60,6 +60,10 @@ import {
   buildPublicForumReplyPromptContext,
   formatPublicForumReplyPromptContext,
 } from "../../characterCognitive/promptAdapters/publicForumReplyPromptAdapter";
+import {
+  buildPublicForumActivityPromptContext,
+  formatPublicForumActivityPromptContext,
+} from "../../characterCognitive/promptAdapters/publicForumActivityPromptAdapter";
 
 export interface ForumRelationContext {
   relationship: CharacterRelationship;
@@ -68,7 +72,7 @@ export interface ForumRelationContext {
   promptContext: string;
   /** Canonical public style only, used when this character replies to a public thread. */
   publicReplyPersona: string;
-  /** Optional public-only context for a generated thread; never used for replies or activity. */
+  /** Optional public-only context for generated public content. */
   publicCognitiveContext?: PublicForumCognitiveContext;
 }
 
@@ -664,6 +668,7 @@ const buildReplyPrompt = (input: {
   thread: ForumThread;
   availableReplies: readonly ForumReply[];
   author: ForumReplyAuthor;
+  promptKind?: "reply" | "activity";
 }): { systemInstruction: string; message: string } => ({
   systemInstruction: `你只生成一条与当前论坛帖直接相关的公开回复。
 ${FORUM_PUBLIC_TEXT_RULES}
@@ -674,9 +679,13 @@ replyToFloor 只能取提示中列出的真实楼层；直接回复主楼必须�
 ${input.author.kind === "relation"
     ? `按该角色经过公开脱敏的说话风格回复：
 ${input.author.context.publicCognitiveContext
-      ? formatPublicForumReplyPromptContext(
-        buildPublicForumReplyPromptContext(input.author.context.publicCognitiveContext),
-      )
+      ? input.promptKind === "activity"
+        ? formatPublicForumActivityPromptContext(
+          buildPublicForumActivityPromptContext(input.author.context.publicCognitiveContext),
+        )
+        : formatPublicForumReplyPromptContext(
+          buildPublicForumReplyPromptContext(input.author.context.publicCognitiveContext),
+        )
       : input.author.context.publicReplyPersona}`
     : `作为普通论坛用户“${input.author.profile.displayName}”回复。
 公开风格：${input.author.profile.publicStyle}
@@ -801,6 +810,10 @@ export async function generateThreadActivity(input: {
   now: number;
   random?: () => number;
   aiCall?: ForumAiCall;
+  /** Explicit public candidates only; absence is denied by the public context policy. */
+  publicEventCandidates?: readonly PublicCharacterEventCandidate[];
+  /** Explicit public world knowledge only; absence is denied by the public context policy. */
+  publicWorldSettings?: readonly PublicWorldSettingCandidate[];
 }): Promise<ForumThreadActivityResult> {
   if (input.thread.ownerIdentityId !== input.ownerIdentityId) {
     throw new Error("生成内容无效：帖子不属于当前身份。");
@@ -824,7 +837,17 @@ export async function generateThreadActivity(input: {
       worldBookEntries: input.worldBookEntries,
       identities: input.settings.identities,
     }))
-    .filter((value): value is ForumRelationContext => Boolean(value));
+    .filter((value): value is ForumRelationContext => Boolean(value))
+    .map((context) => ({
+      ...context,
+      publicCognitiveContext: buildPublicForumCognitiveContext({
+        character: context.character,
+        events: (input.publicEventCandidates || [])
+          .filter((candidate) => candidate.event.characterId === context.character.id),
+        worldSettings: input.publicWorldSettings || [],
+        currentTime: { now: input.now },
+      }),
+    }));
   const originalAuthorContext = input.thread.privateAuthorRelationId
     ? validContexts.find((context) =>
         context.relationship.id === input.thread.privateAuthorRelationId
@@ -860,7 +883,9 @@ ${FORUM_PUBLIC_TEXT_RULES}
       message: `${publicThreadContext(input.thread, threadReplies)}
 请以原楼主的公开身份追加自然后续更新。
 ${originalAuthorContext
-    ? originalAuthorContext.promptContext
+    ? `${originalAuthorContext.promptContext}\n${formatPublicForumActivityPromptContext(
+      buildPublicForumActivityPromptContext(originalAuthorContext.publicCognitiveContext!),
+    )}`
     : "该帖来自应用内虚拟论坛账号，不读取任何角色私密上下文。"}`,
     };
     const candidate = await generateValidatedCandidate({
@@ -913,7 +938,12 @@ ${originalAuthorContext
   const generated: ForumReply[] = [];
   for (const [index, author] of authors.entries()) {
     const availableReplies = [...threadReplies, ...generated];
-    const prompt = buildReplyPrompt({ thread: input.thread, availableReplies, author });
+    const prompt = buildReplyPrompt({
+      thread: input.thread,
+      availableReplies,
+      author,
+      promptKind: "activity",
+    });
     const candidate = await generateValidatedCandidate({
       aiCall,
       request: toAiRequest(input.settings, prompt),

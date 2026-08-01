@@ -13,12 +13,21 @@ import type {
   WorldBookEntry,
 } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
+import { buildPublicForumCognitiveContext } from "../../../domain/publicCognitive/publicContextBuilder";
+import type {
+  PublicCharacterEventCandidate,
+  PublicWorldSettingCandidate,
+} from "../../../domain/publicCognitive/publicForumCognitiveTypes";
 import { createForumVirtualAuthor, getForumVirtualProfile, FORUM_VIRTUAL_PROFILES } from "../../../domain/forum/forumVirtualProfiles";
 import { canScheduleStoryContinuation } from "../../../domain/forum/forumStoryArc";
 import { parseForumGeneratedEventBatch, type ForumGeneratedEventBatch } from "../../../domain/forum/forumValidation";
 import { buildForumProtectedNames, findForumPrivateNameViolation, isForumGeneratedReplyRelevant, validateForumGeneratedText } from "../../../domain/forum/forumContentSafety";
 import { buildForumRelationGenerationContext } from "./forumGenerationService";
 import { apiChat } from "../../../utils/apiHelper";
+import {
+  buildPublicForumActivityPromptContext,
+  formatPublicForumActivityPromptContext,
+} from "../../characterCognitive/promptAdapters/publicForumActivityPromptAdapter";
 
 export const FORUM_ACTIVITY_CHECK_MIN_MS = 30_000;
 export const FORUM_ACTIVITY_CHECK_MAX_MS = 90_000;
@@ -43,6 +52,10 @@ export interface ForumActivityPlanInput {
   now: number;
   random?: () => number;
   aiCall?: (input: { message: string; systemInstruction: string; apiKey: string; model: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean }) => Promise<{ text: string }>;
+  /** Explicitly classified public candidates only; omitted records remain denied. */
+  publicEventCandidates?: readonly PublicCharacterEventCandidate[];
+  /** Explicitly classified public world knowledge only; omitted records remain denied. */
+  publicWorldSettings?: readonly PublicWorldSettingCandidate[];
 }
 
 const id = (prefix: string): string => `${prefix}-${typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -162,6 +175,28 @@ const validateBatch = (input: {
 
 const defaultAiCall = (input: Parameters<NonNullable<ForumActivityPlanInput["aiCall"]>>[0]) => apiChat({ ...input, history: [] });
 
+const buildPublicActivityPromptSupplements = (
+  input: ForumActivityPlanInput,
+  slots: readonly ForumActivityActorSlot[],
+): string[] => slots.flatMap((slot) => {
+  if (slot.actor.kind !== "relationship") return [];
+  const characterId = slot.actor.characterId;
+  const character = input.characters.find((candidate) => candidate.id === characterId);
+  if (!character) return [];
+  const context = buildPublicForumCognitiveContext({
+    character,
+    events: (input.publicEventCandidates || [])
+      .filter((candidate) => candidate.event.characterId === character.id),
+    worldSettings: input.publicWorldSettings || [],
+    currentTime: { now: input.now },
+  });
+  return [
+    `Actor slot ${slot.slotId}:\n${formatPublicForumActivityPromptContext(
+      buildPublicForumActivityPromptContext(context),
+    )}`,
+  ];
+});
+
 /** One public-only AI call yields a scheduled batch; it never writes forum storage itself. */
 export const planForumActivity = async (input: ForumActivityPlanInput): Promise<ForumPendingActivityEvent[]> => {
   if (!input.settings.apiKey?.trim() || !input.settings.selectedModel?.trim()) {
@@ -178,9 +213,10 @@ export const planForumActivity = async (input: ForumActivityPlanInput): Promise<
   if (!eligible.length) return [];
   const storyContinuation = canScheduleStoryContinuation(input.thread, input.replies, input.now)
     && (input.random || Math.random)() < (input.thread.storyArc?.continuationProbability || 0);
+  const publicCognitiveSupplements = buildPublicActivityPromptSupplements(input, eligible);
   const prompt = {
     systemInstruction: `你只生成一批公开论坛活动候选，不执行任何写操作。严格输出 JSON：{"events":[{"localId":"e1","actorSlot":"slot","kind":"reply","body":"回复","replyTo":{"type":"thread"},"delaySeconds":30}]}。每批 1-4 条；actorSlot 只能来自白名单；不得输出任意 ID、私人聊天、Memory、关系、点赞、转发、删除、图片或动作描写。author-update 只可由真实 AI 楼主发出。${storyContinuation ? "当前是开放连载帖的合理后续窗口：第一条必须是楼主的 author-update，延续公开前文，不得改名或编造私密背景。" : ""}`,
-    message: `${publicThreadText(input.thread, input.replies)}\n可用 actorSlots：${eligible.map((slot) => `${slot.slotId}｜${slot.publicAuthor.displayName}｜${slot.safePublicStyle}`).join("\n")}`,
+    message: `${publicThreadText(input.thread, input.replies)}\n可用 actorSlots：${eligible.map((slot) => `${slot.slotId}｜${slot.publicAuthor.displayName}｜${slot.safePublicStyle}`).join("\n")}${publicCognitiveSupplements.length > 0 ? `\n${publicCognitiveSupplements.join("\n\n")}` : ""}`,
   };
   const result = await (input.aiCall || defaultAiCall)({
     ...prompt,
