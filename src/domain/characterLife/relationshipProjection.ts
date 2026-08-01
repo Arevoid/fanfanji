@@ -1,6 +1,9 @@
 import type { CharacterEvent } from "./characterEventTypes";
 import {
   RELATIONSHIP_STATE_PROJECTION_VERSION,
+  type RelationshipHabitSummary,
+  type RelationshipMeaningfulEvent,
+  type RelationshipMilestone,
   type RelationshipOpenLoop,
   type RelationshipState,
 } from "./relationshipStateTypes";
@@ -25,6 +28,9 @@ const createInitialState = (event: CharacterEvent): RelationshipState => ({
   tone: "neutral",
   openLoops: [],
   boundaries: [],
+  habitSummaries: [],
+  meaningfulEvents: [],
+  milestones: [],
   updatedAt: event.recordedAt,
   version: RELATIONSHIP_STATE_PROJECTION_VERSION,
 });
@@ -44,6 +50,63 @@ const updateMeaningfulEvent = (state: RelationshipState, event: CharacterEvent):
   lastMeaningfulEventAt: event.occurredAt,
   updatedAt: Math.max(state.updatedAt, event.recordedAt),
 });
+
+const appendUniqueBySourceEvent = <T extends { sourceEventId: string }>(
+  records: readonly T[] | undefined,
+  record: T,
+): T[] => {
+  const current = records ?? [];
+  return current.some((item) => item.sourceEventId === record.sourceEventId)
+    ? [...current]
+    : [...current, record];
+};
+
+const projectHabitFormed = (state: RelationshipState, event: CharacterEvent): RelationshipState => {
+  const habit: RelationshipHabitSummary = {
+    id: event.id,
+    summary: event.summary,
+    formedAt: event.occurredAt,
+    sourceEventId: event.id,
+  };
+  return updateMeaningfulEvent({
+    ...state,
+    habitSummaries: appendUniqueBySourceEvent(state.habitSummaries, habit),
+  }, event);
+};
+
+const projectMeaningfulShare = (state: RelationshipState, event: CharacterEvent): RelationshipState => {
+  const meaningfulEvent: RelationshipMeaningfulEvent = {
+    id: event.id,
+    kind: "meaningful_share",
+    summary: event.summary,
+    occurredAt: event.occurredAt,
+    sourceEventId: event.id,
+  };
+  return updateMeaningfulEvent({
+    ...state,
+    meaningfulEvents: appendUniqueBySourceEvent(state.meaningfulEvents, meaningfulEvent),
+  }, event);
+};
+
+const projectCareShown = (state: RelationshipState, event: CharacterEvent): RelationshipState => {
+  // Care can warm a neutral relationship, but it cannot erase strain,
+  // complete repair, or advance the relationship stage.
+  const tone = state.tone === "neutral" ? "warm" : state.tone;
+  return updateMeaningfulEvent({ ...state, tone }, event);
+};
+
+const projectMilestoneReached = (state: RelationshipState, event: CharacterEvent): RelationshipState => {
+  const milestone: RelationshipMilestone = {
+    id: event.id,
+    summary: event.summary,
+    reachedAt: event.occurredAt,
+    sourceEventId: event.id,
+  };
+  return updateMeaningfulEvent({
+    ...state,
+    milestones: appendUniqueBySourceEvent(state.milestones, milestone),
+  }, event);
+};
 
 /**
  * Applies one explicit relation-scoped CharacterEvent without side effects.
@@ -101,6 +164,18 @@ export const projectRelationshipState = (
         : [...state.boundaries, event.summary];
       return updateMeaningfulEvent({ ...state, boundaries }, event);
     }
+
+    case "habit_formed":
+      return projectHabitFormed(state, event);
+
+    case "meaningful_share":
+      return projectMeaningfulShare(state, event);
+
+    case "care_shown":
+      return projectCareShown(state, event);
+
+    case "milestone_reached":
+      return projectMilestoneReached(state, event);
 
     default:
       return state;
