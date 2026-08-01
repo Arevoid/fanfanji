@@ -26,7 +26,7 @@ export function buildInnerVoicePrompt({ character, relationship, relationId, tri
 【角色设定】
 性格：${character.personality || "未提供"}
 背景：${character.backstory || "未提供"}
-当前关系上下文：${relationship ? `relationId=${relationId || relationship.id}；关系状态=${relationship.relationship}` : "群聊上下文（不使用单聊关系）"}
+当前关系上下文：${relationship ? `关系状态=${relationship.relationship}` : "群聊上下文（不使用单聊关系）"}
 
 【本次触发消息】
 ${formatMessage(triggerMessage, character.name, userName)}

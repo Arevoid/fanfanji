@@ -70,7 +70,8 @@ import { requestAutomaticMomentComment } from "../features/moments/services/mome
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
 import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
 import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
-import { createMomentTemporalContext, formatMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
+import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
+import { buildMomentPublicCognitiveContext } from "../domain/momentCognitive/momentPublicContextBuilder";
 import {
   MessageSquare,
   Users,
@@ -434,6 +435,39 @@ interface AppChatProps {
 }
 
 const PRESEED_MOMENTS: Moment[] = [];
+
+/**
+ * Builds the only context allowed to cross from the Moments UI into a Moment
+ * AI request. Callers pass already-public Moment records; no Memory,
+ * Relationship, CharacterEvent, or InnerVoice data is accepted here.
+ */
+const buildPublicMomentContext = (input: {
+  character: Character;
+  moments: readonly Moment[];
+  comments?: readonly MomentComment[];
+  now: number;
+}) => buildMomentPublicCognitiveContext({
+  character: input.character,
+  publicMomentHistory: input.moments.map((moment) => ({
+    characterId: input.character.id,
+    visibility: "public" as const,
+    authorName: moment.authorName,
+    content: moment.content,
+    timestamp: moment.timestamp,
+    ...(moment.imageDescription ? { imageDescription: moment.imageDescription } : {}),
+  })),
+  publicCommentHistory: [
+    ...input.moments.flatMap((moment) => moment.comments),
+    ...(input.comments || []),
+  ].map((comment) => ({
+    characterId: input.character.id,
+    visibility: "public" as const,
+    authorName: comment.authorName,
+    content: comment.content,
+    timestamp: comment.timestamp,
+  })),
+  currentTime: { now: input.now },
+});
 
 const isOfflineStoryActiveFor = (relationId: string) =>
   localStorage.getItem(getOfflineModeStorageKey(relationId)) === "true";
@@ -4369,22 +4403,15 @@ ${instructionsPrompt}`;
       setTimeout(async () => {
         try {
           const temporalContext = createMomentTemporalContext(new Date());
-          const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
+          const publicContext = buildPublicMomentContext({
+            character: friend,
+            moments: [newMo],
+            now: Date.now(),
+          });
 
-          const systemInstruction = `${momentTimeContext}
-
-You are roleplaying as "${friend.name}".
-Character Profile:
-- Personality: ${friend.personality}
-- Background: ${friend.backstory}
-
-The user just posted a new WeChat Moment (朋友圈).
-Moment Content: "${newMo.content}"
-${newMo.image ? "[User attached an image to this Moment]" : ""}
-
-Your task: Write a short, natural comment on this Moment.
+          const systemInstruction = `Your task: Write a short, natural comment on the public Moment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
-1. The comment must be brief, extremely natural, and fit your public character profile.
+1. The comment must be brief, extremely natural, and fit the public-safe character context supplied by the Moment Prompt Adapter.
 2. Keep it under 35 characters. Speak in Chinese.
 3. No OOC, no narrative brackets like (微笑), just the direct comment text.
 4. Respond only to the public Moment content. Do not infer or mention private messages, shared experiences, relationship status, or user profile details.
@@ -4408,6 +4435,7 @@ Your task: Write a short, natural comment on this Moment.
             character: friend,
             cleanText: (text) => cleanOnlineMessage(text, true),
             temporalContext,
+            publicContext,
           });
           if (comment) onAddCommentToMoment(newMo.id, comment);
         } catch (err) {
@@ -4455,36 +4483,28 @@ Your task: Write a short, natural comment on this Moment.
     
     setTimeout(async () => {
       try {
-        const existingCommentsContext = targetMoment.comments
-          .map(c => `* ${c.authorName}: ${c.content}`)
-          .join("\n");
-
         const temporalContext = createMomentTemporalContext(new Date());
-        const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
+        const publicContext = buildPublicMomentContext({
+          character: friend,
+          moments: [targetMoment],
+          comments: [
+            ...targetMoment.comments,
+            {
+              id: "public-comment-input",
+              authorName: settings.name,
+              authorAvatar: settings.avatar,
+              content: userCommentText,
+              timestamp: Date.now(),
+            },
+          ],
+          now: Date.now(),
+        });
 
-        const systemInstruction = `${momentTimeContext}
-
-You are roleplaying as "${friend.name}".
-Character Profile:
-- Personality: ${friend.personality}
-- Background: ${friend.backstory}
-
-Context:
-The user has just commented/replied on a WeChat Moment.
-Moment Author: ${targetMoment.authorName}
-Moment Content: "${targetMoment.content}"
-${targetMoment.image ? "[Attached an image]" : ""}
-
-Existing public comments on this Moment:
-${existingCommentsContext || "(No other comments)"}
-
-Latest public comment/reply: "${userCommentText}"
-
-Your task: Write a short, extremely natural WeChat reply/comment to that public comment.
+        const systemInstruction = `Your task: Write a short, extremely natural WeChat reply/comment to the public comment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
-1. The reply must be brief, lively, extremely natural, and match your public character profile.
+1. The reply must be brief, lively, extremely natural, and match the public-safe character context supplied by the Moment Prompt Adapter.
 2. Keep it under 35 characters. Speak in Chinese.
-3. Speak directly to the user (e.g. use "你怎么...", "哈哈就是说啊", etc. without any formal prefixes). Do not write narrative actions or brackets like "(害羞)", just output the comment text.
+3. Speak directly to the user without formal prefixes. Do not write narrative actions or brackets like "(害羞)", just output the comment text.
 4. Respond only to the public Moment and public comments. Do not infer or mention private messages, shared experiences, relationship status, or user profile details.
 `;
 
@@ -4507,6 +4527,7 @@ Your task: Write a short, extremely natural WeChat reply/comment to that public 
           userName: settings.name,
           cleanText: (text) => cleanOnlineMessage(text, true),
           temporalContext,
+          publicContext,
         });
         if (reply) onAddCommentToMoment(momentId, reply);
       } catch (err) {
@@ -4521,30 +4542,20 @@ Your task: Write a short, extremely natural WeChat reply/comment to that public 
     try {
       const ownerMomentHistory = moments
         .filter((moment) => Boolean(moment.characterId))
+        .filter((moment) => moment.characterId === friend.id)
         .filter((moment) => (moment.ownerIdentityId || "identity-1") === (relationship.userIdentityId || "identity-1"))
         .sort((left, right) => right.timestamp - left.timestamp)
         .slice(0, 12);
-      const recentMomentHistory = ownerMomentHistory.length > 0
-        ? ownerMomentHistory
-          .map((moment) => `* ${moment.authorName}：${renderMomentContent(moment.content)}`)
-          .join("\n")
-        : "(No previous friend Moments in this identity feed)";
       const temporalContext = createMomentTemporalContext(new Date(occurredAt));
-      const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
+      const publicContext = buildPublicMomentContext({
+        character: friend,
+        moments: ownerMomentHistory,
+        now: occurredAt,
+      });
 
-      const systemInstruction = `${momentTimeContext}
-
-You are roleplaying as "${friend.name}".
-Character Profile:
-- Personality: ${friend.personality}
-- Background: ${friend.backstory}
-
-Public feed history (do not repeat or paraphrase these):
-${recentMomentHistory}
-
-Your task: Write a WeChat Moment post (朋友圈) from your perspective.
+      const systemInstruction = `Your task: Write a WeChat Moment post (朋友圈) from the public-safe character context supplied by the Moment Prompt Adapter.
 🚨 [CRITICAL WECHAT MOMENT RULES]:
-1. The post must fit your public character profile and be grounded only in public-safe material supplied to this request.
+1. The post must fit the public character profile and be grounded only in public-safe material supplied to this request.
 2. The post content must be natural, engaging, and in Chinese.
 3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
 4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, or talk like an AI. Just output the text of the Moment post.
@@ -4552,7 +4563,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
 6. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)".
 7. If this post needs an image, add one final separate line in exactly this format: "(配图：图片描述)". This line will be rendered as a text-image card, never as post body text.
 8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
-9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the public feed history above. Avoid generic filler such as weather, tiredness, coffee, work, or vague feelings unless a specific public character detail makes it genuinely new.
+9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the public feed history supplied by the Moment Prompt Adapter. Avoid generic filler such as weather, tiredness, coffee, work, or vague feelings unless a specific public character detail makes it genuinely new.
 10. Never infer private messages, Memory, shared experiences, relationship status, OfflineStory content, or user profile details. If there is no fresh public-safe topic, output exactly "SKIP" and nothing else.
 `;
 
@@ -4578,9 +4589,12 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         occurredAt: () => occurredAt,
         temporalContext,
         existingMoments: ownerMomentHistory,
+        publicContext,
       });
       if (generated.moment) onAddMoment(generated.moment);
-      if (generated.memory) onSaveMemories(MemoryService.mergeMemories(memories || [], [{ ...generated.memory, relationId: relationship.id }]));
+      // A public Moment is not a verified private relationship fact. Keep the
+      // generator's legacy return value for compatibility, but do not write it
+      // into relation-scoped Memory without an explicit user confirmation path.
     } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
       const errMsgStr = err?.message || String(err);

@@ -1,5 +1,7 @@
 import type { Character, MemoryItem, Moment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
+import type { MomentPublicCognitiveContext } from "../../../domain/momentCognitive/momentPublicCognitiveTypes";
+import { appendMomentPublicPromptContext } from "../../characterCognitive/promptAdapters/momentPromptAdapter";
 import { sanitizeMomentPublishText } from "./momentContent";
 import { assessMomentUniqueness, isMomentSkipResponse } from "./momentUniqueness";
 import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
@@ -84,8 +86,10 @@ export async function requestCharacterMoment(input: {
   random?: () => number;
   temporalContext?: MomentTemporalContext;
   existingMoments?: readonly Moment[];
+  /** Required for production character generation; omitted only for legacy callers. */
+  publicContext?: MomentPublicCognitiveContext;
 }): Promise<{ moment?: Moment; memory?: MemoryItem }> {
-  const response = await input.requestAi(input.request);
+  const response = await input.requestAi(appendMomentPublicPromptContext(input.request, input.publicContext));
   if (!response?.text) return {};
   const now = input.occurredAt || input.now || Date.now;
   const random = input.random || Math.random;

@@ -886,10 +886,20 @@ export default function App() {
         return;
       }
 
+      // A summary without a relation cannot be assigned to one user's
+      // relationship scope. Keep legacy records readable, but never create a
+      // new long-term memory from a characterId-only fallback.
+      if (!relationId) {
+        setImmediateSummaryTask(prev => ({
+          ...prev,
+          status: "error",
+          error: "需要明确当前关系后才能总结记忆",
+        }));
+        return;
+      }
+
       const retrievalLimit = char.retrievalHistoryLimit || 100;
-      const charMsgs = messages.filter((message) => relationId
-        ? message.relationId === relationId
-        : message.characterId === characterId).slice(-retrievalLimit);
+      const charMsgs = messages.filter((message) => message.relationId === relationId).slice(-retrievalLimit);
       if (charMsgs.length === 0) {
         setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "暂无与该角色的聊天记录，无法进行总结" }));
         return;

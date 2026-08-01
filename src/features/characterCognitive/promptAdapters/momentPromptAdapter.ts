@@ -8,6 +8,7 @@ import type {
   CharacterCognitiveContext,
   CharacterCognitiveRoutineContext,
 } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import type { MomentPublicCognitiveContext } from "../../../domain/momentCognitive/momentPublicCognitiveTypes";
 
 const DEFAULT_PUBLIC_HISTORY_LIMIT = 8;
 const DEFAULT_PUBLIC_COMMENT_LIMIT = 12;
@@ -28,9 +29,9 @@ type MomentPromptContextWithRoutine = MomentPromptContext & {
 };
 
 function projectMomentRoutineContext(
-  context: CharacterCognitiveContext,
+  context: CharacterCognitiveContext | undefined,
 ): Pick<MomentPromptContextWithRoutine, "routineContext"> {
-  if (!context.routineContext) return {};
+  if (!context?.routineContext) return {};
   return {
     routineContext: {
       period: context.routineContext.period,
@@ -40,11 +41,14 @@ function projectMomentRoutineContext(
 }
 
 function projectPublicMomentPersona(
-  context: CharacterCognitiveContext,
+  context: CharacterCognitiveContext | undefined,
   options: MomentPromptAdapterOptions | undefined,
 ) {
   const profile = options?.publicContext?.publicCharacterProfile;
-  if (!profile) return projectPromptPersona(context);
+  if (!profile) {
+    if (context) return projectPromptPersona(context);
+    return { name: "", personality: "", backstory: "" };
+  }
   return {
     name: profile.name,
     ...(profile.age === undefined ? {} : { age: profile.age }),
@@ -56,11 +60,14 @@ function projectPublicMomentPersona(
 }
 
 function projectPublicMomentTime(
-  context: CharacterCognitiveContext,
+  context: CharacterCognitiveContext | undefined,
   options: MomentPromptAdapterOptions | undefined,
 ) {
   const currentTime = options?.publicContext?.currentTime;
-  if (!currentTime) return projectPromptTime(context);
+  if (!currentTime) {
+    if (context) return projectPromptTime(context);
+    return { date: "", time: "" };
+  }
   return {
     date: currentTime.date,
     time: currentTime.time,
@@ -78,7 +85,7 @@ function boundedTopicHints(topics: readonly string[] | undefined, limit: number)
 }
 
 function projectMomentTopicContext(
-  context: CharacterCognitiveContext,
+  context: CharacterCognitiveContext | undefined,
   options: MomentPromptAdapterOptions | undefined,
 ): Pick<MomentPromptContextWithRoutine, "topicContext"> {
   const topicContext = options?.publicContext?.topicContext;
@@ -98,7 +105,7 @@ function projectMomentTopicContext(
  * events or world knowledge to a public post.
  */
 export function buildMomentPromptContext(
-  context: CharacterCognitiveContext,
+  context: CharacterCognitiveContext | undefined,
   options?: MomentPromptAdapterOptions,
 ): MomentPromptContextWithRoutine {
   const publicContext = options?.publicContext;
@@ -140,6 +147,32 @@ export function buildMomentPromptContext(
     time: projectPublicMomentTime(context, options),
     ...projectMomentRoutineContext(context),
     ...projectMomentTopicContext(context, options),
+  };
+}
+
+/**
+ * Public Moment entry point. It accepts only the dedicated public snapshot,
+ * so a public generation caller cannot accidentally provide relation-scoped
+ * Memory, RelationshipState, CharacterEvent, or InnerVoice.
+ */
+export function buildMomentPromptContextFromPublicContext(
+  publicContext: MomentPublicCognitiveContext,
+  options?: Omit<MomentPromptAdapterOptions, "publicContext">,
+): MomentPromptContextWithRoutine {
+  return buildMomentPromptContext(undefined, { ...options, publicContext });
+}
+
+/** Appends the public projection while preserving the caller's task prompt. */
+export function appendMomentPublicPromptContext<T extends { systemInstruction?: string }>(
+  request: T,
+  publicContext: MomentPublicCognitiveContext | undefined,
+): T {
+  if (!publicContext) return request;
+  const supplement = formatMomentPromptContext(buildMomentPromptContextFromPublicContext(publicContext));
+  if (!supplement) return request;
+  return {
+    ...request,
+    systemInstruction: [request.systemInstruction, supplement].filter(Boolean).join("\n\n"),
   };
 }
 

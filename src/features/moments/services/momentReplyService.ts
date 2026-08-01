@@ -1,5 +1,7 @@
 import type { Character, MomentComment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
+import type { MomentPublicCognitiveContext } from "../../../domain/momentCognitive/momentPublicCognitiveTypes";
+import { appendMomentPublicPromptContext } from "../../characterCognitive/promptAdapters/momentPromptAdapter";
 import { sanitizeMomentPublishText } from "./momentContent";
 import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
 
@@ -15,8 +17,10 @@ export async function requestMomentCommentReply(input: {
   now?: () => number;
   random?: () => number;
   temporalContext?: MomentTemporalContext;
+  /** Required for production public replies; omitted only for legacy callers. */
+  publicContext?: MomentPublicCognitiveContext;
 }): Promise<MomentComment | undefined> {
-  const response = await input.requestAi(input.request);
+  const response = await input.requestAi(appendMomentPublicPromptContext(input.request, input.publicContext));
   if (!response?.text) return undefined;
   const now = input.now || Date.now;
   const random = input.random || Math.random;

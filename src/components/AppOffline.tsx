@@ -541,7 +541,7 @@ export default function AppOffline({
     // later incremental sync from discarding facts saved by an earlier one.
     const sourceMessages = getOfflineMemorySourceMessages(story, { includeSynced: true });
 
-    if (!canSyncOfflineStoryToMemory({ story, userConfirmed: true, sourceMessages })) {
+    if (!canSyncOfflineStoryToMemory({ story, userConfirmed: options.userConfirmed === true, sourceMessages })) {
       showToast("只有当前关系下、已确认的单角色线上续写可同步至长期记忆；导演、IF 与多人剧情会保留在线下故事空间。");
       return story;
     }
