@@ -19,6 +19,7 @@ import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
 import { getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { countOfflineStoriesForRelation } from "../domain/relationship/offlineStoryScope";
 import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
 import { ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
 
@@ -970,7 +971,19 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
               <div className="flex items-center gap-3 overflow-x-auto pb-1 no-scrollbar">
                 {selectableCharacters.map(char => {
                   const isSel = char.id === selectedCharId;
-                  const charStoriesCount = offlineStories.filter(s => s.characterId === char.id).length;
+                  const charRelation = relationships.find((relation) =>
+                    relation.userIdentityId === activeIdentityId
+                    && resolveCanonicalCharacterId(relation.characterId, characters) === char.id,
+                  );
+                  const charStoriesCount = charRelation
+                    ? countOfflineStoriesForRelation({
+                        stories: offlineStories,
+                        relationId: charRelation.id,
+                        characterId: char.id,
+                        relationships,
+                        characters,
+                      })
+                    : 0;
                   return (
                     <button
                       key={char.id}
