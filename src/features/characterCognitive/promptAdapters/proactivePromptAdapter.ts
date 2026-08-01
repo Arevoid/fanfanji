@@ -6,6 +6,38 @@ import {
   selectSafePromptEvents,
 } from "./promptVisibilityPolicy";
 import type { CognitivePromptAdapter, ProactivePromptContext } from "./types";
+import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import type {
+  CharacterRoutinePeriod,
+  CharacterRoutineState,
+} from "../../../domain/characterLife/characterRoutine/characterRoutineTypes";
+
+interface ProactivePromptRoutineContext {
+  period: CharacterRoutinePeriod;
+  state: CharacterRoutineState;
+}
+
+type ProactiveContextWithRoutine = CharacterCognitiveContext & {
+  routineContext?: ProactivePromptRoutineContext;
+};
+
+type ProactivePromptContextWithRoutine = ProactivePromptContext & {
+  routineContext?: ProactivePromptRoutineContext;
+};
+
+function projectProactiveRoutineContext(context: CharacterCognitiveContext): Pick<
+  ProactivePromptContextWithRoutine,
+  "routineContext"
+> {
+  const routineContext = (context as ProactiveContextWithRoutine).routineContext;
+  if (!routineContext) return {};
+  return {
+    routineContext: {
+      period: routineContext.period,
+      state: routineContext.state,
+    },
+  };
+}
 
 function projectProactiveRelationshipContext(context: Parameters<CognitivePromptAdapter<ProactivePromptContext>>[0]): Pick<
   ProactivePromptContext,
@@ -42,10 +74,14 @@ function projectProactiveRelationshipContext(context: Parameters<CognitivePrompt
  * Builds a relation-safe proactive projection. Open context is intentionally
  * empty until a separately audited source is introduced.
  */
-export const buildProactivePromptContext: CognitivePromptAdapter<ProactivePromptContext> = (context, options) => ({
+export const buildProactivePromptContext = (
+  context: Parameters<CognitivePromptAdapter<ProactivePromptContext>>[0],
+  options?: Parameters<CognitivePromptAdapter<ProactivePromptContext>>[1],
+): ProactivePromptContextWithRoutine => ({
   persona: projectPromptPersona(context),
   relationship: projectPromptRelationship(context),
   ...projectProactiveRelationshipContext(context),
+  ...projectProactiveRoutineContext(context),
   recentMeaningfulEvents: selectSafePromptEvents(context, options),
   openContext: [],
   boundaries: projectPromptBoundary(context),
@@ -53,7 +89,7 @@ export const buildProactivePromptContext: CognitivePromptAdapter<ProactivePrompt
 });
 
 /** Formats the safe supplement without exposing scope IDs, private Memory, or InnerVoice data. */
-export function formatProactivePromptContext(context: ProactivePromptContext | undefined): string {
+export function formatProactivePromptContext(context: ProactivePromptContextWithRoutine | undefined): string {
   if (!context) return "";
 
   const relationship = [
@@ -68,6 +104,7 @@ export function formatProactivePromptContext(context: ProactivePromptContext | u
   const openLoops = context.relationshipTimeline?.openLoops.map((item) => `- Candidate topic only; do not assume completion: ${item}`) ?? [];
   const relationshipBoundaries = context.relationshipTimeline?.boundaries.map((item) => `- ${item}`) ?? [];
   const lastMeaningfulEvent = context.relationshipTimeline?.lastMeaningfulEventAt;
+  const routine = context.routineContext;
 
   return [
     "[RELATION-SAFE PROACTIVE COGNITIVE CONTEXT]",
@@ -85,5 +122,11 @@ export function formatProactivePromptContext(context: ProactivePromptContext | u
     ...(relationshipBoundaries.length > 0 ? ["Relationship boundaries:", ...relationshipBoundaries] : []),
     ...(lastMeaningfulEvent === undefined ? [] : [`- Last meaningful relationship event at: ${lastMeaningfulEvent}`]),
     `Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`,
+    ...(routine ? [
+      "Routine context (behavior reference only):",
+      `- Current time period: ${routine.period}`,
+      `- Current routine state: ${routine.state}`,
+      "Treat this as a plausibility hint only; do not suppress, reschedule, or delay a message because of it.",
+    ] : []),
   ].join("\n");
 }
