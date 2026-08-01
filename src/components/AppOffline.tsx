@@ -10,6 +10,7 @@ import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
 import { collectOfflineHandoffContent, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
+import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 import "./offline/offlineStory.css";
@@ -536,6 +537,11 @@ export default function AppOffline({
     // A story owns one replaceable summary. Re-reading its source prevents a
     // later incremental sync from discarding facts saved by an earlier one.
     const sourceMessages = getOfflineMemorySourceMessages(story, { includeSynced: true });
+
+    if (!canSyncOfflineStoryToMemory({ story, userConfirmed: true, sourceMessages })) {
+      showToast("只有当前关系下、已确认的单角色线上续写可同步至长期记忆；导演、IF 与多人剧情会保留在线下故事空间。");
+      return story;
+    }
 
     const character = characters.find((item) => item.id === story.characterId);
     if (!character || character.isGroupChat) {
