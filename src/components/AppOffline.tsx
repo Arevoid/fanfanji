@@ -22,7 +22,7 @@ import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolve
 import { getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { countOfflineStoriesForRelation } from "../domain/relationship/offlineStoryScope";
 import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
-import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/characterEventCaptureService";
+import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/offlineStoryEventCaptureService";
 import { ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
 
 interface AppOfflineProps {
@@ -529,7 +529,10 @@ export default function AppOffline({
   };
 
   // Sync memory manually
-  const handleSyncMemoryToBrain = async (story: OfflineStory): Promise<OfflineStory> => {
+  const handleSyncMemoryToBrain = async (
+    story: OfflineStory,
+    options: { userConfirmed?: boolean } = {},
+  ): Promise<OfflineStory> => {
     if (memorySyncInFlightRef.current.has(story.id)) return story;
     const repairingLegacyHandoff = needsLegacyHandoffRepair(story);
     const repairingMissingSummary = needsMissingSummaryRepair(story);
@@ -568,11 +571,15 @@ export default function AppOffline({
         const syncedStory = markSynced();
         if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
         else onSaveOfflineStory(syncedStory);
-        captureOfflineStoryCompletedEvent(
-          syncedStory,
-          relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId,
-          now,
-        );
+        if (options.userConfirmed) {
+          captureOfflineStoryCompletedEvent({
+            story: syncedStory,
+            userIdentityId: relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId,
+            sourceMessages,
+            userConfirmed: true,
+            recordedAt: now,
+          });
+        }
         showToast("没有可提取的线下新增剧情，已保留故事内容");
         return syncedStory;
       }
@@ -625,11 +632,15 @@ export default function AppOffline({
       const syncedStory = markSynced(extractedMemories.map((memory) => memory.id));
       if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
       else onSaveOfflineStory(syncedStory);
-      captureOfflineStoryCompletedEvent(
-        syncedStory,
-        relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId,
-        now,
-      );
+      if (options.userConfirmed) {
+        captureOfflineStoryCompletedEvent({
+          story: syncedStory,
+          userIdentityId: relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId,
+          sourceMessages,
+          userConfirmed: true,
+          recordedAt: now,
+        });
+      }
       showToast("线下剧情摘要已同步到当前角色");
       return syncedStory;
     } catch (error) {
@@ -1157,7 +1168,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     <p className="text-[10px] text-slate-400">将此离线剧本空间的当前进展记忆同步并沉淀到角色的长期记忆库中，让他们在后续对话中感知到这些事件。</p>
                     <button
                       type="button"
-                      onClick={() => void handleSyncMemoryToBrain(activeStory)}
+                      onClick={() => void handleSyncMemoryToBrain(activeStory, { userConfirmed: true })}
                       className="w-full py-2 bg-[var(--button-secondary-bg)] hover:bg-[var(--surface-raised)] text-[var(--button-secondary-text)] font-bold rounded-[16px] border border-[var(--button-secondary-border)] transition-all text-xs flex items-center justify-center gap-1.5 shadow-sm disabled:bg-[var(--button-disabled-bg)] disabled:text-[var(--button-disabled-text)] disabled:border-[var(--button-disabled-border)] disabled:opacity-100"
                     >
                       <Cpu className="w-3.5 h-3.5" />

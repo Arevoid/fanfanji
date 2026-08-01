@@ -29,7 +29,7 @@ const story = (overrides: Partial<OfflineStory> = {}): OfflineStory => ({
 });
 
 const confirmedContinuation = {
-  story: story(),
+  story: story({ characterIds: ["character-1"] }),
   userConfirmed: true,
   sourceMessages: [message("user", "We met after work."), message("character", "I remember.")],
 };

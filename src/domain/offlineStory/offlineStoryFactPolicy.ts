@@ -56,9 +56,7 @@ export const canSyncOfflineStoryToMemory = (input: OfflineStoryFactPolicyInput):
  * participant relation scopes exist in the data model.
  */
 export const canCreateCharacterEventFromOfflineStory = (input: OfflineStoryFactPolicyInput): boolean =>
-  isExplicitDirectContinuation(input)
-  && (input.story.characterIds?.length ?? 1) <= 1
-  && (!input.story.characterIds || Boolean(input.participantRelationIds?.length));
+  isExplicitDirectContinuation(input);
 
 export const classifyOfflineStoryFactLevel = (input: OfflineStoryFactPolicyInput): OfflineStoryFactLevel => {
   if (!canSyncOfflineStoryToMemory(input)) return "story_only";
