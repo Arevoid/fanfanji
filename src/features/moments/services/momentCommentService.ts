@@ -1,6 +1,7 @@
 import type { Character, MomentComment } from "../../../types";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { apiChat } from "../../../utils/apiHelper";
+import { buildMomentPromptContext, formatMomentPromptContext } from "../../characterCognitive/promptAdapters/momentPromptAdapter";
 import { sanitizeMomentPublishText } from "./momentContent";
 import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
 
@@ -15,10 +16,19 @@ export async function requestAutomaticMomentComment(input: {
   now?: () => number;
   random?: () => number;
   temporalContext?: MomentTemporalContext;
-  /** Phase 3 read-only context; Prompt consumption is intentionally deferred. */
+  /** Relation-scoped snapshot; only its MomentPromptAdapter projection reaches the request. */
   cognitiveContext?: CharacterCognitiveContext;
 }): Promise<MomentComment | undefined> {
-  const response = await input.requestAi(input.request);
+  const cognitivePromptBlock = input.cognitiveContext
+    ? formatMomentPromptContext(buildMomentPromptContext(input.cognitiveContext))
+    : "";
+  const request = cognitivePromptBlock
+    ? {
+      ...input.request,
+      systemInstruction: [input.request.systemInstruction, cognitivePromptBlock].filter(Boolean).join("\n\n"),
+    }
+    : input.request;
+  const response = await input.requestAi(request);
   if (!response?.text) return undefined;
   const now = input.now || Date.now;
   const random = input.random || Math.random;
