@@ -1,5 +1,6 @@
 import type { Character } from "../../types";
 import type { CharacterEvent } from "../characterLife/characterEventTypes";
+import type { MomentTopicRecord } from "../moments/momentGeneration/momentTopicTypes";
 
 export const MOMENT_PUBLIC_COGNITIVE_CONTEXT_SCHEMA_VERSION = 1;
 
@@ -86,6 +87,16 @@ export interface MomentPublicBehaviorConstraint {
   description: string;
 }
 
+/**
+ * Generation-only hints. This projection deliberately contains no Moment,
+ * character, relationship, or storage identifiers.
+ */
+export interface MomentPublicTopicContext {
+  recentTopics: readonly string[];
+  repeatedTopics: readonly string[];
+  cooldownTopics: readonly string[];
+}
+
 export interface MomentPublicTimeContextInput {
   now: number;
   date?: string;
@@ -115,6 +126,7 @@ export interface MomentPublicCognitiveContext {
   authorizedPublicFacts: readonly MomentPublicFact[];
   publicEvents: readonly MomentPublicEvent[];
   publicBehaviorConstraints: readonly MomentPublicBehaviorConstraint[];
+  topicContext?: MomentPublicTopicContext;
   currentTime: MomentPublicTimeContext;
 }
 
@@ -125,5 +137,6 @@ export interface BuildMomentPublicCognitiveContextInput {
   publicFacts?: readonly MomentPublicFactCandidate[];
   publicEvents?: readonly MomentPublicEventCandidate[];
   publicBehaviorConstraints?: readonly MomentPublicBehaviorConstraintCandidate[];
+  topicHistory?: readonly MomentTopicRecord[];
   currentTime: MomentPublicTimeContextInput;
 }

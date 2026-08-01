@@ -12,6 +12,19 @@ import {
   selectPublicMomentEvents,
   selectPublicMomentHistory,
 } from "./momentPublicVisibilityPolicy";
+import {
+  getRecentMomentTopics,
+  normalizeMomentTopic,
+} from "../moments/momentGeneration/momentTopicHistory";
+import {
+  DEFAULT_MOMENT_TOPIC_COOLDOWN_MS,
+  DEFAULT_MOMENT_TOPIC_DUPLICATE_WINDOW_MS,
+} from "../moments/momentGeneration/momentTopicPolicy";
+import type { MomentTopicRecord } from "../moments/momentGeneration/momentTopicTypes";
+import type { MomentPublicTopicContext } from "./momentPublicCognitiveTypes";
+
+const MOMENT_TOPIC_CONTEXT_LIMIT = 8;
+const MOMENT_REPEATED_TOPIC_LIMIT = 4;
 
 function projectPublicCharacterProfile(
   character: BuildMomentPublicCognitiveContextInput["character"],
@@ -39,6 +52,65 @@ function projectCurrentTime(
   };
 }
 
+function distinctTopicLabels(records: readonly MomentTopicRecord[], limit: number): string[] {
+  const seen = new Set<string>();
+  const topics: string[] = [];
+  for (const record of records) {
+    const topic = record.topic.trim();
+    const normalized = normalizeMomentTopic(topic);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    topics.push(topic);
+    if (topics.length >= limit) break;
+  }
+  return topics;
+}
+
+function projectTopicContext(
+  history: readonly MomentTopicRecord[] | undefined,
+  characterId: string,
+  now: number,
+): MomentPublicTopicContext | undefined {
+  if (history === undefined) return undefined;
+
+  const queryLimit = Math.max(history.length, MOMENT_TOPIC_CONTEXT_LIMIT);
+  const recentRecords = getRecentMomentTopics(history, characterId, {
+    now,
+    limit: queryLimit,
+  });
+  const duplicateWindowRecords = getRecentMomentTopics(history, characterId, {
+    now,
+    withinMs: DEFAULT_MOMENT_TOPIC_DUPLICATE_WINDOW_MS,
+    limit: queryLimit,
+  });
+  const topicCounts = new Map<string, { count: number; topic: string }>();
+  for (const record of duplicateWindowRecords) {
+    const topic = record.topic.trim();
+    const normalized = normalizeMomentTopic(topic);
+    if (!normalized) continue;
+    const current = topicCounts.get(normalized);
+    topicCounts.set(normalized, {
+      count: (current?.count ?? 0) + 1,
+      topic: current?.topic ?? topic,
+    });
+  }
+  const repeatedTopics = [...topicCounts.values()]
+    .filter(({ count }) => count > 1)
+    .map(({ topic }) => topic)
+    .slice(0, MOMENT_REPEATED_TOPIC_LIMIT);
+  const cooldownRecords = getRecentMomentTopics(history, characterId, {
+    now,
+    withinMs: DEFAULT_MOMENT_TOPIC_COOLDOWN_MS,
+    limit: queryLimit,
+  });
+
+  return {
+    recentTopics: distinctTopicLabels(recentRecords, MOMENT_TOPIC_CONTEXT_LIMIT),
+    repeatedTopics,
+    cooldownTopics: distinctTopicLabels(cooldownRecords, MOMENT_TOPIC_CONTEXT_LIMIT),
+  };
+}
+
 /** Pure, deny-by-default builder for the Moment public-expression domain. */
 export function buildMomentPublicCognitiveContext(
   input: BuildMomentPublicCognitiveContextInput,
@@ -53,6 +125,7 @@ export function buildMomentPublicCognitiveContext(
     authorizedPublicFacts: selectAuthorizedPublicFacts(input.publicFacts || [], characterId),
     publicEvents: selectPublicMomentEvents(input.publicEvents || [], characterId),
     publicBehaviorConstraints: selectPublicBehaviorConstraints(input.publicBehaviorConstraints || []),
+    topicContext: projectTopicContext(input.topicHistory, characterId, input.currentTime.now),
     currentTime: projectCurrentTime(input.currentTime),
   };
 }

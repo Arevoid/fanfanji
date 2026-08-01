@@ -20,6 +20,11 @@ const compactPublicText = (value: string): string => value.trim().slice(0, MAX_P
 
 type MomentPromptContextWithRoutine = MomentPromptContext & {
   routineContext?: CharacterCognitiveRoutineContext;
+  topicContext?: {
+    recentTopics: readonly string[];
+    repeatedTopics: readonly string[];
+    cooldownTopics: readonly string[];
+  };
 };
 
 function projectMomentRoutineContext(
@@ -61,6 +66,29 @@ function projectPublicMomentTime(
     time: currentTime.time,
     ...(currentTime.timezone ? { timezone: currentTime.timezone } : {}),
     ...(currentTime.period ? { period: currentTime.period } : {}),
+  };
+}
+
+function boundedTopicHints(topics: readonly string[] | undefined, limit: number): string[] {
+  if (!topics) return [];
+  return topics
+    .map((topic) => compactPublicText(topic))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function projectMomentTopicContext(
+  context: CharacterCognitiveContext,
+  options: MomentPromptAdapterOptions | undefined,
+): Pick<MomentPromptContextWithRoutine, "topicContext"> {
+  const topicContext = options?.publicContext?.topicContext;
+  if (!topicContext) return {};
+  return {
+    topicContext: {
+      recentTopics: boundedTopicHints(topicContext.recentTopics, DEFAULT_PUBLIC_HISTORY_LIMIT),
+      repeatedTopics: boundedTopicHints(topicContext.repeatedTopics, 4),
+      cooldownTopics: boundedTopicHints(topicContext.cooldownTopics, DEFAULT_PUBLIC_HISTORY_LIMIT),
+    },
   };
 }
 
@@ -111,6 +139,7 @@ export function buildMomentPromptContext(
     behaviorConstraints: publicContext?.publicBehaviorConstraints.map(({ description }) => ({ description })) ?? [],
     time: projectPublicMomentTime(context, options),
     ...projectMomentRoutineContext(context),
+    ...projectMomentTopicContext(context, options),
   };
 }
 
@@ -133,6 +162,19 @@ export function formatMomentPromptContext(context: MomentPromptContextWithRoutin
   const momentHistory = context.publicMomentHistory.map((moment) => `- ${moment.authorName}: ${moment.content}`);
   const commentHistory = context.publicCommentHistory.map((comment) => `- ${comment.authorName}: ${comment.content}`);
   const constraints = context.behaviorConstraints.map((constraint) => `- ${constraint.description}`);
+  const topicContext = context.topicContext;
+  const recentTopics = topicContext?.recentTopics.map((topic) => `- ${topic}`) ?? [];
+  const repeatedTopics = topicContext?.repeatedTopics.map((topic) => `- ${topic}`) ?? [];
+  const cooldownTopics = topicContext?.cooldownTopics.map((topic) => `- ${topic}`) ?? [];
+  const topicGuidance = topicContext && (recentTopics.length > 0 || repeatedTopics.length > 0 || cooldownTopics.length > 0)
+    ? [
+      "Topic diversity guidance (hints only; not facts or hard bans):",
+      ...(recentTopics.length > 0 ? ["Recent public topics:", ...recentTopics] : []),
+      ...(repeatedTopics.length > 0 ? ["Recently repeated topics:", ...repeatedTopics] : []),
+      ...(cooldownTopics.length > 0 ? ["Topics currently in cooldown:", ...cooldownTopics] : []),
+      "Vary the next topic when possible without inventing private experiences.",
+    ]
+    : [];
   const routine = context.routineContext;
   const routineContext = routine ? [
     "Routine context (behavior reference only):",
@@ -153,6 +195,7 @@ export function formatMomentPromptContext(context: MomentPromptContextWithRoutin
     ...(worldKnowledge.length > 0 ? ["Public world knowledge:", ...worldKnowledge] : []),
     ...(momentHistory.length > 0 ? ["Recent public Moment history (avoid repeating these topics):", ...momentHistory] : []),
     ...(commentHistory.length > 0 ? ["Recent public comment history:", ...commentHistory] : []),
+    ...topicGuidance,
     ...(constraints.length > 0 ? ["Behavior constraints:", ...constraints] : []),
     `Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`,
     ...routineContext,
