@@ -1,4 +1,5 @@
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import type { PublicForumCognitiveContext } from "../../../domain/publicCognitive/publicForumCognitiveTypes";
 
 /**
  * Prompt-safe projections deliberately omit every internal identifier. The
@@ -49,11 +50,21 @@ export interface CognitivePromptBehaviorConstraint {
   description: string;
 }
 
+export interface CognitivePromptWorldSetting {
+  title: string;
+  content: string;
+}
+
 export interface PromptAdapterOptions {
   maxFacts?: number;
   maxEvents?: number;
   /** Existing callers may pass their already-ranked Memory IDs without exposing them in adapter output. */
   relevantMemoryIds?: readonly string[];
+}
+
+/** Explicit public input required by Moment adapters; unknown visibility is denied. */
+export interface MomentPromptAdapterOptions extends PromptAdapterOptions {
+  publicContext?: PublicForumCognitiveContext;
 }
 
 export interface ChatPromptContext {
@@ -79,8 +90,8 @@ export interface MomentPromptContext {
   persona: CognitivePromptPersona;
   publicFacts: readonly CognitivePromptFact[];
   publicEvents: readonly CognitivePromptEvent[];
+  publicWorldKnowledge: readonly CognitivePromptWorldSetting[];
   behaviorConstraints: readonly CognitivePromptBehaviorConstraint[];
-  boundaries: CognitivePromptBoundary;
   time: CognitivePromptTimeContext;
 }
 

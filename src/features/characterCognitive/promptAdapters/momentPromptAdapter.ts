@@ -1,22 +1,67 @@
 import {
-  projectPromptBoundary,
   projectPromptPersona,
   projectPromptTime,
   selectMomentPublicFacts,
-  selectPromptBehaviorConstraints,
-  selectSafePromptEvents,
 } from "./promptVisibilityPolicy";
-import type { CognitivePromptAdapter, MomentPromptContext } from "./types";
+import type { MomentPromptAdapterOptions, MomentPromptContext } from "./types";
+import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 
-/** Builds the deliberately narrow public-safe Moment projection without formatting Prompt text. */
-export const buildMomentPromptContext: CognitivePromptAdapter<MomentPromptContext> = (context, options) => ({
-  persona: projectPromptPersona(context),
-  publicFacts: selectMomentPublicFacts(context),
-  publicEvents: selectSafePromptEvents(context, options),
-  behaviorConstraints: selectPromptBehaviorConstraints(context),
-  boundaries: projectPromptBoundary(context),
-  time: projectPromptTime(context),
-});
+function projectPublicMomentPersona(
+  context: CharacterCognitiveContext,
+  options: MomentPromptAdapterOptions | undefined,
+) {
+  const profile = options?.publicContext?.publicCharacterProfile;
+  if (!profile) return projectPromptPersona(context);
+  return {
+    name: profile.name,
+    ...(profile.age === undefined ? {} : { age: profile.age }),
+    ...(profile.gender === undefined ? {} : { gender: profile.gender }),
+    ...(profile.mbti === undefined ? {} : { mbti: profile.mbti }),
+    personality: profile.personality,
+    backstory: profile.backstory,
+  };
+}
+
+function projectPublicMomentTime(
+  context: CharacterCognitiveContext,
+  options: MomentPromptAdapterOptions | undefined,
+) {
+  const currentTime = options?.publicContext?.currentTime;
+  if (!currentTime) return projectPromptTime(context);
+  return {
+    date: currentTime.date,
+    time: currentTime.time,
+    ...(currentTime.timezone ? { timezone: currentTime.timezone } : {}),
+    ...(currentTime.period ? { period: currentTime.period } : {}),
+  };
+}
+
+/**
+ * Builds a deny-by-default public Moment projection. `safe` relation facts
+ * are intentionally not public: only the dedicated public context may supply
+ * events or world knowledge to a public post.
+ */
+export function buildMomentPromptContext(
+  context: CharacterCognitiveContext,
+  options?: MomentPromptAdapterOptions,
+): MomentPromptContext {
+  const publicContext = options?.publicContext;
+  return {
+    persona: projectPublicMomentPersona(context, options),
+    publicFacts: selectMomentPublicFacts(context),
+    publicEvents: publicContext?.publicEvents.map(({ kind, summary, occurredAt, confidence }) => ({
+      kind,
+      summary,
+      occurredAt,
+      confidence,
+    })) ?? [],
+    publicWorldKnowledge: publicContext?.publicWorldSettings.map(({ title, content }) => ({ title, content })) ?? [],
+    // CharacterCognitiveContext constraints are relation-private until a
+    // separate explicit public-constraint contract exists.
+    behaviorConstraints: [],
+    time: projectPublicMomentTime(context, options),
+  };
+}
 
 /**
  * Formats the deliberately public-safe Moment supplement. The existing Moment
@@ -33,6 +78,7 @@ export function formatMomentPromptContext(context: MomentPromptContext | undefin
   ];
   const facts = context.publicFacts.map((fact) => `- ${fact.content}`);
   const events = context.publicEvents.map((event) => `- ${event.summary}`);
+  const worldKnowledge = context.publicWorldKnowledge.map((setting) => `- ${setting.title}: ${setting.content}`);
   const constraints = context.behaviorConstraints.map((constraint) => `- ${constraint.description}`);
 
   return [
@@ -41,7 +87,8 @@ export function formatMomentPromptContext(context: MomentPromptContext | undefin
     "Character focus:",
     ...persona,
     ...(facts.length > 0 ? ["Verified public facts:", ...facts] : []),
-    ...(events.length > 0 ? ["Verified public-safe events:", ...events] : []),
+    ...(events.length > 0 ? ["Verified public events:", ...events] : []),
+    ...(worldKnowledge.length > 0 ? ["Public world knowledge:", ...worldKnowledge] : []),
     ...(constraints.length > 0 ? ["Behavior constraints:", ...constraints] : []),
     `Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`,
   ].join("\n");

@@ -97,7 +97,7 @@ assert.equal(capturedRequests.length, 3, "post, comment, and reply should all co
 for (const request of capturedRequests) {
   const prompt = request.systemInstruction || "";
   assert.match(prompt, /PUBLIC-SAFE MOMENT COGNITIVE CONTEXT/);
-  assert.match(prompt, /A safe event/);
+  assert.equal(prompt.includes("A safe event"), false, "relation-safe events are not public Moment facts");
   assert.equal(prompt.includes("B safe event"), false);
   assert.equal(prompt.includes("A private event"), false);
   assert.equal(prompt.includes("A private chat memory"), false);
@@ -118,7 +118,7 @@ await requestAutomaticMomentComment({
   cleanText: (content) => content,
   cognitiveContext: contextB,
 });
-assert.match(contextBRequests[0].systemInstruction || "", /B safe event/);
+assert.equal((contextBRequests[0].systemInstruction || "").includes("B safe event"), false);
 assert.equal((contextBRequests[0].systemInstruction || "").includes("A safe event"), false);
 
 const legacyRequests: ChatRequest[] = [];

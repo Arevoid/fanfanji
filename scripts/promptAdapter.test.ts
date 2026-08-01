@@ -66,10 +66,10 @@ assert.equal(JSON.stringify(chatB).includes("仅 A 关系可见的聊天事实")
 assert.equal(JSON.stringify(chatB).includes("A 的安全事件"), false);
 
 assert.deepEqual(momentA.publicFacts, [], "unclassified Memory must never become a public Moment fact");
-assert.deepEqual(momentA.publicEvents.map((item) => item.summary), ["A 的安全事件"]);
+assert.deepEqual(momentA.publicEvents, [], "relation-safe events must not become public Moment facts");
 assert.equal(JSON.stringify(momentA).includes("仅 A 关系可见的聊天事实"), false);
 assert.equal(JSON.stringify(momentA).includes("不应公开的私密事件"), false);
-assert.deepEqual(momentA.behaviorConstraints, [{ description: "不得虚构共同场景" }]);
+assert.deepEqual(momentA.behaviorConstraints, [], "private behavior constraints must not become public Moment context");
 
 assert.deepEqual(proactiveA.recentMeaningfulEvents.map((item) => item.summary), ["A 的安全事件"]);
 assert.deepEqual(proactiveA.openContext, []);
