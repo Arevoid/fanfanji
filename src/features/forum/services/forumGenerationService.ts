@@ -56,6 +56,10 @@ import {
   buildPublicForumPostPromptContext,
   formatPublicForumPostPromptContext,
 } from "../../characterCognitive/promptAdapters/publicForumPostPromptAdapter";
+import {
+  buildPublicForumReplyPromptContext,
+  formatPublicForumReplyPromptContext,
+} from "../../characterCognitive/promptAdapters/publicForumReplyPromptAdapter";
 
 export interface ForumRelationContext {
   relationship: CharacterRelationship;
@@ -669,7 +673,11 @@ replyToFloor 只能取提示中列出的真实楼层；直接回复主楼必须�
   message: `${publicThreadContext(input.thread, input.availableReplies)}
 ${input.author.kind === "relation"
     ? `按该角色经过公开脱敏的说话风格回复：
-${input.author.context.publicReplyPersona}`
+${input.author.context.publicCognitiveContext
+      ? formatPublicForumReplyPromptContext(
+        buildPublicForumReplyPromptContext(input.author.context.publicCognitiveContext),
+      )
+      : input.author.context.publicReplyPersona}`
     : `作为普通论坛用户“${input.author.profile.displayName}”回复。
 公开风格：${input.author.profile.publicStyle}
 不得读取或猜测任何角色聊天、Memory、WorldBook。`}`,
@@ -688,6 +696,10 @@ export async function generateInitialRepliesForUserThread(input: {
   maxReplies?: number;
   random?: () => number;
   aiCall?: ForumAiCall;
+  /** Explicit public candidates only; absence is denied by the public context policy. */
+  publicEventCandidates?: readonly PublicCharacterEventCandidate[];
+  /** Explicit public world knowledge only; absence is denied by the public context policy. */
+  publicWorldSettings?: readonly PublicWorldSettingCandidate[];
 }): Promise<ForumReply[]> {
   requireTextAiConfig(input.settings);
   const random = input.random || Math.random;
@@ -702,7 +714,17 @@ export async function generateInitialRepliesForUserThread(input: {
       worldBookEntries: input.worldBookEntries,
       identities: input.settings.identities,
     }))
-    .filter((value): value is ForumRelationContext => Boolean(value));
+    .filter((value): value is ForumRelationContext => Boolean(value))
+    .map((context) => ({
+      ...context,
+      publicCognitiveContext: buildPublicForumCognitiveContext({
+        character: context.character,
+        events: (input.publicEventCandidates || [])
+          .filter((candidate) => candidate.event.characterId === context.character.id),
+        worldSettings: input.publicWorldSettings || [],
+        currentTime: { now: input.now },
+      }),
+    }));
   const replyCount = Math.max(1, Math.min(3, input.maxReplies ?? 2));
   const authors = selectForumReplyAuthors({
     count: replyCount,
