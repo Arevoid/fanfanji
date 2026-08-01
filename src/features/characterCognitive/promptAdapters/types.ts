@@ -83,6 +83,16 @@ export interface ProactivePromptContext {
   time: CognitivePromptTimeContext;
 }
 
+/** A private, relation-safe projection for a character's own diary. */
+export interface DiaryPromptContext {
+  persona: CognitivePromptPersona;
+  relationship: CognitivePromptRelationship;
+  safeEvents: readonly CognitivePromptEvent[];
+  behaviorConstraints: readonly CognitivePromptBehaviorConstraint[];
+  boundaries: CognitivePromptBoundary;
+  time: CognitivePromptTimeContext;
+}
+
 export type CognitivePromptAdapter<TOutput> = (
   context: CharacterCognitiveContext,
   options?: PromptAdapterOptions,

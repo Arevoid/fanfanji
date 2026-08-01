@@ -17,6 +17,11 @@ import type {
   UserSettings,
 } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
+import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
+import type { CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
+import type { CharacterEvent } from "../domain/characterLife/characterEventTypes";
+import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { createDiaryId, getDiaryDayKey } from "../domain/diary/diaryData";
 import {
@@ -50,6 +55,13 @@ interface AppDiaryProps {
 }
 
 type Tab = "counterpart" | "mine" | "calendar";
+
+const getDiaryEventVisibility = (event: CharacterEvent): CharacterCognitiveEventCandidate["promptVisibility"] =>
+  event.status === "active"
+    && (event.kind === "relationship_created" || event.kind === "offline_story_completed")
+    ? "safe"
+    : "private";
+
 const formatDate = (value: number) =>
   new Date(value).toLocaleDateString("zh-CN", {
     month: "long",
@@ -239,6 +251,26 @@ export default function AppDiary({
     )
       return;
     setBusyRelationId(relation.id);
+    const now = Date.now();
+    const cognitiveContext = (() => {
+      try {
+        return buildCharacterCognitiveContext({
+          character,
+          relation,
+          // Diary must not use user-private Memory as a generated fact source.
+          memories: [],
+          events: listCharacterEventsByRelation(relation.id).map((event) => ({
+            event,
+            promptVisibility: getDiaryEventVisibility(event),
+          })),
+          timeContext: { now },
+          knowledgeBoundary: createDirectChatKnowledgeBoundary(),
+          conversationId: relation.conversationId,
+        });
+      } catch {
+        return undefined;
+      }
+    })();
     const result = await generateDiaryEntry({
       relation,
       character,
@@ -246,6 +278,8 @@ export default function AppDiary({
       messages,
       settings,
       trigger: "manual",
+      occurredAt: now,
+      cognitiveContext,
     });
     saveDiaryGenerationTasks([
       result.task,
