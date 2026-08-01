@@ -87,6 +87,17 @@ export interface MomentPromptContext {
 export interface ProactivePromptContext {
   persona: CognitivePromptPersona;
   relationship: CognitivePromptRelationship;
+  /** Optional relation-scoped projection with all storage metadata removed. */
+  relationshipState?: {
+    stage: string;
+    tone: string;
+  };
+  relationshipTimeline?: {
+    recentEvents: readonly CognitivePromptEvent[];
+    openLoops: readonly string[];
+    boundaries: readonly string[];
+    lastMeaningfulEventAt?: number;
+  };
   recentMeaningfulEvents: readonly CognitivePromptEvent[];
   openContext: readonly string[];
   boundaries: CognitivePromptBoundary;
