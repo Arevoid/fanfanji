@@ -69,6 +69,7 @@ import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
 import { buildMomentCognitiveContext } from "../features/moments/services/momentCognitiveContext";
+import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
 import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext, formatMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
 import {
@@ -4144,6 +4145,13 @@ ${stickerListStr}
         ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
         : "";
       const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id });
+      const cognitiveContext = buildProactiveCognitiveContext({
+        character: activeCharacter,
+        relationship: activeRelationship,
+        memories: memories || [],
+        events: listCharacterEventsByRelation(relationId),
+        occurredAt: Date.now(),
+      });
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
@@ -4186,6 +4194,7 @@ ${proactivePrompt}`;
         keepPeriods,
         createId: (idx) => `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
         currentTime: (idx) => Date.now() + idx,
+        cognitiveContext,
       });
 
       if (proactiveResult.data && proactiveResult.data.text) {
@@ -4277,6 +4286,13 @@ ${proactivePrompt}`;
         ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
         : "";
       const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: friend.id });
+      const cognitiveContext = buildProactiveCognitiveContext({
+        character: friend,
+        relationship,
+        memories: memories || [],
+        events: listCharacterEventsByRelation(relationId),
+        occurredAt: Date.now(),
+      });
 
       const taskPrompt = customTaskText || "It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.";
 
@@ -4321,6 +4337,7 @@ ${instructionsPrompt}`;
         keepPeriods,
         createId: (idx) => `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
         currentTime: (idx) => backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
+        cognitiveContext,
         transformBubble: (bubbleText, idx) => {
           const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText);
           if (!isVoice) return bubbleText;

@@ -1,5 +1,7 @@
 import type { apiChat } from "../../../utils/apiHelper";
 import type { Message } from "../../../types";
+import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import { buildProactivePromptContext, formatProactivePromptContext } from "../../characterCognitive/promptAdapters/proactivePromptAdapter";
 import { requestAiReply } from "./aiReplyService";
 import { createCharacterTextMessage } from "./messageFactory";
 import { cleanAiReplyText, splitAiReplyBubbles } from "./messageParser";
@@ -14,8 +16,19 @@ export async function generateProactiveReplyCandidates(input: {
   createId: (index: number) => string;
   currentTime: (index: number) => number;
   transformBubble?: (bubbleText: string, index: number) => string;
+  /** Relation-scoped snapshot; only its ProactivePromptAdapter projection reaches the request. */
+  cognitiveContext?: CharacterCognitiveContext;
 }): Promise<{ data: Awaited<ReturnType<typeof import("../../../utils/apiHelper").apiChat>>; messages: Message[] }> {
-  const data = await requestAiReply(input.requestAi, input.request);
+  const cognitivePromptBlock = input.cognitiveContext
+    ? formatProactivePromptContext(buildProactivePromptContext(input.cognitiveContext))
+    : "";
+  const request = cognitivePromptBlock
+    ? {
+      ...input.request,
+      systemInstruction: [input.request.systemInstruction, cognitivePromptBlock].filter(Boolean).join("\n\n"),
+    }
+    : input.request;
+  const data = await requestAiReply(input.requestAi, request);
   if (!data?.text) return { data, messages: [] };
   const cleanedText = cleanAiReplyText(data.text, input.disableBracketActions);
   const bubbles = splitAiReplyBubbles(cleanedText || data.text, input.keepPeriods);
