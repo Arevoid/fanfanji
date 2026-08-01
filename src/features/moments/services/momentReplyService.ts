@@ -1,4 +1,5 @@
 import type { Character, MomentComment } from "../../../types";
+import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { apiChat } from "../../../utils/apiHelper";
 import { sanitizeMomentPublishText } from "./momentContent";
 import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
@@ -15,6 +16,8 @@ export async function requestMomentCommentReply(input: {
   now?: () => number;
   random?: () => number;
   temporalContext?: MomentTemporalContext;
+  /** Phase 3 read-only context; Prompt consumption is intentionally deferred. */
+  cognitiveContext?: CharacterCognitiveContext;
 }): Promise<MomentComment | undefined> {
   const response = await input.requestAi(input.request);
   if (!response?.text) return undefined;

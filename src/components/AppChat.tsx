@@ -67,6 +67,7 @@ import { MomentsApp } from "../features/moments/MomentsApp";
 import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
+import { buildMomentCognitiveContext } from "../features/moments/services/momentCognitiveContext";
 import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext, formatMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
 import {
@@ -4332,6 +4333,26 @@ ${instructionsPrompt}`;
     }
   };
 
+  const getMomentCognitiveContext = (
+    character: Character,
+    relationship: CharacterRelationship,
+    occurredAt: number,
+  ): CharacterCognitiveContext | undefined => {
+    try {
+      return buildMomentCognitiveContext({
+        character,
+        relationship,
+        memories: memories || [],
+        events: listCharacterEventsByRelation(relationship.id),
+        occurredAt,
+      });
+    } catch {
+      // This read-only snapshot must not block legacy Moment generation when
+      // malformed legacy relationship data cannot be projected.
+      return undefined;
+    }
+  };
+
   const handleAutoCommentOnUserMoment = async (newMo: Moment) => {
     if (activeRelationships.length === 0) return;
 
@@ -4361,6 +4382,7 @@ ${instructionsPrompt}`;
           const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, newMo.content || "");
           const wbPrompt = wbBlocks.formattedAll;
           const temporalContext = createMomentTemporalContext(new Date());
+          const cognitiveContext = getMomentCognitiveContext(friend, relationship, temporalContext.generatedAt.getTime());
           const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
           const systemInstruction = `${momentTimeContext}
@@ -4407,6 +4429,7 @@ Your task: Write a short, natural comment on this Moment.
             character: friend,
             cleanText: (text) => cleanOnlineMessage(text, true),
             temporalContext,
+            cognitiveContext,
           });
           if (comment) onAddCommentToMoment(newMo.id, comment);
         } catch (err) {
@@ -4471,6 +4494,7 @@ Your task: Write a short, natural comment on this Moment.
         const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, userCommentText || "");
         const wbPrompt = wbBlocks.formattedAll;
         const temporalContext = createMomentTemporalContext(new Date());
+        const cognitiveContext = getMomentCognitiveContext(friend, relationship, temporalContext.generatedAt.getTime());
         const momentTimeContext = formatMomentTemporalContext(temporalContext, friend);
 
         const systemInstruction = `${momentTimeContext}
@@ -4526,6 +4550,7 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
           userName: settings.name,
           cleanText: (text) => cleanOnlineMessage(text, true),
           temporalContext,
+          cognitiveContext,
         });
         if (reply) onAddCommentToMoment(momentId, reply);
       } catch (err) {
@@ -4538,6 +4563,7 @@ Your task: Write a short, extremely natural WeChat reply/comment to the user's l
     const friend = characters.find((character) => character.id === relationship.characterId);
     if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return;
     try {
+      const cognitiveContext = getMomentCognitiveContext(friend, relationship, occurredAt);
       const friendMsgs = messages
         .filter((message) => message.relationId === relationship.id)
         .sort((a, b) => a.timestamp - b.timestamp);
@@ -4629,6 +4655,7 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
         occurredAt: () => occurredAt,
         temporalContext,
         existingMoments: ownerMomentHistory,
+        cognitiveContext,
       });
       if (generated.moment) onAddMoment(generated.moment);
       if (generated.memory) onSaveMemories(MemoryService.mergeMemories(memories || [], [{ ...generated.memory, relationId: relationship.id }]));

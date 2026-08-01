@@ -1,4 +1,5 @@
 import type { Character, MemoryItem, Moment } from "../../../types";
+import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { apiChat } from "../../../utils/apiHelper";
 import { sanitizeMomentPublishText } from "./momentContent";
 import { assessMomentUniqueness, isMomentSkipResponse } from "./momentUniqueness";
@@ -84,6 +85,8 @@ export async function requestCharacterMoment(input: {
   random?: () => number;
   temporalContext?: MomentTemporalContext;
   existingMoments?: readonly Moment[];
+  /** Phase 3 read-only context; Prompt consumption is intentionally deferred. */
+  cognitiveContext?: CharacterCognitiveContext;
 }): Promise<{ moment?: Moment; memory?: MemoryItem }> {
   const response = await input.requestAi(input.request);
   if (!response?.text) return {};
