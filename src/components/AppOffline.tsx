@@ -21,6 +21,7 @@ import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolve
 import { getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { countOfflineStoriesForRelation } from "../domain/relationship/offlineStoryScope";
 import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
+import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/characterEventCaptureService";
 import { ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
 
 interface AppOfflineProps {
@@ -561,6 +562,11 @@ export default function AppOffline({
         const syncedStory = markSynced();
         if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
         else onSaveOfflineStory(syncedStory);
+        captureOfflineStoryCompletedEvent(
+          syncedStory,
+          relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId,
+          now,
+        );
         showToast("没有可提取的线下新增剧情，已保留故事内容");
         return syncedStory;
       }
@@ -613,6 +619,11 @@ export default function AppOffline({
       const syncedStory = markSynced(extractedMemories.map((memory) => memory.id));
       if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
       else onSaveOfflineStory(syncedStory);
+      captureOfflineStoryCompletedEvent(
+        syncedStory,
+        relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId,
+        now,
+      );
       showToast("线下剧情摘要已同步到当前角色");
       return syncedStory;
     } catch (error) {

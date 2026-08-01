@@ -31,6 +31,7 @@ export const storageKeys = {
   worldBookEntries: "phone_worldbook_entries",
   memoryVaultItems: "phone_memory_vault_items",
   characterRelationships: "phone_character_relationships",
+  characterEvents: "phone_character_events",
   offlineStories: "phone_offline_stories",
   memoryVaultSettings: "phone_memory_vault_settings",
   calendarEvents: "phone_calendar_events",

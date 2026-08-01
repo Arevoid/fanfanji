@@ -72,6 +72,7 @@ import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./feature
 import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
+import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
 import StatusBar from "./components/StatusBar";
 import AppChat from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
@@ -1689,6 +1690,7 @@ export default function App() {
       const relationIds = relationships
         .filter((relation) => characterIds.has(relation.characterId))
         .map((relation) => relation.id);
+      removeCharacterLifeEventsForRelations(relationIds);
       const cleaned = removeCanonicalCharacterData(
         { relationships, messages, memories, offlineStories },
         id,

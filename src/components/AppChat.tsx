@@ -37,6 +37,7 @@ import { createChatReplyController } from "../features/chat/controllers/chatRepl
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { createChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
+import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
 import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "../core/storage/repositories/forumRepository";
@@ -1268,6 +1269,7 @@ export default function AppChat({
     // A contact deletion removes only this identity's direct relationship. The
     // canonical Character and sibling relationships must remain untouched.
     onClearMessages?.(friendId, undefined, relationId);
+    removeCharacterLifeEventsForRelations([relationId]);
     onDeleteMomentsByRelation?.(relationId);
     onSaveRelationships(relationships.filter((relation) => relation.id !== relationId));
     const innerVoices = loadInnerVoiceRecords([]).value;
@@ -9470,8 +9472,11 @@ Your task: Write a WeChat Moment post (朋友圈) from your perspective.
                             onClick={() => {
                               const characterId = char.profileSourceId || char.id;
                               if (findRelationship(relationships, activeIdentityId, characterId)) return;
-                              const relationId = `rel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-                              onSaveRelationships([...relationships, createRelationship({ id: relationId, characterId, userIdentityId: activeIdentityId, now: Date.now() })]);
+                              const now = Date.now();
+                              const relationId = `rel-${now}-${Math.random().toString(36).slice(2, 7)}`;
+                              const relationship = createRelationship({ id: relationId, characterId, userIdentityId: activeIdentityId, now });
+                              onSaveRelationships([...relationships, relationship]);
+                              captureRelationshipCreatedEvent(relationship, now);
                             }}
                             className="px-2.5 py-1 bg-[var(--button-primary-bg)] hover:bg-[var(--button-primary-hover-bg)] text-[var(--button-primary-text)] rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
                           >
