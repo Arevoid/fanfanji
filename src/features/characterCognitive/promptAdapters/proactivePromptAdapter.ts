@@ -11,6 +11,7 @@ import type {
   CharacterRoutinePeriod,
   CharacterRoutineState,
 } from "../../../domain/characterLife/characterRoutine/characterRoutineTypes";
+import type { ProactiveTopicContext } from "../../chat/services/proactiveCognitiveContext";
 
 interface ProactivePromptRoutineContext {
   period: CharacterRoutinePeriod;
@@ -19,10 +20,12 @@ interface ProactivePromptRoutineContext {
 
 type ProactiveContextWithRoutine = CharacterCognitiveContext & {
   routineContext?: ProactivePromptRoutineContext;
+  topicContext?: ProactiveTopicContext;
 };
 
 type ProactivePromptContextWithRoutine = ProactivePromptContext & {
   routineContext?: ProactivePromptRoutineContext;
+  topicContext?: ProactiveTopicContext;
 };
 
 function projectProactiveRoutineContext(context: CharacterCognitiveContext): Pick<
@@ -70,6 +73,28 @@ function projectProactiveRelationshipContext(context: Parameters<CognitivePrompt
   };
 }
 
+function compactTopicHints(topics: readonly string[] | undefined, limit: number): string[] {
+  if (!topics) return [];
+  return topics
+    .map((topic) => topic.trim().slice(0, 180))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function projectProactiveTopicContext(
+  context: Parameters<CognitivePromptAdapter<ProactivePromptContext>>[0],
+): Pick<ProactivePromptContextWithRoutine, "topicContext"> {
+  const topicContext = (context as ProactiveContextWithRoutine).topicContext;
+  if (!topicContext) return {};
+  return {
+    topicContext: {
+      recentTopics: compactTopicHints(topicContext.recentTopics, 8),
+      repeatedTopics: compactTopicHints(topicContext.repeatedTopics, 4),
+      cooldownTopics: compactTopicHints(topicContext.cooldownTopics, 8),
+    },
+  };
+}
+
 /**
  * Builds a relation-safe proactive projection. Open context is intentionally
  * empty until a separately audited source is introduced.
@@ -82,6 +107,7 @@ export const buildProactivePromptContext = (
   relationship: projectPromptRelationship(context),
   ...projectProactiveRelationshipContext(context),
   ...projectProactiveRoutineContext(context),
+  ...projectProactiveTopicContext(context),
   recentMeaningfulEvents: selectSafePromptEvents(context, options),
   openContext: [],
   boundaries: projectPromptBoundary(context),
@@ -103,6 +129,19 @@ export function formatProactivePromptContext(context: ProactivePromptContextWith
   const relationshipEvents = context.relationshipTimeline?.recentEvents.map((event) => `- ${event.summary}`) ?? [];
   const openLoops = context.relationshipTimeline?.openLoops.map((item) => `- Candidate topic only; do not assume completion: ${item}`) ?? [];
   const relationshipBoundaries = context.relationshipTimeline?.boundaries.map((item) => `- ${item}`) ?? [];
+  const topicContext = context.topicContext;
+  const recentTopics = topicContext?.recentTopics.map((topic) => `- ${topic}`) ?? [];
+  const repeatedTopics = topicContext?.repeatedTopics.map((topic) => `- ${topic}`) ?? [];
+  const cooldownTopics = topicContext?.cooldownTopics.map((topic) => `- ${topic}`) ?? [];
+  const topicGuidance = topicContext && (recentTopics.length > 0 || repeatedTopics.length > 0 || cooldownTopics.length > 0)
+    ? [
+      "Topic diversity guidance (hints only; not facts or hard bans):",
+      ...(recentTopics.length > 0 ? ["Recent proactive topics:", ...recentTopics] : []),
+      ...(repeatedTopics.length > 0 ? ["Recently repeated proactive topics:", ...repeatedTopics] : []),
+      ...(cooldownTopics.length > 0 ? ["Proactive topics currently in cooldown:", ...cooldownTopics] : []),
+      "Use these only as candidate-topic guidance; do not block, reschedule, or suppress a message because of them.",
+    ]
+    : [];
   const lastMeaningfulEvent = context.relationshipTimeline?.lastMeaningfulEventAt;
   const routine = context.routineContext;
 
@@ -120,6 +159,7 @@ export function formatProactivePromptContext(context: ProactivePromptContextWith
     ...(relationshipEvents.length > 0 ? ["Recent safe relationship events:", ...relationshipEvents] : []),
     ...(openLoops.length > 0 ? ["Open relationship loops (candidate topics only):", ...openLoops] : []),
     ...(relationshipBoundaries.length > 0 ? ["Relationship boundaries:", ...relationshipBoundaries] : []),
+    ...topicGuidance,
     ...(lastMeaningfulEvent === undefined ? [] : [`- Last meaningful relationship event at: ${lastMeaningfulEvent}`]),
     `Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`,
     ...(routine ? [

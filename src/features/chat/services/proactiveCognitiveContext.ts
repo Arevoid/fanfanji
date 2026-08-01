@@ -4,6 +4,15 @@ import {
   classifyTimeOfDay,
   getCurrentRoutineState,
 } from "../../../domain/characterLife/characterRoutine/characterRoutinePolicy";
+import {
+  getRecentProactiveTopics,
+  normalizeProactiveTopic,
+} from "../../../domain/characterLife/proactive/proactiveTopicHistory";
+import {
+  DEFAULT_PROACTIVE_TOPIC_COOLDOWN_MS,
+  DEFAULT_PROACTIVE_TOPIC_DUPLICATE_WINDOW_MS,
+} from "../../../domain/characterLife/proactive/proactiveTopicPolicy";
+import type { ProactiveTopicRecord } from "../../../domain/characterLife/proactive/proactiveTopicTypes";
 import type {
   CharacterCognitiveContext,
   CharacterCognitiveEventCandidate,
@@ -29,9 +38,79 @@ export interface ProactiveRoutineContext {
   state: CharacterRoutineState;
 }
 
+export interface ProactiveTopicContext {
+  recentTopics: readonly string[];
+  repeatedTopics: readonly string[];
+  cooldownTopics: readonly string[];
+}
+
 export type ProactiveCognitiveContext = CharacterCognitiveContext & {
   routineContext?: ProactiveRoutineContext;
+  topicContext?: ProactiveTopicContext;
 };
+
+const PROACTIVE_TOPIC_CONTEXT_LIMIT = 8;
+const PROACTIVE_REPEATED_TOPIC_LIMIT = 4;
+
+function distinctTopicLabels(records: readonly ProactiveTopicRecord[], limit: number): string[] {
+  const seen = new Set<string>();
+  const topics: string[] = [];
+  for (const record of records) {
+    const topic = record.topic.trim();
+    const normalized = normalizeProactiveTopic(topic);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    topics.push(topic);
+    if (topics.length >= limit) break;
+  }
+  return topics;
+}
+
+function projectProactiveTopicContext(
+  history: readonly ProactiveTopicRecord[] | undefined,
+  characterId: string,
+  relationId: string,
+  now: number,
+): ProactiveTopicContext | undefined {
+  if (history === undefined) return undefined;
+
+  const queryLimit = Math.max(history.length, PROACTIVE_TOPIC_CONTEXT_LIMIT);
+  const recentRecords = getRecentProactiveTopics(history, characterId, relationId, {
+    now,
+    limit: queryLimit,
+  });
+  const duplicateWindowRecords = getRecentProactiveTopics(history, characterId, relationId, {
+    now,
+    withinMs: DEFAULT_PROACTIVE_TOPIC_DUPLICATE_WINDOW_MS,
+    limit: queryLimit,
+  });
+  const topicCounts = new Map<string, { count: number; topic: string }>();
+  for (const record of duplicateWindowRecords) {
+    const topic = record.topic.trim();
+    const normalized = normalizeProactiveTopic(topic);
+    if (!normalized) continue;
+    const current = topicCounts.get(normalized);
+    topicCounts.set(normalized, {
+      count: (current?.count ?? 0) + 1,
+      topic: current?.topic ?? topic,
+    });
+  }
+  const repeatedTopics = [...topicCounts.values()]
+    .filter(({ count }) => count > 1)
+    .map(({ topic }) => topic)
+    .slice(0, PROACTIVE_REPEATED_TOPIC_LIMIT);
+  const cooldownRecords = getRecentProactiveTopics(history, characterId, relationId, {
+    now,
+    withinMs: DEFAULT_PROACTIVE_TOPIC_COOLDOWN_MS,
+    limit: queryLimit,
+  });
+
+  return {
+    recentTopics: distinctTopicLabels(recentRecords, PROACTIVE_TOPIC_CONTEXT_LIMIT),
+    repeatedTopics,
+    cooldownTopics: distinctTopicLabels(cooldownRecords, PROACTIVE_TOPIC_CONTEXT_LIMIT),
+  };
+}
 
 /** Builds an optional relation-scoped snapshot without changing legacy proactive behavior. */
 export function buildProactiveCognitiveContext(input: {
@@ -42,6 +121,8 @@ export function buildProactiveCognitiveContext(input: {
   occurredAt: number;
   /** Optional routine configuration used only to derive the current prompt hint. */
   routine?: CharacterRoutine;
+  /** Optional relation-scoped history used only for generation diversity hints. */
+  topicHistory?: readonly ProactiveTopicRecord[];
 }): ProactiveCognitiveContext | undefined {
   try {
     const context = buildCharacterCognitiveContext({
@@ -56,14 +137,23 @@ export function buildProactiveCognitiveContext(input: {
       knowledgeBoundary: createDirectChatKnowledgeBoundary(),
       conversationId: input.relationship.conversationId,
     });
-    if (!input.routine) return context;
+    const topicContext = projectProactiveTopicContext(
+      input.topicHistory,
+      input.relationship.characterId,
+      input.relationship.id,
+      input.occurredAt,
+    );
+    if (!input.routine && !topicContext) return context;
 
     return {
       ...context,
-      routineContext: {
-        period: classifyTimeOfDay(input.occurredAt, input.routine.timezone),
-        state: getCurrentRoutineState(input.routine, input.occurredAt),
-      },
+      ...(topicContext ? { topicContext } : {}),
+      ...(!input.routine ? {} : {
+        routineContext: {
+          period: classifyTimeOfDay(input.occurredAt, input.routine.timezone),
+          state: getCurrentRoutineState(input.routine, input.occurredAt),
+        },
+      }),
     };
   } catch {
     return undefined;
