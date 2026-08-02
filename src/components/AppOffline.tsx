@@ -21,6 +21,8 @@ import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
 import { getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { applyConfirmedOfflineRelationshipTransition } from "../domain/relationship/offlineRelationshipTransition";
+import type { KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
 import { countOfflineStoriesForRelation } from "../domain/relationship/offlineStoryScope";
 import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
 import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/offlineStoryEventCaptureService";
@@ -33,6 +35,7 @@ interface AppOfflineProps {
   settings: UserSettings;
   offlineStories: OfflineStory[];
   onSaveOfflineStory: (story: OfflineStory) => void;
+  onSaveRelationships: (relationships: CharacterRelationship[]) => void;
   onDeleteOfflineStory: (storyId: string) => void;
   onClose: () => void;
   onNavigateToChat?: (charId: string, relationId?: string, conversationId?: string) => void;
@@ -78,6 +81,7 @@ export default function AppOffline({
   settings,
   offlineStories = [],
   onSaveOfflineStory,
+  onSaveRelationships,
   onDeleteOfflineStory,
   onClose,
   onNavigateToChat,
@@ -664,6 +668,8 @@ export default function AppOffline({
         ? `【线下剧本《${story.title}》心境归档】`
         : `【线下剧本《${story.title}》关键剧情归档】`;
       let extractedMemories: MemoryItem[] = [];
+      let confirmedFacts: string[] = [];
+      let acceptedOfflineClaims: KnowledgeClaim[] = [];
       try {
         const result = await MemoryService.extractMemories({
           character,
@@ -695,6 +701,11 @@ export default function AppOffline({
         if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
           throw new Error("Offline story knowledge persistence failed");
         }
+        acceptedOfflineClaims = result.acceptedClaims;
+        confirmedFacts = result.acceptedClaims
+          .filter((claim) => claim.status === "active"
+            && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
+          .map((claim) => claim.statement);
         extractedMemories = result.extractedMemories;
       } catch (error) {
         console.warn("Offline memory extraction unavailable; keeping the story retryable:", error);
@@ -713,6 +724,16 @@ export default function AppOffline({
         : (onSaveMemories(mergedMemories), true);
       if (!persisted) throw new Error("Offline story summary persistence failed");
 
+      const nextRelationships = applyConfirmedOfflineRelationshipTransition({
+        relationships,
+        relationId: relationship.id,
+        claims: acceptedOfflineClaims,
+        now,
+      });
+      if (nextRelationships.some((item, index) => item !== relationships[index])) {
+        onSaveRelationships(nextRelationships);
+      }
+
       const syncedStory = markSynced(extractedMemories.map((memory) => memory.id));
       if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
       else onSaveOfflineStory(syncedStory);
@@ -722,6 +743,7 @@ export default function AppOffline({
           userIdentityId: relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId,
           sourceMessages,
           userConfirmed: true,
+          confirmedFacts,
           recordedAt: now,
         });
       }

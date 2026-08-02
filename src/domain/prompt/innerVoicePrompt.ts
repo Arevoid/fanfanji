@@ -8,18 +8,23 @@ export interface InnerVoicePromptInput {
   triggerMessage: Message;
   recentMessages: Message[];
   userName: string;
+  /** The same hidden, relation-scoped continuity block used by direct chat. */
+  offlineContinuityContext?: string;
 }
 
 const formatMessage = (message: Message, characterName: string, userName: string) =>
   `${message.sender === "user" ? userName : characterName}: ${message.content}`;
 
 /** A deliberately separate prompt: it must not alter the normal chat prompt pipeline. */
-export function buildInnerVoicePrompt({ character, relationship, relationId, triggerMessage, recentMessages, userName }: InnerVoicePromptInput): string {
+export function buildInnerVoicePrompt({ character, relationship, relationId, triggerMessage, recentMessages, userName, offlineContinuityContext }: InnerVoicePromptInput): string {
   const context = recentMessages
     .filter((message) => !message.isOffline && !message.isNarration)
     .slice(-16)
     .map((message) => formatMessage(message, character.name, userName))
     .join("\n");
+  const offlineContinuity = offlineContinuityContext?.trim()
+    ? `\n【刚结束的线下连续性上下文】\n${offlineContinuityContext.trim()}\n\n这些线下事实是角色亲自经历的最新事实。心声不得否认、遗忘或与其矛盾；若旧关系标签与线下明确确立的新关系冲突，以线下新事实为准。\n`
+    : "";
 
   return `你正在呈现角色“${character.name}”没有说出口的内心活动，不是在回复用户，也不是分析报告。
 
@@ -30,6 +35,7 @@ export function buildInnerVoicePrompt({ character, relationship, relationId, tri
 
 【本次触发消息】
 ${formatMessage(triggerMessage, character.name, userName)}
+${offlineContinuity}
 
 【最近聊天上下文】
 ${context || "（暂无）"}

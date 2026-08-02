@@ -42,12 +42,13 @@ const story = (id: string, relationId = "relation-1", overrides: Partial<Offline
   ...overrides,
 });
 
-const capture = (currentStory: OfflineStory, userIdentityId = "identity-1") =>
+const capture = (currentStory: OfflineStory, userIdentityId = "identity-1", confirmedFacts?: readonly string[]) =>
   captureOfflineStoryCompletedEvent({
     story: currentStory,
     userIdentityId,
     sourceMessages: [sourceMessage("user", "Confirmed continuation"), sourceMessage("character", "Acknowledged")],
     userConfirmed: true,
+    confirmedFacts,
     recordedAt: 4,
   });
 
@@ -63,13 +64,24 @@ assert.equal(capture(story("if-story", "relation-1", { mode: "if" })).created, f
 assert.equal(capture(story("director-story", "relation-1", { mode: "director" })).created, false, "director is rejected");
 assert.equal(capture(story("story-1")).created, false, "same completion does not duplicate");
 assert.equal(capture(story("story-2")).created, true, "different story creates a separate event");
+assert.equal(capture(
+  story("story-factual"),
+  "identity-1",
+  ["用户接受了范千的表白，双方正式确立恋爱关系。", "范千带炸鸡去了用户家。"],
+).created, true, "accepted Truth facts create a factual completion event");
 assert.equal(capture(story("story-a", "relation-a"), "identity-a").created, true, "different relation remains isolated");
 
 events = loadCharacterEvents().value;
-assert.equal(events.length, 3, "only eligible, unique stories are written");
+assert.equal(events.length, 4, "only eligible, unique stories are written");
+assert.match(
+  events.find((event) => event.source === "offline_story:story-factual:completed")?.summary || "",
+  /正式确立恋爱关系.*范千带炸鸡去了用户家/,
+  "private cognitive consumers receive the confirmed plot facts instead of a generic completion marker",
+);
 assert.deepEqual(events.filter((event) => event.relationId === "relation-1").map((event) => event.id).sort(), [
   "character-event:relation-1:offline_story:story-1:completed",
   "character-event:relation-1:offline_story:story-2:completed",
+  "character-event:relation-1:offline_story:story-factual:completed",
 ]);
 assert.equal(events.filter((event) => event.relationId === "relation-a").length, 1);
 assert.equal(retractByOfflineStoryIds(["story-1"]).success, true);

@@ -80,12 +80,14 @@ assert.equal(selectPendingOfflineHandoffStory({
   relationId: "relation-a",
   characterId: "character-a",
   conversationId: "conversation-a",
+  now: 450,
 }), pendingStory, "the exact relationship can read its pending handoff");
 assert.equal(selectPendingOfflineHandoffStory({
   stories: [pendingStory],
   relationId: "relation-b",
   characterId: "character-a",
   conversationId: "conversation-a",
+  now: 450,
 }), undefined, "another relationship cannot read the pending transcript");
 const pendingPrompt = buildPendingOfflineHandoffPromptBlock({
   story: pendingStory,
@@ -105,11 +107,13 @@ assert.equal(firstDelivery.onlineHandoff?.deliveredReplyCount, 1);
 const secondDelivery = recordOfflineHandoffDelivery(firstDelivery, 460);
 assert.equal(secondDelivery.onlineHandoff?.status, "pending", "the bridge remains available for another online turn");
 const thirdDelivery = recordOfflineHandoffDelivery(secondDelivery, 470);
-assert.equal(thirdDelivery.onlineHandoff?.status, "acknowledged", "the bridge retires after three successful replies received it");
+assert.equal(thirdDelivery.onlineHandoff?.status, "pending", "a failed or missing durable summary cannot consume the only handoff copy");
+const thirdDurableDelivery = recordOfflineHandoffDelivery(secondDelivery, 470, 3, true);
+assert.equal(thirdDurableDelivery.onlineHandoff?.status, "acknowledged", "the bridge retires after three replies only when durable facts exist");
 const acknowledgedStory = acknowledgeOfflineHandoff(pendingStory, 500);
 assert.equal(acknowledgedStory.onlineHandoff?.status, "acknowledged");
 assert.equal(selectPendingOfflineHandoffStory({
-  stories: [acknowledgedStory], relationId: "relation-a", characterId: "character-a", conversationId: "conversation-a",
+  stories: [acknowledgedStory], relationId: "relation-a", characterId: "character-a", conversationId: "conversation-a", now: 500,
 }), undefined, "an acknowledged handoff is not injected again");
 const olderPendingStory = createPendingOfflineHandoff({
   story: { ...story, id: "story-older" },
@@ -117,14 +121,18 @@ const olderPendingStory = createPendingOfflineHandoff({
   now: 300,
 });
 assert.equal(selectPendingOfflineHandoffStory({
-  stories: [olderPendingStory, acknowledgedStory], relationId: "relation-a", characterId: "character-a", conversationId: "conversation-a",
+  stories: [olderPendingStory, acknowledgedStory], relationId: "relation-a", characterId: "character-a", conversationId: "conversation-a", now: 500,
 }), undefined, "an older pending story cannot resurface after the newest handoff was acknowledged");
+assert.equal(selectPendingOfflineHandoffStory({
+  stories: [pendingStory], relationId: "relation-a", characterId: "character-a", conversationId: "conversation-a", now: 400 + 3 * 60 * 60 * 1000,
+}), undefined, "a failed-summary raw transcript stops pretending to be an immediate return after the continuity window");
 
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const bridgeUses = chatSource.match(/selectFreshOfflineHandoffMemory\(\{/g) || [];
-assert.equal(bridgeUses.length, 2, "normal replies and regenerated replies both receive the offline handoff");
+assert.equal(bridgeUses.length, 3, "normal replies, regenerated replies and inner voice all receive the offline handoff");
 assert.doesNotMatch(chatSource, /!relevantMemories\.some\(\(memory\) => memory\.id === latestOfflineContinuationMemory\.id\)/, "structured memory selection cannot suppress the dedicated handoff block");
 assert.match(chatSource, /history\.push\(\{ role: "user", text: pendingOfflineHistoryAnchor \}\)/, "the offline segment is inserted next to the current online message as hidden history");
+assert.match(chatSource, /offlineContinuityContext[\s\S]*generateInnerVoice\(\{/, "inner voice receives the same offline continuity block as direct chat");
 assert.match(chatSource, /createdMessages\.length > 0[\s\S]*recordPendingOfflineHandoffDelivery/, "normal chat records delivery only after creating a reply");
 assert.match(chatSource, /recentUntrackedStory[\s\S]*createPendingOfflineHandoff/, "recent pre-schema stories can repair a missed first online handoff");
 

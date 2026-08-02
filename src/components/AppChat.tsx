@@ -18,7 +18,7 @@ import { getWorldBookLocationReferences } from "../domain/worldbook/locationRefe
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
-import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
+import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
@@ -1243,7 +1243,8 @@ export default function AppChat({
   };
   const recordPendingOfflineHandoffDelivery = (story?: OfflineStory) => {
     if (!story || story.onlineHandoff?.status !== "pending") return;
-    onSaveOfflineStory(recordOfflineHandoffDelivery(story));
+    const durableSummaryReady = hasOfflineStorySummary(story, memories || []);
+    onSaveOfflineStory(recordOfflineHandoffDelivery(story, Date.now(), 3, durableSummaryReady));
   };
   const buildPendingOfflineTimelineHandoff = (
     story: OfflineStory,
@@ -1355,6 +1356,25 @@ export default function AppChat({
         ? message.relationId === activeRelationship.id
         : message.characterId === groupId && activeCharacter?.isGroupChat,
       );
+      const latestOfflineMemory = relationId
+        ? selectFreshOfflineHandoffMemory({
+          memories: memories || [],
+          relationId,
+          queryText: triggerMessage.content,
+        })
+        : undefined;
+      const pendingOfflineStory = relationId ? getPendingOfflineHandoff() : undefined;
+      const offlineContinuityContext = pendingOfflineStory
+        ? buildPendingOfflineTimelineHandoff(
+          pendingOfflineStory,
+          triggerMessage.timestamp,
+          latestOfflineMemory && isOfflineStoryHandoffMemory(latestOfflineMemory, pendingOfflineStory)
+            ? latestOfflineMemory
+            : undefined,
+        )
+        : latestOfflineMemory
+          ? buildOfflineTimelineHandoff(latestOfflineMemory, triggerMessage.timestamp)
+          : undefined;
       const generated = await generateInnerVoice({
         character,
         relationship: activeRelationship,
@@ -1364,6 +1384,7 @@ export default function AppChat({
         relationId,
         groupId,
         settings,
+        offlineContinuityContext,
       });
       if (!generated) {
         setInnerVoiceError("心声生成结果无效，请稍后重试。");

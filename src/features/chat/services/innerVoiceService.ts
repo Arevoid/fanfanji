@@ -14,6 +14,7 @@ export interface GenerateInnerVoiceInput {
   groupId?: string;
   context?: ChatRuntimeContext;
   settings: UserSettings;
+  offlineContinuityContext?: string;
 }
 
 function parseInnerVoice(text: string): { content: string; emotionalState: string } | null {
@@ -50,6 +51,7 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
       triggerMessage: input.triggerMessage,
       recentMessages: input.recentMessages,
       userName: input.settings.name,
+      offlineContinuityContext: input.offlineContinuityContext,
     }),
     apiKey: input.settings.apiKey,
     model: input.settings.selectedModel || "gemini-3.5-flash",

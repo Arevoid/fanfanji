@@ -13,6 +13,8 @@ export interface CaptureOfflineStoryCompletedEventInput {
   sourceMessages: readonly Message[];
   /** Only the explicit user sync action confirms a story for event capture. */
   userConfirmed: boolean;
+  /** Confirmed, relation-scoped facts already accepted by the Truth Layer. */
+  confirmedFacts?: readonly string[];
   recordedAt?: number;
 }
 
@@ -31,6 +33,13 @@ const buildCompletedEvent = (
 ): CharacterEventInput | undefined => {
   const { story, userIdentityId } = input;
   if (!eligibility.allowed || !story.relationId || !userIdentityId) return undefined;
+  const confirmedFacts = Array.from(new Set((input.confirmedFacts || [])
+    .map((fact) => fact.replace(/\s+/gu, " ").trim().slice(0, 240))
+    .filter(Boolean)))
+    .slice(0, 6);
+  const eventSummary = confirmedFacts.length > 0
+    ? `线下剧情已确认：${confirmedFacts.join("；")}`
+    : "用户与角色完成了一次已确认的线下互动剧情。";
 
   return {
     id: getOfflineStoryCompletedEventId(story.relationId, story.id),
@@ -38,8 +47,9 @@ const buildCompletedEvent = (
     characterId: story.characterId,
     userIdentityId,
     kind: eligibility.kind,
-    // A stable boundary record, never a title or AI-generated plot detail.
-    summary: "用户与角色完成了一次已确认的线下互动剧情。",
+    // Only facts already admitted by the Truth Layer may reach other private
+    // cognitive consumers. The story title and raw screenplay stay excluded.
+    summary: eventSummary,
     // CharacterEvent currently stores a source string. This scoped key encodes
     // offline-story + story id + completed action without exposing plot text.
     source: eligibility.sourceKey,

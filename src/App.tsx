@@ -3539,6 +3539,7 @@ export default function App() {
                     activeChatCharId={activeChatCharId}
                     worldBookEntries={worldBookEntries}
                     onSaveOfflineStory={handleSaveOfflineStory}
+                    onSaveRelationships={setRelationships}
                     onDeleteOfflineStory={handleDeleteOfflineStory}
                     onClose={() => setActiveApp(null)}
                     activeChatRelationId={activeChatRelationId}

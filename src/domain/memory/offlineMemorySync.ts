@@ -64,6 +64,8 @@ export function selectPendingOfflineHandoffStory(input: {
   relationId?: string;
   characterId?: string;
   conversationId?: string;
+  now?: number;
+  maxAgeMs?: number;
 }): OfflineStory | undefined {
   if (!input.relationId || !input.characterId) return undefined;
   const latest = [...input.stories]
@@ -73,7 +75,10 @@ export function selectPendingOfflineHandoffStory(input: {
     .sort((left, right) => (right.onlineHandoff?.endedAt || 0) - (left.onlineHandoff?.endedAt || 0))[0];
   // Once the newest handoff is acknowledged, older pending records must not
   // resurface as if they had just happened.
-  return latest?.onlineHandoff?.status === "pending" ? latest : undefined;
+  if (latest?.onlineHandoff?.status !== "pending") return undefined;
+  const age = (input.now ?? Date.now()) - latest.onlineHandoff.endedAt;
+  const maxAgeMs = input.maxAgeMs ?? 2 * 60 * 60 * 1000;
+  return age >= 0 && age <= maxAgeMs ? latest : undefined;
 }
 
 export function createPendingOfflineHandoff(input: {
@@ -119,10 +124,14 @@ export function recordOfflineHandoffDelivery(
   story: OfflineStory,
   now = Date.now(),
   requiredReplyCount = 3,
+  durableSummaryReady = false,
 ): OfflineStory {
   if (story.onlineHandoff?.status !== "pending") return story;
   const deliveredReplyCount = (story.onlineHandoff.deliveredReplyCount || 0) + 1;
-  const acknowledged = deliveredReplyCount >= Math.max(1, requiredReplyCount);
+  // Never retire the only surviving copy of the just-ended timeline. If AI
+  // extraction failed, the raw relation-scoped handoff remains available for
+  // the immediate continuity window and can be replaced by a later retry.
+  const acknowledged = durableSummaryReady && deliveredReplyCount >= Math.max(1, requiredReplyCount);
   return {
     ...story,
     onlineHandoff: {
