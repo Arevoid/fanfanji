@@ -4,7 +4,7 @@ import { apiSummarizePersonality } from "../utils/apiHelper";
 import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
 import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
-import { buildCharacterExport, characterExportFilename } from "../features/archives/characterExport";
+import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile } from "../features/archives/characterExport";
 
 interface AppArchivesProps {
   characters: Character[];
@@ -281,7 +281,7 @@ export default function AppArchives({
         const innerData = parsedJson.data || parsedJson;
         const embeddedCharacter = innerData?.extensions?.fanfanji?.character;
         importedChar = embeddedCharacter && typeof embeddedCharacter === "object"
-          ? { ...embeddedCharacter, id: "char-import-" + Date.now() }
+          ? createCharacterFromImportedProfile(embeddedCharacter, "char-import-" + Date.now())
           : mapSillyTavernToCharacter(parsedJson, "");
         const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
         if (mwb && Array.isArray(mwb)) {
@@ -329,6 +329,11 @@ export default function AppArchives({
       } else {
         throw new Error("请上传 .png 角色卡、.json 配置文件、.txt 或 .docx 文档文件！");
       }
+
+      // All supported formats pass through the same persona-only boundary.
+      // This also protects imports made by older Fanfanji builds that embedded
+      // the entire Character object, including chat and relationship settings.
+      importedChar = createCharacterFromImportedProfile(importedChar, importedChar.id);
 
       const finishImport = (importEntries: boolean) => {
         try {

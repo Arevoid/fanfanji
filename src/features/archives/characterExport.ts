@@ -1,5 +1,52 @@
 import type { Character, WorldBookEntry } from "../../types";
 
+export type PortableCharacterProfile = Pick<Character,
+  "name" | "age" | "avatar" | "gender" | "mbti" | "personality" | "backstory" | "greeting"
+>;
+
+const readString = (value: unknown): string => typeof value === "string" ? value : "";
+
+/**
+ * Character cards are portable persona documents, not chat backups. Keep this
+ * allowlist deliberately small so relation state, memory, UI configuration,
+ * proactive scheduling, voice/image settings, and local asset references can
+ * never hitch a ride through a character-card round trip.
+ */
+export const toPortableCharacterProfile = (character: Character): PortableCharacterProfile => ({
+  name: character.name,
+  age: typeof character.age === "number" ? character.age : "",
+  avatar: character.avatar || "",
+  gender: character.gender || "",
+  mbti: character.mbti || "",
+  personality: character.personality || "",
+  backstory: character.backstory || "",
+  greeting: character.greeting || "",
+});
+
+/** Rebuilds a local Character from persona-only data and ignores every extra field. */
+export const createCharacterFromImportedProfile = (value: unknown, id: string): Character => {
+  const profile = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const numericAge = typeof profile.age === "number" && Number.isFinite(profile.age)
+    ? profile.age
+    : "";
+
+  return {
+    id,
+    name: readString(profile.name) || "未命名角色",
+    age: numericAge,
+    avatar: readString(profile.avatar),
+    gender: readString(profile.gender),
+    mbti: readString(profile.mbti),
+    personality: readString(profile.personality),
+    backstory: readString(profile.backstory),
+    greeting: readString(profile.greeting),
+    album: [],
+    references: [],
+  };
+};
+
 const toWorldBookEntry = (entry: WorldBookEntry) => ({
   keys: (entry.keywords || "").split(/[,，]/).map((key) => key.trim()).filter(Boolean),
   content: entry.content,
@@ -17,6 +64,7 @@ export const buildCharacterExport = (
   worldBookEntries: WorldBookEntry[],
   includeWorldBook: boolean,
 ) => {
+  const profile = toPortableCharacterProfile(character);
   const boundEntries = includeWorldBook
     ? worldBookEntries.filter((entry) => entry.characterId === character.id)
     : [];
@@ -33,8 +81,8 @@ export const buildCharacterExport = (
       extensions: {
         fanfanji: {
           format: "fanfanji-character-export",
-          version: 1,
-          character,
+          version: 2,
+          character: profile,
         },
       },
       ...(includeWorldBook && boundEntries.length > 0 ? {

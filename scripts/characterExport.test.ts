@@ -1,7 +1,35 @@
 import assert from "node:assert/strict";
-import { buildCharacterExport, characterExportFilename } from "../src/features/archives/characterExport";
+import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile } from "../src/features/archives/characterExport";
 
-const character = { id: "char-a", name: "祁澈", avatar: "avatar", personality: "克制", backstory: "背景", greeting: "你好", album: [], references: [] };
+const character = {
+  id: "char-a",
+  name: "祁澈",
+  age: 28,
+  gender: "男",
+  mbti: "INTJ",
+  avatar: "avatar",
+  personality: "克制",
+  backstory: "背景",
+  greeting: "你好",
+  album: ["private-album"],
+  references: [{ id: "private-reference", title: "聊天参考", content: "private-reference-content" }],
+  remark: "chat-remark",
+  isPinned: true,
+  chatBg: "private-chat-background",
+  momentsCover: "private-moments-cover",
+  compressedMemory: "private-compressed-memory",
+  enableAutoSummary: true,
+  enableProactiveChat: true,
+  customChatCSS: "private-chat-css",
+  customChatIcons: { send: "private-chat-icon" },
+  initialChatContext: "private-initial-context",
+  initialChatMode: "context" as const,
+  ownerIdentityId: "private-identity",
+  isContactInstance: true,
+  profileSourceId: "private-profile-source",
+  minimaxVoiceId: "private-voice",
+  imageReferenceAssetId: "private-image-asset",
+};
 const entries = [
   { id: "bound", characterId: "char-a", title: "专属设定", category: "祁澈世界书", content: "只属于祁澈", timestamp: 1, keywords: "祁澈,基地", isActive: true, triggerType: "keys" as const },
   { id: "other", characterId: "char-b", title: "其他角色", category: "其他", content: "不应导出", timestamp: 1 },
@@ -10,10 +38,53 @@ const entries = [
 
 const withBook = buildCharacterExport(character, entries, true);
 assert.equal(withBook.spec, "chara_card_v2");
-assert.equal(withBook.data.extensions.fanfanji.character.id, "char-a");
+assert.deepEqual(withBook.data.extensions.fanfanji.character, {
+  name: "祁澈",
+  age: 28,
+  avatar: "avatar",
+  gender: "男",
+  mbti: "INTJ",
+  personality: "克制",
+  backstory: "背景",
+  greeting: "你好",
+});
 assert.deepEqual(Object.keys(withBook.data.character_book?.entries || {}), ["0"]);
 assert.equal(withBook.data.character_book?.entries?.["0"].content, "只属于祁澈");
 assert.equal("character_book" in buildCharacterExport(character, entries, false).data, false);
+const serialized = JSON.stringify(withBook);
+for (const privateValue of [
+  "char-a",
+  "private-album",
+  "private-reference-content",
+  "chat-remark",
+  "private-chat-background",
+  "private-moments-cover",
+  "private-compressed-memory",
+  "private-chat-css",
+  "private-chat-icon",
+  "private-initial-context",
+  "private-identity",
+  "private-profile-source",
+  "private-voice",
+  "private-image-asset",
+]) {
+  assert.equal(serialized.includes(privateValue), false, `export leaked non-persona value: ${privateValue}`);
+}
+
+const imported = createCharacterFromImportedProfile(character, "new-character");
+assert.deepEqual(imported, {
+  id: "new-character",
+  name: "祁澈",
+  age: 28,
+  avatar: "avatar",
+  gender: "男",
+  mbti: "INTJ",
+  personality: "克制",
+  backstory: "背景",
+  greeting: "你好",
+  album: [],
+  references: [],
+});
 assert.equal(characterExportFilename('祁/澈'), "祁_澈-角色卡.json");
 
 console.log("character export tests passed");
