@@ -86,6 +86,7 @@ import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters }
 import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/services/legacyCharacterKnowledgeMigration";
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
 import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
+import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
 import StatusBar from "./components/StatusBar";
 import AppChat from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
@@ -306,7 +307,9 @@ export default function App() {
     }
   };
 
-  const [messages, setMessages] = useState<Message[]>(() => loadMessages(DEFAULT_MESSAGES).value);
+  const [messages, setMessages] = useState<Message[]>(() => loadMessages(DEFAULT_MESSAGES).value.filter((message) =>
+    !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
+  ));
 
   const [moments, setMoments] = useState<Moment[]>(() => loadMoments([]).value);
 

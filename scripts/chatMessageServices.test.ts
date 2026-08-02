@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../src/features/chat/services/messageFactory";
-import { cleanAiReplyText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles } from "../src/features/chat/services/messageParser";
+import { cleanAiReplyText, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
 
 const clean = (text: string) => cleanAiReplyText(text, false);
 
@@ -21,6 +21,11 @@ assert.equal(isCallRecordMarkup("[通话记录]|语音通话|00:02|%5B%5D"), tru
 assert.deepEqual(splitAiReplyBubbles("成员A：你好。\n成员B：收到！", false), ["成员A：你好", "成员B：收到！"]);
 assert.deepEqual(splitAiReplyBubbles("", false), []);
 assert.deepEqual(splitAiReplyBubbles("普通文本。\n[红包]|1|hi\n结束！", false), ["普通文本", "[红包]|1|hi", "结束！"]);
+assert.equal(stripInternalDeliveryMarkers("第一句\n[15:10]\n第二句\n【下午 3：10】"), "第一句\n\n第二句");
+assert.equal(stripInternalDeliveryMarkers("那就15:10见\n今天[15:10]到"), "那就15:10见\n今天[15:10]到");
+assert.deepEqual(splitAiReplyBubbles(clean("第一句\n[15:10]\n第二句\n[15:10]"), false), ["第一句", "第二句"]);
+assert.equal(isInternalDeliveryMarkerOnly("[15:10]"), true);
+assert.equal(isInternalDeliveryMarkerOnly("15:10见"), false);
 
 // M-P: factories preserve exact caller-provided IDs, timestamps, ownership, and optional fields.
 assert.deepEqual(createUserTextMessage({ id: "u1", characterId: "c1", content: "hi", timestamp: 1 }), { id: "u1", characterId: "c1", sender: "user", content: "hi", timestamp: 1 });
@@ -33,4 +38,4 @@ assert.equal(isRedPacketMarkup("[微信红包]|1|x"), true);
 assert.equal(isTransferMarkup("[微信转账]|1|x"), true);
 assert.deepEqual(parseCallRecord("[通话记录]|语音通话|00:02|%5B%5D"), { callType: "语音通话", duration: "00:02", transcript: [] });
 
-console.log("Chat message services: 16 fixed acceptance checks passed");
+console.log("Chat message services: 21 fixed acceptance checks passed");

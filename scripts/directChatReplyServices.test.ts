@@ -26,6 +26,7 @@ assert.equal(requestCount, 1);
 assert.equal(response.text, "你好。再见！");
 assert.deepEqual(createDirectReplyCandidates(candidateContext("你好")).messages.map((message) => message.content), ["你好"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("你好。再见！")).messages.map((message) => message.content), ["你好", "再见！"]);
+assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句\n[15:10]\n第二句\n【15：10】")).messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.equal(createDirectReplyCandidates(candidateContext("引用回复")).messages[0].content, "引用回复");
 assert.equal(request.systemInstruction.includes("worldbook"), true);
 assert.equal(request.systemInstruction.includes("memory"), true);
@@ -45,6 +46,7 @@ assert.deepEqual(regenerated.messages.map((message) => message.id), ["id-0", "id
 assert.deepEqual(regenerated.messages.map((message) => message.timestamp), [100, 101]);
 assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[微信红包]|1|x")).messages.map((message) => message.content), ["[微信红包]|1|x"]);
 assert.equal(createRegeneratedReplyCandidates(candidateContext("旧消息")).messages.length, 1);
+assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("新的回复\n[15:10]")).messages.map((message) => message.content), ["新的回复"]);
 assert.equal(requestCount, 1);
 
-console.log("Direct chat reply services: 18 fixed acceptance checks passed");
+console.log("Direct chat reply services: 20 fixed acceptance checks passed");
