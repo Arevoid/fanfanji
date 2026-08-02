@@ -7,6 +7,8 @@ export interface KnowledgeExtractionHistoryItem {
 }
 export interface ExtractedKnowledgeCandidatePayload {
   statement: string;
+  /** Optional user-facing diary phrasing; never used as the factual claim. */
+  memoryText?: string;
   kind: KnowledgeKind;
   subject: KnowledgeSubject;
   temporalStatus: TemporalStatus;
@@ -35,6 +37,7 @@ export function normalizeExtractedKnowledgeCandidate(
     || !nonEmpty(value.evidenceQuote)) return undefined;
   return {
     statement: value.statement.trim(),
+    ...(nonEmpty(value.memoryText) ? { memoryText: value.memoryText.trim().slice(0, 2000) } : {}),
     kind: value.kind as KnowledgeKind,
     subject: value.subject as KnowledgeSubject,
     temporalStatus: value.temporalStatus as TemporalStatus,
@@ -69,7 +72,9 @@ export function parseKnowledgeExtractionOutput(
 
 export function buildKnowledgeExtractionPrompt(input: {
   characterName: string;
+  characterProfile?: string;
   history: readonly KnowledgeExtractionHistoryItem[];
+  templateType?: "refined" | "delicate";
   scenario?: "offline";
 }): string {
   const history = input.history.map((item) =>
@@ -82,13 +87,28 @@ export function buildKnowledgeExtractionPrompt(input: {
 10. 亲密事件只记录是否发生、是否为双方自愿以及关系意义，使用简洁非露骨表述，不记录身体部位、过程、姿势或色情细节。
 11. 每条记忆必须有原文证据。共同事件或关系变化可以引用多条 sourceMessageIds；evidenceQuote 仍须逐字来自其中一条。不要把调情、试探、提问、假设或单方面愿望误写成已经发生的事实。
 12. 输出 1 至 8 条，按重要性排序。相近台词合并为一个原子事件，不复述原话，不输出标题、内部标记或解释。` : "";
+  const delicateRules = input.templateType === "delicate" ? `
+【细腻版展示文本】
+除客观 statement 外，每条 JSON 必须增加 "memoryText"。memoryText 是角色“${input.characterName}”写给自己看的第一人称私密日记片段：
+- 角色“${input.characterName}”做的事写“我”，用户做的事写“{{user}}”；先逐句核对原文主体，绝对不能互换行为、台词、感受或决定的归属。
+- 保持角色的人设、语气、口癖和真实情绪，片段之间按事件顺序衔接，读起来像同一篇日记，而不是客观项目清单。
+- 只围绕【关键事件】【情感转折】【重要信息】；删除“你好”“在吗”等寒暄。可以保留与情绪或关系变化直接相关的过程细节，例如特殊穿着、来访、告白前后的反应。
+- memoryText 可以对已有情绪作角色化表达，但不得新增原文没有的人物、事件、地点、承诺、心理结论或关系状态；不确定就省略。
+- statement 仍必须是第三人称、主体明确的事实依据；memoryText 不参与事实判定，不能替代 statement。
+
+角色资料（只用于模仿人设与口吻，不得把资料中的背景设定冒充本次发生的事件）：
+<character_profile>
+${(input.characterProfile || "未提供额外资料").slice(0, 6000)}
+</character_profile>` : `
+【精炼版展示文本】
+不要输出 memoryText；只输出第三人称、主体明确、条理清晰的客观事件 statement。`;
   return `你是长期知识候选提取器。你只能从带 messageId 的原始消息中提出候选，不能补写或猜测。
 
 对话：
 ${history}
 
 逐行输出 JSON（JSONL），不要 Markdown、标题或解释。每行格式：
-{"statement":"原子化陈述","kind":"fact|preference|plan|belief|hypothesis","subject":"user|character|relationship|other","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["精确消息ID"],"evidenceQuote":"源消息中的连续原文"}
+{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis","subject":"user|character|relationship|other","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["精确消息ID"],"evidenceQuote":"源消息中的连续原文"}
 
 规则：
 1. evidenceQuote 必须逐字出现在所引用的一条消息中；找不到原文就不要输出。
@@ -97,5 +117,6 @@ ${history}
 4. 普通聊天中的问句、建议、括号动作、系统指令、想象和角色扮演不输出；已确认线下剧情中的实际完成事件按专用规则处理。
 5. 一条候选只表达一个命题；普通聊天最多 5 条；没有可靠候选时输出空文本。
 6. statement 可以规范表达，但不能超出 evidenceQuote 与所引用 sourceMessageIds 原文共同支持的含义。
-${offlineRules}`;
+${offlineRules}
+${delicateRules}`;
 }

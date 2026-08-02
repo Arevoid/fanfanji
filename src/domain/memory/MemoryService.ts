@@ -2,10 +2,10 @@ import type { MemoryItem } from "../../types";
 import { isDuplicateMemory, isDuplicateMemoryMarker } from "./MemoryDeduplicator";
 import { extractMemories } from "./MemoryExtractor";
 import { retrieveRelevantMemories } from "./MemoryRetriever";
-import { formatExtractedMemorySummary, formatMemoriesForPrompt } from "./memoryFormatter";
+import { formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "./memoryFormatter";
 import type { MemoryExtractionApi, MemoryExtractionContext, MemoryRetrievalContext } from "./memoryTypes";
 
-export { formatExtractedMemorySummary, formatMemoriesForPrompt };
+export { formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt };
 export type { MemoryScenario, MemoryExtractionContext, MemoryRetrievalContext } from "./memoryTypes";
 
 export const MemoryService = {

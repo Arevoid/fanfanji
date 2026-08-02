@@ -28,6 +28,11 @@ export async function extractMemories(
   const data = await extractApi({
     history,
     characterName: context.character.name,
+    characterProfile: [
+      context.character.personality,
+      context.character.backstory,
+      ...(context.character.references || []).map((reference) => `${reference.title}：${reference.content}`),
+    ].filter(Boolean).join("\n").slice(0, 6000),
     apiKey: context.apiKey,
     model: context.model,
     apiEndpoint: context.apiEndpoint,
@@ -78,6 +83,7 @@ export async function extractMemories(
     : undefined;
   const baseId = context.createId();
   const acceptedClaims: KnowledgeClaim[] = [];
+  const displayTextByClaimId = new Map<string, string>();
   let rejectedCandidateCount = rawItems.length - payloads.length;
 
   payloads.forEach((payload, index) => {
@@ -133,7 +139,15 @@ export async function extractMemories(
       offlineStoryPolicyInput: context.offlineStoryPolicyInput,
     };
     const decision = evaluateKnowledgeWrite(writeCandidate);
-    if (decision.accepted) acceptedClaims.push(decision.claim);
+    if (decision.accepted) {
+      acceptedClaims.push(decision.claim);
+      displayTextByClaimId.set(
+        decision.claim.id,
+        context.templateType === "delicate" && payload.memoryText
+          ? payload.memoryText
+          : decision.claim.statement,
+      );
+    }
     else rejectedCandidateCount += 1;
   });
 
@@ -149,7 +163,10 @@ export async function extractMemories(
     id: baseId,
     characterId: context.characterId,
     relationId: context.relationId,
-    content: context.formatContent(trustedClaims.map((claim) => claim.statement)),
+    content: context.formatContent(
+      trustedClaims.map((claim) => claim.statement),
+      { displayItems: trustedClaims.map((claim) => displayTextByClaimId.get(claim.id) || claim.statement) },
+    ),
     timestamp: context.currentTime(),
     importance: context.scenario === "offline" ? 4 : 5,
     isManual: false,

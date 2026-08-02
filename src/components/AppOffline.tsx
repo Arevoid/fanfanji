@@ -9,7 +9,7 @@ import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, User
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
-import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
+import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
 import { filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
@@ -615,7 +615,8 @@ export default function AppOffline({
         && relation.conversationId === story.conversationId,
       );
       if (!relationship) throw new Error("Offline story relationship scope is invalid");
-      const headerLabel = character.archiveTemplateType === "delicate"
+      const isDelicate = character.archiveTemplateType === "delicate";
+      const headerLabel = isDelicate
         ? `【线下剧本《${story.title}》心境归档】`
         : `【线下剧本《${story.title}》关键剧情归档】`;
       let extractedMemories: MemoryItem[] = [];
@@ -642,7 +643,9 @@ export default function AppOffline({
           // The structured extractor has already fixed actor/recipient names.
           // Keep one concise list instead of appending a second keyword-based
           // summary that can omit the actual relationship-changing events.
-          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]`,
+          formatContent: (items, formatOptions) => `${isDelicate
+            ? `${formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)}\n[${syncMarker}]\n【事实索引（系统）】\n${items.map((item) => `- ${item}`).join("\n")}`
+            : `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]`}`,
         }, apiExtractMemories);
         if (result.apiError) throw new Error(result.apiError);
         if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {

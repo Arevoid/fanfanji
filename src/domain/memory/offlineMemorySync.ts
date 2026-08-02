@@ -113,12 +113,13 @@ export function filterOfflineExtractedFacts(items: readonly string[]): string[] 
 
 /** Hides storage-only sync markers from the user-facing Memory page. */
 export function getMemoryDisplayContent(content: string): string {
-  return content
-    .split("\n")
-    .filter((line) => !/^\[offline-story:[^\]]+\]$/u.test(line.trim()))
-    .filter((line) => line.trim() !== "【确认事件（主体与客体固定）】")
-    .join("\n")
-    .trim();
+  const visibleLines: string[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "【确认事件（主体与客体固定）】" || trimmed === "【事实索引（系统）】") break;
+    if (!/^\[offline-story:[^\]]+\]$/u.test(trimmed)) visibleLines.push(line);
+  }
+  return visibleLines.join("\n").trim();
 }
 
 /** Removes legacy screenplay-shaped handoffs before an online prompt can see them. */

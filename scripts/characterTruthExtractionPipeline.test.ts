@@ -58,6 +58,19 @@ assert.match(offlinePrompt, /角色名“范千”固定主体/);
 assert.match(offlinePrompt, /简洁非露骨表述/);
 assert.match(offlinePrompt, /1 至 8 条/);
 
+const delicatePrompt = buildKnowledgeExtractionPrompt({
+  characterName: "范千",
+  characterProfile: "嘴硬心软，说话直接。",
+  templateType: "delicate",
+  scenario: "offline",
+  history: [{ id: "diary-source", role: "user", text: "我同意做你女朋友。" }],
+});
+assert.match(delicatePrompt, /每条 JSON 必须增加 "memoryText"/);
+assert.match(delicatePrompt, /用户做的事写“\{\{user\}\}”/);
+assert.match(delicatePrompt, /绝对不能互换行为、台词、感受或决定的归属/);
+assert.match(delicatePrompt, /嘴硬心软，说话直接/);
+assert.match(delicatePrompt, /关键事件.*情感转折.*重要信息/);
+
 const parsed = parseKnowledgeExtractionOutput([
   JSON.stringify(payload()),
   JSON.stringify(payload({ sourceMessageIds: ["foreign-message"] })),

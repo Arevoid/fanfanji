@@ -21,7 +21,7 @@ import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceReco
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
-import { MemoryService, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
+import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
@@ -997,7 +997,9 @@ export default function App() {
         templateType: char.archiveTemplateType,
         createId: () => (Date.now() + Math.random()).toString(),
         currentTime: () => Date.now(),
-        formatContent: (items) => formatExtractedMemorySummary(headerLabel, items),
+        formatContent: (items, formatOptions) => isDelicate
+          ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
+          : formatExtractedMemorySummary(headerLabel, items),
       }, apiExtractMemories);
       if (result.apiError) {
         setImmediateSummaryTask(prev => ({

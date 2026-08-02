@@ -43,13 +43,14 @@ export interface MemoryExtractionContext {
    * record is created.
    */
   filterItems?: (items: readonly string[]) => string[];
-  formatContent: (items: readonly string[]) => string;
+  formatContent: (items: readonly string[], options?: { displayItems: readonly string[] }) => string;
   offlineStoryPolicyInput?: import("../offlineStory/offlineStoryFactPolicy").OfflineStoryFactPolicyInput;
 }
 
 export interface MemoryExtractionApiParams {
   history: { id: string; role: "user" | "model"; text: string }[];
   characterName: string;
+  characterProfile?: string;
   apiKey: string;
   model: string;
   apiEndpoint?: string;

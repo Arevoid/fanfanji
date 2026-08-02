@@ -415,7 +415,7 @@ ${historyText}
   // API Route: Extract individual memories
   app.post("/api/extract-memories", async (req, res) => {
     try {
-      const { history, characterName, apiKey, model, apiEndpoint, scenario } = req.body;
+      const { history, characterName, characterProfile, apiKey, model, apiEndpoint, templateType, scenario } = req.body;
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
       if (!apiKeyValue) {
         return res.status(400).json({
@@ -433,7 +433,13 @@ ${historyText}
             && typeof record.text === "string";
         })
         : [];
-      const prompt = buildKnowledgeExtractionPrompt({ characterName, history: safeHistory, scenario });
+      const prompt = buildKnowledgeExtractionPrompt({
+        characterName,
+        characterProfile: typeof characterProfile === "string" ? characterProfile : undefined,
+        history: safeHistory,
+        templateType: templateType === "delicate" ? "delicate" : "refined",
+        scenario,
+      });
 
       let aiText = "";
 

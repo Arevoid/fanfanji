@@ -4,6 +4,7 @@ import {
   getMemoryDisplayContent,
   getOfflineStorySummaryMarker,
   isOfflineStoryHandoffMemory,
+  sanitizeOfflineMemoryForOnlineUse,
 } from "../src/domain/memory/offlineMemorySync";
 import { MemoryService } from "../src/domain/memory/MemoryService";
 import type { Character, MemoryItem, Message, OfflineStory } from "../src/types";
@@ -226,6 +227,54 @@ const tests: Array<[string, () => void | Promise<void>]> = [
     }] }));
     assert.equal(result.acceptedClaims.length, 0);
     assert.equal(result.extractedMemories.length, 0);
+  }],
+  ["H delicate template displays character diary voice without changing factual ownership", async () => {
+    const objectiveStatement = "范千向用户告白，用户接受告白，两人确认恋爱关系。";
+    const diaryText = "我今天去{{user}}家时，终于把那句告白说出口了。{{user}}答应做我女朋友——啧，算她有眼光。";
+    const result = await MemoryService.extractMemories({
+      character: { ...character, name: "范千", personality: "嘴硬心软，说话直接。", archiveTemplateType: "delicate" },
+      characterId: character.id,
+      relationId: story.relationId,
+      userIdentityId: "identity-a",
+      conversationId: "direct:relation-a",
+      recentMessages: confirmedStoryMessages,
+      existingMemories: [],
+      scenario: "offline",
+      apiKey: "",
+      model: "",
+      templateType: "delicate",
+      filterItems: filterOfflineExtractedFacts,
+      offlineStoryPolicyInput: { story: confirmedStory, userConfirmed: true, sourceMessages: confirmedStoryMessages },
+      createId: () => "delicate-summary",
+      currentTime: () => 17,
+      formatContent: (items, options) => `【心境归档】\n${(options?.displayItems || items).join("\n\n")}`,
+    }, async (params) => {
+      assert.equal(params.templateType, "delicate");
+      assert.match(params.characterProfile || "", /嘴硬心软/);
+      return { candidates: [{
+        statement: objectiveStatement,
+        memoryText: diaryText,
+        kind: "fact",
+        subject: "relationship",
+        temporalStatus: "present",
+        sourceMessageIds: ["character-confession", "user-acceptance"],
+        evidenceQuote: confirmedStoryMessages[3].content,
+      }] };
+    });
+
+    assert.equal(result.acceptedClaims[0]?.statement, objectiveStatement, "truth storage remains objective and actor-safe");
+    assert.match(result.extractedMemories[0]?.content || "", /我今天去\{\{user\}\}家/);
+    assert.match(result.extractedMemories[0]?.content || "", /算她有眼光/);
+    assert.doesNotMatch(result.extractedMemories[0]?.content || "", /- 范千向用户告白/);
+  }],
+  ["I delicate offline storage shows diary while online recall uses objective fact index", () => {
+    const stored = `【心境归档】\n我今天终于向{{user}}告白了，{{user}}答应了。\n[offline-story:${story.id}:summary]\n【事实索引（系统）】\n- 范千向用户告白，用户接受告白，两人确认恋爱关系。`;
+    const displayed = getMemoryDisplayContent(stored);
+    const recalled = sanitizeOfflineMemoryForOnlineUse(stored);
+    assert.match(displayed, /我今天终于向\{\{user\}\}告白/);
+    assert.doesNotMatch(displayed, /事实索引|范千向用户告白/);
+    assert.match(recalled, /范千向用户告白，用户接受告白/);
+    assert.doesNotMatch(recalled, /我今天终于/);
   }],
 ];
 

@@ -17,7 +17,7 @@ import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatus
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
-import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
+import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { buildOfflineHandoffPromptBlock } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
@@ -4433,7 +4433,9 @@ ${stickerListStr}
         templateType: activeCharacter.archiveTemplateType,
         createId: () => (Date.now() + Math.random()).toString(),
         currentTime: () => Date.now(),
-        formatContent: (items) => formatExtractedMemorySummary(headerLabel, items),
+        formatContent: (items, formatOptions) => isDelicate
+          ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
+          : formatExtractedMemorySummary(headerLabel, items),
       }, apiExtractMemories);
       if (result.apiError) console.error("Extract memory API error:", result.apiError);
       if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {

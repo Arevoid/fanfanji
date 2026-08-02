@@ -432,6 +432,7 @@ export async function apiTestImageConnection(params: {
 export async function apiExtractMemories(params: {
   history: KnowledgeExtractionHistoryItem[];
   characterName: string;
+  characterProfile?: string;
   apiKey: string;
   model: string;
   apiEndpoint?: string;
@@ -457,7 +458,9 @@ export async function apiExtractMemories(params: {
     try {
       const prompt = buildKnowledgeExtractionPrompt({
         characterName: params.characterName,
+        characterProfile: params.characterProfile,
         history: params.history,
+        templateType: params.templateType,
         scenario: params.scenario,
       });
 
