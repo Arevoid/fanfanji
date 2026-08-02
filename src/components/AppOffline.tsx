@@ -46,6 +46,31 @@ interface AppOfflineProps {
   worldBookEntries?: WorldBookEntry[];
 }
 
+interface OfflineStylePreset {
+  id: string;
+  name: string;
+  description: string;
+}
+
+const loadOfflineStylePresets = (): OfflineStylePreset[] => {
+  try {
+    const raw = localStorage.getItem("offline_custom_style_presets");
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is OfflineStylePreset => Boolean(
+      item
+      && typeof item === "object"
+      && typeof (item as OfflineStylePreset).id === "string"
+      && typeof (item as OfflineStylePreset).name === "string"
+      && typeof (item as OfflineStylePreset).description === "string",
+    ));
+  } catch (error) {
+    console.warn("Failed to load offline custom style presets; using an empty list.", error);
+    return [];
+  }
+};
+
 export default function AppOffline({
   characters = [],
   relationships = [],
@@ -202,10 +227,7 @@ export default function AppOffline({
   ];
 
   // Custom style presets state loaded from localStorage
-  const [customPresets, setCustomPresets] = useState<any[]>(() => {
-    const raw = localStorage.getItem("offline_custom_style_presets");
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [customPresets, setCustomPresets] = useState<OfflineStylePreset[]>(loadOfflineStylePresets);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isReadingSettingsOpen, setIsReadingSettingsOpen] = useState(false);
@@ -298,21 +320,21 @@ export default function AppOffline({
       || resolveOfflineStoryCharacterIds(story, characters).includes(selectedCharId))
   );
 
-  const storyChars = activeStory 
+  const storyChars: Character[] = activeStory
     ? (activeStory.characterIds && activeStory.characterIds.length > 0 
         ? selectableCharacters.filter(c => resolveOfflineStoryCharacterIds(activeStory, characters).includes(c.id))
-        : [selectedChar])
-    : [selectedChar];
+        : selectedChar ? [selectedChar] : [])
+    : selectedChar ? [selectedChar] : [];
 
   const storyCharNamesLabel = storyChars.map(c => c.remark || c.name).join("、");
-  const firstActorLabel = storyChars.length > 1 ? "角色们" : (selectedChar.remark || selectedChar.name);
+  const firstActorLabel = storyChars.length > 1 ? "角色们" : selectedChar ? (selectedChar.remark || selectedChar.name) : "角色";
 
   // Online messages are an invisible handoff context, never part of the offline
   // manuscript. The id check also hides snapshots created before this flag existed.
-  const visibleStoryMessages = activeStory?.messages.filter((message) =>
+  const visibleStoryMessages = (Array.isArray(activeStory?.messages) ? activeStory.messages : []).filter((message) =>
     !message.isImportedContext && !message.id.startsWith("offline-import-")
-  ) || [];
-  const editingMessage = activeStory?.messages.find((message) => message.id === editingMessageId) || null;
+  );
+  const editingMessage = (Array.isArray(activeStory?.messages) ? activeStory.messages : []).find((message) => message.id === editingMessageId) || null;
   const readingStyle = {
     "--offline-reading-font-size": `${readingPreferences.fontSize}px`,
     "--offline-reading-letter-spacing": `${readingPreferences.letterSpacing}em`,
@@ -1007,9 +1029,10 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
               </div>
 
               <button 
-                onClick={() => setShowCreateModal(true)}
-                className="w-8 h-8 rounded-full bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center shadow-sm transition-colors"
-                title="新建故事"
+                onClick={() => selectedChar && setShowCreateModal(true)}
+                disabled={!selectedChar}
+                className="w-8 h-8 rounded-full bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                title={selectedChar ? "新建故事" : "请先在档案馆创建角色"}
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -1075,7 +1098,24 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                 )}
               </div>
 
-              {charStories.length === 0 ? (
+              {!selectedChar ? (
+                <div className="py-16 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                    <BookOpen className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold text-slate-700">还没有可用的角色档案</p>
+                    <p className="text-xs text-slate-500 max-w-xs mx-auto">请先在档案馆创建角色，再回来开启线下故事。</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all inline-block shadow-sm"
+                  >
+                    返回桌面
+                  </button>
+                </div>
+              ) : charStories.length === 0 ? (
                 <div className="py-16 text-center space-y-4">
                   <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
                     <BookOpen className="w-8 h-8" />
@@ -1537,7 +1577,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
         />
       )}
 
-      {editingMessage && (
+      {editingMessage && selectedChar && (
         <OfflineStoryEditor
           message={editingMessage}
           character={selectedChar}
@@ -1564,7 +1604,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
 
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>
-        {showCreateModal && (
+        {showCreateModal && selectedChar && (
           <div className="app-viewport-overlay fixed inset-x-0 top-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
