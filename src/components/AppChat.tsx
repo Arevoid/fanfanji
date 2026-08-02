@@ -18,7 +18,7 @@ import { getWorldBookLocationReferences } from "../domain/worldbook/locationRefe
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
-import { acknowledgeOfflineHandoff, buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, getOfflineMemorySourceMessages, isOfflineStoryHandoffMemory, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
+import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
@@ -1211,15 +1211,39 @@ export default function AppChat({
   const visibleChatMessages = currentChatMessages
     .map((message) => ({ ...message, content: stripInternalDeliveryMarkers(message.content) }))
     .filter((message) => Boolean(message.content.trim()));
-  const getPendingOfflineHandoff = (): OfflineStory | undefined => selectPendingOfflineHandoffStory({
-    stories: offlineStories,
-    relationId: activeRelationship?.id,
-    characterId: activeRelationship?.characterId,
-    conversationId: activeRelationship?.conversationId,
-  });
-  const acknowledgePendingOfflineHandoff = (story?: OfflineStory) => {
+  const getPendingOfflineHandoff = (): OfflineStory | undefined => {
+    const pending = selectPendingOfflineHandoffStory({
+      stories: offlineStories,
+      relationId: activeRelationship?.id,
+      characterId: activeRelationship?.characterId,
+      conversationId: activeRelationship?.conversationId,
+    });
+    if (pending) return pending;
+
+    // Upgrade stories completed shortly before this bridge schema existed (or
+    // before their parent state update reached AppChat). This also repairs up
+    // to three already-generated online replies after a missed first handoff.
+    const now = Date.now();
+    const recentUntrackedStory = [...offlineStories]
+      .filter((story) => !story.onlineHandoff && story.mode === "continue" && Boolean(story.archivedAt))
+      .filter((story) => story.relationId === activeRelationship?.id && story.characterId === activeRelationship?.characterId)
+      .filter((story) => !activeRelationship?.conversationId || !story.conversationId || story.conversationId === activeRelationship.conversationId)
+      .filter((story) => now - (story.archivedAt || 0) >= 0 && now - (story.archivedAt || 0) <= 2 * 60 * 60 * 1000)
+      .filter((story) => currentChatMessages.filter((message) => message.sender === "character" && message.timestamp > (story.archivedAt || 0)).length <= 3)
+      .sort((left, right) => (right.archivedAt || 0) - (left.archivedAt || 0))[0];
+    if (!recentUntrackedStory) return undefined;
+    const upgraded = createPendingOfflineHandoff({
+      story: recentUntrackedStory,
+      sourceMessages: getOfflineHandoffSourceMessagesForReturn(recentUntrackedStory),
+      now: recentUntrackedStory.archivedAt,
+    });
+    if (!upgraded.onlineHandoff) return undefined;
+    onSaveOfflineStory(upgraded);
+    return upgraded;
+  };
+  const recordPendingOfflineHandoffDelivery = (story?: OfflineStory) => {
     if (!story || story.onlineHandoff?.status !== "pending") return;
-    onSaveOfflineStory(acknowledgeOfflineHandoff(story));
+    onSaveOfflineStory(recordOfflineHandoffDelivery(story));
   };
   const buildPendingOfflineTimelineHandoff = (
     story: OfflineStory,
@@ -2883,11 +2907,17 @@ ${activeCharacter.disableBracketActions
           && isOfflineStoryHandoffMemory(latestOfflineContinuationMemory, pendingOfflineHandoffForReply)
           ? latestOfflineContinuationMemory
           : undefined;
-        charDefText += buildPendingOfflineTimelineHandoff(
+        const pendingOfflineHistoryAnchor = buildPendingOfflineTimelineHandoff(
           pendingOfflineHandoffForReply,
           userMsg?.timestamp,
           matchingSummary,
         );
+        charDefText += pendingOfflineHistoryAnchor;
+        // Put the handoff immediately before the current user message as a
+        // hidden history anchor as well as a system rule. Some compatible API
+        // models underweight distant system blocks but reliably follow recent
+        // chronological history.
+        history.push({ role: "user", text: pendingOfflineHistoryAnchor });
       } else if (latestOfflineContinuationMemory) {
         charDefText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, userMsg?.timestamp);
       }
@@ -3345,7 +3375,7 @@ ${stickerListStr}
           }
 
           if (createdMessages.length > 0) {
-            acknowledgePendingOfflineHandoff(pendingOfflineHandoffForReply);
+            recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
           }
 
           chatSideEffectController.afterReplySuccess({
@@ -4127,11 +4157,13 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           && isOfflineStoryHandoffMemory(latestOfflineContinuationMemory, pendingOfflineHandoffForReply)
           ? latestOfflineContinuationMemory
           : undefined;
-        charDefText += buildPendingOfflineTimelineHandoff(
+        const pendingOfflineHistoryAnchor = buildPendingOfflineTimelineHandoff(
           pendingOfflineHandoffForReply,
           lastUserMsg.timestamp,
           matchingSummary,
         );
+        charDefText += pendingOfflineHistoryAnchor;
+        history.push({ role: "user", text: pendingOfflineHistoryAnchor });
       } else if (latestOfflineContinuationMemory) {
         charDefText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, lastUserMsg.timestamp);
       }
@@ -4294,7 +4326,7 @@ ${stickerListStr}
         });
         replyCandidates.messages.forEach(onSendMessage);
         if (replyCandidates.messages.length > 0) {
-          acknowledgePendingOfflineHandoff(pendingOfflineHandoffForReply);
+          recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
         }
       }
     } catch (err: any) {

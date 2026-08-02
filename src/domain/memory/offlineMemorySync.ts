@@ -96,6 +96,7 @@ export function createPendingOfflineHandoff(input: {
       startedAt: input.sourceMessages[0]?.timestamp ?? input.story.createdAt,
       endedAt: now,
       sourceMessageIds,
+      deliveredReplyCount: 0,
     },
     updatedAt: now,
   };
@@ -109,6 +110,26 @@ export function acknowledgeOfflineHandoff(story: OfflineStory, now = Date.now())
       ...story.onlineHandoff,
       status: "acknowledged",
       acknowledgedAt: now,
+    },
+    updatedAt: now,
+  };
+}
+
+export function recordOfflineHandoffDelivery(
+  story: OfflineStory,
+  now = Date.now(),
+  requiredReplyCount = 3,
+): OfflineStory {
+  if (story.onlineHandoff?.status !== "pending") return story;
+  const deliveredReplyCount = (story.onlineHandoff.deliveredReplyCount || 0) + 1;
+  const acknowledged = deliveredReplyCount >= Math.max(1, requiredReplyCount);
+  return {
+    ...story,
+    onlineHandoff: {
+      ...story.onlineHandoff,
+      deliveredReplyCount,
+      status: acknowledged ? "acknowledged" : "pending",
+      ...(acknowledged ? { acknowledgedAt: now } : {}),
     },
     updatedAt: now,
   };
@@ -371,5 +392,8 @@ ${transcript || "- 没有可展示的线下正文。"}${omitted > 0 ? `\n- 另�
 - 当前聊天紧接线下剧情结束。“刚才/刚刚/方才”默认指上述线下经历；自然延续当时已经发生的事件、关系变化、承诺和情绪。
 - 仔细区分说话者和行为主体，不得把用户做的事记成角色做的事，也不得反过来。
 - 不得否认或遗忘记录中明确发生的事实；不得补写记录中没有的人物、地点、行为、关系或承诺。
+- 如果用户当前使用了在线下记录中已经确立的关系称呼（例如男朋友、女朋友、老公、老婆），不得用“谁是你的……”之类回答否认该关系。可以保持角色的傲娇或嘴硬，但必须同时自然承认双方刚刚确立或经历的关系事实。
+- 当前返回线上的前几轮回复必须表现出连续性；当用户的话与线下经历相关时，至少自然带出一个记录中真实存在的细节，让用户能明确感受到你记得刚才，而不是只给泛化回复。
+- 如果线下记录明确形成或改变了双方关系，该较新的事实优先于尚未来得及刷新的旧关系标签；不得拿旧标签否认刚刚在线下已经确认的新关系。
 - 这是系统私下提供的上下文。禁止输出时间线标题、编号、时间戳、消息 ID、内部标记、方括号说明或逐字复述整段记录。`;
 }

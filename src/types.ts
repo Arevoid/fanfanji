@@ -887,6 +887,8 @@ export interface OfflineStory {
     startedAt: number;
     endedAt: number;
     sourceMessageIds: string[];
+    /** Successful online replies that received this hidden bridge. */
+    deliveredReplyCount?: number;
     acknowledgedAt?: number;
   };
 }

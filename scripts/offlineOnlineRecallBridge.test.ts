@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { acknowledgeOfflineHandoff, buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../src/domain/memory/offlineMemorySync";
+import { acknowledgeOfflineHandoff, buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../src/domain/memory/offlineMemorySync";
 import type { MemoryItem, OfflineStory } from "../src/types";
 
 const handoff: MemoryItem = {
@@ -98,6 +98,14 @@ assert.match(pendingPrompt, /饭饭：开门/);
 assert.match(pendingPrompt, /范千：我来了/);
 assert.match(pendingPrompt, /刚才\/刚刚\/方才/);
 assert.match(pendingPrompt, /不得把用户做的事记成角色做的事/);
+assert.match(pendingPrompt, /不得用“谁是你的……”.*否认该关系/);
+const firstDelivery = recordOfflineHandoffDelivery(pendingStory, 450);
+assert.equal(firstDelivery.onlineHandoff?.status, "pending", "one ignored reply cannot consume the handoff");
+assert.equal(firstDelivery.onlineHandoff?.deliveredReplyCount, 1);
+const secondDelivery = recordOfflineHandoffDelivery(firstDelivery, 460);
+assert.equal(secondDelivery.onlineHandoff?.status, "pending", "the bridge remains available for another online turn");
+const thirdDelivery = recordOfflineHandoffDelivery(secondDelivery, 470);
+assert.equal(thirdDelivery.onlineHandoff?.status, "acknowledged", "the bridge retires after three successful replies received it");
 const acknowledgedStory = acknowledgeOfflineHandoff(pendingStory, 500);
 assert.equal(acknowledgedStory.onlineHandoff?.status, "acknowledged");
 assert.equal(selectPendingOfflineHandoffStory({
@@ -116,7 +124,9 @@ const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.
 const bridgeUses = chatSource.match(/selectFreshOfflineHandoffMemory\(\{/g) || [];
 assert.equal(bridgeUses.length, 2, "normal replies and regenerated replies both receive the offline handoff");
 assert.doesNotMatch(chatSource, /!relevantMemories\.some\(\(memory\) => memory\.id === latestOfflineContinuationMemory\.id\)/, "structured memory selection cannot suppress the dedicated handoff block");
-assert.match(chatSource, /createdMessages\.length > 0[\s\S]*acknowledgePendingOfflineHandoff/, "normal chat acknowledges only after creating a reply");
+assert.match(chatSource, /history\.push\(\{ role: "user", text: pendingOfflineHistoryAnchor \}\)/, "the offline segment is inserted next to the current online message as hidden history");
+assert.match(chatSource, /createdMessages\.length > 0[\s\S]*recordPendingOfflineHandoffDelivery/, "normal chat records delivery only after creating a reply");
+assert.match(chatSource, /recentUntrackedStory[\s\S]*createPendingOfflineHandoff/, "recent pre-schema stories can repair a missed first online handoff");
 
 const offlineSource = readFileSync(new URL("../src/components/AppOffline.tsx", import.meta.url), "utf8");
 assert.match(offlineSource, /createPendingOfflineHandoff\(\{[\s\S]*story: completedStory/, "offline exit persists a handoff independently of extraction success");
