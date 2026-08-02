@@ -1,4 +1,7 @@
-import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import type {
+  CharacterCognitiveContext,
+  CharacterCognitiveRoutineContext,
+} from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { MomentPublicCognitiveContext } from "../../../domain/momentCognitive/momentPublicCognitiveTypes";
 
 /**
@@ -86,6 +89,7 @@ export interface ChatPromptContext {
   safeEvents: readonly CognitivePromptEvent[];
   boundaries: CognitivePromptBoundary;
   time: CognitivePromptTimeContext;
+  routineContext?: CharacterCognitiveRoutineContext;
 }
 
 export interface MomentPromptContext {

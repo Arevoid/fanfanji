@@ -11,6 +11,7 @@ import type {
   WorldBookEntry,
 } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
+import { isWorldBookEntryVisible } from "../../../domain/worldbook/worldBookVisibility";
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
 import { apiChat } from "../../../utils/apiHelper";
 import {
@@ -195,20 +196,10 @@ export const buildForumRelationGenerationContext = (input: {
   const character = input.characters.find((item) =>
     item.id === canonicalId && !item.isGroupChat && !item.isContactInstance);
   if (!character) return undefined;
-  const recentMessages = input.messages
-    .filter((message) =>
-      message.relationId === input.relationship.id
-      && message.conversationId === input.relationship.conversationId)
-    .sort((left, right) => left.timestamp - right.timestamp)
-    .slice(-16);
-  const relationMemories = input.memories
-    .filter((memory) => memory.relationId === input.relationship.id)
-    .sort((left, right) => right.timestamp - left.timestamp)
-    .slice(0, 8);
   const worldBookEntries = input.worldBookEntries
     .filter((entry) =>
       entry.isActive !== false
-      && (entry.characterId === canonicalId || entry.characterId === "global"))
+      && isWorldBookEntryVisible(entry, { scenario: "public", characterId: canonicalId }))
     .slice(0, 8);
   const protectedNames = buildForumProtectedNames({
     ownerIdentity: input.identities?.find((identity) => identity.id === input.ownerIdentityId),
@@ -216,9 +207,12 @@ export const buildForumRelationGenerationContext = (input: {
   });
   const promptContext = buildForumPublicSafeContext({
     character,
-    relationshipCompressedMemory: input.relationship.compressedMemory,
-    recentMessages,
-    memories: relationMemories,
+    // Relationship summaries are private and can never seed public topics.
+    relationshipCompressedMemory: undefined,
+    // Direct chat and relation Memory are private even when reduced to topic
+    // labels; public generation must derive topics only from public inputs.
+    recentMessages: [],
+    memories: [],
     worldBookEntries,
     protectedNames,
   });

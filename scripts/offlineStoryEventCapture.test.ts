@@ -16,7 +16,7 @@ Object.assign(globalThis, {
 });
 
 const { captureOfflineStoryCompletedEvent } = await import("../src/features/characterLife/services/offlineStoryEventCaptureService");
-const { loadCharacterEvents } = await import("../src/core/storage/repositories/characterEventRepository");
+const { loadCharacterEvents, retractByOfflineStoryIds } = await import("../src/core/storage/repositories/characterEventRepository");
 const { storageKeys } = await import("../src/core/storage/storageKeys");
 
 const sourceMessage = (sender: Message["sender"], content: string): Message => ({
@@ -72,6 +72,8 @@ assert.deepEqual(events.filter((event) => event.relationId === "relation-1").map
   "character-event:relation-1:offline_story:story-2:completed",
 ]);
 assert.equal(events.filter((event) => event.relationId === "relation-a").length, 1);
+assert.equal(retractByOfflineStoryIds(["story-1"]).success, true);
+assert.equal(loadCharacterEvents().value.find((event) => event.source === "offline_story:story-1:completed")?.status, "retracted");
 
 values.delete(storageKeys.characterEvents);
 console.log("offline story event capture tests passed");

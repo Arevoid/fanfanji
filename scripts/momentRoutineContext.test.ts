@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { buildMomentCognitiveContext } from "../src/features/moments/services/momentCognitiveContext";
 import { buildMomentPromptContext, formatMomentPromptContext } from "../src/features/characterCognitive/promptAdapters/momentPromptAdapter";
 import { buildCharacterRoutine } from "../src/domain/characterLife/characterRoutine/characterRoutineBuilder";
+import { buildMomentPublicCognitiveContext } from "../src/domain/momentCognitive/momentPublicContextBuilder";
 import { createRelationship } from "../src/domain/relationship/characterRelationship";
 import type { Character } from "../src/types";
 
@@ -69,5 +70,14 @@ assert.deepEqual(
 const legacyPrompt = formatMomentPromptContext(buildMomentPromptContext(buildContext(Date.UTC(2026, 0, 5, 12, 0))));
 assert.doesNotMatch(legacyPrompt, /Routine context/);
 assert.doesNotMatch(legacyPrompt, /activeHours|sleepHours|routineId|\"version\"/);
+
+const publicContext = buildMomentPublicCognitiveContext({
+  character,
+  routine: sleepingRoutine,
+  currentTime: { now: Date.UTC(2026, 0, 5, 23, 30) },
+});
+const publicPrompt = formatMomentPromptContext(buildMomentPromptContext(undefined, { publicContext }));
+assert.match(publicPrompt, /Current routine state: sleeping/);
+assert.doesNotMatch(publicPrompt, /activeHours|sleepHours|routineId/);
 
 console.log("PASS Moment routine context projection, sleeping guidance, cross-midnight, timezone, and legacy compatibility");

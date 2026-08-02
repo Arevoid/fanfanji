@@ -22,6 +22,8 @@ import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/
 import type { CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
 import type { CharacterEvent } from "../domain/characterLife/characterEventTypes";
 import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
+import { buildRelationshipCognitiveProjection } from "../features/characterLife/services/relationshipCognitiveProjectionService";
+import { buildCharacterRoutine } from "../domain/characterLife/characterRoutine/characterRoutineBuilder";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { createDiaryId, getDiaryDayKey } from "../domain/diary/diaryData";
 import {
@@ -254,18 +256,26 @@ export default function AppDiary({
     const now = Date.now();
     const cognitiveContext = (() => {
       try {
+        const relationEvents = listCharacterEventsByRelation(relation.id);
+        const relationshipProjection = buildRelationshipCognitiveProjection({
+          relation,
+          events: relationEvents,
+          now,
+        });
         return buildCharacterCognitiveContext({
           character,
           relation,
           // Diary must not use user-private Memory as a generated fact source.
           memories: [],
-          events: listCharacterEventsByRelation(relation.id).map((event) => ({
+          events: relationEvents.map((event) => ({
             event,
             promptVisibility: getDiaryEventVisibility(event),
           })),
           timeContext: { now },
           knowledgeBoundary: createDirectChatKnowledgeBoundary(),
           conversationId: relation.conversationId,
+          relationshipTimeline: relationshipProjection.timeline,
+          routine: buildCharacterRoutine(character.routine),
         });
       } catch {
         return undefined;

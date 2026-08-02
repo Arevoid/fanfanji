@@ -11,8 +11,8 @@ function resolveCharacterId(input: ChatMessageInput): string {
 }
 
 /**
- * Keep legacy fields authoritative when present. Context-only callers opt into
- * the runtime boundary without changing existing message creation behavior.
+ * Legacy fields remain readable, while context-based production callers get
+ * a complete runtime boundary at creation time.
  */
 function resolveBoundary(input: ChatMessageInput): Pick<ChatRuntimeContext, "relationId" | "conversationId"> {
   if (input.characterId !== undefined) {

@@ -188,16 +188,16 @@ export const buildForumPublicPersona = (
 
 export const buildForumPublicSafeContext = (input: {
   character: Character;
+  /** @deprecated Private relation data is ignored by this public projection. */
   relationshipCompressedMemory?: string;
+  /** @deprecated Private direct-chat data is ignored by this public projection. */
   recentMessages: readonly Message[];
+  /** @deprecated Private Memory data is ignored by this public projection. */
   memories: readonly MemoryItem[];
   worldBookEntries: readonly WorldBookEntry[];
   protectedNames: readonly string[];
 }): string => {
   const topicSeeds = extractForumPublicTopicSeeds([
-    input.relationshipCompressedMemory || "",
-    ...input.recentMessages.map((message) => message.content),
-    ...input.memories.map((memory) => memory.content),
     ...input.worldBookEntries.map((entry) => `${entry.title} ${entry.content}`),
   ]);
   return `公开说话风格：${buildForumPublicPersona(input.character, input.protectedNames)}

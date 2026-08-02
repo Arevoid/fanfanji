@@ -87,7 +87,7 @@ ${input.character.name}
 Personality: ${input.character.personality || ""}
 Background: ${input.character.backstory || ""}
 Relationship: ${input.relationship.relationship}
-Relationship summary: ${input.relationship.compressedMemory || ""}
+Do not infer shared scenes or private facts that are not present in the scoped context below.
 
 Recent direct-chat context:
 ${relationMessages.map((message) => `${message.sender}: ${message.content}`).join("\n")}

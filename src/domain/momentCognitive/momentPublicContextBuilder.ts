@@ -22,6 +22,7 @@ import {
 } from "../moments/momentGeneration/momentTopicPolicy";
 import type { MomentTopicRecord } from "../moments/momentGeneration/momentTopicTypes";
 import type { MomentPublicTopicContext } from "./momentPublicCognitiveTypes";
+import { classifyTimeOfDay, getCurrentRoutineState } from "../characterLife/characterRoutine/characterRoutinePolicy";
 
 const MOMENT_TOPIC_CONTEXT_LIMIT = 8;
 const MOMENT_REPEATED_TOPIC_LIMIT = 4;
@@ -126,6 +127,12 @@ export function buildMomentPublicCognitiveContext(
     publicEvents: selectPublicMomentEvents(input.publicEvents || [], characterId),
     publicBehaviorConstraints: selectPublicBehaviorConstraints(input.publicBehaviorConstraints || []),
     topicContext: projectTopicContext(input.topicHistory, characterId, input.currentTime.now),
+    ...(input.routine ? {
+      routineContext: {
+        period: classifyTimeOfDay(input.currentTime.now, input.routine.timezone),
+        state: getCurrentRoutineState(input.routine, input.currentTime.now),
+      },
+    } : {}),
     currentTime: projectCurrentTime(input.currentTime),
   };
 }

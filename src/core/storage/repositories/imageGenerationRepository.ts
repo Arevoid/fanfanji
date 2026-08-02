@@ -17,5 +17,12 @@ export const removeImageGenerationRecordsByRelation = (records: readonly ImageGe
 export const removeImageGenerationRecordsByCharacter = (records: readonly ImageGenerationRecord[], characterId: string) =>
   records.filter((record) => record.characterId !== characterId);
 
-export const removeImageGenerationRecordByMessage = (records: readonly ImageGenerationRecord[], messageId: string) =>
-  records.filter((record) => record.messageId !== messageId);
+export const removeImageGenerationRecordByMessage = (
+  records: readonly ImageGenerationRecord[],
+  messageId: string,
+  scope?: Pick<ImageGenerationRecord, "relationId" | "conversationId" | "groupId">,
+) => records.filter((record) => record.messageId !== messageId || Boolean(scope && (
+  record.relationId !== scope.relationId
+  || record.conversationId !== scope.conversationId
+  || record.groupId !== scope.groupId
+)));

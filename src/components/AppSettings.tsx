@@ -130,7 +130,17 @@ const BACKUP_KEYS = [
   "phone_diary_entries",
   "phone_diary_shares",
   "phone_diary_generation_tasks",
+  "phone_diary_translations",
   "phone_diary_drafts",
+  "phone_inner_voice_records",
+  "phone_character_events",
+  "phone_character_knowledge_claims",
+  "phone_conversation_summaries",
+  "phone_behavior_corrections",
+  "phone_character_knowledge_migration_state",
+  "phone_moment_topic_history",
+  "phone_proactive_topic_history",
+  "phone_moment_generation_tasks",
   "phone_character_relationships",
   "phone_music_playlists",
   "phone_music_tracks",
@@ -142,6 +152,11 @@ const BACKUP_KEYS = [
   "phone_settings",
   "phone_appearance_settings",
   "phone_worldbook_entries",
+  "phone_last_read_timestamps",
+  "phone_initiated_chat_ids",
+  "phone_identity_wallet_balances",
+  "wechat_wallet_balance",
+  "wechat_redpacket_statuses",
 ] as const;
 
 const BACKUP_KEY_SET = new Set<string>(BACKUP_KEYS);
@@ -170,7 +185,7 @@ export function sanitizeSystemBackupValue(
       return "[]";
     }
   }
-  if (["phone_diary_entries", "phone_diary_shares", "phone_diary_generation_tasks", "phone_diary_drafts"].includes(key)) {
+  if (["phone_diary_entries", "phone_diary_shares", "phone_diary_generation_tasks", "phone_diary_translations", "phone_diary_drafts"].includes(key)) {
     try {
       const parsed = JSON.parse(value);
       if (!Array.isArray(parsed)) return "[]";
@@ -198,6 +213,9 @@ export function sanitizeSystemBackupValue(
         if (key === "phone_diary_generation_tasks") {
           const relation = typeof record.relationId === "string" ? relationMap.get(record.relationId) : undefined;
           return Boolean(relation && relation.userIdentityId === record.ownerIdentityId);
+        }
+        if (key === "phone_diary_translations") {
+          return typeof record.diaryEntryId === "string" && typeof record.translatedBody === "string";
         }
         return typeof record.body === "string";
       });

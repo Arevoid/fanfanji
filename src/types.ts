@@ -1,3 +1,5 @@
+import type { CharacterRoutine } from "./domain/characterLife/characterRoutine/characterRoutineTypes";
+
 export interface CharacterReference {
   id: string;
   title: string;
@@ -38,6 +40,8 @@ export interface Character {
   enableAutoTranslate?: boolean;
   summaryTriggerRound?: number;
   compressedMemory?: string;
+  /** Optional character-level routine configuration; it is a prompt hint only. */
+  routine?: CharacterRoutine;
   enableProactiveChat?: boolean;
   /** Whether this contact may occasionally start an incoming voice call. */
   enableProactiveCall?: boolean;
@@ -614,6 +618,15 @@ export interface CalendarEvent {
   isDone: boolean;
 }
 
+export type WorldBookScope =
+  | { kind: "global" }
+  | { kind: "character"; characterId: string }
+  | { kind: "identity"; userIdentityId: string }
+  | { kind: "relationship"; relationId: string; characterId: string; userIdentityId: string };
+
+export type WorldBookVisibility = "public" | "private";
+export type WorldBookPurpose = "world_canon" | "persona_rule" | "relationship_context" | "generation_rule";
+
 export interface WorldBookEntry {
   id: string;
   title: string;
@@ -621,6 +634,11 @@ export interface WorldBookEntry {
   content: string;
   timestamp: number;
   characterId?: string; // "global" or a specific character's ID
+  /** New explicit scope; missing scope keeps legacy character/global reads compatible. */
+  scope?: WorldBookScope;
+  /** Public entries must opt in explicitly; missing visibility is legacy/private. */
+  visibility?: WorldBookVisibility;
+  purpose?: WorldBookPurpose;
   triggerType?: "keys" | "constant" | "vector";
   keywords?: string;
   isActive?: boolean;
@@ -798,6 +816,8 @@ export interface MemoryItem {
   relationId?: string;
   /** The Moment that created this automatic memory, when applicable. */
   sourceMomentId?: string;
+  /** Authoritative Truth Layer records represented by this compatibility view. */
+  sourceKnowledgeClaimIds?: string[];
   content: string;
   timestamp: number;
   importance?: number; // 1-10, default 5

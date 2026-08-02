@@ -1,7 +1,6 @@
 import {
   projectPromptBoundary,
   projectPromptPersona,
-  projectPromptRelationship,
   projectPromptTime,
   selectPromptBehaviorConstraints,
   selectSafePromptEvents,
@@ -18,7 +17,9 @@ import type {
  */
 export const buildForumDirectMessagePromptContext: CognitivePromptAdapter<ForumDirectMessagePromptContext> = (context, options) => ({
   persona: projectPromptPersona(context),
-  relationship: projectPromptRelationship(context),
+  // Forum DM receives only the current relation stage. Legacy compressed
+  // summaries are not authoritative and must not bypass the Truth adapter.
+  relationship: { stage: context.relationship.stage },
   safeEvents: selectSafePromptEvents(context, options),
   behaviorConstraints: selectPromptBehaviorConstraints(context),
   boundaries: projectPromptBoundary(context),
@@ -45,7 +46,6 @@ export function formatForumDirectMessagePromptContext(
     "Use only verified information below when directly relevant. Do not infer shared scenes, locations, actions, user experiences, private chat facts, or an unconfirmed relationship change.",
     `Character focus: ${context.persona.name}`,
     `Current relationship: ${context.relationship.stage}`,
-    ...(context.relationship.compressedMemory ? [`Safe relationship summary: ${context.relationship.compressedMemory}`] : []),
     ...(events.length > 0 ? ["Verified safe events:", ...events] : []),
     ...(constraints.length > 0 ? ["Behavior constraints:", ...constraints] : []),
     ...(boundaries.length > 0 ? ["Knowledge boundaries:", ...boundaries] : []),

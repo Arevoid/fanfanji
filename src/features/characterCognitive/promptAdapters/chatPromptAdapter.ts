@@ -48,6 +48,12 @@ export const buildChatPromptContext: CognitivePromptAdapter<ChatPromptContext> =
   safeEvents: selectSafePromptEvents(context, options),
   boundaries: projectPromptBoundary(context),
   time: projectPromptTime(context),
+  ...(context.routineContext ? {
+    routineContext: {
+      period: context.routineContext.period,
+      state: context.routineContext.state,
+    },
+  } : {}),
 });
 
 /**
@@ -71,6 +77,12 @@ export function formatChatPromptContext(context: ChatPromptContext | undefined):
   const relationshipEvents = context.relationshipTimeline?.recentEvents.map((event) => `- ${event.summary}`) ?? [];
   const openLoops = context.relationshipTimeline?.openLoops.map((item) => `- ${item}`) ?? [];
   const relationshipBoundaries = context.relationshipTimeline?.boundaries.map((item) => `- ${item}`) ?? [];
+  const routine = context.routineContext;
+  const routineContext = routine ? [
+    "Routine context (behavior reference only):",
+    `- Current time period: ${routine.period}`,
+    `- Current routine state: ${routine.state}`,
+  ] : [];
   if (
     facts.length === 0 &&
     events.length === 0 &&
@@ -78,7 +90,8 @@ export function formatChatPromptContext(context: ChatPromptContext | undefined):
     relationshipState.length === 0 &&
     relationshipEvents.length === 0 &&
     openLoops.length === 0 &&
-    relationshipBoundaries.length === 0
+    relationshipBoundaries.length === 0 &&
+    routineContext.length === 0
   ) return "";
 
   return [
@@ -90,6 +103,7 @@ export function formatChatPromptContext(context: ChatPromptContext | undefined):
     ...(relationshipEvents.length > 0 ? ["Recent relationship events:", ...relationshipEvents] : []),
     ...(openLoops.length > 0 ? ["Open relationship loops:", ...openLoops] : []),
     ...(relationshipBoundaries.length > 0 ? ["Relationship boundaries:", ...relationshipBoundaries] : []),
+    ...routineContext,
     ...(boundaries.length > 0 ? ["Knowledge boundaries:", ...boundaries] : []),
   ].join("\n");
 }

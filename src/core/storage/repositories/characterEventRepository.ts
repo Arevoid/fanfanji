@@ -49,6 +49,14 @@ export const removeByRelations = (relationIds: readonly string[]): StorageWriteR
   const current = loadCharacterEvents().value;
   return saveCharacterEvents(removeCharacterEventsByRelations(current, relationIds));
 };
+export const retractByOfflineStoryIds = (storyIds: readonly string[]): StorageWriteResult => {
+  const ids = new Set(storyIds.filter(Boolean).map((storyId) => `offline_story:${storyId}:completed`));
+  if (ids.size === 0) return { success: true };
+  const current = loadCharacterEvents().value;
+  return saveCharacterEvents(current.map((event) => ids.has(event.source)
+    ? { ...event, status: "retracted" }
+    : event));
+};
 
 export const characterEventRepository = {
   load: loadCharacterEvents,
@@ -58,4 +66,5 @@ export const characterEventRepository = {
   append,
   appendMany,
   removeByRelations,
+  retractByOfflineStoryIds,
 };

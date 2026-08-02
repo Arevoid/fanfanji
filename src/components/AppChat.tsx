@@ -13,12 +13,12 @@ import { generateGroupReplyCandidates } from "../features/chat/services/groupCha
 import { generateProactiveReplyCandidates } from "../features/chat/services/proactiveMessageService";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
+import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { buildOfflineHandoffPromptBlock } from "../domain/memory/offlineMemorySync";
-import { createOocCorrectionMemory } from "../domain/memory/oocMemory";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
@@ -42,14 +42,32 @@ import { createChatReplyController } from "../features/chat/controllers/chatRepl
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { createChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
+import { attachDirectScope, isMessageInDirectScope, resolveDirectInteractionScope, toDirectChatRuntimeContext, type MessageMutationScope } from "../features/chat/context/directInteractionScope";
 import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
+import { removeCharacterTruthForRelations } from "../features/characterKnowledge/services/characterTruthCleanupService";
 import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
+import { append as appendKnowledgeClaim, appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
+import { loadKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
+import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
+import { loadBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
+import { behaviorCorrectionRepository } from "../core/storage/repositories/behaviorCorrectionRepository";
+import { formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
+import { createConversationSummaryRecord } from "../features/characterKnowledge/services/conversationSummaryService";
+import { createDeterministicArtifactClaim } from "../features/characterKnowledge/services/deterministicKnowledgeCapture";
+import { buildRelationshipCognitiveProjection } from "../features/characterLife/services/relationshipCognitiveProjectionService";
+import { buildCharacterRoutine } from "../domain/characterLife/characterRoutine/characterRoutineBuilder";
+import { createMomentTopicRecord } from "../domain/moments/momentGeneration/momentTopicHistory";
+import type { MomentTopicRecord } from "../domain/moments/momentGeneration/momentTopicTypes";
+import { createProactiveTopicRecord } from "../domain/characterLife/proactive/proactiveTopicHistory";
+import { appendMomentTopicRecord, loadMomentTopicRecords } from "../core/storage/repositories/momentTopicRepository";
+import { appendProactiveTopicRecord, loadProactiveTopicRecords, removeProactiveTopicsForRelations } from "../core/storage/repositories/proactiveTopicRepository";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
 import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "../core/storage/repositories/forumRepository";
 import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from "../domain/forum/forumShare";
 import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
-import { loadDiaryShares } from "../core/storage/repositories/diaryRepository";
+import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryTranslations, saveDiaryEntries, saveDiaryGenerationTasks, saveDiaryShares, saveDiaryTranslations } from "../core/storage/repositories/diaryRepository";
+import { cleanupDiaryForRelations } from "../domain/diary/diaryCleanup";
 import { Button, Card, Modal } from "./ui";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
@@ -404,9 +422,9 @@ interface AppChatProps {
   onLikeMoment: (momentId: string, userName: string) => void;
   onDeleteMoment?: (momentId: string) => void;
   onDeleteMomentsByRelation?: (relationId: string) => void;
-  onToggleBookmark: (messageId: string) => void;
-  onDeleteMessage?: (messageId: string) => void;
-  onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>) => void;
+  onToggleBookmark: (messageId: string, scope?: MessageMutationScope) => void;
+  onDeleteMessage?: (messageId: string, scope?: MessageMutationScope) => void;
+  onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => void;
   onClose: () => void;
   onSaveSettings: (settings: UserSettings) => void;
   onNavigateToApp: (appId: string) => void;
@@ -446,6 +464,8 @@ const buildPublicMomentContext = (input: {
   character: Character;
   moments: readonly Moment[];
   comments?: readonly MomentComment[];
+  topicHistory?: readonly MomentTopicRecord[];
+  routine?: Character["routine"];
   now: number;
 }) => buildMomentPublicCognitiveContext({
   character: input.character,
@@ -467,8 +487,17 @@ const buildPublicMomentContext = (input: {
     content: comment.content,
     timestamp: comment.timestamp,
   })),
+  ...(input.topicHistory ? { topicHistory: input.topicHistory } : {}),
+  ...(input.routine ? { routine: input.routine } : {}),
   currentTime: { now: input.now },
 });
+
+/** Stores only a short diversity hint; topic history is never a fact source. */
+const compactTopicHint = (values: readonly string[]): string => values
+  .map((value) => value.replace(/\[[^\]]+\](?:\|[^\s]*)?/g, "").replace(/\s+/g, " ").trim())
+  .filter(Boolean)
+  .join(" ")
+  .slice(0, 180);
 
 const isOfflineStoryActiveFor = (relationId: string) =>
   localStorage.getItem(getOfflineModeStorageKey(relationId)) === "true";
@@ -1001,9 +1030,20 @@ export default function AppChat({
       return;
     }
 
-    onSendMessageRaw(activeRelationship && !activeCharacter?.isGroupChat && !msg.relationId
-      ? { ...msg, relationId: activeRelationship.id, conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id) }
-      : msg);
+    if (!activeCharacter?.isGroupChat) {
+      if (!activeDirectScope) {
+        console.warn("Direct message write blocked: no verified relationship scope.", msg.id);
+        return;
+      }
+      const scopedMessage = attachDirectScope(msg, activeDirectScope);
+      if (!scopedMessage) {
+        console.warn("Direct message write blocked: message scope conflicts with the active relationship.", msg.id);
+        return;
+      }
+      onSendMessageRaw(scopedMessage);
+    } else {
+      onSendMessageRaw(msg);
+    }
 
     // Normal chat remains manual-play only.
   };
@@ -1132,6 +1172,31 @@ export default function AppChat({
     ? m.relationId === activeRelationship.id
     : m.characterId === activeChatCharId && activeCharacter?.isGroupChat));
   const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const activeDirectScope = resolveDirectInteractionScope({
+    characterId: activeCharacter?.id,
+    activeIdentityId,
+    relationship: activeRelationship,
+    isGroupChat: Boolean(activeCharacter?.isGroupChat),
+  });
+  const activeRuntimeContext = activeDirectScope
+    ? toDirectChatRuntimeContext(activeDirectScope)
+    : createChatRuntimeContext({
+        characterId: activeCharacter?.id,
+        conversationId: activeCharacter?.isGroupChat ? `group:${activeCharacter.id}` : null,
+        userIdentityId: activeIdentityId,
+        isGroup: Boolean(activeCharacter?.isGroupChat),
+        groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
+      });
+  const isCapturedRuntimeCurrent = (context: typeof activeRuntimeContext) => context.isGroup
+    ? Boolean(activeCharacter?.isGroupChat
+      && context.userIdentityId === activeIdentityId
+      && context.groupId === activeCharacter.id
+      && context.conversationId === `group:${activeCharacter.id}`)
+    : Boolean(activeDirectScope
+      && context.userIdentityId === activeDirectScope.userIdentityId
+      && context.characterId === activeDirectScope.characterId
+      && context.relationId === activeDirectScope.relationId
+      && context.conversationId === activeDirectScope.conversationId);
   const activeVoiceCallScope = resolveDirectVoiceCallScope({
     activeIdentityId,
     relationship: activeRelationship,
@@ -1307,8 +1372,10 @@ export default function AppChat({
     const relationId = relationToDelete?.id || orphanRelationId!;
     // A contact deletion removes only this identity's direct relationship. The
     // canonical Character and sibling relationships must remain untouched.
-    onClearMessages?.(friendId, undefined, relationId);
+    clearMessagesAndLinkedArtifacts(friendId, relationId);
     removeCharacterLifeEventsForRelations([relationId]);
+    removeCharacterTruthForRelations([relationId]);
+    removeProactiveTopicsForRelations([relationId]);
     onDeleteMomentsByRelation?.(relationId);
     onSaveRelationships(relationships.filter((relation) => relation.id !== relationId));
     const innerVoices = loadInnerVoiceRecords([]).value;
@@ -1321,6 +1388,22 @@ export default function AppChat({
       removedImageRecords.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete relation image asset:", error)));
     }
     onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
+    const diaryCleanup = cleanupDiaryForRelations({
+      relationIds: [relationId],
+      entries: loadDiaryEntries().value,
+      shares: loadDiaryShares().value,
+      tasks: loadDiaryGenerationTasks().value,
+      translations: loadDiaryTranslations().value,
+    });
+    saveDiaryEntries(diaryCleanup.entries);
+    saveDiaryShares(diaryCleanup.shares);
+    saveDiaryGenerationTasks(diaryCleanup.tasks);
+    saveDiaryTranslations(diaryCleanup.translations);
+    setRedPacketStatuses((previous) => {
+      const next = removePaymentStatusesByRelation(previous, relationId);
+      localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(next));
+      return next;
+    });
     onDeleteRelationshipMusic?.(relationId);
     const forumShares = loadForumShares().value;
     const remainingForumShares = removeForumSharesByRelation(forumShares, relationId);
@@ -1507,18 +1590,18 @@ export default function AppChat({
   const [meActiveSubView, setMeActiveSubView] = useState<"none" | "identities" | "wallet" | "stickers" | "favorites">("none");
   const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState("");
-  const [walletBalance, setWalletBalance] = useState<number>(() => {
-    try {
-      const stored = localStorage.getItem("wechat_wallet_balance");
-      return stored ? parseFloat(stored) : 0.00;
-    } catch {
-      return 0.00;
-    }
-  });
-
-  useEffect(() => {
-    localStorage.setItem("wechat_wallet_balance", walletBalance.toFixed(2));
-  }, [walletBalance]);
+  const [walletBalances, setWalletBalances] = useState<IdentityWalletBalances>(() =>
+    loadIdentityWalletBalances(localStorage.getItem(IDENTITY_WALLET_BALANCES_KEY), localStorage.getItem("wechat_wallet_balance")));
+  const walletBalance = walletBalances[activeIdentityId] || 0;
+  const setWalletBalance = (update: number | ((previous: number) => number)) => {
+    setWalletBalances((previous) => {
+      const current = previous[activeIdentityId] || 0;
+      const nextValue = typeof update === "function" ? update(current) : update;
+      const next = { ...previous, [activeIdentityId]: nextValue };
+      localStorage.setItem(IDENTITY_WALLET_BALANCES_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   const [editMyName, setEditMyName] = useState(settings.name);
   const [editMySignature, setEditMySignature] = useState(settings.signature);
@@ -1635,7 +1718,7 @@ export default function AppChat({
     })
     .then(res => {
       if (res && res.text) {
-        onUpdateMessage(msg.id, { translation: res.text });
+        onUpdateMessage(msg.id, { translation: res.text }, msg);
         showToast("翻译完成");
       } else {
         showToast("翻译无结果");
@@ -1734,6 +1817,7 @@ export default function AppChat({
     senderAvatar: string;
     sender: "user" | "character";
     timestamp: number;
+    message: Message;
   } | null>(null);
   const [isOpeningRedPacket, setIsOpeningRedPacket] = useState<boolean>(false);
   const [isManualArchiving, setIsManualArchiving] = useState<boolean>(false);
@@ -1777,31 +1861,31 @@ export default function AppChat({
       persona: Math.round(personaLength * 1.6)
     };
   }, [draftContextMemoryLimit, activeCharacter, currentChatMessages, memories, recallSettings]);
-  const [redPacketStatuses, setRedPacketStatuses] = useState<Record<string, "claimed" | "expired" | "refunded">>((() => {
+  const [redPacketStatuses, setRedPacketStatuses] = useState<RedPacketStatusMap>((() => {
     try {
-      const stored = localStorage.getItem("wechat_redpacket_statuses");
+      const stored = localStorage.getItem(RED_PACKET_STATUSES_KEY);
       return stored ? JSON.parse(stored) : {};
     } catch {
       return {};
     }
   })());
 
-  const updateRedPacketStatus = (msgId: string, status: "claimed" | "expired" | "refunded") => {
+  const updateRedPacketStatus = (message: Message, status: RedPacketStatus) => {
     setRedPacketStatuses(prev => {
-      const next = { ...prev, [msgId]: status };
-      localStorage.setItem("wechat_redpacket_statuses", JSON.stringify(next));
+      const next = writeRedPacketStatus(prev, message, status);
+      localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(next));
       return next;
     });
   };
 
-  const getRedPacketActualStatus = (msgId: string, timestamp: number, sender: string) => {
-    const savedStatus = redPacketStatuses[msgId];
+  const getRedPacketActualStatus = (message: Message) => {
+    const savedStatus = readRedPacketStatus(redPacketStatuses, message, activeIdentityId === "identity-1");
     if (savedStatus === "claimed" || savedStatus === "refunded") {
       return savedStatus;
     }
     // Check if 24 hours (86400000 ms) have passed since timestamp
     const hours24 = 24 * 3600 * 1000;
-    if (Date.now() - timestamp > hours24) {
+    if (Date.now() - message.timestamp > hours24) {
       return "expired";
     }
     return savedStatus || "unclaimed";
@@ -1813,13 +1897,17 @@ export default function AppChat({
     const updatedStatuses = { ...redPacketStatuses };
     let refundAmountTotal = 0;
 
-    messages.forEach((msg) => {
+    const activeRelationIds = new Set(activeRelationships.map((relationship) => relationship.id));
+    messages.filter((message) => message.relationId
+      ? activeRelationIds.has(message.relationId)
+      : Boolean(characters.find((character) => character.id === message.characterId && character.isGroupChat && belongsToActiveIdentity(character.ownerIdentityId))))
+      .forEach((msg) => {
       if (isRedPacketMarkup(msg.content)) {
-        const currentStatus = redPacketStatuses[msg.id] || "unclaimed";
+        const currentStatus = readRedPacketStatus(redPacketStatuses, msg, activeIdentityId === "identity-1") || "unclaimed";
         const isExpired = Date.now() - msg.timestamp > 24 * 3600 * 1000;
         
         if (isExpired && currentStatus === "unclaimed") {
-          updatedStatuses[msg.id] = "expired";
+          updatedStatuses[getPaymentStatusKey(msg)] = "expired";
           changed = true;
 
           // If the user sent it, refund the money to user's wallet
@@ -1828,7 +1916,7 @@ export default function AppChat({
             const amt = parseFloat(amountStr || "0");
             if (!isNaN(amt) && amt > 0) {
               refundAmountTotal += amt;
-              updatedStatuses[msg.id] = "refunded";
+              updatedStatuses[getPaymentStatusKey(msg)] = "refunded";
             }
           }
         }
@@ -1837,11 +1925,10 @@ export default function AppChat({
 
     if (changed) {
       setRedPacketStatuses(updatedStatuses);
-      localStorage.setItem("wechat_redpacket_statuses", JSON.stringify(updatedStatuses));
+      localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(updatedStatuses));
       if (refundAmountTotal > 0) {
         setWalletBalance(prev => {
           const next = prev + refundAmountTotal;
-          localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
           return next;
         });
         showToast(`检测到有红包逾期未领，已自动退回 ¥${refundAmountTotal.toFixed(2)} 至您的零钱！🧧`);
@@ -1868,6 +1955,25 @@ export default function AppChat({
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [voicePlayed, setVoicePlayed] = useState<Record<string, boolean>>({});
   const [voiceTranscribed, setVoiceTranscribed] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    activeTtsAudio?.pause();
+    if (voiceTimer) clearInterval(voiceTimer);
+    callSpeechQueueRef.current = [];
+    isCallSpeechPlayingRef.current = false;
+    setActiveTtsAudio(null);
+    setPlayingMessageId(null);
+    setAudioLoadingMessageId(null);
+    setVoiceTimer(null);
+    setOpenVoiceId(null);
+    setActiveMenuMsg(null);
+    setOpenRedPacketDetail(null);
+    setShowRedPacketOpenModal(false);
+    setOpenTransferDetail(null);
+    setShowTransferDetailModal(false);
+    setShowAttachPanel(false);
+    setActiveAttachModal(null);
+  }, [activeIdentityId, activeChatRelationId, activeChatCharId]);
 
   const [selectedFileNote, setSelectedFileNote] = useState<{ title: string; content: string } | null>(null);
   const [showOocCommentModal, setShowOocCommentModal] = useState<Message | null>(null);
@@ -2198,13 +2304,18 @@ export default function AppChat({
     }
     const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
     const secs = (callingDuration % 60).toString().padStart(2, "0");
-    onSendMessageRaw(createVoiceCallRecordMessage({
+    const callRecord = createVoiceCallRecordMessage({
       id: `call-record-${Date.now()}`,
       characterId: activeChatCharId,
       scope: activeVoiceCallScope,
       content: `[通话记录]|语音通话|${mins}:${secs}|${encodeURIComponent(JSON.stringify(callTranscript))}`,
       timestamp: Date.now(),
-    }));
+    });
+    onSendMessageRaw(callRecord);
+    if (activeDirectScope) {
+      const claim = createDeterministicArtifactClaim({ message: callRecord, scope: activeDirectScope });
+      if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture voice-call knowledge claim.");
+    }
     if (activeTtsAudio) activeTtsAudio.pause();
     callSpeechQueueRef.current = [];
     isCallSpeechPlayingRef.current = false;
@@ -2295,7 +2406,10 @@ export default function AppChat({
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
       // Query group-level worldbook entries
-      const groupWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText);
+      const groupWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText, {
+        scenario: "group",
+        characterId: activeChatCharId || undefined,
+      });
       let groupWbText = groupWbBlocks.formattedAll ? `\n\n【🚨 微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
       if (activeCharacter.enableTimeAwareness !== false) {
         groupWbText += `\n【当前现实时间】\n${formatLocalTimeContext()}\n`;
@@ -2304,7 +2418,10 @@ export default function AppChat({
 
       // Construct a system instruction that contains details about all members and how they should reply
       const membersDefText = groupMembers.map((member, idx) => {
-        const memberWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], member.id, scanText);
+        const memberWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], member.id, scanText, {
+          scenario: "group",
+          characterId: member.id,
+        });
         const memberWbText = memberWbBlocks.formattedAll 
           ? `\n- 【重要】该角色专属世界书背景/日程/时间线设定:\n${memberWbBlocks.formattedAll}` 
           : "";
@@ -2312,7 +2429,7 @@ export default function AppChat({
 - 角色人设/性格: ${member.personality}
 - 背景设定: ${member.backstory}
 - 与机主(${settings.name})的关系: 根据人设及世界观设定
-${member.compressedMemory ? `- 过去的互动记忆: ${member.compressedMemory}` : ""}${memberWbText}`;
+${memberWbText}`;
       }).join("\n\n");
 
       // Generate a comprehensive system prompt
@@ -2478,21 +2595,25 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
 
     const isRedPacket = userMsg && isRedPacketMarkup(userMsg.content);
     if (isRedPacket) {
-      const rpId = userMsg!.id;
+      const capturedMessage = userMsg!;
+      const capturedRelationship = activeRelationship;
+      const capturedCharacter = activeCharacter;
       // Simulate partner claiming after 3 seconds
       setTimeout(() => {
-        updateRedPacketStatus(rpId, "claimed");
+        if (capturedRelationship && !relationships.some((relationship) => relationship.id === capturedRelationship.id
+          && relationship.userIdentityId === capturedRelationship.userIdentityId
+          && relationship.characterId === capturedRelationship.characterId)) return;
+        updateRedPacketStatus(capturedMessage, "claimed");
         
-        const partnerName = activeCharacter.remark || activeCharacter.name;
-        const claimNotification: Message = {
-          id: `claim-notification-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          characterId: activeChatCharId,
-          sender: "character",
-          content: `${partnerName}已拆开并领受了你的红包`,
-          timestamp: Date.now(),
-          isNarration: true,
-        };
-        onSendMessage(claimNotification);
+        const partnerName = capturedCharacter.remark || capturedCharacter.name;
+        const claimNotification = capturedRelationship
+          ? createCharacterTextMessage({
+              id: `claim-notification-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              context: createChatRuntimeContext({ characterId: capturedRelationship.characterId, relationId: capturedRelationship.id, conversationId: capturedRelationship.conversationId || getConversationId(capturedRelationship.id), userIdentityId: capturedRelationship.userIdentityId }),
+              content: `${partnerName}已拆开并领受了你的红包`, timestamp: Date.now(), isNarration: true,
+            })
+          : createGroupCharacterMessage({ id: `claim-notification-${Date.now()}`, characterId: capturedCharacter.id, content: `${partnerName}已拆开并领受了你的红包`, timestamp: Date.now(), isNarration: true });
+        onSendMessageRaw(claimNotification);
       }, 3000);
     }
 
@@ -2638,8 +2759,9 @@ ${activeCharacter.disableBracketActions
       }
 
       charDefText += `\n\n[🚨 记忆与上下文关联优先级规则]:
-1. 归档精炼总结优先：以下“先前背景与归档总结”及“召回深度记忆”为历史最高优先级真实记忆，你必须绝对优先根据它们来保持角色认同、长久羁绊和态度。
-2. 历史检索及短期上下文：你的短期上下文聊天记录已按照用户的限制进行了智能截断，以节省 Token 开销。请勿认为你忘记了先前对话，一切先前细节请完全基于归档精炼总结中包含的信息。`;
+1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
+2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
+3. 历史检索及短期上下文：短期聊天记录已按用户限制截断；需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
 
       const normalizeTopicText = (value: string) => value
         .replace(/\[[^\]]*\]/g, " ")
@@ -2665,7 +2787,7 @@ ${activeCharacter.disableBracketActions
 
       const legacyDefaultMemory = activeRelationship?.id === `relation_default_${activeCharacter.id}` ? activeCharacter.compressedMemory : undefined;
       if ((activeRelationship?.compressedMemory || legacyDefaultMemory) && shouldLoadLongTermMemory) {
-        charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeRelationship?.compressedMemory || legacyDefaultMemory}`;
+        charDefText += `\n- Legacy compressed summary / 旧版关系摘要（仅作非权威补充，不可直接当作已确认事实）: ${activeRelationship?.compressedMemory || legacyDefaultMemory}`;
       }
 
       // Recall memories from Memory Vault
@@ -2673,8 +2795,30 @@ ${activeCharacter.disableBracketActions
       const relevantMemories = shouldLoadLongTermMemory
         ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: userMsg ? userMsg.content : "", existingMemories: memories || [], limit: topK, scenario: "chat" })
         : [];
-      if (relevantMemories.length > 0) {
-        charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories from previous conversations / 召回深度记忆 (Contextually relevant facts/moments):\n");
+      const truthRetrieval = activeRelationship
+        ? retrieveTruthForPrivatePrompt({
+          scope: {
+            relationId: activeRelationship.id,
+            characterId: activeRelationship.characterId,
+            userIdentityId: activeRelationship.userIdentityId,
+            conversationId: activeRelationship.conversationId,
+          },
+          queryText: userMsg?.content || "",
+          limit: topK,
+          claims: loadKnowledgeClaims().value,
+          summaries: loadConversationSummaries().value,
+          corrections: loadBehaviorCorrections().value,
+        })
+        : undefined;
+      const shadowedLegacyMemoryIds = new Set(truthRetrieval?.shadowedLegacyMemoryIds || []);
+      const visibleLegacyMemories = relevantMemories.filter((memory) =>
+        !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
+      );
+      if (visibleLegacyMemories.length > 0) {
+        charDefText += formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆（仅作补充）:\n");
+      }
+      if (truthRetrieval) {
+        charDefText += formatTruthRetrievalForPrompt(truthRetrieval);
       }
 
       // A continuation synchronized while leaving the offline app is an explicit
@@ -2745,7 +2889,12 @@ ${activeCharacter.disableBracketActions
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
       // Use the unified World Book system blocks builder
-      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText);
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText, {
+        scenario: "chat",
+        characterId: activeRelationship?.characterId || activeChatCharId || undefined,
+        userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
+        relationId: activeRelationship?.id,
+      });
 
       // Assemble system instruction blocks
       let assembledInstructions: string[] = [];
@@ -3229,6 +3378,11 @@ ${stickerListStr}
       }));
 
       try {
+        const relationshipProjection = buildRelationshipCognitiveProjection({
+          relation: activeRelationship,
+          events: events.map(({ event }) => event),
+          now: Date.now(),
+        });
         return buildCharacterCognitiveContext({
           character: activeCharacter,
           relation: activeRelationship,
@@ -3237,6 +3391,8 @@ ${stickerListStr}
           timeContext: { now: Date.now() },
           knowledgeBoundary: createDirectChatKnowledgeBoundary(),
           conversationId: runtimeContext.conversationId || undefined,
+          relationshipTimeline: relationshipProjection.timeline,
+          routine: buildCharacterRoutine(activeCharacter.routine),
         });
       } catch {
         // Cognitive context is read-only and must never block the legacy reply
@@ -3263,16 +3419,28 @@ ${stickerListStr}
     options?: { forumShareTrigger?: boolean },
   ) => chatReplyController.generate({ userMsg, customHistoryOverride, options });
 
-  const sendCustomMessage = (contentString: string) => {
-    if (!activeChatCharId || !activeCharacter) return;
+  const sendCustomMessage = (contentString: string, capturedContext = activeRuntimeContext) => {
+    if (!activeChatCharId || !activeCharacter || !isCapturedRuntimeCurrent(capturedContext)) return;
     const userMsg = createUserTextMessage({
       id: Date.now().toString(),
-      characterId: activeChatCharId,
+      context: capturedContext,
       content: contentString,
       timestamp: Date.now(),
     });
     const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
     onSendMessage(normalizedUserMsg);
+    if (!capturedContext.isGroup && capturedContext.relationId && capturedContext.conversationId && capturedContext.userIdentityId) {
+      const claim = createDeterministicArtifactClaim({
+        message: normalizedUserMsg,
+        scope: {
+          relationId: capturedContext.relationId,
+          characterId: capturedContext.characterId,
+          userIdentityId: capturedContext.userIdentityId,
+          conversationId: capturedContext.conversationId,
+        },
+      });
+      if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture chat-artifact knowledge claim.");
+    }
     generateResponseForUserMessage(normalizedUserMsg);
   };
 
@@ -3293,6 +3461,7 @@ ${stickerListStr}
     if (!activeCharacter.isGroupChat && !activeRelationship) return false;
     setIsGeneratingImage(true);
     setImageGenerationError(null);
+    const capturedContext = activeRuntimeContext;
     try {
       const scope = activeCharacter.isGroupChat
         ? { kind: "group" as const, groupId: activeCharacter.id, conversationId: `group:${activeCharacter.id}` }
@@ -3304,6 +3473,11 @@ ${stickerListStr}
         settings, character: target, relationship: activeCharacter.isGroupChat ? undefined : activeRelationship,
         recentMessages, scope, trigger, userText, createId: () => `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       });
+      if (!isCapturedRuntimeCurrent(capturedContext)) {
+        await imageAssetDb.deleteImage(generated.record.imageAssetId).catch(() => undefined);
+        showToast("关系已切换，已取消发送刚生成的图片。");
+        return false;
+      }
       onSendMessage(generated.message);
       const records = loadImageGenerationRecords([]).value;
       saveImageGenerationRecords([...records, generated.record]);
@@ -3339,38 +3513,75 @@ ${stickerListStr}
     isOfflineModeActive,
     isInputNarration,
     activeOfflineStoryId,
+    runtimeContext: activeRuntimeContext,
   });
 
   const deleteMessageAndLinkedImage = (messageId: string) => {
+    const targetMessage = currentChatMessages.find((message) => message.id === messageId);
+    if (!targetMessage) return;
+    if (activeDirectScope && !isMessageInDirectScope(targetMessage, activeDirectScope)) return;
     const records = loadImageGenerationRecords([]).value;
-    const removed = records.filter((record) => record.messageId === messageId);
+    const removed = records.filter((record) => record.messageId === messageId
+      && record.relationId === targetMessage.relationId
+      && record.conversationId === targetMessage.conversationId);
     if (removed.length) {
-      saveImageGenerationRecords(removeImageGenerationRecordByMessage(records, messageId));
+      saveImageGenerationRecords(removeImageGenerationRecordByMessage(records, messageId, {
+        relationId: targetMessage.relationId,
+        conversationId: targetMessage.conversationId || (activeDirectScope?.conversationId ?? `group:${targetMessage.characterId}`),
+        groupId: targetMessage.relationId ? undefined : targetMessage.characterId,
+      }));
       removed.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete generated image asset:", error)));
     }
-    onDeleteMessage?.(messageId);
+    onDeleteMessage?.(messageId, targetMessage);
+  };
+
+  const clearMessagesAndLinkedArtifacts = (characterId: string, relationId?: string) => {
+    const removedMessages = messages.filter((message) => relationId
+      ? message.relationId === relationId
+      : message.characterId === characterId);
+    const removedMessageIds = new Set(removedMessages.map((message) => message.id));
+    const records = loadImageGenerationRecords([]).value;
+    const removedRecords = records.filter((record) => removedMessageIds.has(record.messageId)
+      && (relationId ? record.relationId === relationId : record.characterId === characterId));
+    if (removedRecords.length) {
+      const removedRecordIds = new Set(removedRecords.map((record) => record.id));
+      saveImageGenerationRecords(records.filter((record) => !removedRecordIds.has(record.id)));
+      removedRecords.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete cleared image asset:", error)));
+    }
+    if (relationId) {
+      setRedPacketStatuses((previous) => {
+        const next = removePaymentStatusesForMessages(removePaymentStatusesByRelation(previous, relationId), removedMessages);
+        localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(next));
+        return next;
+      });
+    }
+    onClearMessages?.(characterId, undefined, relationId);
   };
 
   const sendPartnerRedPacket = async (amount: string, greeting: string) => {
     if (!activeChatCharId || !activeCharacter) return;
+    const capturedCharacter = activeCharacter;
+    const capturedDirectScope = activeDirectScope;
+    const createCapturedCharacterMessage = (id: string, content: string, timestamp: number): Message =>
+      capturedDirectScope
+        ? createCharacterTextMessage({ id, context: toDirectChatRuntimeContext(capturedDirectScope), content, timestamp })
+        : createGroupCharacterMessage({ id, characterId: capturedCharacter.id, content, timestamp });
     
     // 1. Send the red packet message as "character"
-    const charRedPacketMsg: Message = {
-      id: `char-rp-${Date.now()}`,
-      characterId: activeChatCharId,
-      sender: "character",
-      content: `[红包]|${amount}|${greeting}`,
-      timestamp: Date.now(),
-    };
-    onSendMessage(charRedPacketMsg);
+    const charRedPacketMsg = createCapturedCharacterMessage(`char-rp-${Date.now()}`, `[红包]|${amount}|${greeting}`, Date.now());
+    onSendMessageRaw(charRedPacketMsg);
+    if (capturedDirectScope) {
+      const claim = createDeterministicArtifactClaim({ message: charRedPacketMsg, scope: capturedDirectScope });
+      if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture partner red-packet knowledge claim.");
+    }
 
     // 2. Trigger a conversational dialogue follow-up from the character in-character
     setIsTyping(true);
     try {
       const history = messages
-        .filter((message) => !message.isOffline && (activeRelationship
-          ? message.relationId === activeRelationship.id
-          : message.characterId === activeChatCharId && activeCharacter.isGroupChat))
+        .filter((message) => !message.isOffline && (capturedDirectScope
+          ? message.relationId === capturedDirectScope.relationId
+          : message.characterId === capturedCharacter.id && capturedCharacter.isGroupChat))
         .slice(-15)
         .map((m) => ({
           role: m.sender === "user" ? "user" as const : "model" as const,
@@ -3378,7 +3589,7 @@ ${stickerListStr}
         }));
 
       const assembledInstructions = [];
-      assembledInstructions.push(`You are roleplaying as "${activeCharacter.name}". You just sent the user a WeChat red packet with the greeting "${greeting}" for amount ¥${amount}. Now, output a single very brief, sweet, realistic chat message following the red packet (e.g., telling them to buy themselves a treat or expressing your affection).
+      assembledInstructions.push(`You are roleplaying as "${capturedCharacter.name}". You just sent the user a WeChat red packet with the greeting "${greeting}" for amount ¥${amount}. Now, output a single very brief, sweet, realistic chat message following the red packet (e.g., telling them to buy themselves a treat or expressing your affection).
 Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO action/ambient descriptions in brackets.`);
       
       const systemInstruction = assembledInstructions.join("\n\n");
@@ -3394,15 +3605,14 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
       });
 
       if (data && data.text) {
-        const cleanedText = cleanOnlineMessage(data.text, activeCharacter.disableBracketActions || false);
-        const textMsg: Message = {
-          id: `char-rp-text-${Date.now()}`,
-          characterId: activeChatCharId,
-          sender: "character",
-          content: cleanedText || data.text,
-          timestamp: Date.now() + 100,
-        };
-        onSendMessage(textMsg);
+        const relationshipStillExists = !capturedDirectScope || relationships.some((relationship) =>
+          relationship.id === capturedDirectScope.relationId
+          && relationship.userIdentityId === capturedDirectScope.userIdentityId
+          && relationship.characterId === capturedDirectScope.characterId);
+        if (!relationshipStillExists) return;
+        const cleanedText = cleanOnlineMessage(data.text, capturedCharacter.disableBracketActions || false);
+        const textMsg = createCapturedCharacterMessage(`char-rp-text-${Date.now()}`, cleanedText || data.text, Date.now() + 100);
+        onSendMessageRaw(textMsg);
       }
     } catch (e) {
       console.error("Partner red packet message generation failed", e);
@@ -3703,10 +3913,41 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     if (onDeleteMessage) deleteMessageAndLinkedImage(targetMsg.id);
 
     // 2. Find the chat history excluding the targetMsg
-    const previousMessages = currentChatMessages.filter((m) => m.id !== targetMsg.id);
+      const previousMessages = currentChatMessages.filter((m) => m.id !== targetMsg.id);
     // Find the last user message
-    const lastUserMsg = [...previousMessages].reverse().find((m) => m.sender === "user");
-    if (!lastUserMsg) return;
+      const lastUserMsg = [...previousMessages].reverse().find((m) => m.sender === "user");
+      if (!lastUserMsg) return;
+      const regenerationCognitiveContext = activeRelationship && !activeCharacter.isGroupChat
+        ? (() => {
+          try {
+            const relationEvents = listCharacterEventsByRelation(activeRelationship.id);
+            const relationshipProjection = buildRelationshipCognitiveProjection({
+              relation: activeRelationship,
+              events: relationEvents,
+              now: Date.now(),
+            });
+            return buildCharacterCognitiveContext({
+              character: activeCharacter,
+              relation: activeRelationship,
+              memories: [],
+              events: relationEvents.map((event) => ({
+                event,
+                promptVisibility: event.status === "active"
+                  && (event.kind === "relationship_created" || event.kind === "offline_story_completed")
+                  ? "safe" as const
+                  : "private" as const,
+              })),
+              timeContext: { now: Date.now() },
+              knowledgeBoundary: createDirectChatKnowledgeBoundary(),
+              conversationId: activeRelationship.conversationId,
+              relationshipTimeline: relationshipProjection.timeline,
+              routine: buildCharacterRoutine(activeCharacter.routine),
+            });
+          } catch {
+            return undefined;
+          }
+        })()
+        : undefined;
 
     setIsTyping(true);
 
@@ -3772,12 +4013,13 @@ ${activeCharacter.disableBracketActions
 - Background Story: ${activeCharacter.backstory}`;
 
       charDefText += `\n\n[🚨 记忆与上下文关联优先级规则]:
-1. 归档精炼总结优先：以下“先前背景与归档总结”及“召回深度记忆”为历史最高优先级真实记忆，你必须绝对优先根据它们来保持角色认同、长久羁绊和态度。
-2. 历史检索及短期上下文：你的短期上下文聊天记录已按照用户的限制进行了智能截断，以节省 Token 开销。请勿认为你忘记了先前对话，一切先前细节请完全基于归档精炼总结中包含的信息。`;
+1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
+2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
+3. 历史检索及短期上下文：需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
 
       const legacyDefaultMemory = activeRelationship?.id === `relation_default_${activeCharacter.id}` ? activeCharacter.compressedMemory : undefined;
       if (activeRelationship?.compressedMemory || legacyDefaultMemory) {
-        charDefText += `\n- Previous Background / 先前背景与归档总结: ${activeRelationship?.compressedMemory || legacyDefaultMemory}`;
+        charDefText += `\n- Legacy compressed summary / 旧版关系摘要（仅作非权威补充，不可直接当作已确认事实）: ${activeRelationship?.compressedMemory || legacyDefaultMemory}`;
       }
 
       // Add OOC comment correction as high priority instruction
@@ -3789,8 +4031,30 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // Recall memories
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: lastUserMsg.content, existingMemories: memories || [], limit: topK, scenario: "chat" });
-      if (relevantMemories.length > 0) {
-        charDefText += formatMemoriesForPrompt(relevantMemories, "\n- Reclaimed Memories / 召回深度记忆:\n");
+      const truthRetrieval = activeRelationship
+        ? retrieveTruthForPrivatePrompt({
+          scope: {
+            relationId: activeRelationship.id,
+            characterId: activeRelationship.characterId,
+            userIdentityId: activeRelationship.userIdentityId,
+            conversationId: activeRelationship.conversationId,
+          },
+          queryText: lastUserMsg.content,
+          limit: topK,
+          claims: loadKnowledgeClaims().value,
+          summaries: loadConversationSummaries().value,
+          corrections: loadBehaviorCorrections().value,
+        })
+        : undefined;
+      const shadowedLegacyMemoryIds = new Set(truthRetrieval?.shadowedLegacyMemoryIds || []);
+      const visibleLegacyMemories = relevantMemories.filter((memory) =>
+        !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
+      );
+      if (visibleLegacyMemories.length > 0) {
+        charDefText += formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆:\n");
+      }
+      if (truthRetrieval) {
+        charDefText += formatTruthRetrievalForPrompt(truthRetrieval);
       }
 
       const userProfileText = `User Profile:
@@ -3808,7 +4072,12 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
       // Use the unified World Book system blocks builder
-      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText);
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText, {
+        scenario: "chat",
+        characterId: activeRelationship?.characterId || activeChatCharId || undefined,
+        userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
+        relationId: activeRelationship?.id,
+      });
 
       // Assemble system instruction blocks
       let assembledInstructions: string[] = [];
@@ -3848,6 +4117,14 @@ ${timeLogString}
 
       // 4. Character Definition
       assembledInstructions.push(charDefText);
+
+      if (regenerationCognitiveContext) {
+        const cognitivePrompt = formatChatPromptContext(buildChatPromptContext(regenerationCognitiveContext, {
+          maxFacts: 0,
+          relevantMemoryIds: [],
+        }));
+        if (cognitivePrompt) assembledInstructions.push(cognitivePrompt);
+      }
 
       // 5. After Character Definition entries
       if (wbBlocks.after_char_def.length > 0) {
@@ -4038,7 +4315,7 @@ ${stickerListStr}
             })
               .then((res) => {
                 if (res && res.text && res.text !== msg.content) {
-                  onUpdateMessage(msg.id, { translation: res.text });
+                  onUpdateMessage(msg.id, { translation: res.text }, msg);
                 }
               })
               .catch((err) => {
@@ -4128,7 +4405,8 @@ ${stickerListStr}
 
   // Memory Extraction Handler (Extracting facts & moments instead of a big blob)
   const handleExtractMemories = async (manualMessagesOverride?: Message[]) => {
-    if (!activeChatCharId || !activeCharacter) return 0;
+    if (!activeChatCharId || !activeCharacter || !activeDirectScope) return 0;
+    const extractionScope = activeDirectScope;
 
     setIsCompressingMemory(true);
     try {
@@ -4143,7 +4421,9 @@ ${stickerListStr}
       const result = await MemoryService.extractMemories({
         character: activeCharacter,
         characterId: activeChatCharId,
-        relationId: activeRelationship?.id,
+        relationId: extractionScope.relationId,
+        userIdentityId: extractionScope.userIdentityId,
+        conversationId: extractionScope.conversationId,
         recentMessages: messagesToCompress,
         existingMemories: memories || [],
         scenario: "chat",
@@ -4156,6 +4436,22 @@ ${stickerListStr}
         formatContent: (items) => formatExtractedMemorySummary(headerLabel, items),
       }, apiExtractMemories);
       if (result.apiError) console.error("Extract memory API error:", result.apiError);
+      if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
+        console.error("Knowledge claims could not be persisted; compatibility Memory was not updated.");
+        return 0;
+      }
+      const extractedSummary = createConversationSummaryRecord({
+        scope: extractionScope,
+        claims: result.acceptedClaims,
+        sourceMessageIds: messagesToCompress.map((message) => message.id),
+        generatedAt: Date.now(),
+        rangeStartAt: messagesToCompress[0]?.timestamp,
+        rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
+      });
+      if (extractedSummary) {
+        const summaryWrite = saveConversationSummaries([...loadConversationSummaries().value, extractedSummary]);
+        if (!summaryWrite.success) console.error("Conversation summary cache could not be persisted:", summaryWrite.error);
+      }
       if (result.extractedMemories.length > 0) {
         onSaveMemories(MemoryService.mergeMemories(memories || [], result.extractedMemories));
         return result.extractedMemories.length;
@@ -4192,18 +4488,38 @@ ${stickerListStr}
       const recentConversation = analyzeRecentConversation(charMsgs, activeChatCharId);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
-      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText);
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText, {
+        scenario: "chat",
+        characterId: activeRelationship.characterId,
+        userIdentityId: activeRelationship.userIdentityId,
+        relationId: activeRelationship.id,
+      });
       const wbPrompt = wbBlocks.formattedAll;
       const timeContext = activeCharacter.enableTimeAwareness !== false
         ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
         : "";
       const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id });
+      const truthPrompt = formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt({
+        scope: {
+          relationId: activeRelationship.id,
+          characterId: activeRelationship.characterId,
+          userIdentityId: activeRelationship.userIdentityId,
+          conversationId: activeRelationship.conversationId,
+        },
+        queryText: recentConversation.recentMessages.slice(-2).map((message) => message.content).join(" "),
+        limit: recallSettings?.recallCount || 5,
+        claims: loadKnowledgeClaims().value,
+        summaries: loadConversationSummaries().value,
+        corrections: loadBehaviorCorrections().value,
+      }));
       const cognitiveContext = buildProactiveCognitiveContext({
         character: activeCharacter,
         relationship: activeRelationship,
         memories: memories || [],
         events: listCharacterEventsByRelation(relationId),
         occurredAt: Date.now(),
+        routine: buildCharacterRoutine(activeCharacter.routine),
+        topicHistory: loadProactiveTopicRecords().value,
       });
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
@@ -4218,13 +4534,11 @@ Roleplay Profile:
 - Personality & Behavior: ${activeCharacter.personality}
 - Background Story: ${activeCharacter.backstory}
 
-${activeRelationship.compressedMemory ? `Compressed Memories (Important context from previous conversations): ${activeRelationship.compressedMemory}` : ""}
-
 User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}${truthPrompt}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
 ${proactivePrompt}`;
@@ -4256,6 +4570,17 @@ ${proactivePrompt}`;
           relationId,
           conversationId: activeRelationship.conversationId || getConversationId(relationId),
         }));
+        const topic = compactTopicHint(proactiveResult.messages.map((message) => message.content));
+        const topicRecord = topic
+          ? createProactiveTopicRecord({
+            topic,
+            category: "daily_share",
+            createdAt: Date.now(),
+            characterId: activeCharacter.id,
+            relationId: activeRelationship.id,
+          })
+          : undefined;
+        if (topicRecord) appendProactiveTopicRecord(topicRecord);
       } else {
         alert(`主动联络失败: ${(proactiveResult.data as any).error || "智能体无响应"}`);
       }
@@ -4333,18 +4658,38 @@ ${proactivePrompt}`;
       const recentConversation = analyzeRecentConversation(charMsgs, friend.id);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
-      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, scanText);
+      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, scanText, {
+        scenario: "chat",
+        characterId: relationship.characterId,
+        userIdentityId: relationship.userIdentityId,
+        relationId: relationship.id,
+      });
       const wbPrompt = wbBlocks.formattedAll;
       const timeContext = friend.enableTimeAwareness !== false
         ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
         : "";
       const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: friend.id });
+      const truthPrompt = formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt({
+        scope: {
+          relationId: relationship.id,
+          characterId: relationship.characterId,
+          userIdentityId: relationship.userIdentityId,
+          conversationId: relationship.conversationId,
+        },
+        queryText: recentConversation.recentMessages.slice(-2).map((message) => message.content).join(" "),
+        limit: recallSettings?.recallCount || 5,
+        claims: loadKnowledgeClaims().value,
+        summaries: loadConversationSummaries().value,
+        corrections: loadBehaviorCorrections().value,
+      }));
       const cognitiveContext = buildProactiveCognitiveContext({
         character: friend,
         relationship,
         memories: memories || [],
         events: listCharacterEventsByRelation(relationId),
         occurredAt: Date.now(),
+        routine: buildCharacterRoutine(friend.routine),
+        topicHistory: loadProactiveTopicRecords().value,
       });
 
       const taskPrompt = customTaskText || "It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.";
@@ -4361,13 +4706,11 @@ Roleplay Profile:
 - Personality & Behavior: ${friend.personality}
 - Background Story: ${friend.backstory}
 
-${relationship.compressedMemory ? `Compressed Memories (Important context from previous conversations): ${relationship.compressedMemory}` : ""}
-
 User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
+${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}${truthPrompt}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 ${taskPrompt}
 
 ${instructionsPrompt}`;
@@ -4405,6 +4748,17 @@ ${instructionsPrompt}`;
           relationId,
           conversationId: relationship.conversationId || getConversationId(relationId),
         }));
+        const topic = compactTopicHint(proactiveResult.messages.map((message) => message.content));
+        const topicRecord = topic
+          ? createProactiveTopicRecord({
+            topic,
+            category: "daily_share",
+            createdAt: Date.now(),
+            characterId: friend.id,
+            relationId: relationship.id,
+          })
+          : undefined;
+        if (topicRecord) appendProactiveTopicRecord(topicRecord);
       }
     } catch (err) {
       console.error("Proactive message auto-trigger error:", err);
@@ -4433,6 +4787,8 @@ ${instructionsPrompt}`;
           const publicContext = buildPublicMomentContext({
             character: friend,
             moments: [newMo],
+            topicHistory: loadMomentTopicRecords().value,
+            routine: buildCharacterRoutine(friend.routine),
             now: Date.now(),
           });
 
@@ -4524,6 +4880,8 @@ ${instructionsPrompt}`;
               timestamp: Date.now(),
             },
           ],
+          topicHistory: loadMomentTopicRecords().value,
+          routine: buildCharacterRoutine(friend.routine),
           now: Date.now(),
         });
 
@@ -4577,6 +4935,8 @@ ${instructionsPrompt}`;
       const publicContext = buildPublicMomentContext({
         character: friend,
         moments: ownerMomentHistory,
+        topicHistory: loadMomentTopicRecords().value,
+        routine: buildCharacterRoutine(friend.routine),
         now: occurredAt,
       });
 
@@ -4618,7 +4978,20 @@ ${instructionsPrompt}`;
         existingMoments: ownerMomentHistory,
         publicContext,
       });
-      if (generated.moment) onAddMoment(generated.moment);
+      if (generated.moment) {
+        onAddMoment(generated.moment);
+        const topic = compactTopicHint([generated.moment.content]);
+        const topicRecord = topic
+          ? createMomentTopicRecord({
+            topic,
+            category: "other",
+            generatedAt: generated.moment.timestamp || occurredAt,
+            momentId: generated.moment.id,
+            characterId: friend.id,
+          })
+          : undefined;
+        if (topicRecord) appendMomentTopicRecord(topicRecord);
+      }
       // A public Moment is not a verified private relationship fact. Keep the
       // generator's legacy return value for compatibility, but do not write it
       // into relation-scoped Memory without an explicit user confirmation path.
@@ -6066,7 +6439,7 @@ ${instructionsPrompt}`;
                           const count = await handleExtractMemories();
                           // Step 2: Clear messages
                           if (onClearMessages) {
-                            onClearMessages(activeChatCharId, undefined, activeRelationship?.id);
+                            clearMessagesAndLinkedArtifacts(activeChatCharId, activeRelationship?.id);
                           }
                           // Reset greeting checked state so a new proactive greeting can be generated immediately
                           setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
@@ -6083,7 +6456,7 @@ ${instructionsPrompt}`;
                           if (window.confirm("确定要直接清空所有对话记录吗？该操作不可撤销，且不会保存任何新记忆。")) {
                             setShowClearHistoryModal(false);
                             if (onClearMessages) {
-                              onClearMessages(activeChatCharId, undefined, activeRelationship?.id);
+                              clearMessagesAndLinkedArtifacts(activeChatCharId, activeRelationship?.id);
                             }
                             // Reset greeting checked state so a new proactive greeting can be generated immediately
                             setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
@@ -6553,10 +6926,10 @@ ${instructionsPrompt}`;
                         );
                       })() : isRedPacketMarkup(msg.content) ? (() => {
                         const [, amount, greeting] = msg.content.split("|");
-                        const status = getRedPacketActualStatus(msg.id, msg.timestamp, msg.sender);
+                        const status = getRedPacketActualStatus(msg);
                         return <RedPacketCard amount={amount || "8.88"} greeting={greeting || "恭喜发财，万事如意"} status={status} isSelf={isSelf} onClick={() => {
                           const char = characters.find((character) => character.id === msg.characterId);
-                          setOpenRedPacketDetail({ id: msg.id, amount: amount || "8.88", greeting: greeting || "恭喜发财", senderName: char?.remark || char?.name || "未知好友", senderAvatar: char?.avatar || "🧧", sender: msg.sender as "user" | "character", timestamp: msg.timestamp });
+                          setOpenRedPacketDetail({ id: msg.id, amount: amount || "8.88", greeting: greeting || "恭喜发财", senderName: char?.remark || char?.name || "未知好友", senderAvatar: char?.avatar || "🧧", sender: msg.sender as "user" | "character", timestamp: msg.timestamp, message: msg });
                           setShowRedPacketOpenModal(true);
                         }} />;
                       })() : isTransferMarkup(msg.content) ? (() => {
@@ -7022,9 +7395,14 @@ ${instructionsPrompt}`;
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (file) {
+                        const capturedContext = activeRuntimeContext;
                         try {
                           const compressed = await compressImage(file, 800, 800, 0.75);
-                          sendCustomMessage(compressed);
+                          if (!isCapturedRuntimeCurrent(capturedContext)) {
+                            showToast("关系已切换，已取消发送图片。");
+                            return;
+                          }
+                          sendCustomMessage(compressed, capturedContext);
                           setShowAttachPanel(false);
                         } catch (err) {
                           console.error("Custom chat image compression failed:", err);
@@ -7388,7 +7766,6 @@ ${instructionsPrompt}`;
                       // Deduct wallet balance
                       setWalletBalance(prev => {
                         const next = prev - amt;
-                        localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
                         return next;
                       });
                       sendCustomMessage(`[红包]|${finalAmount}|${finalGreeting}`);
@@ -7406,7 +7783,7 @@ ${instructionsPrompt}`;
 
            {/* Red Envelope Opened Modal Overlay */}
           {showRedPacketOpenModal && openRedPacketDetail && (() => {
-            const status = getRedPacketActualStatus(openRedPacketDetail.id, openRedPacketDetail.timestamp, openRedPacketDetail.sender);
+            const status = getRedPacketActualStatus(openRedPacketDetail.message);
             const isSelf = openRedPacketDetail.sender === "user";
 
             return (
@@ -7506,13 +7883,12 @@ ${instructionsPrompt}`;
                             setTimeout(() => {
                               setIsOpeningRedPacket(false);
                               // Mark as claimed
-                              updateRedPacketStatus(openRedPacketDetail.id, "claimed");
+                              updateRedPacketStatus(openRedPacketDetail.message, "claimed");
                               // Deposit money
                               const parsed = parseFloat(openRedPacketDetail.amount);
                               if (!isNaN(parsed)) {
                                 setWalletBalance(prev => {
                                   const next = prev + parsed;
-                                  localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
                                   return next;
                                 });
                               }
@@ -8599,7 +8975,7 @@ ${instructionsPrompt}`;
                           if (m.content.startsWith("[红包]")) {
                             const [_, amountStr, greetingStr] = m.content.split("|");
                             const amount = parseFloat(amountStr || "8.88");
-                            const status = getRedPacketActualStatus(m.id, m.timestamp, m.sender);
+                            const status = getRedPacketActualStatus(m);
                             const char = characters.find(c => c.id === m.characterId);
                             const friendName = char?.remark || char?.name || "未知好友";
                             const avatarUrl = char?.avatar || "🧧";
@@ -8736,10 +9112,9 @@ ${instructionsPrompt}`;
                                 showToast("请输入有效的充值金额");
                                 return;
                               }
-                              setWalletBalance(prev => {
-                                const next = prev + amountVal;
-                                localStorage.setItem("wechat_wallet_balance", next.toFixed(2));
-                                return next;
+                      setWalletBalance(prev => {
+                        const next = prev + amountVal;
+                        return next;
                               });
                               showToast(`充值成功！余额已增加 ¥${amountVal.toFixed(2)}`);
                               setShowTopUpModal(false);
@@ -8847,7 +9222,7 @@ ${instructionsPrompt}`;
                                 </div>
 
                                 <button
-                                  onClick={() => onToggleBookmark(bm.id)}
+                                  onClick={() => onToggleBookmark(bm.id, bm)}
                                   className="text-rose-400 hover:text-rose-600 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
                                   title="取消收藏"
                                 >
@@ -9721,7 +10096,7 @@ ${instructionsPrompt}`;
           >
             <button
               onClick={() => {
-                onToggleBookmark(activeMenuMsg.id);
+                onToggleBookmark(activeMenuMsg.id, activeMenuMsg);
                 setActiveMenuMsg(null);
               }}
               className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
@@ -9757,6 +10132,14 @@ ${instructionsPrompt}`;
 
             <button
               onClick={() => {
+                const belongsToCurrentChat = activeDirectScope
+                  ? isMessageInDirectScope(activeMenuMsg, activeDirectScope)
+                  : Boolean(activeCharacter?.isGroupChat && activeMenuMsg.characterId === activeCharacter.id);
+                if (!belongsToCurrentChat) {
+                  setActiveMenuMsg(null);
+                  showToast("不能引用其他关系中的消息。");
+                  return;
+                }
                 setQuotedMessage(activeMenuMsg);
                 setActiveMenuMsg(null);
                 const inputEl = document.querySelector('input[type="text"]') as HTMLInputElement;
@@ -9862,16 +10245,26 @@ ${instructionsPrompt}`;
                   if (!oocCommentText.trim()) return;
 
                   const relationId = activeRelationship?.id;
-                  if (relationId && activeChatCharId) {
-                    const oocMemory = createOocCorrectionMemory({
+                  if (relationId && activeChatCharId && activeDirectScope) {
+                    const now = Date.now();
+                    const stored = behaviorCorrectionRepository.append({
                       id: "ooc-" + Date.now(),
                       characterId: activeChatCharId,
                       relationId,
+                      userIdentityId: activeDirectScope.userIdentityId,
+                      conversationId: activeDirectScope.conversationId,
+                      instruction: oocCommentText.trim(),
                       originalResponse: showOocCommentModal.content,
-                      feedback: oocCommentText.trim(),
-                      timestamp: Date.now(),
+                      sourceMessageIds: [showOocCommentModal.id],
+                      createdAt: now,
+                      updatedAt: now,
+                      status: "active",
+                      schemaVersion: 1,
                     });
-                    onSaveMemories(MemoryService.mergeMemories(memories, [oocMemory]));
+                    if (!stored.success) {
+                      showToast("OOC 纠正保存失败，请稍后重试。");
+                      return;
+                    }
                   }
                   
                   const comment = oocCommentText.trim();

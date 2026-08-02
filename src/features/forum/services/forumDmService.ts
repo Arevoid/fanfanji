@@ -7,6 +7,7 @@ import { buildCharacterCognitiveContext } from "../../../domain/characterCogniti
 import { createDirectChatKnowledgeBoundary } from "../../../domain/characterCognitive/contextPolicy";
 import type { CharacterCognitiveEventCandidate } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import { listByRelation as listCharacterEventsByRelation } from "../../../core/storage/repositories/characterEventRepository";
+import { buildRelationshipCognitiveProjection } from "../../characterLife/services/relationshipCognitiveProjectionService";
 import {
   buildForumDirectMessagePromptContext,
   formatForumDirectMessagePromptContext,
@@ -42,15 +43,22 @@ export const requestForumDmReply = async (input: { conversation: ForumDmConversa
     const cognitiveContext = character && relationship
       ? (() => {
         try {
+          const relationEvents = listCharacterEventsByRelation(relationship.id);
+          const relationshipProjection = buildRelationshipCognitiveProjection({
+            relation: relationship,
+            events: relationEvents,
+            now,
+          });
           return buildCharacterCognitiveContext({
             character,
             relation: relationship,
             // Forum DMs intentionally do not consume private chat Memory.
             memories: [],
-            events: listCharacterEventsByRelation(relationship.id).map((event) => ({ event, promptVisibility: getForumDmEventVisibility(event) })),
+            events: relationEvents.map((event) => ({ event, promptVisibility: getForumDmEventVisibility(event) })),
             timeContext: { now },
             knowledgeBoundary: createDirectChatKnowledgeBoundary(),
             conversationId: relationship.conversationId,
+            relationshipTimeline: relationshipProjection.timeline,
           });
         } catch {
           return undefined;

@@ -33,7 +33,7 @@ const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 assert.match(chat, /generated \? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"/);
 assert.match(settingsPage, /const updateCurrentImageModel = \(model: string\)/);
 assert.match(settingsPage, /const persistImagePresetDraft =/);
-assert.match(settingsPage, /onSaveSettings\(\{ \.\.\.settings, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId \}\)/);
+assert.match(settingsPage, /onSaveSettings\(\(previous\) => \(\{ \.\.\.previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId \}\)\)/);
 assert.match(settingsPage, /selectedModel: model/);
 assert.match(settingsPage, /请先选择或输入图片模型。/);
 assert.match(settingsPage, /selectedModel: preset\.selectedModel \|\| \(preset as ImageApiPreset & \{ model\?: string \}\)\.model \|\| ""/);

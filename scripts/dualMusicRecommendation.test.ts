@@ -14,7 +14,7 @@ assert.equal(chooseLocalLibraryTrack(tracks, ["song-a"], () => 0), "song-b");
 const base: any = {
   tracks,
   character: { id: "char", name: "Friend", personality: "quiet", backstory: "" },
-  relationship: { id: "rel-a", characterId: "char", userIdentityId: "identity-a", conversationId: "direct:rel-a", relationship: "friend" },
+  relationship: { id: "rel-a", characterId: "char", userIdentityId: "identity-a", conversationId: "direct:rel-a", relationship: "friend", compressedMemory: "PRIVATE legacy summary" },
   messages: [{ id: "m", characterId: "char", relationId: "rel-b", sender: "user", content: "other relation", timestamp: 1 }],
   memories: [{ id: "mem", characterId: "char", relationId: "rel-b", content: "other memory", timestamp: 1 }],
   settings: { apiKey: "key", selectedModel: "model" },
@@ -23,6 +23,7 @@ const aiResult = await recommendDualMusicTrack({
   ...base,
   requestAi: async (request: any) => {
     assert.doesNotMatch(request.systemInstruction, /other relation|other memory/);
+    assert.doesNotMatch(request.systemInstruction, /PRIVATE legacy summary/);
     return { text: '{"trackId":"song-b","reason":"fits"}' };
   },
 });

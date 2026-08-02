@@ -13,6 +13,10 @@ import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repos
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
+import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
+import { loadConversationSummaries, saveConversationSummaries, retractConversationSummariesBySourceMessageIds } from "./core/storage/repositories/conversationSummaryRepository";
+import { loadBehaviorCorrections, saveBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
+import { loadCharacterKnowledgeMigrationState, saveCharacterKnowledgeMigrationState } from "./core/storage/repositories/characterKnowledgeMigrationRepository";
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
@@ -41,6 +45,8 @@ import {
 import { imageAssetDb } from "./utils/imageAssetDb";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
 import { DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import { messageMatchesMutationScope, type MessageMutationScope } from "./features/chat/context/directInteractionScope";
+import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, removePaymentStatusesForMessages, type RedPacketStatusMap } from "./features/chat/services/paymentScope";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
 import { 
   AlbumWidget, 
@@ -73,6 +79,13 @@ import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
+import { retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
+import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
+import { removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
+import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters } from "./core/storage/repositories/proactiveTopicRepository";
+import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/services/legacyCharacterKnowledgeMigration";
+import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
+import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import StatusBar from "./components/StatusBar";
 import AppChat from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
@@ -368,6 +381,8 @@ export default function App() {
   };
 
   const handleDeleteOfflineStory = (storyId: string) => {
+    retractBySourceStoryIds([storyId]);
+    retractByOfflineStoryIds([storyId]);
     setOfflineStories((prev) => {
       const filtered = prev.filter((s) => s.id !== storyId);
       return filtered;
@@ -825,6 +840,51 @@ export default function App() {
     if (momentsChanged) setMoments(migration.moments);
   }, [characters, memories, moments, offlineStories]);
 
+  // Truth Layer migration is deliberately additive. Legacy Memory and
+  // compressed-memory fields remain untouched for rollback and old-build
+  // readability; deterministic source IDs make this safe on every startup.
+  useEffect(() => {
+    if (characters.length === 0 || relationships.length === 0) return;
+    const existingClaims = loadKnowledgeClaims().value;
+    const existingSummaries = loadConversationSummaries().value;
+    const existingCorrections = loadBehaviorCorrections().value;
+    const result = migrateLegacyCharacterKnowledge({
+      characters,
+      relationships,
+      memories,
+      offlineStories,
+      existingClaims,
+      existingSummaries,
+      existingCorrections,
+      now: Date.now(),
+    });
+    if (result.claims.length > 0) {
+      const write = appendKnowledgeClaims(result.claims);
+      if (!write.success) console.error("Failed to persist migrated character knowledge claims:", write.error);
+    }
+    if (result.summaries.length > 0) {
+      const write = saveConversationSummaries([...existingSummaries, ...result.summaries]);
+      if (!write.success) console.error("Failed to persist migrated conversation summaries:", write.error);
+    }
+    if (result.corrections.length > 0) {
+      const write = saveBehaviorCorrections([...existingCorrections, ...result.corrections]);
+      if (!write.success) console.error("Failed to persist migrated behavior corrections:", write.error);
+    }
+    const previous = loadCharacterKnowledgeMigrationState().value;
+    saveCharacterKnowledgeMigrationState({
+      schemaVersion: CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION,
+      migrationVersion: CHARACTER_KNOWLEDGE_MIGRATION_VERSION,
+      lastRunAt: Date.now(),
+      migratedMemoryIds: Array.from(new Set([...previous.migratedMemoryIds, ...result.migratedMemoryIds])),
+      migratedSummaryIds: Array.from(new Set([...previous.migratedSummaryIds, ...result.migratedSummaryIds])),
+      migratedCorrectionIds: Array.from(new Set([...previous.migratedCorrectionIds, ...result.migratedCorrectionIds])),
+      orphanRecordIds: Array.from(new Set([...previous.orphanRecordIds, ...result.orphanRecordIds])),
+    });
+    result.diagnostics.forEach((diagnostic) => {
+      console.warn(`[character truth migration] ${diagnostic.recordId}: ${diagnostic.diagnostic}`);
+    });
+  }, [characters, relationships, memories, offlineStories]);
+
   // Offline-story handoffs must be persisted before their story is marked as
   // synced. The ordinary effect remains the single path for every other memory
   // update, while this callback gives the offline exit flow a durable result.
@@ -899,6 +959,15 @@ export default function App() {
       }
 
       const retrievalLimit = char.retrievalHistoryLimit || 100;
+      const relation = relationships.find((item) =>
+        item.id === relationId
+        && item.characterId === characterId
+        && item.conversationId === (conversationId || item.conversationId),
+      );
+      if (!relation) {
+        setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "当前关系作用域无效，无法写入长期认知" }));
+        return;
+      }
       const charMsgs = messages.filter((message) => message.relationId === relationId).slice(-retrievalLimit);
       if (charMsgs.length === 0) {
         setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "暂无与该角色的聊天记录，无法进行总结" }));
@@ -914,6 +983,8 @@ export default function App() {
         character: char,
         characterId,
         relationId,
+        userIdentityId: relation.userIdentityId,
+        conversationId: relation.conversationId,
         recentMessages: msgsToSummarize,
         existingMemories: memories,
         scenario: "immediate-summary",
@@ -934,6 +1005,27 @@ export default function App() {
         return;
       }
       const addedCount = result.extractedMemories.length;
+      if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
+        setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "长期认知写入失败，未更新兼容记忆" }));
+        return;
+      }
+      const extractedSummary = createConversationSummaryRecord({
+        scope: {
+          relationId: relation.id,
+          characterId: relation.characterId,
+          userIdentityId: relation.userIdentityId,
+          conversationId: relation.conversationId,
+        },
+        claims: result.acceptedClaims,
+        sourceMessageIds: msgsToSummarize.map((message) => message.id),
+        generatedAt: Date.now(),
+        rangeStartAt: msgsToSummarize[0]?.timestamp,
+        rangeEndAt: msgsToSummarize[msgsToSummarize.length - 1]?.timestamp,
+      });
+      if (extractedSummary) {
+        const summaryWrite = saveConversationSummaries([...loadConversationSummaries().value, extractedSummary]);
+        if (!summaryWrite.success) console.warn("Conversation summary cache could not be persisted:", summaryWrite.error);
+      }
       if (addedCount > 0) {
         setMemories(prev => MemoryService.mergeMemories(prev, result.extractedMemories));
       }
@@ -1701,11 +1793,23 @@ export default function App() {
         .filter((relation) => characterIds.has(relation.characterId))
         .map((relation) => relation.id);
       removeCharacterLifeEventsForRelations(relationIds);
+      removeCharacterTruthForRelations(relationIds);
+      removeMomentTopicsForCharacters(deletedCharacterIds);
+      removeProactiveTopicsForRelations(relationIds);
+      removeProactiveTopicsForCharacters(deletedCharacterIds);
       const cleaned = removeCanonicalCharacterData(
         { relationships, messages, memories, offlineStories },
         id,
         deletedCharacterIds,
       );
+      try {
+        const parsed = JSON.parse(localStorage.getItem(RED_PACKET_STATUSES_KEY) || "{}") as RedPacketStatusMap;
+        const removedMessages = messages.filter((message) => relationIds.includes(message.relationId || "") || characterIds.has(message.characterId));
+        const withoutRelations = relationIds.reduce((statuses, relationId) => removePaymentStatusesByRelation(statuses, relationId), parsed);
+        localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(removePaymentStatusesForMessages(withoutRelations, removedMessages)));
+      } catch (error) {
+        console.warn("Unable to clear payment state for deleted character:", error);
+      }
       setCharacters((prev) => prev
         .filter((character) => !characterIds.has(character.id))
         .map((character) => character.isGroupChat && character.memberIds
@@ -1818,41 +1922,53 @@ export default function App() {
 
   // Chat message send handler
   const handleSendMessage = (msg: Message) => {
-    setMessages((prev) => [...prev, msg]);
+    const isGroupMessage = characters.some((character) => character.id === msg.characterId && character.isGroupChat);
+    let messageToSave = msg;
+    if (!isGroupMessage) {
+      const relationship = msg.relationId ? relationships.find((item) => item.id === msg.relationId) : undefined;
+      if (!relationship
+        || relationship.characterId !== msg.characterId
+        || (msg.conversationId && msg.conversationId !== (relationship.conversationId || getConversationId(relationship.id)))) {
+        console.warn("Direct message write rejected because its relationship scope is missing or inconsistent.", msg.id);
+        return;
+      }
+      messageToSave = { ...msg, conversationId: relationship.conversationId || getConversationId(relationship.id) };
+    }
+    setMessages((prev) => [...prev, messageToSave]);
 
     // Update character's last active time on message exchange
-      if (msg.relationId) {
-        setRelationships((previous) => previous.map((relation) => relation.id === msg.relationId ? { ...relation, lastActiveTime: Date.now(), updatedAt: Date.now() } : relation));
+      if (messageToSave.relationId) {
+        setRelationships((previous) => previous.map((relation) => relation.id === messageToSave.relationId ? { ...relation, lastActiveTime: Date.now(), updatedAt: Date.now() } : relation));
       }
 
     // Check if auto-translation is enabled and the message needs translation
-    const char = characters.find((c) => c.id === msg.characterId);
+    const char = characters.find((c) => c.id === messageToSave.characterId);
     if (
       char &&
       char.enableAutoTranslate &&
-      msg.sender === "character" &&
-      !msg.isNarration &&
-      !msg.content.startsWith("data:image/") &&
-      !msg.content.startsWith("[红包]")
+      messageToSave.sender === "character" &&
+      !messageToSave.isNarration &&
+      !messageToSave.content.startsWith("data:image/") &&
+      !messageToSave.content.startsWith("[红包]")
     ) {
       // Check if text is non-Chinese
-      const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(msg.content);
-      const hasKorean = /[\uac00-\ud7af]/.test(msg.content);
-      const hasChinese = /[\u4e00-\u9fa5]/.test(msg.content);
-      const hasEnglish = /[a-zA-Z]{3,}/.test(msg.content);
+      const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(messageToSave.content);
+      const hasKorean = /[\uac00-\ud7af]/.test(messageToSave.content);
+      const hasChinese = /[\u4e00-\u9fa5]/.test(messageToSave.content);
+      const hasEnglish = /[a-zA-Z]{3,}/.test(messageToSave.content);
       const isNonChinese = hasJapanese || hasKorean || (!hasChinese && hasEnglish);
 
       if (isNonChinese) {
         apiTranslate({
-          text: msg.content,
+          text: messageToSave.content,
           apiKey: settings.apiKey || "",
           model: settings.selectedModel,
           apiEndpoint: settings.apiEndpoint,
         })
           .then((res) => {
-            if (res && res.text && res.text !== msg.content) {
+            if (res && res.text && res.text !== messageToSave.content) {
               setMessages((prev) =>
-                prev.map((m) => (m.id === msg.id ? { ...m, translation: res.text } : m))
+                prev.map((m) => (m.id === messageToSave.id && messageMatchesMutationScope(m, messageToSave) ? { ...m, translation: res.text } : m))
               );
             }
           })
@@ -1863,19 +1979,37 @@ export default function App() {
     }
   };
 
-  const handleToggleBookmark = (id: string) => {
+  const handleToggleBookmark = (id: string, scope?: MessageMutationScope) => {
     setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, isBookmarked: !m.isBookmarked } : m))
+      prev.map((m) => (m.id === id && messageMatchesMutationScope(m, scope) ? { ...m, isBookmarked: !m.isBookmarked } : m))
     );
   };
 
-  const handleDeleteMessage = (id: string) => {
-    setMessages((prev) => prev.filter((m) => m.id !== id));
+  const handleDeleteMessage = (id: string, scope?: MessageMutationScope) => {
+    const deletedMessage = messages.find((message) => message.id === id && messageMatchesMutationScope(message, scope));
+    if (!deletedMessage) return;
+    const sourceRelation = deletedMessage.relationId
+      ? relationships.find((relation) => relation.id === deletedMessage.relationId)
+      : undefined;
+    const sourceScope = sourceRelation
+      ? {
+        relationId: sourceRelation.id,
+        characterId: sourceRelation.characterId,
+        userIdentityId: sourceRelation.userIdentityId,
+        conversationId: sourceRelation.conversationId,
+      }
+      : undefined;
+    // Source-linked truth is retained for auditability but cannot remain
+    // active after its evidence message is deleted.
+    retractBySourceMessageIds([id], sourceScope);
+    retractConversationSummariesBySourceMessageIds([id], sourceScope);
+    retractBehaviorCorrectionsBySourceMessageIds([id], sourceScope);
+    setMessages((prev) => prev.filter((m) => m.id !== id || !messageMatchesMutationScope(m, scope)));
   };
 
-  const handleUpdateMessage = (id: string, updatedFields: Partial<Message>) => {
+  const handleUpdateMessage = (id: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => {
     setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, ...updatedFields } : m))
+      prev.map((m) => (m.id === id && messageMatchesMutationScope(m, scope) ? { ...m, ...updatedFields } : m))
     );
   };
 
@@ -1915,12 +2049,15 @@ export default function App() {
       }
       setMemories((previous) => removeMemoriesForMoment(previous, deletedMoment));
     }
+    removeMomentTopicsForMoments([momentId]);
     setMoments((prev) => {
       return prev.filter((moment) => moment.id !== momentId);
     });
   };
 
   const handleDeleteMomentsByRelation = (relationId: string) => {
+    const removedMomentIds = moments.filter((moment) => moment.relationId === relationId).map((moment) => moment.id);
+    removeMomentTopicsForMoments(removedMomentIds);
     setMoments((previous) => previous.filter((moment) => moment.relationId !== relationId));
   };
 

@@ -1,7 +1,6 @@
 import {
   projectPromptBoundary,
   projectPromptPersona,
-  projectPromptRelationship,
   projectPromptTime,
   selectSafePromptEvents,
 } from "./promptVisibilityPolicy";
@@ -104,7 +103,9 @@ export const buildProactivePromptContext = (
   options?: Parameters<CognitivePromptAdapter<ProactivePromptContext>>[1],
 ): ProactivePromptContextWithRoutine => ({
   persona: projectPromptPersona(context),
-  relationship: projectPromptRelationship(context),
+  // Legacy compressedMemory is not a proactive source. Relationship state and
+  // event projections are supplied separately and remain rebuildable.
+  relationship: { stage: context.relationship.stage },
   ...projectProactiveRelationshipContext(context),
   ...projectProactiveRoutineContext(context),
   ...projectProactiveTopicContext(context),
@@ -120,7 +121,6 @@ export function formatProactivePromptContext(context: ProactivePromptContextWith
 
   const relationship = [
     `- Current relationship: ${context.relationship.stage}`,
-    ...(context.relationship.compressedMemory ? [`- Safe relationship summary: ${context.relationship.compressedMemory}`] : []),
   ];
   const events = context.recentMeaningfulEvents.map((event) => `- ${event.summary}`);
   const relationshipState = context.relationshipState

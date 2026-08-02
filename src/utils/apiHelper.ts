@@ -1,6 +1,12 @@
 // src/utils/apiHelper.ts
 
 import { UserSettings } from "../types";
+import {
+  buildKnowledgeExtractionPrompt,
+  parseKnowledgeExtractionOutput,
+  type ExtractedKnowledgeCandidatePayload,
+  type KnowledgeExtractionHistoryItem,
+} from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 
 // Helper to parse different models response formats
 export const parseModels = (data: any): string[] | null => {
@@ -424,7 +430,7 @@ export async function apiTestImageConnection(params: {
 
 // extract memories wrapper
 export async function apiExtractMemories(params: {
-  history: any[];
+  history: KnowledgeExtractionHistoryItem[];
   characterName: string;
   apiKey: string;
   model: string;
@@ -432,7 +438,7 @@ export async function apiExtractMemories(params: {
   templateType?: "refined" | "delicate";
   /** Offline continuations need factual handoff summaries, not screenplay prose. */
   scenario?: "offline";
-}): Promise<{ text: string; items: string[]; error?: string }> {
+}): Promise<{ text: string; items: ExtractedKnowledgeCandidatePayload[]; candidates?: ExtractedKnowledgeCandidatePayload[]; error?: string }> {
   try {
     const res = await fetch("/api/extract-memories", {
       method: "POST",
@@ -441,52 +447,19 @@ export async function apiExtractMemories(params: {
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.items && Array.isArray(data.items)) {
-        return { text: data.text || "", items: data.items };
+      if (Array.isArray(data.candidates)) {
+        return { text: data.text || "", items: data.candidates, candidates: data.candidates };
       }
     }
     throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
     console.warn("apiExtractMemories backend failed, trying client direct fallback:", err);
     try {
-      const historyText = (params.history || [])
-        .map((h: any) => `${h.role === "user" ? "用户" : params.characterName}: ${h.text || h.content}`)
-        .join("\n");
-
-      let prompt = "";
-      if (params.templateType === "delicate") {
-        prompt = `你现在是“${params.characterName}”，请以第一人称（我）的心境和视角，阅读你与用户的对话历史，写下符合你人设、带有丰富情感色彩和代入感的心境日记（细腻版）。
-
-【对话记录】：
-${historyText}
-
-【提取与整理要求】：
-1. 记录你对用户的真实心理活动、情感变化、细微的触动或私密日记。
-2. 用第一人称（我）写，文字要富有沉浸感、细腻生动、具有你原本性格特质的口吻。例如：“今天听说他工作很累，我心里有些说不出的心疼，真想立刻飞过去抱抱他，叮嘱他多喝点热水。下次一定要亲自给他买杯咖啡。”
-3. 丢弃无意义闲聊，每一次提取最多生成 3 条心境日记/随笔，每条 30-80 字左右，展现出你内心的温存或波动。
-4. 请直接输出每一条日记，每行一条，以星号 * 开头。不要加任何多余的说明、字数统计或 markdown 格式。`;
-      } else {
-        prompt = `你是一个高超的记忆提取和整理助手。你的任务是从角色“${params.characterName}”与用户的对话历史中，提取出值得长期记住的事情。
-请阅读下面的对话记录，并将其拆解提取为多条【独立、简短、核心】的事件日志（精炼版）。
-
-【对话记录】：
-${historyText}
-
-【提取与整理要求】：
-1. 提取出双方透露的核心事实、兴趣爱好、重要约定、对彼此的态度或关系进展。
-2. 每一条记忆必须是独立的、简短的一句话，不要包含口头禅或修饰词，语言精炼，概括性强，极低 token 消耗。
-3. 保持第三人称客观描述。例如：
-   * 用户喜欢喝热美式，${params.characterName}承诺下次做设计图时会帮其带咖啡。
-   * 两人约定周末一起散步。
-   * ${params.characterName}发现用户最近工作压力很大，表示很担心。
-4. 丢弃一切无意义的闲聊、问候和没有长远价值的信息。
-5. 每次提取最多生成 5 条最核心的记忆，最少生成 1 条（如果没有核心信息则不用生成任何条目）。
-6. 请直接输出每一条记忆，每行一条，以星号 * 开头。不要有任何多余的寒暄、解释或 markdown 格式，也不要加标题。`;
-      }
-
-      if (params.scenario === "offline") {
-        prompt += `\n\n【线下剧情交接额外要求】：\n1. 仅总结双方明确表达的关系变化、约定、偏好或可在后续线上聊天延续的事实。\n2. 不要写入地点、肢体动作、舞台调度、环境描写、演出对白或未经确认的共同场景。\n3. 使用第三人称明确主体；无法确认主体或事实时不要输出该条。\n4. 至少输出一条可确认事实；没有可确认事实时直接输出空。`;
-      }
+      const prompt = buildKnowledgeExtractionPrompt({
+        characterName: params.characterName,
+        history: params.history,
+        scenario: params.scenario,
+      });
 
       let targetModel = params.model;
       if (params.apiEndpoint && params.apiEndpoint.trim()) {
@@ -503,17 +476,13 @@ ${historyText}
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.5,
         systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
-          ? "你是一个记忆提炼和提取专家，直接按要求输出提取后的多条记忆条目列表，不带任何废话和解释。"
+          ? "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供精确 sourceMessageIds 和原文 evidenceQuote。"
           : undefined
       });
 
       const aiText = result.text || "";
-      const lines = aiText.split(/\n/).map(line => line.trim());
-      const items = lines
-        .map(line => line.replace(/^[\s*\-•+]+/, "").trim())
-        .filter(line => line.length > 0 && !line.startsWith("【") && !line.includes("以下是") && !line.includes("暂无"));
-
-      return { text: aiText, items };
+      const candidates = parseKnowledgeExtractionOutput(aiText, new Set(params.history.map((item) => item.id)));
+      return { text: aiText, items: candidates, candidates };
     } catch (fallbackErr) {
       console.error("Direct extract memories fallback failed:", fallbackErr);
       return {

@@ -1,5 +1,6 @@
 import { WorldBookEntry } from "../types";
 import { loadWorldBookEntries } from "../core/storage/repositories/worldBookRepository";
+import { isWorldBookEntryVisible, type WorldBookReadContext } from "../domain/worldbook/worldBookVisibility";
 
 export function getLatestWorldBookEntries(propEntries: WorldBookEntry[]): WorldBookEntry[] {
   try {
@@ -29,7 +30,8 @@ export interface WorldBookSystemBlocks {
 export function buildWorldBookSystemBlocks(
   propEntries: WorldBookEntry[],
   characterId: string,
-  scanText: string
+  scanText: string,
+  readContext?: WorldBookReadContext,
 ): WorldBookSystemBlocks {
   const latestWorldBookEntries = getLatestWorldBookEntries(propEntries);
   const scanTextLower = scanText.toLowerCase();
@@ -40,8 +42,7 @@ export function buildWorldBookSystemBlocks(
   }[] = [];
 
   for (const entry of latestWorldBookEntries) {
-    // Skip inactive entries
-    if (entry.isActive === false) continue;
+    if (readContext ? !isWorldBookEntryVisible(entry, readContext) : entry.isActive === false) continue;
 
     // Check if bound to global or specific character
     const isGlobal = !entry.characterId || entry.characterId === "global";

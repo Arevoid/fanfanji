@@ -50,10 +50,11 @@ assert.equal(actual.message.relationId, "rel-a");
 assert.equal(actual.message.conversationId, "direct:rel-a");
 
 const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
-const priorityStart = appChat.indexOf("if (shouldGenerateExplicitImage)");
-const priorityEnd = appChat.indexOf("let currentMessagesWithNewUser", priorityStart);
+const chatController = readFileSync(new URL("../src/features/chat/hooks/useChatController.ts", import.meta.url), "utf8");
+const priorityStart = chatController.indexOf("if (shouldGenerateExplicitImage)");
+const priorityEnd = chatController.indexOf("const updatedOfflineMessages", priorityStart);
 assert.ok(priorityStart >= 0 && priorityEnd > priorityStart, "explicit image branch must precede normal reply");
-const priorityBranch = appChat.slice(priorityStart, priorityEnd);
+const priorityBranch = chatController.slice(priorityStart, priorityEnd);
 assert.match(priorityBranch, /await generateAndSendCharacterImage\("explicit-user-text", pendingImageRequest!\)/);
 assert.match(priorityBranch, /return;/);
 assert.doesNotMatch(priorityBranch, /generateResponseForUserMessage/);

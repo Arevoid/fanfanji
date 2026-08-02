@@ -7,6 +7,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, UserSettings, WorldBookEntry } from "../types";
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
+import { appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
 import { collectOfflineHandoffContent, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
@@ -585,6 +586,12 @@ export default function AppOffline({
       }
 
       const historyLimit = character.retrievalHistoryLimit || 100;
+      const relationship = relationships.find((relation) =>
+        relation.id === story.relationId
+        && relation.characterId === story.characterId
+        && relation.conversationId === story.conversationId,
+      );
+      if (!relationship) throw new Error("Offline story relationship scope is invalid");
       const headerLabel = character.archiveTemplateType === "delicate"
         ? `【线下剧本《${story.title}》心境归档】`
         : `【线下剧本《${story.title}》关键剧情归档】`;
@@ -594,6 +601,8 @@ export default function AppOffline({
           character,
           characterId: story.characterId,
           relationId: story.relationId,
+          userIdentityId: relationship.userIdentityId,
+          conversationId: relationship.conversationId,
           recentMessages: sourceMessages.slice(-historyLimit),
           existingMemories: memories,
           scenario: "offline",
@@ -604,6 +613,7 @@ export default function AppOffline({
           apiEndpoint: settings.apiEndpoint,
           templateType: character.archiveTemplateType,
           filterItems: filterOfflineExtractedFacts,
+          offlineStoryPolicyInput: { story, userConfirmed: options.userConfirmed === true, sourceMessages },
           createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           currentTime: () => Date.now(),
           // Source-derived third-person facts are the authoritative record for
@@ -611,6 +621,9 @@ export default function AppOffline({
           formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]\n【确认事件（主体与客体固定）】\n${collectOfflineHandoffContent(story, character.remark || character.name)}`,
         }, apiExtractMemories);
         if (result.apiError) throw new Error(result.apiError);
+        if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
+          throw new Error("Offline story knowledge persistence failed");
+        }
         extractedMemories = result.extractedMemories;
       } catch (error) {
         console.warn("Offline memory extraction unavailable; keeping the story retryable:", error);
@@ -745,7 +758,16 @@ export default function AppOffline({
       // Base Persona
       let sysPrompt = `你现在正在与用户进行“线下故事/小说剧本”的联合创作。本场剧本中共有以下 ${storyCharsList.length} 位角色参与：\n\n`;
       
-      storyCharsList.forEach((char, idx) => {
+      // Character-level compressed memory is private to a direct relation. Do
+      // not fall back to it for relationless/group stories.
+      storyCharsList
+        .map((char) => ({
+          ...char,
+          // The prompt reads the explicit relation summary below; never carry
+          // the character-level legacy summary into this projection.
+          compressedMemory: undefined,
+        }))
+        .forEach((char, idx) => {
         sysPrompt += `[角色 ${idx + 1}: ${char.name}]
 - 姓名：${char.name}
 - 年龄：${char.age || "未知"}
@@ -753,7 +775,7 @@ export default function AppOffline({
 - 背景设定：${char.backstory}
 - 当前关系摘要：${(updatedStory.relationId ? relationships.find((relation) => relation.id === updatedStory.relationId)?.compressedMemory : char.compressedMemory) || "暂无"}
 \n`;
-      });
+        });
 
       if (isImportedGroupStory) {
         sysPrompt += `\n【群聊关系事实：绝对不可改写】

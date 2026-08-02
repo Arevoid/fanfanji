@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { Character, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask } from "../types";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { append as appendKnowledgeClaim, retract as retractKnowledgeClaim, supersede as supersedeKnowledgeClaim } from "../core/storage/repositories/characterKnowledgeRepository";
+import { createManualKnowledgeClaim } from "../features/characterKnowledge/services/manualKnowledgeService";
 import { 
   ArrowLeft, 
   ChevronLeft,
@@ -54,6 +56,12 @@ export default function AppMemory({
 }: AppMemoryProps) {
   const displayCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
   const normalizeCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
+  const toTruthScope = (relation: CharacterRelationship) => ({
+    relationId: relation.id,
+    characterId: relation.characterId,
+    userIdentityId: relation.userIdentityId,
+    conversationId: relation.conversationId,
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>("all");
   const [selectedRelationId, setSelectedRelationId] = useState<string>("all");
@@ -155,14 +163,33 @@ export default function AppMemory({
       return;
     }
 
+    const relation = relationships.find((item) => item.id === newRelationId && item.characterId === normalizeCharacterId(newCharId));
+    if (!relation) {
+      alert("当前关系作用域无效，无法保存长期认知。");
+      return;
+    }
+    const now = Date.now();
+    const memoryId = now.toString();
+    const claim = createManualKnowledgeClaim({
+      id: `claim:manual:${memoryId}`,
+      scope: toTruthScope(relation),
+      statement: newContent.trim(),
+      sourceRecordId: memoryId,
+      recordedAt: now,
+    });
+    if (!claim || !appendKnowledgeClaim(claim).success) {
+      alert("长期认知写入失败，未保存兼容记忆。");
+      return;
+    }
     const newItem: MemoryItem = {
-      id: Date.now().toString(),
-      characterId: normalizeCharacterId(newCharId),
+      id: memoryId,
+      characterId: relation.characterId,
       relationId: newRelationId,
       content: newContent.trim(),
-      timestamp: Date.now(),
+      timestamp: now,
       importance: newImportance,
-      isManual: true
+      isManual: true,
+      sourceKnowledgeClaimIds: [claim.id],
     };
 
     onSaveMemories([newItem, ...normalizedMemories]);
@@ -180,6 +207,17 @@ export default function AppMemory({
 
   const confirmDeleteMemory = () => {
     if (deleteConfirmId) {
+      const memory = memories.find((item) => item.id === deleteConfirmId);
+      const relation = memory?.relationId ? relationships.find((item) => item.id === memory.relationId && item.characterId === normalizeCharacterId(memory.characterId)) : undefined;
+      if (memory?.sourceKnowledgeClaimIds?.length && relation) {
+        const failed = memory.sourceKnowledgeClaimIds.some((claimId) =>
+          !retractKnowledgeClaim(toTruthScope(relation), claimId, "compatibility_memory_deleted").success,
+        );
+        if (failed) {
+          alert("长期认知撤回失败，未删除兼容记忆。");
+          return;
+        }
+      }
       onSaveMemories(memories.filter(item => item.id !== deleteConfirmId));
       setDeleteConfirmId(null);
     }
@@ -194,12 +232,46 @@ export default function AppMemory({
   const handleSaveEdit = () => {
     if (!editingItem || !editContent.trim()) return;
 
+    const relation = editingItem.relationId
+      ? relationships.find((item) => item.id === editingItem.relationId && item.characterId === normalizeCharacterId(editingItem.characterId))
+      : undefined;
+    if (!relation) {
+      alert("当前关系作用域无效，无法修改长期认知。");
+      return;
+    }
+    const now = Date.now();
+    const replacement = createManualKnowledgeClaim({
+      id: `claim:manual:${editingItem.id}:${now}`,
+      scope: toTruthScope(relation),
+      statement: editContent.trim(),
+      sourceRecordId: editingItem.id,
+      recordedAt: now,
+    });
+    if (!replacement) {
+      alert("修改内容未通过长期认知审核。");
+      return;
+    }
+    const previousClaimIds = editingItem.sourceKnowledgeClaimIds || [];
+    const primaryClaimId = previousClaimIds[0];
+    const stored = primaryClaimId
+      ? supersedeKnowledgeClaim(toTruthScope(relation), primaryClaimId, replacement).success
+      : appendKnowledgeClaim(replacement).success;
+    if (!stored) {
+      alert("长期认知修改失败，兼容记忆保持不变。");
+      return;
+    }
+    previousClaimIds.slice(1).forEach((claimId) => {
+      retractKnowledgeClaim(toTruthScope(relation), claimId, "compatibility_memory_manually_replaced");
+    });
+
     const updated = memories.map(item => {
       if (item.id === editingItem.id) {
         return {
           ...item,
           content: editContent.trim(),
-          timestamp: Date.now() // Update timestamp to reflect edit time
+          timestamp: now,
+          isManual: true,
+          sourceKnowledgeClaimIds: [replacement.id],
         };
       }
       return item;

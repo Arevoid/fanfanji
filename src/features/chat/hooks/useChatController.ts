@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { Character, Message, OfflineStory } from "../../../types";
+import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 import {
   appendChatUserMessageToOfflineStory,
   createChatUserMessage,
@@ -30,6 +31,7 @@ export interface UseChatControllerOptions {
   isOfflineModeActive: boolean;
   isInputNarration: boolean;
   activeOfflineStoryId: string | null;
+  runtimeContext: ChatRuntimeContext;
 }
 
 /**
@@ -49,23 +51,39 @@ export function useChatController({
   isOfflineModeActive,
   isInputNarration,
   activeOfflineStoryId,
+  runtimeContext,
 }: UseChatControllerOptions) {
   const [chatInputText, setChatInputText] = useState("");
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
+
+  const scopeKey = runtimeContext.isGroup
+    ? `group:${runtimeContext.groupId || runtimeContext.characterId || ""}:${runtimeContext.conversationId || ""}`
+    : `direct:${runtimeContext.userIdentityId}:${runtimeContext.relationId || ""}:${runtimeContext.conversationId || ""}`;
+  useEffect(() => {
+    setChatInputText("");
+    setQuotedMessage(null);
+  }, [scopeKey]);
+
+  const quoteBelongsToRuntime = (message: Message): boolean => runtimeContext.isGroup
+    ? message.characterId === runtimeContext.groupId && message.conversationId === runtimeContext.conversationId
+    : message.characterId === runtimeContext.characterId
+      && message.relationId === runtimeContext.relationId
+      && (!message.conversationId || message.conversationId === runtimeContext.conversationId);
 
   // Handle Send Message (User sends only, no immediate reply)
   const handleSendOnly = async (event?: FormEvent) => {
     if (event) event.preventDefault();
     if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
 
-    const userMsgText = quotedMessage && activeCharacter
-      ? formatQuotedChatInput(chatInputText.trim(), quotedMessage, activeCharacter)
+    const safeQuotedMessage = quotedMessage && quoteBelongsToRuntime(quotedMessage) ? quotedMessage : null;
+    const userMsgText = safeQuotedMessage && activeCharacter
+      ? formatQuotedChatInput(chatInputText.trim(), safeQuotedMessage, activeCharacter)
       : chatInputText.trim();
     if (quotedMessage) setQuotedMessage(null);
     setChatInputText("");
 
     const userMessage = createChatUserMessage({
-      characterId: activeChatCharId,
+      context: runtimeContext,
       content: userMsgText,
       isOfflineModeActive,
       isInputNarration,
@@ -96,14 +114,15 @@ export function useChatController({
       ? getPendingExplicitImageRequest(rawUserRequest, currentChatMessages)
       : null;
     const shouldGenerateExplicitImage = Boolean(pendingImageRequest);
-    const userMsgText = quotedMessage && activeCharacter
-      ? formatQuotedChatInput(rawUserRequest, quotedMessage, activeCharacter)
+    const safeQuotedMessage = quotedMessage && quoteBelongsToRuntime(quotedMessage) ? quotedMessage : null;
+    const userMsgText = safeQuotedMessage && activeCharacter
+      ? formatQuotedChatInput(rawUserRequest, safeQuotedMessage, activeCharacter)
       : rawUserRequest;
     if (quotedMessage) setQuotedMessage(null);
     setChatInputText("");
 
     const userMessage = createChatUserMessage({
-      characterId: activeChatCharId,
+      context: runtimeContext,
       content: userMsgText,
       isOfflineModeActive,
       isInputNarration,

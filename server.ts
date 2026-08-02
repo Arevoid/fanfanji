@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
+import { buildKnowledgeExtractionPrompt, parseKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
 
 dotenv.config();
 
@@ -422,30 +423,17 @@ ${historyText}
         });
       }
 
-      const historyText = (history || [])
-        .map((h: any) => `${h.role === "user" ? "用户" : characterName}: ${h.text || h.content}`)
-        .join("\n");
-
-      let prompt = `你是一个高超的记忆提取和整理助手。你的任务是从角色“${characterName}”与用户的对话历史中，提取出值得长期记住的事情。
-请阅读下面的对话记录，并将其拆解提取为多条【独立、简短、核心】的记忆条目。
-
-【对话记录】：
-${historyText}
-
-【提取与整理要求】：
-1. 提取出双方透露的核心事实、兴趣爱好、重要约定、对彼此的态度或关系进展。
-2. 每一条记忆必须是独立的、简短的一句话，不要包含口头禅或修饰词，语言精炼，概括性强。
-3. 保持第三人称客观描述。例如：
-   * 用户喜欢喝热美式，${characterName}承诺下次做设计图时会帮其带咖啡。
-   * 两人约定周末一起散步。
-   * ${characterName}发现用户最近工作压力很大，表示很担心。
-4. 丢弃一切无意义的闲聊、问候和没有长远价值的信息。
-5. 每次提取最多生成 5 条最核心的记忆，最少生成 1 条（如果没有核心信息则不用生成任何条目）。
-6. 请直接输出每一条记忆，每行一条，以星号 * 开头。不要有任何多余的寒暄、解释或 markdown 格式，也不要加标题。`;
-
-      if (scenario === "offline") {
-        prompt += `\n\n【线下剧情交接额外要求】：\n1. 仅总结双方明确表达的关系变化、约定、偏好或可在后续线上聊天延续的事实。\n2. 不要写入地点、肢体动作、舞台调度、环境描写、演出对白或未经确认的共同场景。\n3. 使用第三人称明确主体；无法确认主体或事实时不要输出该条。\n4. 至少输出一条可确认事实；没有可确认事实时直接输出空。`;
-      }
+      const safeHistory: KnowledgeExtractionHistoryItem[] = Array.isArray(history)
+        ? history.filter((item: unknown): item is KnowledgeExtractionHistoryItem => {
+          if (!item || typeof item !== "object") return false;
+          const record = item as Record<string, unknown>;
+          return typeof record.id === "string"
+            && record.id.trim().length > 0
+            && (record.role === "user" || record.role === "model")
+            && typeof record.text === "string";
+        })
+        : [];
+      const prompt = buildKnowledgeExtractionPrompt({ characterName, history: safeHistory, scenario });
 
       let aiText = "";
 
@@ -470,7 +458,7 @@ ${historyText}
           body: JSON.stringify({
             model: targetModel,
             messages: [
-              { role: "system", content: "你是一个记忆提炼和提取专家，直接按要求输出提取后的多条记忆条目列表，不带任何废话和解释。" },
+              { role: "system", content: "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供精确 sourceMessageIds 和原文 evidenceQuote。" },
               { role: "user", content: prompt }
             ],
             temperature: 0.5
@@ -508,13 +496,8 @@ ${historyText}
         aiText = response.text || "";
       }
 
-      // Parse bullet points
-      const lines = aiText.split(/\n/).map(line => line.trim());
-      const items = lines
-        .map(line => line.replace(/^[\s*\-•+]+/, "").trim())
-        .filter(line => line.length > 0 && !line.startsWith("【") && !line.includes("以下是") && !line.includes("暂无"));
-
-      res.json({ text: aiText, items });
+      const candidates = parseKnowledgeExtractionOutput(aiText, new Set(safeHistory.map((item) => item.id)));
+      res.json({ text: aiText, items: candidates, candidates });
     } catch (error: any) {
       console.error("Extract Memories Error:", error);
       res.status(500).json({ error: error.message || "提取记忆发生异常，请稍后再试。" });

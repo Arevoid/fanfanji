@@ -1,5 +1,7 @@
 import type { Character } from "../../types";
+import type { CharacterRoutine } from "../characterLife/characterRoutine/characterRoutineTypes";
 import type { CharacterEvent } from "../characterLife/characterEventTypes";
+import type { CharacterCognitiveRoutineContext } from "../characterCognitive/characterCognitiveTypes";
 import type { MomentTopicRecord } from "../moments/momentGeneration/momentTopicTypes";
 
 export const MOMENT_PUBLIC_COGNITIVE_CONTEXT_SCHEMA_VERSION = 1;
@@ -97,6 +99,9 @@ export interface MomentPublicTopicContext {
   cooldownTopics: readonly string[];
 }
 
+/** Prompt-safe routine signal; configuration and identity remain private. */
+export type MomentPublicRoutineContext = CharacterCognitiveRoutineContext;
+
 export interface MomentPublicTimeContextInput {
   now: number;
   date?: string;
@@ -127,6 +132,7 @@ export interface MomentPublicCognitiveContext {
   publicEvents: readonly MomentPublicEvent[];
   publicBehaviorConstraints: readonly MomentPublicBehaviorConstraint[];
   topicContext?: MomentPublicTopicContext;
+  routineContext?: MomentPublicRoutineContext;
   currentTime: MomentPublicTimeContext;
 }
 
@@ -138,5 +144,6 @@ export interface BuildMomentPublicCognitiveContextInput {
   publicEvents?: readonly MomentPublicEventCandidate[];
   publicBehaviorConstraints?: readonly MomentPublicBehaviorConstraintCandidate[];
   topicHistory?: readonly MomentTopicRecord[];
+  routine?: CharacterRoutine;
   currentTime: MomentPublicTimeContextInput;
 }

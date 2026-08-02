@@ -1,4 +1,5 @@
 import { buildCharacterCognitiveContext } from "../../../domain/characterCognitive/contextBuilder";
+import { buildRelationshipCognitiveProjection } from "../../characterLife/services/relationshipCognitiveProjectionService";
 import { createDirectChatKnowledgeBoundary } from "../../../domain/characterCognitive/contextPolicy";
 import {
   classifyTimeOfDay,
@@ -125,6 +126,11 @@ export function buildProactiveCognitiveContext(input: {
   topicHistory?: readonly ProactiveTopicRecord[];
 }): ProactiveCognitiveContext | undefined {
   try {
+    const relationshipProjection = buildRelationshipCognitiveProjection({
+      relation: input.relationship,
+      events: input.events,
+      now: input.occurredAt,
+    });
     const context = buildCharacterCognitiveContext({
       character: input.character,
       relation: input.relationship,
@@ -136,6 +142,7 @@ export function buildProactiveCognitiveContext(input: {
       timeContext: { now: input.occurredAt },
       knowledgeBoundary: createDirectChatKnowledgeBoundary(),
       conversationId: input.relationship.conversationId,
+      relationshipTimeline: relationshipProjection.timeline,
     });
     const topicContext = projectProactiveTopicContext(
       input.topicHistory,

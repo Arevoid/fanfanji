@@ -1,4 +1,6 @@
 import type { Character, MemoryItem, MemoryVaultSettings, Message } from "../../types";
+import type { KnowledgeClaim } from "../characterKnowledge/characterKnowledgeTypes";
+import type { ExtractedKnowledgeCandidatePayload } from "../../features/characterKnowledge/services/knowledgeExtractionProtocol";
 
 export type MemoryScenario =
   | "chat"
@@ -12,6 +14,8 @@ export type MemoryScenario =
 export interface MemoryRetrievalContext {
   characterId: string;
   relationId?: string;
+  userIdentityId?: string;
+  conversationId?: string;
   queryText: string;
   existingMemories: readonly MemoryItem[];
   limit?: number;
@@ -22,6 +26,8 @@ export interface MemoryExtractionContext {
   character: Character;
   characterId: string;
   relationId?: string;
+  userIdentityId?: string;
+  conversationId?: string;
   recentMessages: readonly Message[];
   existingMemories: readonly MemoryItem[];
   scenario: "chat" | "offline" | "manual-summary" | "immediate-summary";
@@ -38,10 +44,11 @@ export interface MemoryExtractionContext {
    */
   filterItems?: (items: readonly string[]) => string[];
   formatContent: (items: readonly string[]) => string;
+  offlineStoryPolicyInput?: import("../offlineStory/offlineStoryFactPolicy").OfflineStoryFactPolicyInput;
 }
 
 export interface MemoryExtractionApiParams {
-  history: { role: "user" | "model"; text: string }[];
+  history: { id: string; role: "user" | "model"; text: string }[];
   characterName: string;
   apiKey: string;
   model: string;
@@ -52,7 +59,15 @@ export interface MemoryExtractionApiParams {
 
 export interface MemoryExtractionApiResult {
   items?: unknown;
+  candidates?: ExtractedKnowledgeCandidatePayload[];
   error?: string;
+}
+
+export interface MemoryExtractionResult {
+  extractedMemories: MemoryItem[];
+  acceptedClaims: KnowledgeClaim[];
+  rejectedCandidateCount: number;
+  apiError?: string;
 }
 
 export type MemoryExtractionApi = (params: MemoryExtractionApiParams) => Promise<MemoryExtractionApiResult>;

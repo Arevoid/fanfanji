@@ -30,12 +30,14 @@ type MomentPromptContextWithRoutine = MomentPromptContext & {
 
 function projectMomentRoutineContext(
   context: CharacterCognitiveContext | undefined,
+  options?: MomentPromptAdapterOptions,
 ): Pick<MomentPromptContextWithRoutine, "routineContext"> {
-  if (!context?.routineContext) return {};
+  const routine = context?.routineContext || options?.publicContext?.routineContext;
+  if (!routine) return {};
   return {
     routineContext: {
-      period: context.routineContext.period,
-      state: context.routineContext.state,
+      period: routine.period,
+      state: routine.state,
     },
   };
 }
@@ -145,7 +147,7 @@ export function buildMomentPromptContext(
     publicCommentHistory,
     behaviorConstraints: publicContext?.publicBehaviorConstraints.map(({ description }) => ({ description })) ?? [],
     time: projectPublicMomentTime(context, options),
-    ...projectMomentRoutineContext(context),
+    ...projectMomentRoutineContext(context, options),
     ...projectMomentTopicContext(context, options),
   };
 }

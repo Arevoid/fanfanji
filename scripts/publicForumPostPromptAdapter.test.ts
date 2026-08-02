@@ -4,7 +4,7 @@ import {
   buildPublicForumPostPromptContext,
   formatPublicForumPostPromptContext,
 } from "../src/features/characterCognitive/promptAdapters/publicForumPostPromptAdapter";
-import { generateForumThreads } from "../src/features/forum/services/forumGenerationService";
+import { buildForumRelationGenerationContext, generateForumThreads } from "../src/features/forum/services/forumGenerationService";
 import type { CharacterRelationship } from "../src/domain/relationship/characterRelationship";
 import type { Character } from "../src/types";
 import type { UserSettings } from "../src/types";
@@ -72,6 +72,16 @@ const relation: CharacterRelationship = {
   updatedAt: 1,
 };
 const settings = { apiKey: "test-key", selectedModel: "test-model" } as UserSettings;
+const relationContext = buildForumRelationGenerationContext({
+  ownerIdentityId: relation.userIdentityId,
+  relationship: relation,
+  characters: [character],
+  messages: [{ id: "private-message", characterId: character.id, relationId: relation.id, conversationId: relation.conversationId, sender: "user", content: "PRIVATE chat marker: surprise birthday", timestamp: 1 }],
+  memories: [{ id: "private-memory", characterId: character.id, relationId: relation.id, content: "PRIVATE memory marker: forbidden detail", timestamp: 1 }],
+  worldBookEntries: [],
+});
+assert.ok(relationContext);
+assert.doesNotMatch(relationContext.promptContext, /PRIVATE chat marker|PRIVATE memory marker|birthday|forbidden detail/);
 const capturedRequests: Array<{ message: string; systemInstruction: string }> = [];
 const generated = await generateForumThreads({
   ownerIdentityId: relation.userIdentityId,
