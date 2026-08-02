@@ -1215,7 +1215,7 @@ export default function AppSettings({
             </div>
             
             <div className="text-center pt-8">
-              <span className="text-[10px] font-mono text-slate-400">小手机系统版本 v3.5.0 • 星空探索版</span>
+              <span className="text-[10px] font-mono text-slate-400">交流群：1060472750</span>
             </div>
           </div>
         ) : (
