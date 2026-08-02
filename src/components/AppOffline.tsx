@@ -149,6 +149,7 @@ export default function AppOffline({
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const memorySyncInFlightRef = useRef(new Set<string>());
+  const [memorySyncingStoryId, setMemorySyncingStoryId] = useState<string | null>(null);
 
   const saveActiveStorySnapshot = (story: OfflineStory) => {
     activeStoryRef.current = story;
@@ -576,10 +577,16 @@ export default function AppOffline({
     story: OfflineStory,
     options: { userConfirmed?: boolean; syncIntent?: "automatic_end" | "manual_settings" } = {},
   ): Promise<OfflineStory> => {
-    if (memorySyncInFlightRef.current.has(story.id)) return story;
+    if (memorySyncInFlightRef.current.has(story.id)) {
+      showToast("剧情记忆正在同步中，请稍候…");
+      return story;
+    }
     const repairingLegacyHandoff = needsLegacyHandoffRepair(story);
     const repairingMissingSummary = needsMissingSummaryRepair(story);
-    if (!hasUnsyncedOfflineMemoryProgress(story) && !repairingLegacyHandoff && !repairingMissingSummary) return story;
+    if (!hasUnsyncedOfflineMemoryProgress(story) && !repairingLegacyHandoff && !repairingMissingSummary) {
+      showToast("当前进展已经同步，无需重复处理");
+      return story;
+    }
     // A story owns one replaceable summary. Re-reading its source prevents a
     // later incremental sync from discarding facts saved by an earlier one.
     const sourceMessages = getOfflineMemorySourceMessages(story, { includeSynced: true });
@@ -615,6 +622,8 @@ export default function AppOffline({
     });
 
     memorySyncInFlightRef.current.add(story.id);
+    setMemorySyncingStoryId(story.id);
+    showToast("正在总结并同步剧情记忆，请稍候…");
     try {
       if (sourceMessages.length === 0) {
         const syncedStory = markSynced();
@@ -717,6 +726,7 @@ export default function AppOffline({
       return failedStory;
     } finally {
       memorySyncInFlightRef.current.delete(story.id);
+      setMemorySyncingStoryId((current) => current === story.id ? null : current);
     }
   };
 
@@ -1277,10 +1287,14 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     <button
                       type="button"
                       onClick={() => void handleSyncMemoryToBrain(activeStory, { userConfirmed: true, syncIntent: "manual_settings" })}
+                      disabled={memorySyncingStoryId === activeStory.id}
+                      aria-busy={memorySyncingStoryId === activeStory.id}
                       className="w-full py-2 bg-[var(--button-secondary-bg)] hover:bg-[var(--surface-raised)] text-[var(--button-secondary-text)] font-bold rounded-[16px] border border-[var(--button-secondary-border)] transition-all text-xs flex items-center justify-center gap-1.5 shadow-sm disabled:bg-[var(--button-disabled-bg)] disabled:text-[var(--button-disabled-text)] disabled:border-[var(--button-disabled-border)] disabled:opacity-100"
                     >
-                      <Cpu className="w-3.5 h-3.5" />
-                      <span>同步当前进展记忆至角色大脑</span>
+                      {memorySyncingStoryId === activeStory.id
+                        ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        : <Cpu className="w-3.5 h-3.5" />}
+                      <span>{memorySyncingStoryId === activeStory.id ? "同步中，请稍候…" : "同步当前进展记忆至角色大脑"}</span>
                     </button>
                   </div>
 

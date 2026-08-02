@@ -18,7 +18,7 @@ import { getWorldBookLocationReferences } from "../domain/worldbook/locationRefe
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
-import { buildOfflineHandoffPromptBlock } from "../domain/memory/offlineMemorySync";
+import { buildOfflineHandoffPromptBlock, selectFreshOfflineHandoffMemory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
@@ -2824,17 +2824,13 @@ ${activeCharacter.disableBracketActions
       // A continuation synchronized while leaving the offline app is an explicit
       // handoff. Surface the newest one on the immediate return to online chat,
       // even when a short greeting is too vague for semantic retrieval.
-      const latestOfflineContinuationMemory = [...(memories || [])]
-        .filter((memory) => memory.relationId === activeRelationship?.id && memory.content.includes("offline-story:"))
-        .sort((a, b) => b.timestamp - a.timestamp)[0];
-      const isFreshOfflineHandoff = latestOfflineContinuationMemory
-        // The handoff must be newer than the last online message. This keeps an
-        // old archived story from resurfacing, while allowing an immediate return
-        // to online chat to bridge naturally even when it crosses midnight.
-        && (!latestHistoryMessage || latestOfflineContinuationMemory.timestamp >= latestHistoryMessage.timestamp)
-        && Date.now() - latestOfflineContinuationMemory.timestamp < 2 * 60 * 60 * 1000;
-      if (isFreshOfflineHandoff
-        && !relevantMemories.some((memory) => memory.id === latestOfflineContinuationMemory.id)) {
+      const latestOnlineCharacterMessage = [...msgsForHistory].reverse().find((message) => message.sender === "character");
+      const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
+        memories: memories || [],
+        relationId: activeRelationship?.id,
+        latestOnlineCharacterMessageAt: latestOnlineCharacterMessage?.timestamp,
+      });
+      if (latestOfflineContinuationMemory) {
         charDefText += buildOfflineHandoffPromptBlock(latestOfflineContinuationMemory);
       }
 
@@ -4055,6 +4051,16 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       }
       if (truthRetrieval) {
         charDefText += formatTruthRetrievalForPrompt(truthRetrieval);
+      }
+
+      const latestOnlineCharacterMessage = [...msgsForHistory].reverse().find((message) => message.sender === "character");
+      const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
+        memories: memories || [],
+        relationId: activeRelationship?.id,
+        latestOnlineCharacterMessageAt: latestOnlineCharacterMessage?.timestamp,
+      });
+      if (latestOfflineContinuationMemory) {
+        charDefText += buildOfflineHandoffPromptBlock(latestOfflineContinuationMemory);
       }
 
       const userProfileText = `User Profile:

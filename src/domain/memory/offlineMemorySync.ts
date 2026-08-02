@@ -27,6 +27,28 @@ export function hasOfflineStorySummary(story: OfflineStory, memories: readonly M
   );
 }
 
+/**
+ * Selects the latest relation-scoped offline handoff until the character has
+ * produced an online reply after it. User questions sent during that handoff
+ * must not suppress the memory before the character can acknowledge it.
+ */
+export function selectFreshOfflineHandoffMemory(input: {
+  memories: readonly MemoryItem[];
+  relationId?: string;
+  latestOnlineCharacterMessageAt?: number;
+  now?: number;
+  maxAgeMs?: number;
+}): MemoryItem | undefined {
+  if (!input.relationId) return undefined;
+  const now = input.now ?? Date.now();
+  const maxAgeMs = input.maxAgeMs ?? 2 * 60 * 60 * 1000;
+  return [...input.memories]
+    .filter((memory) => memory.relationId === input.relationId && memory.content.includes("offline-story:"))
+    .filter((memory) => now - memory.timestamp >= 0 && now - memory.timestamp < maxAgeMs)
+    .filter((memory) => input.latestOnlineCharacterMessageAt === undefined || memory.timestamp >= input.latestOnlineCharacterMessageAt)
+    .sort((left, right) => right.timestamp - left.timestamp)[0];
+}
+
 export function getOfflineMemorySourceMessages(story: OfflineStory, options: { includeSynced?: boolean } = {}): Message[] {
   const syncStart = options.includeSynced
     ? 0
