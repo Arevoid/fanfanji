@@ -2824,11 +2824,10 @@ ${activeCharacter.disableBracketActions
       // A continuation synchronized while leaving the offline app is an explicit
       // handoff. Surface the newest one on the immediate return to online chat,
       // even when a short greeting is too vague for semantic retrieval.
-      const latestOnlineCharacterMessage = [...msgsForHistory].reverse().find((message) => message.sender === "character");
       const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
         memories: memories || [],
         relationId: activeRelationship?.id,
-        latestOnlineCharacterMessageAt: latestOnlineCharacterMessage?.timestamp,
+        queryText: userMsg?.content,
       });
       if (latestOfflineContinuationMemory) {
         charDefText += buildOfflineHandoffPromptBlock(latestOfflineContinuationMemory);
@@ -4053,11 +4052,10 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         charDefText += formatTruthRetrievalForPrompt(truthRetrieval);
       }
 
-      const latestOnlineCharacterMessage = [...msgsForHistory].reverse().find((message) => message.sender === "character");
       const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
         memories: memories || [],
         relationId: activeRelationship?.id,
-        latestOnlineCharacterMessageAt: latestOnlineCharacterMessage?.timestamp,
+        queryText: lastUserMsg.content,
       });
       if (latestOfflineContinuationMemory) {
         charDefText += buildOfflineHandoffPromptBlock(latestOfflineContinuationMemory);

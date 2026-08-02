@@ -14,19 +14,25 @@ const handoff: MemoryItem = {
 assert.equal(selectFreshOfflineHandoffMemory({
   memories: [handoff],
   relationId: "relation-a",
-  latestOnlineCharacterMessageAt: 90,
+  queryText: "几点我带点炸鸡过去",
   now: 110,
-}), handoff, "a handoff remains available until the character acknowledges it online");
+}), handoff, "a recent handoff remains available across the immediate online return window");
 assert.equal(selectFreshOfflineHandoffMemory({
   memories: [handoff],
   relationId: "relation-a",
-  latestOnlineCharacterMessageAt: 101,
-  now: 110,
-}), undefined, "a later online character reply completes the handoff");
+  queryText: "我们之前确认恋爱关系了吗",
+  now: 100 + 3 * 60 * 60 * 1000,
+}), handoff, "an older handoff remains retrievable when the query overlaps its facts");
+assert.equal(selectFreshOfflineHandoffMemory({
+  memories: [handoff],
+  relationId: "relation-a",
+  queryText: "今天天气怎么样",
+  now: 100 + 3 * 60 * 60 * 1000,
+}), undefined, "an old unrelated handoff does not pollute ordinary chat");
 assert.equal(selectFreshOfflineHandoffMemory({
   memories: [handoff],
   relationId: "relation-b",
-  latestOnlineCharacterMessageAt: 90,
+  queryText: "确认恋爱关系",
   now: 110,
 }), undefined, "another relationship cannot receive this offline memory");
 

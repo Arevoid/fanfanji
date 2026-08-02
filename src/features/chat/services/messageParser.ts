@@ -4,7 +4,7 @@ import type { ChatMessageVisualType, CallTranscriptItem } from "./messageTypes";
 export type { CallTranscriptItem } from "./messageTypes";
 
 /** Internal scheduling metadata can be supplied to a model, but is never chat content. */
-const INTERNAL_DELIVERY_MARKER = /\[\s*(?:发送于|发送时间|历史发送时间)\s*[:：]\s*[^\]]+\]/gi;
+const INTERNAL_DELIVERY_MARKER = /\[\s*(?:发送于|发送时间|历史发送时间|消息发送时间|消息时间)\s*[:：]\s*[^\]]+\]/gi;
 const INTERNAL_STANDALONE_CLOCK_MARKER = /(^|\n)[\t ]*[\[【（(]\s*(?:(?:上午|下午|早上|晚上)\s*)?(?:[01]?\d|2[0-3])\s*[:：]\s*[0-5]\d(?:\s*[:：]\s*[0-5]\d)?\s*[\]】）)][\t ]*(?=\n|$)/gim;
 
 export function stripInternalDeliveryMarkers(text: string): string {

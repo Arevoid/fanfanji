@@ -28,24 +28,34 @@ export function hasOfflineStorySummary(story: OfflineStory, memories: readonly M
 }
 
 /**
- * Selects the latest relation-scoped offline handoff until the character has
- * produced an online reply after it. User questions sent during that handoff
- * must not suppress the memory before the character can acknowledge it.
+ * Selects the latest relation-scoped offline handoff throughout the immediate
+ * return window, and later whenever the user's query overlaps its facts.
  */
 export function selectFreshOfflineHandoffMemory(input: {
   memories: readonly MemoryItem[];
   relationId?: string;
-  latestOnlineCharacterMessageAt?: number;
+  queryText?: string;
   now?: number;
   maxAgeMs?: number;
 }): MemoryItem | undefined {
   if (!input.relationId) return undefined;
   const now = input.now ?? Date.now();
   const maxAgeMs = input.maxAgeMs ?? 2 * 60 * 60 * 1000;
+  const normalizedQuery = (input.queryText || "").toLocaleLowerCase();
+  const queryTokens = Array.from(new Set([
+    ...normalizedQuery.split(/[\s,.:;!?"'，（）()。！“”]+/u).filter((token) => token.length >= 2),
+    ...Array.from(normalizedQuery.matchAll(/[\p{Script=Han}]{2,}/gu)).flatMap(([sequence]) =>
+      Array.from({ length: Math.max(0, sequence.length - 1) }, (_, index) => sequence.slice(index, index + 2)),
+    ),
+  ]));
   return [...input.memories]
     .filter((memory) => memory.relationId === input.relationId && memory.content.includes("offline-story:"))
-    .filter((memory) => now - memory.timestamp >= 0 && now - memory.timestamp < maxAgeMs)
-    .filter((memory) => input.latestOnlineCharacterMessageAt === undefined || memory.timestamp >= input.latestOnlineCharacterMessageAt)
+    .filter((memory) => {
+      const age = now - memory.timestamp;
+      if (age >= 0 && age < maxAgeMs) return true;
+      const content = memory.content.toLocaleLowerCase();
+      return queryTokens.some((token) => content.includes(token));
+    })
     .sort((left, right) => right.timestamp - left.timestamp)[0];
 }
 
@@ -208,5 +218,6 @@ export function createOfflineStoryHandoffMemory(input: {
 export function buildOfflineHandoffPromptBlock(memory: MemoryItem): string {
   return `\n- Latest offline continuation handoff (continue this naturally if relevant):
   * ${sanitizeOfflineMemoryForOnlineUse(memory.content)}
-  * When asked about what just happened offline, treat only the handoff facts above as authoritative. Do not invent missing scenes, actions, locations, or promises; if a detail is absent, say you are unsure.`;
+  * These are confirmed facts in the current relationship. Never deny, forget, or contradict them; when relevant, acknowledge them naturally in character.
+  * When asked about what happened offline, treat only the handoff facts above as authoritative. Do not invent missing scenes, actions, locations, or promises; if a detail is absent, say you are unsure.`;
 }
