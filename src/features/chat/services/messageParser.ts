@@ -5,12 +5,19 @@ export type { CallTranscriptItem } from "./messageTypes";
 
 /** Internal scheduling metadata can be supplied to a model, but is never chat content. */
 const INTERNAL_DELIVERY_MARKER = /\[\s*(?:消息发送于|消息发送时间|消息时间|历史发送时间|发送于|发送时间)\s*(?:[:：]\s*)?[^\]]*(?:\d{1,2}\s*[:：]\s*\d{2})[^\]]*\]/gi;
+// Date/time context is retained in Message records for ordering and model
+// context, but must never render as a user-facing chat bubble. This removes
+// named date-and-clock blocks while leaving the underlying timestamp intact.
+const INTERNAL_NAMED_TIMESTAMP_MARKER = /\[\s*(?:历史时间|当前时间|本地时间|现实时间|时间戳|消息时间|发送时间)\s*(?:[:：]\s*)?[^\]]*(?:\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}\s*[-/]\s*\d{1,2}\s*[-/]\s*\d{1,2})[^\]]*(?:\d{1,2}\s*[:：]\s*\d{2})[^\]]*\]/gi;
+const INTERNAL_DATE_TIMESTAMP_MARKER = /\[\s*(?:\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}\s*[-/]\s*\d{1,2}\s*[-/]\s*\d{1,2})\s+(?:上午|下午|早上|晚上)?\s*\d{1,2}\s*[:：]\s*\d{2}[^\]]*\]/gi;
 const INTERNAL_STANDALONE_CLOCK_MARKER = /(^|\n)[\t ]*[\[【（(]\s*(?:(?:上午|下午|早上|晚上)\s*)?(?:[01]?\d|2[0-3])\s*[:：]\s*[0-5]\d(?:\s*[:：]\s*[0-5]\d)?\s*[\]】）)][\t ]*(?=\n|$)/gim;
 const INTERNAL_RELATIVE_SECOND_MARKER = /(^|\n)[\t ]*\[\s*第\s*\d{1,4}\s*秒\s*\][\t ]*(?=\n|$)/gim;
 
 export function stripInternalDeliveryMarkers(text: string): string {
   return text
     .replace(INTERNAL_DELIVERY_MARKER, "")
+    .replace(INTERNAL_NAMED_TIMESTAMP_MARKER, "")
+    .replace(INTERNAL_DATE_TIMESTAMP_MARKER, "")
     // Models occasionally copy the clock portion of hidden history metadata
     // as a standalone bubble, for example "[15:10]". Only remove a complete
     // metadata line; conversational text such as "15:10见" remains intact.
