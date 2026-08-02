@@ -216,8 +216,45 @@ export function createOfflineStoryHandoffMemory(input: {
 }
 
 export function buildOfflineHandoffPromptBlock(memory: MemoryItem): string {
-  return `\n- Latest offline continuation handoff (continue this naturally if relevant):
-  * ${sanitizeOfflineMemoryForOnlineUse(memory.content)}
-  * These are confirmed facts in the current relationship. Never deny, forget, or contradict them; when relevant, acknowledge them naturally in character.
-  * When asked about what happened offline, treat only the handoff facts above as authoritative. Do not invent missing scenes, actions, locations, or promises; if a detail is absent, say you are unsure.`;
+  return buildOfflineHandoffTimelinePromptBlock({ memory });
+}
+
+const formatTimelineTime = (timestamp?: number): string => timestamp && Number.isFinite(timestamp)
+  ? new Date(timestamp).toLocaleString("zh-CN", { hour12: false })
+  : "时间未记录";
+
+/**
+ * Places a completed offline story between the previous and current online
+ * segments. Facts remain relation-scoped; timestamps only explain chronology.
+ */
+export function buildOfflineHandoffTimelinePromptBlock(input: {
+  memory: MemoryItem;
+  story?: OfflineStory;
+  previousOnlineAt?: number;
+  currentOnlineAt?: number;
+}): string {
+  const sourceMessages = input.story
+    ? getOfflineMemorySourceMessages(input.story, { includeSynced: true })
+    : [];
+  const offlineStartedAt = sourceMessages[0]?.timestamp ?? input.story?.createdAt ?? input.memory.timestamp;
+  const offlineEndedAt = input.story?.archivedAt
+    ?? input.story?.lastMemorySyncAt
+    ?? sourceMessages[sourceMessages.length - 1]?.timestamp
+    ?? input.memory.timestamp;
+  const isImmediateReturn = Boolean(
+    input.currentOnlineAt
+    && input.currentOnlineAt >= offlineEndedAt
+    && input.currentOnlineAt - offlineEndedAt <= 2 * 60 * 60 * 1000,
+  );
+
+  return `\n[线上—线下—新线上连续时间线｜仅供理解，不得作为消息输出]
+1. 上一段线上聊天：${formatTimelineTime(input.previousOnlineAt)}。
+2. 已确认的线下互动：${formatTimelineTime(offlineStartedAt)} 至 ${formatTimelineTime(offlineEndedAt)}。
+${sanitizeOfflineMemoryForOnlineUse(input.memory.content)}
+3. 当前新线上聊天：${formatTimelineTime(input.currentOnlineAt)}。
+连续性规则：
+- 第 2 段真实发生在第 1 段之后、第 3 段之前；角色亲历并记得上述已确认事实，不得否认、遗忘或与之矛盾。
+- ${isImmediateReturn ? "这次线上聊天是线下互动刚结束后的衔接，用户所说的“刚才/刚刚”优先指第 2 段。" : "按上述绝对时间理解先后关系，不得擅自改写相对时间。"}
+- 只把列出的事实视为权威；不得补写缺失的场景、动作、地点或承诺。不确定的细节应明确表示不确定。
+- 本时间线是隐藏上下文。禁止复述标题、编号、时间线标签、存储标记或方括号元数据，禁止把它们发送成聊天气泡。`;
 }

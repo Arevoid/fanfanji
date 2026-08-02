@@ -18,7 +18,7 @@ import { getWorldBookLocationReferences } from "../domain/worldbook/locationRefe
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
-import { buildOfflineHandoffPromptBlock, selectFreshOfflineHandoffMemory } from "../domain/memory/offlineMemorySync";
+import { buildOfflineHandoffTimelinePromptBlock, getOfflineMemorySourceMessages, isOfflineStoryHandoffMemory, selectFreshOfflineHandoffMemory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
@@ -1211,6 +1211,25 @@ export default function AppChat({
   const visibleChatMessages = currentChatMessages
     .map((message) => ({ ...message, content: stripInternalDeliveryMarkers(message.content) }))
     .filter((message) => Boolean(message.content.trim()));
+  const buildOfflineTimelineHandoff = (memory: MemoryItem, currentOnlineAt?: number): string => {
+    const story = [...offlineStories]
+      .filter((candidate) => candidate.relationId === activeRelationship?.id)
+      .filter((candidate) => isOfflineStoryHandoffMemory(memory, candidate))
+      .sort((left, right) => (right.archivedAt ?? right.updatedAt) - (left.archivedAt ?? left.updatedAt))[0];
+    const offlineSourceMessages = story
+      ? getOfflineMemorySourceMessages(story, { includeSynced: true })
+      : [];
+    const offlineStartedAt = offlineSourceMessages[0]?.timestamp ?? story?.createdAt ?? memory.timestamp;
+    const previousOnlineAt = [...currentChatMessages]
+      .filter((message) => message.timestamp < offlineStartedAt)
+      .sort((left, right) => right.timestamp - left.timestamp)[0]?.timestamp;
+    return buildOfflineHandoffTimelinePromptBlock({
+      memory,
+      story,
+      previousOnlineAt,
+      currentOnlineAt,
+    });
+  };
   const activeStylePreset = resolveActiveChatStylePreset(
     activeCharacter?.chatStylePreset,
     settings.globalChatStylePreset,
@@ -2830,7 +2849,7 @@ ${activeCharacter.disableBracketActions
         queryText: userMsg?.content,
       });
       if (latestOfflineContinuationMemory) {
-        charDefText += buildOfflineHandoffPromptBlock(latestOfflineContinuationMemory);
+        charDefText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, userMsg?.timestamp);
       }
 
       const userProfileText = `User Profile (interacting with you):
@@ -4058,7 +4077,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         queryText: lastUserMsg.content,
       });
       if (latestOfflineContinuationMemory) {
-        charDefText += buildOfflineHandoffPromptBlock(latestOfflineContinuationMemory);
+        charDefText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, lastUserMsg.timestamp);
       }
 
       const userProfileText = `User Profile:

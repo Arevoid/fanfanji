@@ -31,7 +31,9 @@ export async function generateProactiveReplyCandidates(input: {
   const data = await requestAiReply(input.requestAi, request);
   if (!data?.text) return { data, messages: [] };
   const cleanedText = cleanAiReplyText(data.text, input.disableBracketActions);
-  const bubbles = splitAiReplyBubbles(cleanedText || data.text, input.keepPeriods);
+  // Internal scheduling metadata is model context, never user-visible chat.
+  // Do not fall back to the raw response when sanitization removes everything.
+  const bubbles = cleanedText ? splitAiReplyBubbles(cleanedText, input.keepPeriods) : [];
   return {
     data,
     messages: bubbles.map((bubbleText, index) => createCharacterTextMessage({

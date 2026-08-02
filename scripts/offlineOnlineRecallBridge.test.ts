@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { selectFreshOfflineHandoffMemory } from "../src/domain/memory/offlineMemorySync";
-import type { MemoryItem } from "../src/types";
+import { buildOfflineHandoffTimelinePromptBlock, selectFreshOfflineHandoffMemory } from "../src/domain/memory/offlineMemorySync";
+import type { MemoryItem, OfflineStory } from "../src/types";
 
 const handoff: MemoryItem = {
   id: "offline-summary",
@@ -35,6 +35,33 @@ assert.equal(selectFreshOfflineHandoffMemory({
   queryText: "确认恋爱关系",
   now: 110,
 }), undefined, "another relationship cannot receive this offline memory");
+
+const story: OfflineStory = {
+  id: "story-a",
+  characterId: "character-a",
+  relationId: "relation-a",
+  conversationId: "conversation-a",
+  title: "刚结束的剧情",
+  createdAt: 200,
+  updatedAt: 400,
+  archivedAt: 400,
+  mode: "continue",
+  messages: [
+    { id: "offline-user", characterId: "character-a", relationId: "relation-a", conversationId: "conversation-a", sender: "user", content: "开门", timestamp: 220, isOffline: true },
+    { id: "offline-character", characterId: "character-a", relationId: "relation-a", conversationId: "conversation-a", sender: "character", content: "我来了", timestamp: 300, isOffline: true },
+  ],
+};
+const timeline = buildOfflineHandoffTimelinePromptBlock({
+  memory: { ...handoff, timestamp: 400 },
+  story,
+  previousOnlineAt: 100,
+  currentOnlineAt: 450,
+});
+assert.match(timeline, /上一段线上聊天/);
+assert.match(timeline, /已确认的线下互动/);
+assert.match(timeline, /当前新线上聊天/);
+assert.match(timeline, /刚结束后的衔接/);
+assert.match(timeline, /禁止.*发送成聊天气泡/);
 
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const bridgeUses = chatSource.match(/selectFreshOfflineHandoffMemory\(\{/g) || [];

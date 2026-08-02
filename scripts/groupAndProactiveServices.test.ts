@@ -62,6 +62,15 @@ assert.equal((await generateProactiveReplyCandidates({ ...{
   requestAi: async () => ({ text: "" }), request, characterId: "a", disableBracketActions: false, keepPeriods: false,
   createId: (index: number) => `${index}`, currentTime: (index: number) => index,
 } })).messages.length, 0);
+assert.equal((await generateProactiveReplyCandidates({
+  requestAi: async () => ({ text: "[消息发送于 2026-08-02 18:11]" }),
+  request,
+  characterId: "a",
+  disableBracketActions: false,
+  keepPeriods: false,
+  createId: (index: number) => `${index}`,
+  currentTime: (index: number) => index,
+})).messages.length, 0);
 await assert.rejects(() => generateProactiveReplyCandidates({ requestAi: async () => { throw new Error("failed"); }, request, characterId: "a", disableBracketActions: false, keepPeriods: false, createId: (index) => `${index}`, currentTime: (index) => index }), /failed/);
 assert.equal(proactiveRequests, 1);
 assert.equal(groupRequests, 1);
