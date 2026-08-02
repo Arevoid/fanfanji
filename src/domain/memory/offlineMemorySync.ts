@@ -103,9 +103,22 @@ export function filterOfflineExtractedFacts(items: readonly string[]): string[] 
     // Any unresolved personal pronoun can reverse actor/recipient meaning
     // after the story returns to online chat. Require named third-person facts.
     .filter((item) => !/(?:我们|你们|他们|她们|我|你|他|她|它)/.test(item))
+    // Keep intimacy as a durable, non-graphic relationship event and discard
+    // transient screenplay or explicit physical detail.
+    .filter((item) => !/(衬衫|内裤|没穿|开门瞬间|姿势|阴茎|阴道|乳房|插入|抽插|射精|口交|肛交)/.test(item))
     // The source-derived facts below are authoritative for these directional
     // events, so a model summary cannot reverse their actor and recipient.
     .filter((item) => !/(水管|漏水|感谢|谢谢|请.*吃饭)/.test(item));
+}
+
+/** Hides storage-only sync markers from the user-facing Memory page. */
+export function getMemoryDisplayContent(content: string): string {
+  return content
+    .split("\n")
+    .filter((line) => !/^\[offline-story:[^\]]+\]$/u.test(line.trim()))
+    .filter((line) => line.trim() !== "【确认事件（主体与客体固定）】")
+    .join("\n")
+    .trim();
 }
 
 /** Removes legacy screenplay-shaped handoffs before an online prompt can see them. */

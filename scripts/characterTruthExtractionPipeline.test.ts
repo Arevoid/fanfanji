@@ -44,6 +44,20 @@ assert.match(prompt, /messageId="user-plan"/);
 assert.match(prompt, /evidenceQuote/);
 assert.match(prompt, /plan \+ future/);
 
+const offlinePrompt = buildKnowledgeExtractionPrompt({
+  characterName: "范千",
+  scenario: "offline",
+  history: [
+    { id: "offline-character", role: "model", text: "范千带炸鸡来到用户家中。" },
+    { id: "offline-user", role: "user", text: "我同意了，男朋友。" },
+  ],
+});
+assert.match(offlinePrompt, /user 和 character 两侧消息/);
+assert.match(offlinePrompt, /关系状态变化/);
+assert.match(offlinePrompt, /角色名“范千”固定主体/);
+assert.match(offlinePrompt, /简洁非露骨表述/);
+assert.match(offlinePrompt, /1 至 8 条/);
+
 const parsed = parseKnowledgeExtractionOutput([
   JSON.stringify(payload()),
   JSON.stringify(payload({ sourceMessageIds: ["foreign-message"] })),
@@ -91,7 +105,7 @@ assert.equal(inventedByCharacter.extractedMemories.length, 0, "character self-au
 const fabricatedQuote = await MemoryService.extractMemories({ ...baseContext, createId: () => "extraction-3" }, async () => ({
   items: [payload({ evidenceQuote: "用户从未说过的内容" })],
 }));
-assert.equal(fabricatedQuote.acceptedClaims[0]?.truthStatus, "inferred");
+assert.equal(fabricatedQuote.acceptedClaims.length, 0, "a fabricated quote has no traceable evidence");
 assert.equal(fabricatedQuote.extractedMemories.length, 0, "a fabricated quote cannot return to legacy Memory");
 
 const invalidSource = await MemoryService.extractMemories({ ...baseContext, createId: () => "extraction-4" }, async () => ({

@@ -72,6 +72,12 @@ function resolveTruth(candidate: KnowledgeWriteCandidate): { truthStatus: TruthS
   if (source.kind === "legacy_memory") return { truthStatus: "legacy_unverified", userConfirmed: false, confidence: clampConfidence(candidate.confidence, 0.25) };
   if (source.kind === "manual") return { truthStatus: "confirmed", userConfirmed: true, confidence: clampConfidence(candidate.confidence, 1) };
   if (source.kind === "deterministic_action") return { truthStatus: "confirmed", userConfirmed: Boolean(candidate.userConfirmed), confidence: clampConfidence(candidate.confidence, 1) };
+  // evaluateKnowledgeWrite has already enforced the narrow offline boundary:
+  // direct single-character continuation + explicit user confirmation. Within
+  // that boundary, both sides of the story are confirmed relationship canon.
+  if (source.kind === "offline_story" && candidate.userConfirmed === true) {
+    return { truthStatus: "confirmed", userConfirmed: true, confidence: clampConfidence(candidate.confidence, 0.9) };
+  }
   if (source.authorship === "user") {
     const confirmed = candidate.userConfirmed === true;
     return { truthStatus: confirmed ? "confirmed" : "asserted", userConfirmed: confirmed, confidence: clampConfidence(candidate.confidence, confirmed ? 1 : 0.85) };

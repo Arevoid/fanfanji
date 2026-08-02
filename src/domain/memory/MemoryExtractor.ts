@@ -71,7 +71,8 @@ export async function extractMemories(
   const allowedMessageIds = new Set(context.recentMessages.map((message) => message.id));
   const payloads = rawItems
     .map((item) => normalizeExtractedKnowledgeCandidate(item, allowedMessageIds))
-    .filter((item): item is NonNullable<typeof item> => item !== undefined);
+    .filter((item): item is NonNullable<typeof item> => item !== undefined)
+    .slice(0, context.scenario === "offline" ? 8 : 5);
   const filteredStatements = context.filterItems
     ? new Set(context.filterItems(payloads.map((item) => item.statement)))
     : undefined;
@@ -88,10 +89,25 @@ export async function extractMemories(
       .map((id) => context.recentMessages.find((message) => message.id === id))
       .filter(isMessage);
     const quotedMessage = sourceMessages.find((message) => message.content.includes(payload.evidenceQuote));
+    if (!quotedMessage) {
+      rejectedCandidateCount += 1;
+      return;
+    }
     const isVerifiedUserEvidence = Boolean(quotedMessage
       && quotedMessage.sender === "user"
       && sourceMessages.every((message) => message.sender === "user"));
-    const statement = isVerifiedUserEvidence ? payload.evidenceQuote : payload.statement;
+    // A confirmed offline continuation is summarized into explicit named
+    // subjects. Replacing it with the raw quote here would re-introduce "我/你"
+    // and can reverse who did what when the memory is recalled later.
+    const useNormalizedOfflineStatement = context.scenario === "offline"
+      && context.offlineStoryPolicyInput?.userConfirmed === true;
+    const statement = useNormalizedOfflineStatement
+      ? payload.statement
+      : isVerifiedUserEvidence ? payload.evidenceQuote : payload.statement;
+    if (context.filterItems && context.filterItems([statement]).length === 0) {
+      rejectedCandidateCount += 1;
+      return;
+    }
     const sourceKind = context.scenario === "offline" ? "offline_story" as const : "user_message" as const;
     const writeCandidate: KnowledgeWriteCandidate = {
       id: `claim:${baseId}:${index}`,
@@ -111,7 +127,7 @@ export async function extractMemories(
         producer: `memory-extractor.${context.scenario}.v1`,
         evidenceKey: createEvidenceKey(context.relationId!, payload.sourceMessageIds, statement),
       },
-      confidence: isVerifiedUserEvidence ? 0.85 : 0.4,
+      confidence: useNormalizedOfflineStatement ? 0.9 : isVerifiedUserEvidence ? 0.85 : 0.4,
       userConfirmed: context.scenario === "offline" && context.offlineStoryPolicyInput?.userConfirmed === true,
       recordedAt: context.currentTime(),
       offlineStoryPolicyInput: context.offlineStoryPolicyInput,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   filterOfflineExtractedFacts,
+  getMemoryDisplayContent,
   getOfflineStorySummaryMarker,
   isOfflineStoryHandoffMemory,
 } from "../src/domain/memory/offlineMemorySync";
@@ -36,6 +37,49 @@ const legacy: MemoryItem = {
 };
 
 const canonicalMarker = getOfflineStorySummaryMarker(story);
+const confirmedStoryMessages: Message[] = [
+  {
+    id: "character-chicken",
+    characterId: character.id,
+    relationId: story.relationId,
+    sender: "character",
+    content: "范千带着一袋炸鸡来到用户家中，两人一起吃了炸鸡。",
+    timestamp: 10,
+  },
+  {
+    id: "user-preference",
+    characterId: character.id,
+    relationId: story.relationId,
+    sender: "user",
+    content: "我喜欢这个炸鸡的味道。",
+    timestamp: 11,
+  },
+  {
+    id: "character-confession",
+    characterId: character.id,
+    relationId: story.relationId,
+    sender: "character",
+    content: "范千向用户告白并询问是否愿意成为恋人。",
+    timestamp: 12,
+  },
+  {
+    id: "user-acceptance",
+    characterId: character.id,
+    relationId: story.relationId,
+    sender: "user",
+    content: "我同意了，男朋友。",
+    timestamp: 13,
+  },
+  {
+    id: "relationship-intimacy",
+    characterId: character.id,
+    relationId: story.relationId,
+    sender: "user",
+    content: "用户与范千在双方自愿的情况下发生了性关系。",
+    timestamp: 14,
+  },
+];
+const confirmedStory: OfflineStory = { ...story, messages: confirmedStoryMessages };
 const tests: Array<[string, () => void | Promise<void>]> = [
   ["A canonical marker remains stable across incremental message counts", () => {
     assert.equal(canonicalMarker, getOfflineStorySummaryMarker({ ...story, messages: [...story.messages, { ...story.messages[0], id: "message-b" }] }));
@@ -90,6 +134,98 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       .filter((memory) => !isOfflineStoryHandoffMemory(memory, story));
     const next = MemoryService.mergeMemories(retained, [replacement]);
     assert.deepEqual(next.map((memory) => memory.id), ["summary", "other-story"]);
+  }],
+  ["F confirmed continuation stores concise normalized key events from both speakers", async () => {
+    const candidates = [
+      {
+        statement: "范千带炸鸡来到用户家中，两人一起吃了炸鸡。",
+        kind: "fact" as const,
+        subject: "relationship" as const,
+        temporalStatus: "past" as const,
+        sourceMessageIds: ["character-chicken"],
+        evidenceQuote: confirmedStoryMessages[0].content,
+      },
+      {
+        statement: "用户明确表示喜欢范千带来的炸鸡口味。",
+        kind: "preference" as const,
+        subject: "user" as const,
+        temporalStatus: "timeless" as const,
+        sourceMessageIds: ["user-preference"],
+        evidenceQuote: confirmedStoryMessages[1].content,
+      },
+      {
+        statement: "范千向用户告白，用户接受告白，两人确认恋爱关系。",
+        kind: "fact" as const,
+        subject: "relationship" as const,
+        temporalStatus: "present" as const,
+        sourceMessageIds: ["character-confession", "user-acceptance"],
+        evidenceQuote: confirmedStoryMessages[3].content,
+      },
+      {
+        statement: "用户与范千在双方自愿的情况下发生了性关系。",
+        kind: "fact" as const,
+        subject: "relationship" as const,
+        temporalStatus: "past" as const,
+        sourceMessageIds: ["relationship-intimacy"],
+        evidenceQuote: confirmedStoryMessages[4].content,
+      },
+    ];
+    const result = await MemoryService.extractMemories({
+      character: { ...character, name: "范千" },
+      characterId: character.id,
+      relationId: story.relationId,
+      userIdentityId: "identity-a",
+      conversationId: "direct:relation-a",
+      recentMessages: confirmedStoryMessages,
+      existingMemories: [],
+      scenario: "offline",
+      apiKey: "",
+      model: "",
+      filterItems: filterOfflineExtractedFacts,
+      offlineStoryPolicyInput: { story: confirmedStory, userConfirmed: true, sourceMessages: confirmedStoryMessages },
+      createId: () => "confirmed-summary",
+      currentTime: () => 15,
+      formatContent: (items) => `【关键剧情归档】\n${items.map((item) => `- ${item}`).join("\n")}\n[${canonicalMarker}]`,
+    }, async () => ({ candidates }));
+
+    assert.equal(result.acceptedClaims.length, 4);
+    assert.ok(result.acceptedClaims.every((claim) => claim.truthStatus === "confirmed" && claim.userConfirmed));
+    assert.equal(result.extractedMemories.length, 1);
+    const content = result.extractedMemories[0].content;
+    assert.match(content, /范千带炸鸡来到用户家中/);
+    assert.match(content, /用户明确表示喜欢范千带来的炸鸡口味/);
+    assert.match(content, /两人确认恋爱关系/);
+    assert.match(content, /双方自愿的情况下发生了性关系/);
+    assert.doesNotMatch(content, /我同意了/);
+    assert.doesNotMatch(getMemoryDisplayContent(content), /offline-story:/);
+  }],
+  ["G unconfirmed offline story cannot promote model narration to memory", async () => {
+    const result = await MemoryService.extractMemories({
+      character: { ...character, name: "范千" },
+      characterId: character.id,
+      relationId: story.relationId,
+      userIdentityId: "identity-a",
+      conversationId: "direct:relation-a",
+      recentMessages: confirmedStoryMessages,
+      existingMemories: [],
+      scenario: "offline",
+      apiKey: "",
+      model: "",
+      filterItems: filterOfflineExtractedFacts,
+      offlineStoryPolicyInput: { story: confirmedStory, userConfirmed: false, sourceMessages: confirmedStoryMessages },
+      createId: () => "unconfirmed-summary",
+      currentTime: () => 16,
+      formatContent: (items) => items.join("\n"),
+    }, async () => ({ candidates: [{
+      statement: "范千带炸鸡来到用户家中。",
+      kind: "fact",
+      subject: "relationship",
+      temporalStatus: "past",
+      sourceMessageIds: ["character-chicken"],
+      evidenceQuote: confirmedStoryMessages[0].content,
+    }] }));
+    assert.equal(result.acceptedClaims.length, 0);
+    assert.equal(result.extractedMemories.length, 0);
   }],
 ];
 

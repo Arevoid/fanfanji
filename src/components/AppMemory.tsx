@@ -5,6 +5,7 @@ import { resolveCanonicalCharacterId } from "../domain/character/characterIdenti
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { append as appendKnowledgeClaim, retract as retractKnowledgeClaim, supersede as supersedeKnowledgeClaim } from "../core/storage/repositories/characterKnowledgeRepository";
 import { createManualKnowledgeClaim } from "../features/characterKnowledge/services/manualKnowledgeService";
+import { getMemoryDisplayContent } from "../domain/memory/offlineMemorySync";
 import { 
   ArrowLeft, 
   ChevronLeft,
@@ -588,7 +589,7 @@ export default function AppMemory({
                         /* Read-only view */
                         <div>
                           <p className="text-xs text-slate-600 leading-relaxed font-medium break-all whitespace-pre-wrap">
-                            {item.content}
+                            {getMemoryDisplayContent(item.content)}
                           </p>
                           <div className="flex items-center justify-between pt-2">
                             {/* Manual tag */}

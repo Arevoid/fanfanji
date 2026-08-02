@@ -10,7 +10,7 @@ import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { collectOfflineHandoffContent, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
+import { filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
@@ -24,6 +24,7 @@ import { getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey,
 import { countOfflineStoriesForRelation } from "../domain/relationship/offlineStoryScope";
 import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
 import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/offlineStoryEventCaptureService";
+import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../domain/prompt/offlineIdentityBinding";
 import { ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
 
 interface AppOfflineProps {
@@ -638,9 +639,10 @@ export default function AppOffline({
           offlineStoryPolicyInput: { story, userConfirmed: options.userConfirmed === true, sourceMessages },
           createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           currentTime: () => Date.now(),
-          // Source-derived third-person facts are the authoritative record for
-          // actor/recipient direction; ambiguous extraction text is excluded.
-          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]\n【确认事件（主体与客体固定）】\n${collectOfflineHandoffContent(story, character.remark || character.name)}`,
+          // The structured extractor has already fixed actor/recipient names.
+          // Keep one concise list instead of appending a second keyword-based
+          // summary that can omit the actual relationship-changing events.
+          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]`,
         }, apiExtractMemories);
         if (result.apiError) throw new Error(result.apiError);
         if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
@@ -799,6 +801,11 @@ export default function AppOffline({
 \n`;
         });
 
+      sysPrompt += `\n${buildOfflineIdentityBinding({
+        characterNames: storyCharsList.flatMap((character) => [character.name, character.remark || ""]),
+        userName: settings.name,
+      })}\n`;
+
       if (isImportedGroupStory) {
         sysPrompt += `\n【群聊关系事实：绝对不可改写】
 这是从群聊导入的续写。以上每位角色档案中的身份、与用户的关系、以及角色彼此的关系，均为已确定的事实，必须逐字按其含义延续。
@@ -950,6 +957,13 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
       });
 
       if (response && response.text) {
+        const singleActorNames = storyCharsList.length === 1
+          ? Array.from(new Set([storyCharsList[0].name, storyCharsList[0].remark].filter((name): name is string => Boolean(name))))
+          : [];
+        const responseText = singleActorNames.reduce(
+          (text, characterName) => removeSingleActorSelfVocative(text, characterName),
+          response.text,
+        );
         // A single generation is one editable script entry. Preserve its paragraphs
         // inside the entry instead of turning every paragraph into a separate message.
         const newMsgs: Message[] = [{
@@ -958,7 +972,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
           relationId: updatedStory.relationId,
           conversationId: updatedStory.conversationId,
           sender: "character",
-          content: response.text.trim(),
+          content: responseText.trim(),
           timestamp: Date.now(),
           isOffline: true,
           isNarration: false
