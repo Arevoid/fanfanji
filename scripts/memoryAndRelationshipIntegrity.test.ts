@@ -28,6 +28,11 @@ assert.equal(isOnlineContinuationStory({ ...continuation, mode: "if" }), false, 
 assert.equal(isOnlineContinuationStory(continuation), true, "linked continuation is eligible");
 assert.equal(shouldAutoSyncOnlineContinuation(continuation), true, "new continuation content syncs");
 assert.equal(
+  shouldAutoSyncOnlineContinuation({ ...continuation, sourceChatId: undefined, sourceChatMsgCount: undefined }),
+  true,
+  "new offline continuation also syncs when it ends",
+);
+assert.equal(
   shouldAutoSyncOnlineContinuation({ ...continuation, lastSyncedMessageCount: continuation.messages.length }),
   false,
   "already-synced continuation does not sync twice",

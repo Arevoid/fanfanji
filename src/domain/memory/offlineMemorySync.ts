@@ -143,9 +143,9 @@ export function hasUnsyncedOfflineMemoryProgress(story: OfflineStory): boolean {
 }
 
 /**
- * Only a story deliberately opened as a continuation of an online chat may
- * feed its new facts back into that chat's memory. Director and IF stories can
- * import history as reference, but remain independent branches by design.
+ * Identifies a continuation that originated from an online chat. This remains
+ * useful for navigation, while automatic memory sync also supports a new
+ * offline continuation that did not import chat history.
  */
 export function isOnlineContinuationStory(story: OfflineStory): boolean {
   return story.mode === "continue"
@@ -154,7 +154,7 @@ export function isOnlineContinuationStory(story: OfflineStory): boolean {
 }
 
 export function shouldAutoSyncOnlineContinuation(story: OfflineStory): boolean {
-  return isOnlineContinuationStory(story) && hasUnsyncedOfflineMemoryProgress(story);
+  return story.mode === "continue" && hasUnsyncedOfflineMemoryProgress(story);
 }
 
 /**

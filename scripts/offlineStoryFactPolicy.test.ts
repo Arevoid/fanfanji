@@ -38,6 +38,12 @@ assert.equal(canSyncOfflineStoryToMemory(confirmedContinuation), true, "confirme
 assert.equal(classifyOfflineStoryFactLevel(confirmedContinuation), "event_eligible", "confirmed single-character continuation is eligible for a future event policy");
 assert.equal(canSyncOfflineStoryToMemory({ ...confirmedContinuation, story: story({ mode: "if" }) }), false, "IF story is rejected");
 assert.equal(canSyncOfflineStoryToMemory({ ...confirmedContinuation, story: story({ mode: "director" }) }), false, "director story is rejected");
+const manualIf = { ...confirmedContinuation, story: story({ mode: "if" as const }), syncIntent: "manual_settings" as const };
+const manualDirector = { ...confirmedContinuation, story: story({ mode: "director" as const }), syncIntent: "manual_settings" as const };
+assert.equal(canSyncOfflineStoryToMemory(manualIf), true, "IF story can sync only after settings confirmation");
+assert.equal(canSyncOfflineStoryToMemory(manualDirector), true, "director story can sync only after settings confirmation");
+assert.equal(classifyOfflineStoryFactLevel(manualIf), "memory_eligible", "manually confirmed IF stays memory-only");
+assert.equal(canCreateCharacterEventFromOfflineStory(manualDirector), false, "manual fictional branch does not create an automatic completion event");
 assert.equal(canSyncOfflineStoryToMemory({ ...confirmedContinuation, userConfirmed: false }), false, "unconfirmed story is rejected");
 assert.equal(canSyncOfflineStoryToMemory({ ...confirmedContinuation, sourceMessages: [message("character", "AI-only plot")] }), false, "AI-only plot is rejected");
 

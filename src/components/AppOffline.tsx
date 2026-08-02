@@ -392,6 +392,9 @@ export default function AppOffline({
       localStorage.setItem(getOfflineModeStorageKey(story.relationId), "true");
       localStorage.setItem(getOfflineStoryStorageKey(story.relationId), story.id);
     }
+    if (story.mode === "director" || story.mode === "if") {
+      showToast("当前模式不会在结束时自动同步记忆；如需让线上角色记住，请在剧本设置中手动同步。");
+    }
   };
 
   const clearOfflineSession = (story: OfflineStory) => {
@@ -410,18 +413,35 @@ export default function AppOffline({
     Boolean(story.archivedAt || story.memorySyncStatus === "synced") && !hasOfflineStorySummary(story, memories);
 
   const shouldSyncStoryMemory = (story: OfflineStory) =>
-    shouldAutoSyncOnlineContinuation(story) || needsLegacyHandoffRepair(story);
+    story.mode === "continue"
+    && (shouldAutoSyncOnlineContinuation(story) || needsLegacyHandoffRepair(story) || needsMissingSummaryRepair(story));
+
+  const finalizeStoryBeforeLeaving = async (story: OfflineStory): Promise<OfflineStory> => {
+    let completedStory = story;
+    if (shouldSyncStoryMemory(story)) {
+      completedStory = await handleSyncMemoryToBrain(story, { userConfirmed: true, syncIntent: "automatic_end" });
+    }
+    // Returning to either destination ends the current offline session. A
+    // failed summary remains retryable, while Director/IF stays story-only
+    // unless the user explicitly used the settings sync action.
+    if (!completedStory.archivedAt) {
+      completedStory = {
+        ...completedStory,
+        archivedAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      if (activeStoryRef.current?.id === completedStory.id) saveActiveStorySnapshot(completedStory);
+      else onSaveOfflineStory(completedStory);
+    }
+    return completedStory;
+  };
 
   // Exit story workspace back to list
   const handleExitStoryWorkspace = async () => {
-    // Only an explicitly linked online continuation may write a handoff on
-    // exit. Director and IF stories remain isolated, even when they imported
-    // chat history as writing reference.
+    // Ending any direct continuation confirms and archives its new memories.
+    // Director and IF branches remain opt-in through the settings action.
     const latestStory = activeStoryRef.current;
-    let completedStory = latestStory;
-    if (latestStory && shouldSyncStoryMemory(latestStory)) {
-      completedStory = await handleSyncMemoryToBrain(latestStory);
-    }
+    const completedStory = latestStory ? await finalizeStoryBeforeLeaving(latestStory) : null;
     if (completedStory) clearOfflineSession(completedStory);
     clearActiveStorySnapshot();
     setIsSettingsOpen(false);
@@ -440,10 +460,7 @@ export default function AppOffline({
       showToast("未找到当前身份对应的线上聊天关系。");
       return;
     }
-    let completedStory = latestStory;
-    if (shouldSyncStoryMemory(latestStory)) {
-      completedStory = await handleSyncMemoryToBrain(latestStory);
-    }
+    const completedStory = await finalizeStoryBeforeLeaving(latestStory);
     clearOfflineSession(completedStory);
     clearActiveStorySnapshot();
     setIsSettingsOpen(false);
@@ -535,7 +552,9 @@ export default function AppOffline({
     setNewStartFromChat(false);
     setNewTimeAwareness(false);
 
-    showToast("线下故事创建成功");
+    showToast(newStory.mode === "director" || newStory.mode === "if"
+      ? "故事已创建。当前模式不自动同步记忆；如需同步，请在剧本设置中手动操作。"
+      : "线下续写已创建；结束剧情时会自动总结并同步记忆。");
   };
 
   // Delete a story
@@ -555,7 +574,7 @@ export default function AppOffline({
   // Sync memory manually
   const handleSyncMemoryToBrain = async (
     story: OfflineStory,
-    options: { userConfirmed?: boolean } = {},
+    options: { userConfirmed?: boolean; syncIntent?: "automatic_end" | "manual_settings" } = {},
   ): Promise<OfflineStory> => {
     if (memorySyncInFlightRef.current.has(story.id)) return story;
     const repairingLegacyHandoff = needsLegacyHandoffRepair(story);
@@ -565,8 +584,14 @@ export default function AppOffline({
     // later incremental sync from discarding facts saved by an earlier one.
     const sourceMessages = getOfflineMemorySourceMessages(story, { includeSynced: true });
 
-    if (!canSyncOfflineStoryToMemory({ story, userConfirmed: options.userConfirmed === true, sourceMessages })) {
-      showToast("只有当前关系下、已确认的单角色线上续写可同步至长期记忆；导演、IF 与多人剧情会保留在线下故事空间。");
+    const offlineStoryPolicyInput = {
+      story,
+      userConfirmed: options.userConfirmed === true,
+      syncIntent: options.syncIntent,
+      sourceMessages,
+    };
+    if (!canSyncOfflineStoryToMemory(offlineStoryPolicyInput)) {
+      showToast("当前剧情暂时无法同步：需要单角色关系、有效用户剧情，并由续写结束自动确认或在设置中手动确认。");
       return story;
     }
 
@@ -637,7 +662,7 @@ export default function AppOffline({
           apiEndpoint: settings.apiEndpoint,
           templateType: character.archiveTemplateType,
           filterItems: filterOfflineExtractedFacts,
-          offlineStoryPolicyInput: { story, userConfirmed: options.userConfirmed === true, sourceMessages },
+          offlineStoryPolicyInput,
           createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           currentTime: () => Date.now(),
           // The structured extractor has already fixed actor/recipient names.
@@ -1244,10 +1269,14 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       <Cpu className="w-4 h-4 text-indigo-500" />
                       <span className="text-xs font-bold text-slate-800">同步剧本记忆</span>
                     </div>
-                    <p className="text-[10px] text-slate-400">将此离线剧本空间的当前进展记忆同步并沉淀到角色的长期记忆库中，让他们在后续对话中感知到这些事件。</p>
+                    <p className="text-[10px] text-slate-400">
+                      {activeStory.mode === "continue"
+                        ? "续写剧情结束时会自动总结并同步；也可以在此立即同步当前进展。"
+                        : "导演和 IF 模式结束时不会自动同步。只有点击下方按钮手动确认后，剧情才会进入角色长期记忆并同步到线上。"}
+                    </p>
                     <button
                       type="button"
-                      onClick={() => void handleSyncMemoryToBrain(activeStory, { userConfirmed: true })}
+                      onClick={() => void handleSyncMemoryToBrain(activeStory, { userConfirmed: true, syncIntent: "manual_settings" })}
                       className="w-full py-2 bg-[var(--button-secondary-bg)] hover:bg-[var(--surface-raised)] text-[var(--button-secondary-text)] font-bold rounded-[16px] border border-[var(--button-secondary-border)] transition-all text-xs flex items-center justify-center gap-1.5 shadow-sm disabled:bg-[var(--button-disabled-bg)] disabled:text-[var(--button-disabled-text)] disabled:border-[var(--button-disabled-border)] disabled:opacity-100"
                     >
                       <Cpu className="w-3.5 h-3.5" />
@@ -1707,6 +1736,12 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     ))}
                   </div>
                 </div>
+
+                {(newMode === "director" || newMode === "if") && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-relaxed text-amber-700">
+                    当前模式结束时不会自动总结或同步记忆。如需让线上角色记住本剧情，请进入“剧本设置”并手动同步。
+                  </div>
+                )}
 
                 {/* IF premise prompt field */}
                 {newMode === "if" && (
