@@ -18,7 +18,7 @@ import { getWorldBookLocationReferences } from "../domain/worldbook/locationRefe
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
-import { buildOfflineHandoffTimelinePromptBlock, getOfflineMemorySourceMessages, isOfflineStoryHandoffMemory, selectFreshOfflineHandoffMemory } from "../domain/memory/offlineMemorySync";
+import { acknowledgeOfflineHandoff, buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, getOfflineMemorySourceMessages, isOfflineStoryHandoffMemory, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
@@ -1211,6 +1211,34 @@ export default function AppChat({
   const visibleChatMessages = currentChatMessages
     .map((message) => ({ ...message, content: stripInternalDeliveryMarkers(message.content) }))
     .filter((message) => Boolean(message.content.trim()));
+  const getPendingOfflineHandoff = (): OfflineStory | undefined => selectPendingOfflineHandoffStory({
+    stories: offlineStories,
+    relationId: activeRelationship?.id,
+    characterId: activeRelationship?.characterId,
+    conversationId: activeRelationship?.conversationId,
+  });
+  const acknowledgePendingOfflineHandoff = (story?: OfflineStory) => {
+    if (!story || story.onlineHandoff?.status !== "pending") return;
+    onSaveOfflineStory(acknowledgeOfflineHandoff(story));
+  };
+  const buildPendingOfflineTimelineHandoff = (
+    story: OfflineStory,
+    currentOnlineAt?: number,
+    summaryMemory?: MemoryItem,
+  ): string => {
+    const offlineStartedAt = story.onlineHandoff?.startedAt ?? story.createdAt;
+    const previousOnlineAt = [...currentChatMessages]
+      .filter((message) => message.timestamp < offlineStartedAt)
+      .sort((left, right) => right.timestamp - left.timestamp)[0]?.timestamp;
+    return buildPendingOfflineHandoffPromptBlock({
+      story,
+      characterName: activeCharacter?.remark || activeCharacter?.name || "当前角色",
+      userName: settings.name || "用户",
+      previousOnlineAt,
+      currentOnlineAt,
+      summaryMemory,
+    });
+  };
   const buildOfflineTimelineHandoff = (memory: MemoryItem, currentOnlineAt?: number): string => {
     const story = [...offlineStories]
       .filter((candidate) => candidate.relationId === activeRelationship?.id)
@@ -2610,6 +2638,7 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     cognitiveContext?: CharacterCognitiveContext,
   ) => {
     setIsTyping(true);
+    let pendingOfflineHandoffForReply: OfflineStory | undefined;
     if (options?.forumShareTrigger) setForumShareReplyError("");
 
     const isRedPacket = userMsg && isRedPacketMarkup(userMsg.content);
@@ -2848,7 +2877,18 @@ ${activeCharacter.disableBracketActions
         relationId: activeRelationship?.id,
         queryText: userMsg?.content,
       });
-      if (latestOfflineContinuationMemory) {
+      pendingOfflineHandoffForReply = getPendingOfflineHandoff();
+      if (pendingOfflineHandoffForReply) {
+        const matchingSummary = latestOfflineContinuationMemory
+          && isOfflineStoryHandoffMemory(latestOfflineContinuationMemory, pendingOfflineHandoffForReply)
+          ? latestOfflineContinuationMemory
+          : undefined;
+        charDefText += buildPendingOfflineTimelineHandoff(
+          pendingOfflineHandoffForReply,
+          userMsg?.timestamp,
+          matchingSummary,
+        );
+      } else if (latestOfflineContinuationMemory) {
         charDefText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, userMsg?.timestamp);
       }
 
@@ -3302,6 +3342,10 @@ ${stickerListStr}
             if (idx < replyCandidates.messages.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
             }
+          }
+
+          if (createdMessages.length > 0) {
+            acknowledgePendingOfflineHandoff(pendingOfflineHandoffForReply);
           }
 
           chatSideEffectController.afterReplySuccess({
@@ -3964,6 +4008,7 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
         : undefined;
 
     setIsTyping(true);
+    let pendingOfflineHandoffForReply: OfflineStory | undefined;
 
     try {
       // Short-term real-time context limit: contextMemoryLimit (range 10~50, default 20), capped globally at 50
@@ -4076,7 +4121,18 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         relationId: activeRelationship?.id,
         queryText: lastUserMsg.content,
       });
-      if (latestOfflineContinuationMemory) {
+      pendingOfflineHandoffForReply = getPendingOfflineHandoff();
+      if (pendingOfflineHandoffForReply) {
+        const matchingSummary = latestOfflineContinuationMemory
+          && isOfflineStoryHandoffMemory(latestOfflineContinuationMemory, pendingOfflineHandoffForReply)
+          ? latestOfflineContinuationMemory
+          : undefined;
+        charDefText += buildPendingOfflineTimelineHandoff(
+          pendingOfflineHandoffForReply,
+          lastUserMsg.timestamp,
+          matchingSummary,
+        );
+      } else if (latestOfflineContinuationMemory) {
         charDefText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, lastUserMsg.timestamp);
       }
 
@@ -4237,6 +4293,9 @@ ${stickerListStr}
           currentTime: (idx) => Date.now() + idx,
         });
         replyCandidates.messages.forEach(onSendMessage);
+        if (replyCandidates.messages.length > 0) {
+          acknowledgePendingOfflineHandoff(pendingOfflineHandoffForReply);
+        }
       }
     } catch (err: any) {
       console.error("Regeneration error:", err);

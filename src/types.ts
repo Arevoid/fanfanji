@@ -880,6 +880,15 @@ export interface OfflineStory {
   memorySyncStatus?: "pending" | "synced" | "failed";
   lastMemorySyncAt?: number;
   syncedSourceMessageIds?: string[];
+  /** Durable one-shot bridge from a completed offline story back to this relationship's online chat. */
+  onlineHandoff?: {
+    status: "pending" | "acknowledged";
+    createdAt: number;
+    startedAt: number;
+    endedAt: number;
+    sourceMessageIds: string[];
+    acknowledgedAt?: number;
+  };
 }
 
 export interface Sticker {

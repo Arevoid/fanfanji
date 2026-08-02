@@ -10,7 +10,7 @@ import { apiChat, apiExtractMemories } from "../utils/apiHelper";
 import { appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { splitTextToOfflineSegments } from "../utils/pngParser";
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
+import { createPendingOfflineHandoff, filterOfflineExtractedFacts, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
@@ -425,15 +425,25 @@ export default function AppOffline({
     // Returning to either destination ends the current offline session. A
     // failed summary remains retryable, while Director/IF stays story-only
     // unless the user explicitly used the settings sync action.
+    const handoffCreatedAt = Date.now();
     if (!completedStory.archivedAt) {
       completedStory = {
         ...completedStory,
-        archivedAt: Date.now(),
-        updatedAt: Date.now(),
+        archivedAt: handoffCreatedAt,
+        updatedAt: handoffCreatedAt,
       };
-      if (activeStoryRef.current?.id === completedStory.id) saveActiveStorySnapshot(completedStory);
-      else onSaveOfflineStory(completedStory);
     }
+    // Immediate online continuity must not depend on the AI long-term summary.
+    // Continue mode always queues its confirmed story transcript. Director/IF
+    // may queue only the messages that were explicitly synced in settings.
+    const handoffSourceMessages = getOfflineHandoffSourceMessagesForReturn(completedStory);
+    completedStory = createPendingOfflineHandoff({
+      story: completedStory,
+      sourceMessages: handoffSourceMessages,
+      now: handoffCreatedAt,
+    });
+    if (activeStoryRef.current?.id === completedStory.id) saveActiveStorySnapshot(completedStory);
+    else onSaveOfflineStory(completedStory);
     return completedStory;
   };
 

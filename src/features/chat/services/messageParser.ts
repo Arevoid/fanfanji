@@ -6,6 +6,7 @@ export type { CallTranscriptItem } from "./messageTypes";
 /** Internal scheduling metadata can be supplied to a model, but is never chat content. */
 const INTERNAL_DELIVERY_MARKER = /\[\s*(?:消息发送于|消息发送时间|消息时间|历史发送时间|发送于|发送时间)\s*(?:[:：]\s*)?[^\]]*(?:\d{1,2}\s*[:：]\s*\d{2})[^\]]*\]/gi;
 const INTERNAL_STANDALONE_CLOCK_MARKER = /(^|\n)[\t ]*[\[【（(]\s*(?:(?:上午|下午|早上|晚上)\s*)?(?:[01]?\d|2[0-3])\s*[:：]\s*[0-5]\d(?:\s*[:：]\s*[0-5]\d)?\s*[\]】）)][\t ]*(?=\n|$)/gim;
+const INTERNAL_RELATIVE_SECOND_MARKER = /(^|\n)[\t ]*\[\s*第\s*\d{1,4}\s*秒\s*\][\t ]*(?=\n|$)/gim;
 
 export function stripInternalDeliveryMarkers(text: string): string {
   return text
@@ -14,6 +15,9 @@ export function stripInternalDeliveryMarkers(text: string): string {
     // as a standalone bubble, for example "[15:10]". Only remove a complete
     // metadata line; conversational text such as "15:10见" remains intact.
     .replace(INTERNAL_STANDALONE_CLOCK_MARKER, "$1")
+    // Models may expose response pacing such as "[第2秒]". It is neither a
+    // message nor the structured Message.timestamp, so hide only a full line.
+    .replace(INTERNAL_RELATIVE_SECOND_MARKER, "$1")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

@@ -59,6 +59,61 @@ export function selectFreshOfflineHandoffMemory(input: {
     .sort((left, right) => right.timestamp - left.timestamp)[0];
 }
 
+export function selectPendingOfflineHandoffStory(input: {
+  stories: readonly OfflineStory[];
+  relationId?: string;
+  characterId?: string;
+  conversationId?: string;
+}): OfflineStory | undefined {
+  if (!input.relationId || !input.characterId) return undefined;
+  const latest = [...input.stories]
+    .filter((story) => Boolean(story.onlineHandoff))
+    .filter((story) => story.relationId === input.relationId && story.characterId === input.characterId)
+    .filter((story) => !input.conversationId || !story.conversationId || story.conversationId === input.conversationId)
+    .sort((left, right) => (right.onlineHandoff?.endedAt || 0) - (left.onlineHandoff?.endedAt || 0))[0];
+  // Once the newest handoff is acknowledged, older pending records must not
+  // resurface as if they had just happened.
+  return latest?.onlineHandoff?.status === "pending" ? latest : undefined;
+}
+
+export function createPendingOfflineHandoff(input: {
+  story: OfflineStory;
+  sourceMessages: readonly Message[];
+  now?: number;
+}): OfflineStory {
+  const sourceMessageIds = input.sourceMessages.map((message) => message.id);
+  if (sourceMessageIds.length === 0) return input.story;
+  const existing = input.story.onlineHandoff;
+  if (existing?.status === "acknowledged"
+    && sourceMessageIds.length === existing.sourceMessageIds.length
+    && sourceMessageIds.every((id, index) => id === existing.sourceMessageIds[index])) return input.story;
+  const now = input.now ?? Date.now();
+  return {
+    ...input.story,
+    onlineHandoff: {
+      status: "pending",
+      createdAt: now,
+      startedAt: input.sourceMessages[0]?.timestamp ?? input.story.createdAt,
+      endedAt: now,
+      sourceMessageIds,
+    },
+    updatedAt: now,
+  };
+}
+
+export function acknowledgeOfflineHandoff(story: OfflineStory, now = Date.now()): OfflineStory {
+  if (story.onlineHandoff?.status !== "pending") return story;
+  return {
+    ...story,
+    onlineHandoff: {
+      ...story.onlineHandoff,
+      status: "acknowledged",
+      acknowledgedAt: now,
+    },
+    updatedAt: now,
+  };
+}
+
 export function getOfflineMemorySourceMessages(story: OfflineStory, options: { includeSynced?: boolean } = {}): Message[] {
   const syncStart = options.includeSynced
     ? 0
@@ -76,6 +131,16 @@ export function getOfflineMemorySourceMessages(story: OfflineStory, options: { i
     // stable chronological handoff without mutating the persisted story.
     .sort((left, right) => left.message.timestamp - right.message.timestamp || left.index - right.index)
     .map(({ message }) => message);
+}
+
+export function getOfflineHandoffSourceMessagesForReturn(story: OfflineStory): Message[] {
+  const participantIds = Array.from(new Set((story.characterIds || [story.characterId]).filter(Boolean)));
+  if (!story.relationId || participantIds.length !== 1 || participantIds[0] !== story.characterId) return [];
+  const sourceMessages = getOfflineMemorySourceMessages(story, { includeSynced: true });
+  if (story.mode === "continue") return sourceMessages;
+  if (story.memorySyncStatus !== "synced") return [];
+  const manuallySyncedIds = new Set(story.syncedSourceMessageIds || []);
+  return sourceMessages.filter((message) => manuallySyncedIds.has(message.id));
 }
 
 /**
@@ -254,7 +319,57 @@ ${sanitizeOfflineMemoryForOnlineUse(input.memory.content)}
 3. 当前新线上聊天：${formatTimelineTime(input.currentOnlineAt)}。
 连续性规则：
 - 第 2 段真实发生在第 1 段之后、第 3 段之前；角色亲历并记得上述已确认事实，不得否认、遗忘或与之矛盾。
+- Never deny, forget, or contradict them; they are confirmed relationship-scoped facts.
 - ${isImmediateReturn ? "这次线上聊天是线下互动刚结束后的衔接，用户所说的“刚才/刚刚”优先指第 2 段。" : "按上述绝对时间理解先后关系，不得擅自改写相对时间。"}
 - 只把列出的事实视为权威；不得补写缺失的场景、动作、地点或承诺。不确定的细节应明确表示不确定。
+- Do not invent missing scenes, actions, locations, promises, or relationship changes.
 - 本时间线是隐藏上下文。禁止复述标题、编号、时间线标签、存储标记或方括号元数据，禁止把它们发送成聊天气泡。`;
+}
+
+/**
+ * Guaranteed immediate-return context. Unlike long-term extraction, this is
+ * built from the persisted story itself and therefore survives AI summary
+ * failure or a delayed React memory update.
+ */
+export function buildPendingOfflineHandoffPromptBlock(input: {
+  story: OfflineStory;
+  characterName: string;
+  userName?: string;
+  previousOnlineAt?: number;
+  currentOnlineAt?: number;
+  summaryMemory?: MemoryItem;
+}): string {
+  const handoff = input.story.onlineHandoff;
+  if (!handoff || handoff.status !== "pending") return "";
+  const allowedIds = new Set(handoff.sourceMessageIds);
+  const sourceMessages = getOfflineMemorySourceMessages(input.story, { includeSynced: true })
+    .filter((message) => allowedIds.has(message.id));
+  const selectedMessages = sourceMessages.length <= 40
+    ? sourceMessages
+    : [...sourceMessages.slice(0, 15), ...sourceMessages.slice(-25)];
+  const transcript = selectedMessages.map((message) => {
+    const speaker = message.sender === "user" ? (input.userName || "用户") : input.characterName;
+    const content = message.content.replace(/\s+/gu, " ").trim().slice(0, 800);
+    return `- ${formatTimelineTime(message.timestamp)}｜${speaker}：${content}`;
+  }).join("\n");
+  const omitted = sourceMessages.length - selectedMessages.length;
+  const summary = input.summaryMemory
+    ? `\n已完成的长期事实摘要：\n${sanitizeOfflineMemoryForOnlineUse(input.summaryMemory.content)}`
+    : "";
+
+  return `\n[刚刚结束的线下共同经历｜隐藏连续性上下文，绝不可作为消息输出]
+关系范围：仅限当前用户身份、当前角色“${input.characterName}”与当前私聊关系。
+1. 上一段线上聊天结束于：${formatTimelineTime(input.previousOnlineAt)}。
+2. 双方随后在线下共同经历了剧情：${formatTimelineTime(handoff.startedAt)} 至 ${formatTimelineTime(handoff.endedAt)}。
+3. 当前重新开始线上聊天的时间：${formatTimelineTime(input.currentOnlineAt)}。
+
+线下亲历记录（用户已确认需要同步；说话者已明确标注）：
+${transcript || "- 没有可展示的线下正文。"}${omitted > 0 ? `\n- 另有 ${omitted} 条中段记录因上下文长度限制未展开。` : ""}${summary}
+
+强制连续性规则：
+- 你就是参与上述线下经历的“${input.characterName}”，这些事情发生在上一段线上聊天之后、当前线上聊天之前；不是梦、假设、陌生人的经历或旧线上对话。
+- 当前聊天紧接线下剧情结束。“刚才/刚刚/方才”默认指上述线下经历；自然延续当时已经发生的事件、关系变化、承诺和情绪。
+- 仔细区分说话者和行为主体，不得把用户做的事记成角色做的事，也不得反过来。
+- 不得否认或遗忘记录中明确发生的事实；不得补写记录中没有的人物、地点、行为、关系或承诺。
+- 这是系统私下提供的上下文。禁止输出时间线标题、编号、时间戳、消息 ID、内部标记、方括号说明或逐字复述整段记录。`;
 }

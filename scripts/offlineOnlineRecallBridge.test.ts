@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildOfflineHandoffTimelinePromptBlock, selectFreshOfflineHandoffMemory } from "../src/domain/memory/offlineMemorySync";
+import { acknowledgeOfflineHandoff, buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../src/domain/memory/offlineMemorySync";
 import type { MemoryItem, OfflineStory } from "../src/types";
 
 const handoff: MemoryItem = {
@@ -63,9 +63,62 @@ assert.match(timeline, /当前新线上聊天/);
 assert.match(timeline, /刚结束后的衔接/);
 assert.match(timeline, /禁止.*发送成聊天气泡/);
 
+const pendingStory = createPendingOfflineHandoff({ story, sourceMessages: story.messages, now: 400 });
+assert.equal(pendingStory.onlineHandoff?.status, "pending", "returning online creates a durable handoff without an AI summary");
+assert.deepEqual(pendingStory.onlineHandoff?.sourceMessageIds, ["offline-user", "offline-character"]);
+assert.deepEqual(getOfflineHandoffSourceMessagesForReturn(story).map((message) => message.id), ["offline-user", "offline-character"], "continue mode always bridges its confirmed transcript");
+assert.deepEqual(getOfflineHandoffSourceMessagesForReturn({ ...story, characterIds: ["character-a", "character-b"] }), [], "multi-character stories cannot enter one direct relationship handoff");
+const directorStory: OfflineStory = { ...story, mode: "director" };
+assert.deepEqual(getOfflineHandoffSourceMessagesForReturn(directorStory), [], "unsynced Director mode stays isolated");
+assert.deepEqual(getOfflineHandoffSourceMessagesForReturn({
+  ...directorStory,
+  memorySyncStatus: "synced",
+  syncedSourceMessageIds: ["offline-user"],
+}).map((message) => message.id), ["offline-user"], "Director mode bridges only explicitly synced messages");
+assert.equal(selectPendingOfflineHandoffStory({
+  stories: [pendingStory],
+  relationId: "relation-a",
+  characterId: "character-a",
+  conversationId: "conversation-a",
+}), pendingStory, "the exact relationship can read its pending handoff");
+assert.equal(selectPendingOfflineHandoffStory({
+  stories: [pendingStory],
+  relationId: "relation-b",
+  characterId: "character-a",
+  conversationId: "conversation-a",
+}), undefined, "another relationship cannot read the pending transcript");
+const pendingPrompt = buildPendingOfflineHandoffPromptBlock({
+  story: pendingStory,
+  characterName: "范千",
+  userName: "饭饭",
+  previousOnlineAt: 100,
+  currentOnlineAt: 450,
+});
+assert.match(pendingPrompt, /饭饭：开门/);
+assert.match(pendingPrompt, /范千：我来了/);
+assert.match(pendingPrompt, /刚才\/刚刚\/方才/);
+assert.match(pendingPrompt, /不得把用户做的事记成角色做的事/);
+const acknowledgedStory = acknowledgeOfflineHandoff(pendingStory, 500);
+assert.equal(acknowledgedStory.onlineHandoff?.status, "acknowledged");
+assert.equal(selectPendingOfflineHandoffStory({
+  stories: [acknowledgedStory], relationId: "relation-a", characterId: "character-a", conversationId: "conversation-a",
+}), undefined, "an acknowledged handoff is not injected again");
+const olderPendingStory = createPendingOfflineHandoff({
+  story: { ...story, id: "story-older" },
+  sourceMessages: story.messages,
+  now: 300,
+});
+assert.equal(selectPendingOfflineHandoffStory({
+  stories: [olderPendingStory, acknowledgedStory], relationId: "relation-a", characterId: "character-a", conversationId: "conversation-a",
+}), undefined, "an older pending story cannot resurface after the newest handoff was acknowledged");
+
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const bridgeUses = chatSource.match(/selectFreshOfflineHandoffMemory\(\{/g) || [];
 assert.equal(bridgeUses.length, 2, "normal replies and regenerated replies both receive the offline handoff");
 assert.doesNotMatch(chatSource, /!relevantMemories\.some\(\(memory\) => memory\.id === latestOfflineContinuationMemory\.id\)/, "structured memory selection cannot suppress the dedicated handoff block");
+assert.match(chatSource, /createdMessages\.length > 0[\s\S]*acknowledgePendingOfflineHandoff/, "normal chat acknowledges only after creating a reply");
+
+const offlineSource = readFileSync(new URL("../src/components/AppOffline.tsx", import.meta.url), "utf8");
+assert.match(offlineSource, /createPendingOfflineHandoff\(\{[\s\S]*story: completedStory/, "offline exit persists a handoff independently of extraction success");
 
 console.log("PASS saved offline memory reaches the first online character reply without cross-relation leakage");

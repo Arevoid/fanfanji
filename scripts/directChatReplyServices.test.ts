@@ -49,6 +49,7 @@ assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[微信红�
 assert.equal(createRegeneratedReplyCandidates(candidateContext("旧消息")).messages.length, 1);
 assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("新的回复\n[15:10]")).messages.map((message) => message.content), ["新的回复"]);
 assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[消息发送于 2026-08-02 18:11]")).messages, []);
+assert.deepEqual(createDirectReplyCandidates(candidateContext("[第2秒]")).messages, []);
 assert.equal(requestCount, 1);
 
 console.log("Direct chat reply services: 20 fixed acceptance checks passed");
