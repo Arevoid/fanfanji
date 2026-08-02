@@ -24,6 +24,9 @@ assert.deepEqual(splitAiReplyBubbles("普通文本。\n[红包]|1|hi\n结束！"
 assert.equal(stripInternalDeliveryMarkers("第一句\n[15:10]\n第二句\n【下午 3：10】"), "第一句\n\n第二句");
 assert.equal(stripInternalDeliveryMarkers("催什么催\n[消息发送时间：2026年8月2日星期日\n17:52]"), "催什么催");
 assert.equal(stripInternalDeliveryMarkers("第一句\n[消息发送于 2026-08-02 18:11]\n第二句"), "第一句\n\n第二句");
+assert.equal(stripInternalDeliveryMarkers("角色回复\n[历史时间：2026年8月2日 15:25]\n下一句"), "角色回复\n\n下一句");
+assert.equal(stripInternalDeliveryMarkers("角色回复\n[当前时间：2026年8月2日 19:48]\n下一句"), "角色回复\n\n下一句");
+assert.equal(stripInternalDeliveryMarkers("角色回复\n[2026-08-02 19:48]\n下一句"), "角色回复\n\n下一句");
 assert.equal(stripInternalDeliveryMarkers("第一句\n[第2秒]\n第二句"), "第一句\n\n第二句");
 assert.equal(stripInternalDeliveryMarkers("剧情发生在第2秒"), "剧情发生在第2秒");
 assert.equal(stripInternalDeliveryMarkers("那就15:10见\n今天[15:10]到"), "那就15:10见\n今天[15:10]到");
