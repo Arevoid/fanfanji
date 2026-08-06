@@ -17,6 +17,10 @@ export interface ForumStoryOutputValidationContext {
   storyCharacterIds?: readonly string[];
   storyThreadIds?: readonly string[];
   storyEventIds?: readonly string[];
+  /** IDs of story-scoped anonymous forum identities allowed in comments. */
+  storyForumUserIds?: readonly string[];
+  /** Existing story-thread floors that may be used as reply targets. */
+  storyReplyFloors?: readonly number[];
   /** IDs of real Character entities that must never appear in story output. */
   forbiddenCharacterIds?: readonly string[];
   /** Used by adapters to reject embedded scope IDs before normalization drops them. */
@@ -75,6 +79,9 @@ const storyScopedReference = (key: string): "character" | "thread" | "event" | u
   if (key === "storyeventid" || key === "storyeventids") return "event";
   return undefined;
 };
+
+const isCommentAuthorType = (value: unknown): value is "story_character" | "forum_user" =>
+  value === "story_character" || value === "forum_user";
 
 const allowlistedReference = (
   kind: "character" | "thread" | "event",
@@ -143,6 +150,21 @@ const scanValue = (
       if (hasForeignStoryPrefix(nested, context)) addReason(reasons, `${childPath}: cross-story id reference`);
       else if (context.rejectEmbeddedScopeReferences && nested.includes(":")) {
         addReason(reasons, `${childPath}: embedded story-scoped id is not allowed in AI output`);
+      }
+    }
+    if (normalized === "authorid" && typeof nested === "string") {
+      const allowedCharacter = context.storyCharacterIds?.includes(nested) || false;
+      const allowedForumUser = context.storyForumUserIds?.includes(nested) || false;
+      const hasAuthorAllowlist = Boolean(context.storyCharacterIds || context.storyForumUserIds);
+      if (hasAuthorAllowlist && !allowedCharacter && !allowedForumUser) {
+        addReason(reasons, `${childPath}: story author reference is not allowlisted`);
+      }
+      if (hasForeignStoryPrefix(nested, context)) addReason(reasons, `${childPath}: cross-story author reference`);
+    }
+    if (normalized === "replytofloor" && typeof nested === "number") {
+      if (!Number.isInteger(nested) || nested < 2) addReason(reasons, `${childPath}: invalid reply floor`);
+      if (context.storyReplyFloors && !context.storyReplyFloors.includes(nested)) {
+        addReason(reasons, `${childPath}: reply floor does not exist`);
       }
     }
     scanValue(nested, childPath, context, reasons);
@@ -224,7 +246,41 @@ export const validateForumStoryCommentCandidates = (
       addReason(reasons, `output[${index}]: invalid comment`);
       return;
     }
-    for (const key of ["style", "authorName", "content"]) validateRequiredText(comment, key, `output[${index}]`, reasons);
+    validateRequiredText(comment, "content", `output[${index}]`, reasons);
+    if (comment.style !== undefined && typeof comment.style !== "string") {
+      addReason(reasons, `output[${index}].style: invalid style`);
+    }
+    if (comment.replyToFloor !== undefined) {
+      if (typeof comment.replyToFloor !== "number" || !Number.isInteger(comment.replyToFloor) || comment.replyToFloor < 2) {
+        addReason(reasons, `output[${index}].replyToFloor: invalid reply floor`);
+      } else if (context.storyReplyFloors && !context.storyReplyFloors.includes(comment.replyToFloor)) {
+        addReason(reasons, `output[${index}].replyToFloor: reply floor does not exist`);
+      }
+    }
+    if (comment.quoteContent !== undefined && typeof comment.quoteContent !== "string") {
+      addReason(reasons, `output[${index}].quoteContent: invalid quote`);
+    }
+    if (comment.quoteContent !== undefined && comment.replyToFloor === undefined) {
+      addReason(reasons, `output[${index}].quoteContent: parent floor is missing`);
+    }
+    const hasAuthorType = comment.authorType !== undefined;
+    const hasAuthorId = comment.authorId !== undefined;
+    if (hasAuthorType || hasAuthorId) {
+      if (!isCommentAuthorType(comment.authorType)) {
+        addReason(reasons, `output[${index}].authorType: invalid author type`);
+      }
+      validateRequiredText(comment, "authorId", `output[${index}]`, reasons);
+      if (comment.authorType === "story_character" && context.storyCharacterIds && typeof comment.authorId === "string"
+        && !context.storyCharacterIds.includes(comment.authorId)) {
+        addReason(reasons, `output[${index}].authorId: story character is not allowlisted`);
+      }
+      if (comment.authorType === "forum_user" && context.storyForumUserIds && typeof comment.authorId === "string"
+        && !context.storyForumUserIds.includes(comment.authorId)) {
+        addReason(reasons, `output[${index}].authorId: StoryForumUser is not allowlisted`);
+      }
+    } else {
+      validateRequiredText(comment, "authorName", `output[${index}]`, reasons);
+    }
   });
   return finish(data as ForumStoryCommentCandidate[], reasons);
 };

@@ -1,4 +1,12 @@
-import type { ForumStory, StoryCharacter, StoryEvent, StoryThread, StoryUpdate } from "../../domain/forumStory/forumStoryTypes";
+import type {
+  ForumStory,
+  ForumStoryExecutionLog,
+  StoryCharacter,
+  StoryEvent,
+  StoryForumUser,
+  StoryThread,
+  StoryUpdate,
+} from "../../domain/forumStory/forumStoryTypes";
 import { readArray, writeArray } from "../../core/storage/repositories/repositoryUtils";
 import type { StorageResult, StorageWriteResult } from "../../core/storage/storageTypes";
 
@@ -11,6 +19,20 @@ const FORBIDDEN_SCOPE_KEYS = new Set([
   "Relationship",
   "privateContext",
   "PrivateContext",
+  "privateActor",
+  "PrivateActor",
+  "conversationId",
+  "ConversationId",
+  "userId",
+  "UserId",
+  "realUserId",
+  "RealUserId",
+  "characterId",
+  "CharacterId",
+  "realCharacterId",
+  "RealCharacterId",
+  "relationshipId",
+  "RelationshipId",
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -24,6 +46,8 @@ export const containsForbiddenStoryScopeKey = (value: unknown): boolean => {
 };
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+const isNonNegativeNumber = (value: unknown): value is number => isFiniteNumber(value) && value >= 0;
+const isNonNegativeInteger = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
 const isPositiveInteger = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 1;
 const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
 
@@ -58,6 +82,8 @@ export const isStoryThreadRecord = (value: unknown): value is StoryThread => {
     && isPositiveInteger(value.episode)
     && isFiniteNumber(value.createdAt)
     && isFiniteNumber(value.updatedAt)
+    && (value.viewCount === undefined || isNonNegativeInteger(value.viewCount))
+    && (value.likeCount === undefined || isNonNegativeInteger(value.likeCount))
     && (value.closedAt === undefined || isFiniteNumber(value.closedAt));
 };
 
@@ -79,6 +105,21 @@ export const isStoryCharacterRecord = (value: unknown): value is StoryCharacter 
     && isFiniteNumber(value.updatedAt);
 };
 
+export const isStoryForumUserRecord = (value: unknown): value is StoryForumUser => {
+  if (!isRecord(value) || containsForbiddenStoryScopeKey(value)) return false;
+  return typeof value.id === "string"
+    && typeof value.storyId === "string"
+    && typeof value.displayName === "string"
+    && value.displayName.trim().length > 0
+    && ["anonymous", "observer", "insider", "analyst", "supporter", "skeptic"].includes(String(value.userType))
+    && typeof value.style === "string"
+    && value.style.trim().length > 0
+    && typeof value.personaSummary === "string"
+    && value.personaSummary.trim().length > 0
+    && isFiniteNumber(value.createdAt)
+    && (value.updatedAt === undefined || isFiniteNumber(value.updatedAt));
+};
+
 export const isStoryEventRecord = (value: unknown): value is StoryEvent => {
   if (!isRecord(value) || containsForbiddenStoryScopeKey(value)) return false;
   return typeof value.id === "string"
@@ -94,6 +135,7 @@ export const isStoryEventRecord = (value: unknown): value is StoryEvent => {
     && (value.actorIds === undefined || isStringArray(value.actorIds))
     && (value.forumThreadId === undefined || typeof value.forumThreadId === "string")
     && (value.forumReplyId === undefined || typeof value.forumReplyId === "string")
+    && (value.floorNumber === undefined || isPositiveInteger(value.floorNumber))
     && (value.idempotencyKey === undefined || typeof value.idempotencyKey === "string");
 };
 
@@ -110,6 +152,18 @@ export const isStoryUpdateRecord = (value: unknown): value is StoryUpdate => {
     && isStringArray(value.eventIds)
     && (value.forumReplyId === undefined || typeof value.forumReplyId === "string")
     && isFiniteNumber(value.createdAt);
+};
+
+export const isForumStoryExecutionLogRecord = (value: unknown): value is ForumStoryExecutionLog => {
+  if (!isRecord(value) || containsForbiddenStoryScopeKey(value)) return false;
+  return typeof value.id === "string"
+    && typeof value.storyId === "string"
+    && ["generate_update", "generate_comment_reaction", "none"].includes(String(value.action))
+    && ["time", "comment_activity", "hot_discussion", "manual"].includes(String(value.trigger))
+    && ["pending", "running", "success", "failed"].includes(String(value.status))
+    && isFiniteNumber(value.startedAt)
+    && (value.finishedAt === undefined || isFiniteNumber(value.finishedAt))
+    && (value.error === undefined || typeof value.error === "string");
 };
 
 export const loadStoryCollection = <T>(

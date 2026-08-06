@@ -10,10 +10,16 @@
 export type ForumStoryId = string;
 export type StoryThreadId = string;
 export type StoryCharacterId = string;
+export type StoryForumUserId = string;
 export type StoryEventId = string;
 export type StoryUpdateId = string;
+export type ForumStoryExecutionLogId = string;
 
 export type ForumStoryStatus = "draft" | "active" | "waiting_update" | "completed";
+
+export type ForumStoryExecutionAction = "generate_update" | "generate_comment_reaction" | "none";
+export type ForumStoryExecutionTrigger = "time" | "comment_activity" | "hot_discussion" | "manual";
+export type ForumStoryExecutionLogStatus = "pending" | "running" | "success" | "failed";
 
 export type StoryCreationSource = "user" | "system" | "template";
 
@@ -50,6 +56,9 @@ export interface StoryThread {
   readonly episode: number;
   readonly createdAt: number;
   readonly updatedAt: number;
+  /** Story-scope simulated engagement counters. */
+  readonly viewCount?: number;
+  readonly likeCount?: number;
   readonly closedAt?: number;
 }
 
@@ -72,6 +81,30 @@ export interface StoryCharacter {
   readonly status: "active" | "silent" | "removed";
   readonly createdAt: number;
   readonly updatedAt: number;
+}
+
+/**
+ * An anonymous identity that exists only inside one ForumStory. It is not a
+ * real app user, Character, relationship participant, or memory owner.
+ */
+export type StoryForumUserType =
+  | "anonymous"
+  | "observer"
+  | "insider"
+  | "analyst"
+  | "supporter"
+  | "skeptic";
+
+export interface StoryForumUser {
+  readonly id: StoryForumUserId;
+  readonly storyId: ForumStoryId;
+  readonly displayName: string;
+  readonly userType: StoryForumUserType;
+  /** Stable public writing style for this story-scoped identity. */
+  readonly style: string;
+  readonly personaSummary: string;
+  readonly createdAt: number;
+  readonly updatedAt?: number;
 }
 
 export type StoryEventType =
@@ -100,6 +133,8 @@ export interface StoryEvent {
   /** Existing Forum references are optional evidence/projection links. */
   readonly forumThreadId?: string;
   readonly forumReplyId?: string;
+  /** Story-thread floor associated with comment_added events. */
+  readonly floorNumber?: number;
   readonly idempotencyKey?: string;
 }
 
@@ -124,4 +159,16 @@ export interface StoryUpdate {
   /** Existing ForumReply ID after the update is publicly published. */
   readonly forumReplyId?: string;
   readonly createdAt: number;
+}
+
+/** Story-scope audit record for one progression runner invocation. */
+export interface ForumStoryExecutionLog {
+  readonly id: ForumStoryExecutionLogId;
+  readonly storyId: ForumStoryId;
+  readonly action: ForumStoryExecutionAction;
+  readonly trigger: ForumStoryExecutionTrigger;
+  readonly status: ForumStoryExecutionLogStatus;
+  readonly startedAt: number;
+  readonly finishedAt?: number;
+  readonly error?: string;
 }

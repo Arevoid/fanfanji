@@ -188,6 +188,8 @@ export const createForumStory = async (input: CreateForumStoryInput): Promise<Fo
     episode: 1,
     createdAt: now,
     updatedAt: now,
+    viewCount: 0,
+    likeCount: 0,
   };
   const eventInput: StoryEventInput = {
     id: `${storyId}:event:post-created`,

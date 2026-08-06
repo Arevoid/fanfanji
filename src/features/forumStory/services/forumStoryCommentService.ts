@@ -4,11 +4,13 @@ import type {
   StoryCharacter,
   StoryEvent,
   StoryEventInput,
+  StoryForumUser,
   StoryThread,
 } from "../../../domain/forumStory/forumStoryTypes";
 import type {
   ForumStoryCommentCandidate,
   ForumStoryCommentCharacter,
+  ForumStoryCommentForumUser,
   ForumStoryCommentPrompt,
   ForumStoryCommentStyle,
 } from "../../characterCognitive/promptAdapters/forumStoryCommentPromptAdapter";
@@ -18,9 +20,11 @@ import {
 } from "../../characterCognitive/promptAdapters/forumStoryCommentPromptAdapter";
 import { ForumStoryRepository } from "../forumStoryRepository";
 import { StoryCharacterRepository } from "../storyCharacterRepository";
+import { StoryForumUserRepository } from "../storyForumUserRepository";
 import { StoryEventRepository } from "../storyEventRepository";
 import {
   StoryForumReplyRepository,
+  type StoryForumReplyInput,
   type StoryForumReply,
 } from "../storyReplyRepository";
 import { StoryThreadRepository } from "../storyThreadRepository";
@@ -55,6 +59,9 @@ export interface GenerateForumStoryCommentsInput {
   storyThread?: StoryThread;
   characters?: readonly StoryCharacter[];
   storyCharacters?: readonly StoryCharacter[];
+  /** Optional story-scoped anonymous users to seed into the repository. */
+  forumUsers?: readonly StoryForumUser[];
+  storyForumUsers?: readonly StoryForumUser[];
   settings: ForumStoryCommentGenerationSettings;
   count?: number;
   now?: number;
@@ -95,10 +102,20 @@ const fingerprint = (value: string): string => {
 };
 
 const commentCharacterProjection = (characters: readonly StoryCharacter[]): ForumStoryCommentCharacter[] =>
-  characters.map((character) => ({
+  characters.map((character, index) => ({
+    id: `story-character-${index + 1}`,
     name: character.identity.name,
     role: character.role,
     personaSummary: character.personaSummary,
+  }));
+
+const commentForumUserProjection = (users: readonly StoryForumUser[]): ForumStoryCommentForumUser[] =>
+  users.map((user, index) => ({
+    id: `story-forum-user-${index + 1}`,
+    displayName: user.displayName,
+    userType: user.userType,
+    style: user.style,
+    personaSummary: user.personaSummary,
   }));
 
 const generateCandidates = async (input: {
@@ -136,9 +153,20 @@ const selectThread = (input: GenerateForumStoryCommentsInput, storyId: string): 
   return thread;
 };
 
-const findAuthor = (characters: readonly StoryCharacter[], authorName: string): StoryCharacter | undefined => {
+const findCharacterByName = (characters: readonly StoryCharacter[], authorName: string): StoryCharacter | undefined => {
   const wanted = normalize(authorName);
   return characters.find((character) => normalize(character.identity.name) === wanted && character.status === "active");
+};
+
+const findCharacterById = (characters: readonly StoryCharacter[], authorId: string): StoryCharacter | undefined =>
+  characters.find((character, index) => character.id === authorId || `story-character-${index + 1}` === authorId);
+
+const findForumUserById = (users: readonly StoryForumUser[], authorId: string): StoryForumUser | undefined =>
+  users.find((user, index) => user.id === authorId || `story-forum-user-${index + 1}` === authorId);
+
+const findForumUserByName = (users: readonly StoryForumUser[], authorName: string): StoryForumUser | undefined => {
+  const wanted = normalize(authorName);
+  return users.find((user) => normalize(user.displayName) === wanted);
 };
 
 const selectCharacters = (input: GenerateForumStoryCommentsInput, storyId: string): StoryCharacter[] => {
@@ -146,6 +174,16 @@ const selectCharacters = (input: GenerateForumStoryCommentsInput, storyId: strin
   if (persisted.length > 0) return persisted.filter((character) => character.status === "active");
   return (input.characters || input.storyCharacters || [])
     .filter((character) => character.storyId === storyId && character.status === "active");
+};
+
+const selectForumUsers = (input: GenerateForumStoryCommentsInput, storyId: string): StoryForumUser[] => {
+  const persisted = StoryForumUserRepository.getUsersByStoryId(storyId);
+  const supplied = (input.forumUsers || input.storyForumUsers || [])
+    .filter((user) => user.storyId === storyId);
+  for (const user of supplied) {
+    if (!persisted.some((item) => item.id === user.id)) StoryForumUserRepository.createUser(user);
+  }
+  return StoryForumUserRepository.getUsersByStoryId(storyId);
 };
 
 const publicStyle = (style: ForumStoryCommentStyle): string => {
@@ -175,14 +213,17 @@ export const generateStoryComments = async (
   const storedThread = StoryThreadRepository.getThread(storyId, thread.id);
   if (storedThread && storedThread.storyId !== storyId) throw new Error("StoryThread scope mismatch");
   const characters = selectCharacters(input, storyId);
-  if (characters.length === 0) throw new Error("ForumStory comments require story-scoped characters");
+  const forumUsers = selectForumUsers(input, storyId);
+  if (characters.length === 0 && forumUsers.length === 0) throw new Error("ForumStory comments require story-scoped authors");
   const existingReplies = StoryForumReplyRepository.listReplies(storyId, thread.id);
   const prompt = buildForumStoryCommentPrompt({
     storyScope: "forum-story",
     thread: { title: thread.title, initialContent: thread.initialContent },
     characters: commentCharacterProjection(characters),
+    ...(forumUsers.length > 0 ? { forumUsers: commentForumUserProjection(forumUsers) } : {}),
     existingComments: existingReplies.map((reply) => ({
       authorName: reply.publicAuthor.displayName,
+      floorNumber: reply.floorNumber ?? reply.floor,
       content: reply.body,
       style: reply.storyCommentStyle,
     })),
@@ -195,7 +236,9 @@ export const generateStoryComments = async (
   });
   const validation = validateForumStoryCommentCandidates(parsedCandidates, {
     storyId,
-    storyCharacterIds: characters.map((character) => character.id),
+    storyCharacterIds: characters.flatMap((character, index) => [character.id, `story-character-${index + 1}`]),
+    storyForumUserIds: forumUsers.flatMap((user, index) => [user.id, `story-forum-user-${index + 1}`]),
+    storyReplyFloors: existingReplies.map((reply) => reply.floorNumber ?? reply.floor),
     storyThreadIds: [thread.id],
   });
   if (!validation.allowed || !validation.sanitizedData) {
@@ -206,22 +249,42 @@ export const generateStoryComments = async (
   const existingBodies = new Set(existingReplies.map((reply) => normalize(reply.body)));
   const replyResults: StoryForumReply[] = [];
   const eventResults: StoryEvent[] = [];
-  let nextFloor = existingReplies.reduce((max, reply) => Math.max(max, reply.floor), 1) + 1;
 
   for (const candidate of candidates) {
     const bodyKey = normalize(candidate.content);
-    const author = findAuthor(characters, candidate.authorName);
-    if (!author || !bodyKey || existingBodies.has(bodyKey)) continue;
+    const authorType = candidate.authorType;
+    const legacyForumUser = !authorType && candidate.authorName
+      ? findForumUserByName(forumUsers, candidate.authorName)
+      : undefined;
+    const author = authorType === "story_character"
+      ? findCharacterById(characters, candidate.authorId || "")
+      : authorType === "forum_user"
+        ? undefined
+        : candidate.authorName ? findCharacterByName(characters, candidate.authorName) : undefined;
+    const forumUser = authorType === "forum_user"
+      ? findForumUserById(forumUsers, candidate.authorId || "")
+      : legacyForumUser;
+    if ((!author && !forumUser) || !bodyKey || existingBodies.has(bodyKey)) continue;
+    const resolvedAuthorType = forumUser ? "forum_user" : "story_character";
+    const resolvedAuthorId = forumUser?.id || author?.id;
+    if (!resolvedAuthorId) continue;
+    const normalizedForumStyle = forumUser ? normalize(forumUser.style) : "";
+    const replyStyle = forumUser && ["ordinary", "gossip", "rational", "question", "supplement"].includes(normalizedForumStyle)
+      ? normalizedForumStyle as ForumStoryCommentStyle
+      : candidate.style;
     const replyId = makeId("forum-story-reply");
-    const reply: StoryForumReply = {
+    const parentReply = candidate.replyToFloor === undefined
+      ? undefined
+      : existingReplies.find((item) => (item.floorNumber ?? item.floor) === candidate.replyToFloor);
+    if (candidate.replyToFloor !== undefined && !parentReply) continue;
+    const replyInput: StoryForumReplyInput = {
       storyId,
       id: replyId,
       threadId: thread.id,
       ownerIdentityId: `story-scope:${storyId}`,
-      floor: nextFloor,
       publicAuthor: {
-        displayName: author.identity.name,
-        ...(author.identity.avatar ? { avatar: author.identity.avatar } : {}),
+        displayName: forumUser?.displayName || author?.identity.name || "故事网友",
+        ...(author?.identity.avatar ? { avatar: author.identity.avatar } : {}),
         kind: "virtual",
         isAnonymous: false,
       },
@@ -232,23 +295,33 @@ export const generateStoryComments = async (
       likedByIdentityIds: [],
       createdAt: now,
       updatedAt: now,
-      storyCommentStyle: candidate.style,
-      storyCommentLabel: publicStyle(candidate.style),
+      storyAuthorType: resolvedAuthorType,
+      storyAuthorId: resolvedAuthorId,
+      ...(forumUser ? { storyForumUserStyle: forumUser.style } : {}),
+      ...(parentReply ? { parentReplyId: parentReply.id } : {}),
+      ...(parentReply?.storyAuthorId ? { replyToUserId: parentReply.storyAuthorId } : {}),
+      ...(candidate.quoteContent ? { quoteContent: candidate.quoteContent } : {}),
+      storyCommentStyle: replyStyle,
+      storyCommentLabel: publicStyle(replyStyle),
     };
-    ensureWrite(StoryForumReplyRepository.appendReply(reply), "comment");
+    const replyWrite = StoryForumReplyRepository.appendReply(replyInput);
+    ensureWrite(replyWrite, "comment");
+    if (!replyWrite.reply) throw new Error("ForumStory comment reply read failed");
+    const reply = replyWrite.reply;
     const eventInput: StoryEventInput = {
       id: makeId("forum-story-event"),
       storyId,
       type: "comment_added",
       source: "npc",
       status: "confirmed",
-      summary: `${publicStyle(candidate.style)} ${author.identity.name}: ${candidate.content}`,
+      summary: `${publicStyle(replyStyle)} ${forumUser?.displayName || author?.identity.name || "故事网友"}: ${candidate.content}`,
       storyVersion: story.version,
       occurredAt: now,
       createdAt: now,
-      actorIds: [author.id],
+      ...(author ? { actorIds: [author.id] } : {}),
       forumThreadId: thread.id,
       forumReplyId: replyId,
+      floorNumber: reply.floorNumber ?? reply.floor,
       idempotencyKey: `${storyId}:comment:${fingerprint(candidate.content)}`,
     };
     const eventWrite = StoryEventRepository.appendEvent(eventInput);
@@ -258,7 +331,6 @@ export const generateStoryComments = async (
     replyResults.push(reply);
     eventResults.push(event);
     existingBodies.add(bodyKey);
-    nextFloor += 1;
   }
 
   return {

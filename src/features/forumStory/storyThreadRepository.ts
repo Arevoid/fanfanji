@@ -20,10 +20,15 @@ export const getThread = (storyId: string, threadId: string): StoryThread | unde
   listThreads(storyId).find((thread) => thread.id === threadId);
 
 export const createThread = (thread: StoryThread): StorageWriteResult => {
-  if (!isStoryThreadRecord(thread)) return failedStoryWrite();
+  const normalizedThread: StoryThread = {
+    ...thread,
+    viewCount: thread.viewCount ?? 0,
+    likeCount: thread.likeCount ?? 0,
+  };
+  if (!isStoryThreadRecord(normalizedThread)) return failedStoryWrite();
   const current = loadThreads().value;
-  if (current.some((item) => item.storyId === thread.storyId && item.id === thread.id)) return failedStoryWrite();
-  return saveStoryCollection(storageKeys.forumStoryThreads, [...current, thread]);
+  if (current.some((item) => item.storyId === normalizedThread.storyId && item.id === normalizedThread.id)) return failedStoryWrite();
+  return saveStoryCollection(storageKeys.forumStoryThreads, [...current, normalizedThread]);
 };
 
 export const updateThread = (storyId: string, threadId: string, patch: StoryThreadPatch): StorageWriteResult => {
