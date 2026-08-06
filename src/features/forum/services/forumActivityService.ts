@@ -51,6 +51,10 @@ export interface ForumActivityPlanInput {
   settings: UserSettings;
   now: number;
   random?: () => number;
+  /** When present, the first generated event must answer this public reply floor. */
+  requiredReplyFloor?: number;
+  /** User interactions should still receive an answer when an actor just posted. */
+  ignoreActorCooldown?: boolean;
   aiCall?: (input: { message: string; systemInstruction: string; apiKey: string; model: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean }) => Promise<{ text: string }>;
   /** Explicitly classified public candidates only; omitted records remain denied. */
   publicEventCandidates?: readonly PublicCharacterEventCandidate[];
@@ -144,6 +148,7 @@ const validateBatch = (input: {
   replies: readonly ForumReply[];
   slots: readonly ForumActivityActorSlot[];
   protectedNames: readonly string[];
+  requiredReplyFloor?: number;
 }): ForumGeneratedEventBatch => {
   const slotMap = new Map(input.slots.map((slot) => [slot.slotId, slot]));
   const earlier = new Set<string>();
@@ -152,6 +157,8 @@ const validateBatch = (input: {
     const replyTo = event.replyTo;
     const slot = slotMap.get(event.actorSlot);
     if (!slot) return [];
+    if (input.requiredReplyFloor !== undefined && usedActors.length === 0
+      && (replyTo.type !== "floor" || replyTo.floor !== input.requiredReplyFloor)) return [];
     if (event.kind === "author-update" && !actorIsThreadAuthor(slot, input.thread)) return [];
     if ((input.thread.source === "user" || input.thread.source === "user-anonymous") && event.kind === "author-update") return [];
     if (replyTo.type === "floor" && !input.replies.some((reply) => reply.floor === replyTo.floor && !reply.isDeleted)) return [];
@@ -190,10 +197,18 @@ const buildPublicActivityPromptSupplements = (
     worldSettings: input.publicWorldSettings || [],
     currentTime: { now: input.now },
   });
+  const actorState = input.actorStates.find((state) =>
+    state.threadId === input.thread.id && state.actorKey === forumActorKey(slot.actor));
+  const recentPublicReplies = actorState?.recentReplyIds
+    .map((replyId) => input.replies.find((reply) => reply.id === replyId && !reply.isDeleted))
+    .filter((reply): reply is ForumReply => Boolean(reply))
+    .slice(0, 3)
+    .map((reply) => `floor ${reply.floor}: ${reply.body.slice(0, 180)}`)
+    .join("\n");
   return [
     `Actor slot ${slot.slotId}:\n${formatPublicForumActivityPromptContext(
       buildPublicForumActivityPromptContext(context),
-    )}`,
+    )}${recentPublicReplies ? `\nRecent public replies by this actor (continue naturally, do not repeat):\n${recentPublicReplies}` : ""}`,
   ];
 });
 
@@ -208,7 +223,7 @@ export const planForumActivity = async (input: ForumActivityPlanInput): Promise<
   const recent = input.actorStates.filter((state) => state.threadId === input.thread.id && state.ownerIdentityId === input.ownerIdentityId);
   const eligible = slots.filter((slot) => {
     const state = recent.find((candidate) => candidate.actorKey === forumActorKey(slot.actor));
-    return !state?.cooldownUntil || state.cooldownUntil <= input.now;
+    return input.ignoreActorCooldown || !state?.cooldownUntil || state.cooldownUntil <= input.now;
   });
   if (!eligible.length) return [];
   const storyContinuation = canScheduleStoryContinuation(input.thread, input.replies, input.now)
@@ -230,12 +245,19 @@ export const planForumActivity = async (input: ForumActivityPlanInput): Promise<
     ownerIdentity: input.settings.identities?.find((identity) => identity.id === input.ownerIdentityId),
     characters: input.characters,
   });
+  const parsedBatch = parseForumGeneratedEventBatch(result.text);
+  const constrainedBatch = input.requiredReplyFloor === undefined
+    ? parsedBatch
+    : { events: parsedBatch.events.map((event, index) => index === 0
+      ? { ...event, replyTo: { type: "floor" as const, floor: input.requiredReplyFloor! } }
+      : event) };
   const batch = validateBatch({
-    batch: parseForumGeneratedEventBatch(result.text),
+    batch: constrainedBatch,
     thread: input.thread,
     replies: input.replies,
     slots: eligible,
     protectedNames,
+    requiredReplyFloor: input.requiredReplyFloor,
   });
   const batchId = id("forum-activity-batch");
   return batch.events.map((event, index) => {

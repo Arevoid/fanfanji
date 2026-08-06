@@ -66,8 +66,7 @@ import {
   touchForumTranslation,
 } from "../core/storage/repositories/forumTranslationRepository";
 import { getForumTranslationTargetLanguage, translateForumContent } from "../features/forum/services/forumTranslationService";
-import { useForumActivityEngine } from "../features/forum/hooks/useForumActivityEngine";
-import { forceForumThreadActivity, scheduleInitialForumReplies } from "../features/forum/services/forumActivityRuntime";
+import { forceForumThreadActivity, scheduleForumUserInteraction, scheduleInitialForumReplies } from "../features/forum/services/forumActivityRuntime";
 import { BottomSheet, Button, ConfirmDialog, PopoverMenu } from "./ui";
 import { ForumAvatar } from "../features/forum/components/ForumAvatar";
 import { getForumVirtualProfile } from "../domain/forum/forumVirtualProfiles";
@@ -101,6 +100,9 @@ import { ForumDmList } from "../features/forum/components/ForumDmList";
 import { ForumDmConversation } from "../features/forum/components/ForumDmConversation";
 import { appendForumDmMessage, deleteForumDmConversation, markForumDmRead, openForumDmConversation, resolveForumDmActorFromPublicRecord } from "../domain/forum/forumDmData";
 import { requestForumDmReply } from "../features/forum/services/forumDmService";
+import { listForumStoryUiItems } from "../features/forumStory/forumStoryUiData";
+import { ForumStoryList } from "../features/forumStory/components/ForumStoryList";
+import { ForumStoryThreadView } from "../features/forumStory/components/ForumStoryThreadView";
 import { FORUM_HOME_PAGE_SIZE, FORUM_REPLY_PAGE_SIZE } from "../domain/forum/forumCapacity";
 
 interface AppForumProps {
@@ -186,6 +188,7 @@ export default function AppForum({
   const [rootTab, setRootTab] = useState<ForumRootTab>("home");
   const [secondaryPage, setSecondaryPage] = useState<"history" | "likes" | "notifications" | "profile" | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [activeStoryId, setActiveStoryId] = useState<string | null>(null);
   const [readonlySnapshot, setReadonlySnapshot] = useState<ForumThreadPublicSnapshot | null>(null);
   const [showComposer, setShowComposer] = useState(false);
   const [showHomeActions, setShowHomeActions] = useState(false);
@@ -231,6 +234,7 @@ export default function AppForum({
     () => listForumThreadsForIdentity(threads, activeIdentity.id, replies),
     [threads, replies, activeIdentity.id],
   );
+  const forumStoryItems = useMemo(() => listForumStoryUiItems(), []);
   const activeThread = identityThreads.find((thread) => thread.id === activeThreadId);
   const activeDmConversation = dmConversations.find((conversation) => conversation.id === activeDmConversationId);
   const activeProfile = profiles.find((profile) => profile.ownerIdentityId === activeIdentity.id) || createForumProfile(activeIdentity, 0);
@@ -247,16 +251,6 @@ export default function AppForum({
   );
   const selectedShareTarget = shareTargets.find((target) => target.relationship.id === selectedShareRelationId);
 
-  useForumActivityEngine({
-    ownerIdentityId: activeIdentity.id,
-    relationships,
-    characters,
-    messages,
-    memories,
-    worldBookEntries,
-    settings,
-  });
-
   useEffect(() => {
     const safe = loadForumDataSafely({
       validRelationIds: new Set(relationships.map((relationship) => relationship.id)),
@@ -271,7 +265,7 @@ export default function AppForum({
   }, [activeIdentity, profiles]);
 
   useEffect(() => {
-    setRootTab("home"); setSecondaryPage(null); setActiveThreadId(null); setReadonlySnapshot(null);
+    setRootTab("home"); setSecondaryPage(null); setActiveThreadId(null); setActiveStoryId(null); setReadonlySnapshot(null);
     setProfileName(activeProfile.displayName); setProfileBio(activeProfile.bio || "");
   }, [activeIdentity.id]);
 
@@ -751,6 +745,7 @@ export default function AppForum({
 
   const handleBack = () => {
     if (activeDmConversationId) { setActiveDmConversationId(null); setDmBody(""); return; }
+    if (activeStoryId) { setActiveStoryId(null); setError(""); setNotice(""); return; }
     if (activeThreadId || readonlySnapshot) {
       setActiveThreadId(null);
       setReadonlySnapshot(null);
@@ -949,6 +944,15 @@ export default function AppForum({
       setReplyBody("");
       setReplyingTo(null);
       setReplyAnonymously(false);
+      void scheduleForumUserInteraction({
+        ownerIdentityId: activeIdentity.id,
+        relationships,
+        characters,
+        messages,
+        memories,
+        worldBookEntries,
+        settings,
+      }, activeThread.id, reply.floor).catch(() => undefined);
       requestAnimationFrame(() => {
         newestReplyRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
       });
@@ -1072,9 +1076,9 @@ export default function AppForum({
           <ChevronLeft className="h-5 w-5" />
         </button>
         <h1 className="absolute left-1/2 -translate-x-1/2 text-[17px] font-bold">
-          {activeDmConversation ? activeDmConversation.participantPublicSnapshot.displayName : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : rootTab === "mine" ? "我的" : rootTab === "dm" ? "私信" : "论坛"}
+          {activeDmConversation ? activeDmConversation.participantPublicSnapshot.displayName : activeStoryId ? "故事论坛" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : rootTab === "mine" ? "我的" : rootTab === "dm" ? "私信" : "论坛"}
         </h1>
-        {!activeThread && !readonlySnapshot && !secondaryPage && !activeDmConversation && rootTab === "home" ? (
+        {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && !activeDmConversation && rootTab === "home" ? (
           <button
             ref={homeMenuAnchorRef}
             type="button"
@@ -1097,6 +1101,8 @@ export default function AppForum({
           >
             <RefreshCw className={`h-4 w-4 ${isThreadRefreshing ? "animate-spin" : ""}`} />
           </button>
+        ) : activeStoryId ? (
+          <span className="h-9 w-9" aria-hidden="true" />
         ) : (
           <span className="h-9 w-9" aria-hidden="true" />
         )}
@@ -1148,6 +1154,8 @@ export default function AppForum({
         <ForumDmConversation conversation={activeDmConversation} messages={dmMessages.filter((message) => message.conversationId === activeDmConversation.id)} body={dmBody} setBody={setDmBody} sending={isDmSending} onSend={() => void sendDm()} onDelete={() => setShowDeleteDmConfirmation(true)} />
       ) : readonlySnapshot ? (
         <ForumSnapshotDetail snapshot={readonlySnapshot} />
+      ) : activeStoryId ? (
+        <ForumStoryThreadView storyId={activeStoryId} />
       ) : !activeThread && secondaryPage ? (
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-4">
           {secondaryPage === "profile" && <section className="rounded-2xl bg-white p-4 shadow-sm">
@@ -1180,7 +1188,11 @@ export default function AppForum({
         </main>
       ) : !activeThread ? (
         <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24">
-          {identityThreads.length === 0 ? (
+          <ForumStoryList
+            items={forumStoryItems}
+            onOpen={(storyId) => { setActiveStoryId(storyId); setError(""); setNotice(""); }}
+          />
+          {identityThreads.length === 0 && forumStoryItems.length === 0 ? (
             <div className="flex min-h-full flex-col items-center justify-center px-8 py-16 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-sm">
                 <MessageCircle className="h-7 w-7 text-slate-300" />
@@ -1191,7 +1203,7 @@ export default function AppForum({
                 发布帖子
               </Button>
             </div>
-          ) : (
+          ) : identityThreads.length > 0 ? (
             <div className="mt-3 overflow-hidden border-y border-slate-100 bg-white">
               {visibleThreads.map((thread) => {
                 const metrics = selectForumThreadMetrics(
@@ -1220,7 +1232,7 @@ export default function AppForum({
               })}
               {identityThreads.length > visibleThreads.length && <button type="button" onClick={() => setVisibleThreadCount((count) => count + FORUM_HOME_PAGE_SIZE)} className="w-full border-t border-slate-100 py-4 text-xs font-medium text-slate-500">加载更多</button>}
             </div>
-          )}
+          ) : null}
         </main>
       ) : (
         <>
@@ -1504,7 +1516,7 @@ export default function AppForum({
         </>
       )}
 
-      {!activeThread && !readonlySnapshot && !secondaryPage && !activeDmConversation && (
+      {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && !activeDmConversation && (
         <nav className="flex shrink-0 border-t border-slate-100 bg-white pb-[max(8px,env(safe-area-inset-bottom))] pt-2" aria-label="论坛导航">
           <button type="button" onClick={() => setRootTab("home")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "home" ? "text-neutral-950" : "text-slate-400"}`}><MessageCircle className="h-5 w-5" />论坛</button>
           <button type="button" onClick={() => setRootTab("dm")} className={`relative flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "dm" ? "text-neutral-950" : "text-slate-400"}`}><Mail className="h-5 w-5" />私信{dmConversations.reduce((total, item) => total + item.unreadCount, 0) > 0 && <span className="absolute ml-5 h-2 w-2 rounded-full bg-rose-500" />}</button>

@@ -27,6 +27,23 @@ assert.equal(events.length, 2, "one call plans a bounded multi-actor batch");
 assert.equal(events[0].privateActor?.kind, "virtual");
 assert.equal(events[1].replyTarget.type, "batch");
 
+const interactionEvents = await planForumActivity({
+  trigger: "user-interaction", ownerIdentityId: "identity-a", thread,
+  replies: [{
+    id: "user-floor", threadId: thread.id, ownerIdentityId: thread.ownerIdentityId, floor: 2,
+    publicAuthor: { displayName: "User", kind: "user", isAnonymous: false }, body: "杩欐槸鐢ㄦ埛鐨勫洖澶?", source: "user",
+    occurredAt: 2, baseLikeCount: 0, likedByIdentityIds: [], createdAt: 2, updatedAt: 2,
+  }],
+  actorStates: [], relationships: [], characters: [], messages: [], memories: [], worldBookEntries: [], settings, now: 200,
+  requiredReplyFloor: 2,
+  ignoreActorCooldown: true,
+  aiCall: async () => ({ text: JSON.stringify({ events: [
+    { localId: "interaction", actorSlot: "virtual-1", kind: "reply", body: thread.title, replyTo: { type: "thread" }, delaySeconds: 0 },
+  ] }) }),
+});
+assert.equal(interactionEvents.length, 1, "a user interaction always produces a bounded response event");
+assert.deepEqual(interactionEvents[0].replyTarget, { type: "floor", floor: 2 }, "the response is anchored to the user's reply floor");
+
 const first = releaseForumPendingEvents({ events, threads: [thread], replies: [], actorStates: [], ownerIdentityId: "identity-a", now: 100, limit: 1 });
 assert.equal(first.replies.length, 1, "pending events release one at a time");
 assert.equal(first.events[0].status, "released");

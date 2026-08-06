@@ -122,6 +122,65 @@ export const scheduleInitialForumReplies = async (context: ForumActivityRuntimeC
   return releaseDueForumActivity(context, 1);
 };
 
+/**
+ * A user reply is a direct social prompt.  Queue a public-only response batch
+ * targeted at that floor so the other participants can answer and continue the
+ * discussion without requiring the user to press refresh.
+ */
+export const scheduleForumUserInteraction = async (
+  context: ForumActivityRuntimeContext,
+  threadId: string,
+  replyFloor: number,
+): Promise<ForumReply[]> => {
+  const now = context.now?.() ?? Date.now();
+  const snapshot = getForumSnapshotForIdentity(context.ownerIdentityId);
+  const thread = snapshot.threads.find((item) => item.id === threadId && item.ownerIdentityId === context.ownerIdentityId);
+  if (!thread || !Number.isInteger(replyFloor) || replyFloor < 2) return [];
+  const recentInteraction = snapshot.activityTasks.some((task) => task.threadId === threadId
+    && task.trigger === "user-interaction"
+    && task.startedAt >= now - 45_000);
+  if (recentInteraction) return [];
+  const events = await planForumActivity({
+    trigger: "user-interaction",
+    ownerIdentityId: context.ownerIdentityId,
+    thread,
+    replies: snapshot.replies,
+    actorStates: snapshot.actorStates,
+    relationships: context.relationships,
+    characters: context.characters,
+    messages: context.messages,
+    memories: context.memories,
+    worldBookEntries: context.worldBookEntries,
+    settings: context.settings,
+    now,
+    random: context.random,
+    requiredReplyFloor: replyFloor,
+    ignoreActorCooldown: true,
+  });
+  if (!events.length) return [];
+  const first = events[0];
+  const task: ForumActivityTask = {
+    id: id("forum-activity-task"),
+    ownerIdentityId: context.ownerIdentityId,
+    threadId,
+    trigger: "user-interaction",
+    status: "succeeded",
+    startedAt: now,
+    completedAt: now,
+    pendingEvents: events.map((event) => event.id === first.id
+      ? { ...event, scheduledAt: now, updatedAt: now }
+      : event),
+    createdAt: now,
+    updatedAt: now,
+  };
+  const latestSnapshot = getForumSnapshotForIdentity(context.ownerIdentityId);
+  if (latestSnapshot.activityTasks.some((item) => item.threadId === threadId
+    && item.trigger === "user-interaction"
+    && item.startedAt >= now - 45_000)) return [];
+  if (!commitForumMutation({ activityTasks: [...latestSnapshot.activityTasks, task] }).success) return [];
+  return releaseDueForumActivity(context, 1);
+};
+
 export const runAutomaticForumActivityCheck = async (context: ForumActivityRuntimeContext): Promise<{ attempted: boolean; released: ForumReply[] }> => {
   const released = releaseDueForumActivity(context, 1);
   if (released.length) return { attempted: false, released };
@@ -132,7 +191,16 @@ export const runAutomaticForumActivityCheck = async (context: ForumActivityRunti
     return { attempted: false, released: [] };
   }
   const eligibleThreads = [...snapshot.threads]
-    .filter((candidate) => candidate.source !== "user" && candidate.source !== "user-anonymous")
+    .filter((candidate) => {
+      if (candidate.source !== "user" && candidate.source !== "user-anonymous") return true;
+      // A failed/empty initial-reply plan should be recoverable on the next
+      // background tick, while a successfully queued user post is handled by
+      // its existing pending events and should not be duplicated.
+      return now - candidate.createdAt >= 2 * 60 * 1000
+        && !snapshot.activityTasks.some((task) => task.threadId === candidate.id
+        && task.trigger === "initial-replies"
+        && task.status === "succeeded");
+    })
     .sort((a, b) => {
       const storyA = canScheduleStoryContinuation(a, snapshot.replies, now) ? 1 : 0;
       const storyB = canScheduleStoryContinuation(b, snapshot.replies, now) ? 1 : 0;

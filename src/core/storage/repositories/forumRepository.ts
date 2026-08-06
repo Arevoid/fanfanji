@@ -236,7 +236,7 @@ const isForumActivityTask = (value: unknown): value is ForumActivityTask => {
   return typeof task.id === "string"
     && typeof task.ownerIdentityId === "string"
     && typeof task.threadId === "string"
-    && ["automatic", "manual-thread-refresh", "initial-replies", "like-engagement"].includes(String(task.trigger))
+    && ["automatic", "manual-thread-refresh", "initial-replies", "like-engagement", "user-interaction"].includes(String(task.trigger))
     && ["running", "succeeded", "failed", "blocked"].includes(String(task.status))
     && typeof task.startedAt === "number"
     && Array.isArray(task.pendingEvents)

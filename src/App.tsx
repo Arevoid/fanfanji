@@ -98,6 +98,7 @@ import AppSettings from "./components/AppSettings";
 import AppNotes from "./components/AppNotes";
 import AppDiary from "./components/AppDiary";
 import AppMemory from "./components/AppMemory";
+import { useForumActivityEngine } from "./features/forum/hooks/useForumActivityEngine";
 import AppOffline from "./components/AppOffline";
 import {
   BookOpen,
@@ -2351,6 +2352,17 @@ export default function App() {
     signature: settings.signature,
     bio: settings.bio,
   };
+  // Keep forum activity processing alive while the user navigates between apps.
+  // The engine still respects document visibility and persists all pending work.
+  useForumActivityEngine({
+    ownerIdentityId: activeIdentity.id,
+    relationships,
+    characters,
+    messages,
+    memories,
+    worldBookEntries,
+    settings,
+  });
   const availableMusicRelationships = relationships
     .filter((relationship) => relationship.userIdentityId === activeIdentityId)
     .map((relationship) => ({

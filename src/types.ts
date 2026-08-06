@@ -400,7 +400,7 @@ export interface ForumActivityTask {
   id: string;
   ownerIdentityId: string;
   threadId: string;
-  trigger: "automatic" | "manual-thread-refresh" | "initial-replies" | "like-engagement";
+  trigger: "automatic" | "manual-thread-refresh" | "initial-replies" | "like-engagement" | "user-interaction";
   status: "running" | "succeeded" | "failed" | "blocked";
   startedAt: number;
   completedAt?: number;
