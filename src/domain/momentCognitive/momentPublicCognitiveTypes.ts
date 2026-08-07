@@ -3,6 +3,7 @@ import type { CharacterRoutine } from "../characterLife/characterRoutine/charact
 import type { CharacterEvent } from "../characterLife/characterEventTypes";
 import type { CharacterCognitiveRoutineContext } from "../characterCognitive/characterCognitiveTypes";
 import type { MomentTopicRecord } from "../moments/momentGeneration/momentTopicTypes";
+import type { PublicShareAuthorization } from "../publicCognitive/publicShareAuthorization";
 
 export const MOMENT_PUBLIC_COGNITIVE_CONTEXT_SCHEMA_VERSION = 1;
 
@@ -54,10 +55,14 @@ export interface MomentPublicEventCandidate {
   event: CharacterEvent;
   /** Omitted visibility is unknown and therefore denied. */
   visibility?: MomentPublicVisibility;
-  /** Required when a relationship-scoped fact is explicitly authorized for public use. */
+  /** @deprecated Boolean opt-in is ignored; use authorization.status=authorized. */
   explicitlyAuthorized?: boolean;
   /** Prevents a relationship event from becoming public through an accidental label. */
   isRelationshipScoped?: boolean;
+  /** Explicit authorization required for relationship-scoped events. */
+  authorization?: PublicShareAuthorization;
+  /** Alias retained for callers that name the grant explicitly. */
+  shareAuthorization?: PublicShareAuthorization;
 }
 
 export interface MomentPublicEvent {
@@ -73,7 +78,12 @@ export interface MomentPublicFactCandidate {
   visibility?: MomentPublicVisibility;
   /** Shared or relationship-derived facts require explicit public authorization. */
   isRelationshipScoped?: boolean;
+  /** @deprecated Boolean opt-in is ignored; use authorization.status=authorized. */
   explicitlyAuthorized?: boolean;
+  /** Explicit authorization required for relationship-scoped facts. */
+  authorization?: PublicShareAuthorization;
+  shareAuthorization?: PublicShareAuthorization;
+  sourceEventId?: string;
 }
 
 export interface MomentPublicFact {

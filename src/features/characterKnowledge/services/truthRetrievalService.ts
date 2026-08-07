@@ -133,10 +133,10 @@ export function formatTruthRetrievalForPrompt(result: TruthRetrievalResult): str
     formatClaims("Future plans / 尚未发生的计划", projection.futurePlans, { caution: "这些是计划，不得改写成已经发生的事实。" }),
     formatClaims("Open beliefs and hypotheses / 待验证信念与假设", projection.openBeliefsAndHypotheses, { caution: "这些内容不能直接当作确定事实。" }),
     formatClaims("Disputed claims / 有争议内容", projection.disputed, { caution: "存在冲突，只能谨慎提及，不可擅自裁决。" }),
-    formatClaims("Legacy unverified / 旧数据待核验", projection.legacyUnverified, { caution: "仅作线索，未经用户确认不得当作真实事实。" }),
+    formatClaims("Legacy unverified / 旧数据待核验 / source=legacy-unverified", projection.legacyUnverified, { caution: "仅作线索，未经用户确认不得当作真实事实。" }),
   ].filter(Boolean).join("");
   const summaryBlock = result.summaries.length > 0
-    ? `\n[Conversation summaries / 对话摘要（派生缓存，非权威事实）]\n${result.summaries.map((summary) => `- ${summary.summary}`).join("\n")}`
+    ? `\n[Derived summaries / 对话摘要（派生缓存，非权威事实；source=derived-summary；低于已确认事实）]\n${result.summaries.map((summary) => `- ${summary.summary}`).join("\n")}`
     : "";
   const correctionBlock = result.corrections.length > 0
     ? `\n[Behavior corrections / 人设修正]\n${result.corrections.map((correction) => `- ${correction.instruction}`).join("\n")}`

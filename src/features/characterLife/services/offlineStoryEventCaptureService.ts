@@ -6,6 +6,7 @@ import {
   type OfflineStoryEventEligibility,
 } from "../../../domain/offlineStory/offlineStoryEventPolicy";
 import { CHARACTER_EVENT_SCHEMA_VERSION, type CharacterEventInput } from "../../../domain/characterLife/characterEventTypes";
+import { evaluateOfflineStoryReality } from "../../../domain/offlineStory/offlineStoryRealityPolicy";
 
 export interface CaptureOfflineStoryCompletedEventInput {
   story: OfflineStory;
@@ -79,6 +80,33 @@ export const captureOfflineStoryCompletedEvent = (
     sourceMessages: input.sourceMessages,
     recordedSourceKeys: relationEvents.map((event) => event.source),
   });
+  const realityDecision = evaluateOfflineStoryReality({
+    storyId: input.story.id,
+    relationId: input.story.relationId,
+    characterId: input.story.characterId,
+    userIdentityId: input.userIdentityId,
+    mode: input.story.mode,
+    status: eligibility.allowed ? "confirmed" : "unconfirmed",
+    source: eligibility.sourceKey,
+    userConfirmed: input.userConfirmed,
+    occurred: Boolean(input.story.archivedAt),
+    isAiGenerated: !input.sourceMessages.some((message) =>
+      message.sender === "user"
+      && !message.isImportedContext
+      && !message.id.startsWith("offline-import-")
+      && Boolean(message.content?.trim())),
+  });
+  if (!realityDecision.allowed) {
+    return {
+      created: false,
+      eligibility: {
+        ...eligibility,
+        allowed: false,
+        confidence: 0,
+        reason: "fact_policy_rejected",
+      },
+    };
+  }
   const event = buildCompletedEvent(input, eligibility);
   if (!event) return { created: false, eligibility };
 

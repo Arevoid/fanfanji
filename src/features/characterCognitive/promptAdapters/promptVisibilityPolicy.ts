@@ -1,4 +1,5 @@
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import { projectLegacySummary } from "../../../domain/characterCognitive/legacySummaryPolicy";
 import type {
   CognitivePromptBehaviorConstraint,
   CognitivePromptBoundary,
@@ -28,9 +29,22 @@ export function projectPromptPersona(context: CharacterCognitiveContext): Cognit
   };
 }
 
-export function projectPromptRelationship(context: CharacterCognitiveContext): CognitivePromptRelationship {
-  const { stage, compressedMemory } = context.relationship;
-  return { stage, ...(compressedMemory ? { compressedMemory } : {}) };
+export function projectPromptRelationship(
+  context: CharacterCognitiveContext,
+  options?: PromptAdapterOptions,
+): CognitivePromptRelationship {
+  const { stage, legacySummary } = context.relationship;
+  const summary = legacySummary
+    ? projectLegacySummary({
+      summary: legacySummary.content,
+      summaryRelationId: legacySummary.relationId,
+      targetRelationId: context.scope.relationId,
+      hasConfirmedEvent: context.recentEvents.some((event) => event.confidence === 1),
+      hasConfirmedClaim: options?.hasConfirmedClaim === true,
+      hasDerivedSummary: options?.hasDerivedSummary === true,
+    })
+    : undefined;
+  return { stage, ...(summary ? { legacySummary: summary } : {}) };
 }
 
 export function projectPromptTime(context: CharacterCognitiveContext): CognitivePromptTimeContext {

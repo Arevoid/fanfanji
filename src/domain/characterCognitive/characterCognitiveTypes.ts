@@ -8,6 +8,7 @@ import type {
 import type { RelationshipTimeline } from "../characterLife/relationshipTimelineTypes";
 import type { RelationshipState } from "../characterLife/relationshipStateTypes";
 import type { CharacterRelationship, CharacterRelationshipState } from "../relationship/characterRelationship";
+import type { LegacySummaryProjection } from "./legacySummaryPolicy";
 
 export const CHARACTER_COGNITIVE_CONTEXT_SCHEMA_VERSION = 1;
 
@@ -39,7 +40,8 @@ export interface CharacterCognitiveRelationshipContext {
   userIdentityId: string;
   conversationId: string;
   stage: CharacterRelationshipState;
-  compressedMemory?: string;
+  /** Legacy relationship summary; never treated as an authoritative fact. */
+  legacySummary?: LegacySummaryProjection & { relationId: string };
   lastActiveTime?: number;
   scheduledProactiveTime?: number;
   updatedAt: number;

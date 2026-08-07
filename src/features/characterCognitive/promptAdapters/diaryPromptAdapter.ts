@@ -39,7 +39,7 @@ export const buildDiaryPromptContext = (
   options?: Parameters<CognitivePromptAdapter<DiaryPromptContext>>[1],
 ): DiaryPromptContextWithRoutine => ({
   persona: projectPromptPersona(context),
-  relationship: projectPromptRelationship(context),
+  relationship: projectPromptRelationship(context, options),
   safeEvents: selectSafePromptEvents(context, options),
   behaviorConstraints: selectPromptBehaviorConstraints(context),
   boundaries: projectPromptBoundary(context),
@@ -56,6 +56,9 @@ export function formatDiaryPromptContext(context: DiaryPromptContextWithRoutine 
   if (!context) return "";
 
   const events = context.safeEvents.map((event) => `- ${event.summary}`);
+  const legacySummary = context.relationship.legacySummary
+    ? [`- ${context.relationship.legacySummary.content} (source=${context.relationship.legacySummary.source}; weak reference only)`]
+    : [];
   const constraints = context.behaviorConstraints.map((constraint) => `- ${constraint.description}`);
   const boundaries = [
     ...context.boundaries.unknown.map((item) => `- Unknown: ${item}`),
@@ -68,12 +71,13 @@ export function formatDiaryPromptContext(context: DiaryPromptContextWithRoutine 
     `- Current time period: ${routine.period}`,
     `- Current routine state: ${routine.state}`,
   ] : [];
-  if (events.length === 0 && constraints.length === 0 && boundaries.length === 0 && routineContext.length === 0) return "";
+  if (events.length === 0 && constraints.length === 0 && boundaries.length === 0 && legacySummary.length === 0 && routineContext.length === 0) return "";
 
   return [
     "[RELATION-SAFE DIARY COGNITIVE CONTEXT]",
     "Use only verified completed facts when directly relevant. Do not present plans, offline-story narration, inner thoughts, or inferred shared scenes as real completed experiences.",
     ...(events.length > 0 ? ["Verified safe events:", ...events] : []),
+    ...(legacySummary.length > 0 ? ["Legacy summary (source=legacy-unverified; weak reference, never an authoritative fact):", ...legacySummary] : []),
     ...(constraints.length > 0 ? ["Behavior constraints:", ...constraints] : []),
     ...(boundaries.length > 0 ? ["Knowledge boundaries:", ...boundaries] : []),
     `Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`,

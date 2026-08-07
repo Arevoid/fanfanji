@@ -20,7 +20,10 @@ export interface CognitivePromptPersona {
 
 export interface CognitivePromptRelationship {
   stage: string;
-  compressedMemory?: string;
+  legacySummary?: {
+    content: string;
+    source: "legacy-unverified";
+  };
 }
 
 export interface CognitivePromptFact {
@@ -65,6 +68,9 @@ export interface PromptAdapterOptions {
   maxPublicComments?: number;
   /** Existing callers may pass their already-ranked Memory IDs without exposing them in adapter output. */
   relevantMemoryIds?: readonly string[];
+  /** Truth-layer precedence flags supplied by the request-time caller. */
+  hasConfirmedClaim?: boolean;
+  hasDerivedSummary?: boolean;
 }
 
 /** Explicit Moment-public input; unknown visibility is denied before this boundary. */

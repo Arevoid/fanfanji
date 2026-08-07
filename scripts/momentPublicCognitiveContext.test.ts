@@ -33,6 +33,17 @@ const event = (characterId: string, summary: string, relationId = "relation-priv
   status: "active",
   schemaVersion: 1,
 });
+const shareAuthorization = (sourceEventId: string) => ({
+  id: `share-${sourceEventId}`,
+  sourceEventId,
+  relationId: "relation-private",
+  characterId: characterA.id,
+  userIdentityId: "identity-private",
+  scope: "moment" as const,
+  status: "authorized" as const,
+  createdAt: 12,
+});
+const authorizedEvent = event(characterA.id, "已授权公开经历");
 
 assert.equal(canExposeToMomentPublicContext(undefined), false);
 assert.equal(canExposeToMomentPublicContext({}), false);
@@ -45,7 +56,10 @@ assert.equal(
   "relationship-derived facts require explicit public authorization",
 );
 assert.equal(
-  canExposeToMomentPublicContext({ visibility: "public", isRelationshipScoped: true, explicitlyAuthorized: true }),
+  canExposeToMomentPublicContext(
+    { visibility: "public", isRelationshipScoped: true, authorization: shareAuthorization("event-a") },
+    { sourceEventId: "event-a", relationId: "relation-private", characterId: characterA.id, userIdentityId: "identity-private", scope: "moment" },
+  ),
   true,
 );
 
@@ -63,14 +77,14 @@ const context = buildMomentPublicCognitiveContext({
   publicFacts: [
     { characterId: characterA.id, visibility: "public", content: "公开事实" },
     { characterId: characterA.id, visibility: "public", isRelationshipScoped: true, content: "未授权共同经历" },
-    { characterId: characterA.id, visibility: "public", isRelationshipScoped: true, explicitlyAuthorized: true, content: "已授权共同经历" },
+    { characterId: characterA.id, visibility: "public", isRelationshipScoped: true, sourceEventId: "fact-authorized", authorization: shareAuthorization("fact-authorized"), content: "已授权共同经历" },
   ],
   publicEvents: [
     { event: event(characterA.id, "公开事件"), visibility: "public" },
     { event: event(characterA.id, "私密事件"), visibility: "private" },
     { event: event(characterA.id, "关系事件"), visibility: "relationship" },
     { event: event(characterA.id, "未授权共同经历"), visibility: "public", isRelationshipScoped: true },
-    { event: event(characterA.id, "已授权公开经历"), visibility: "public", isRelationshipScoped: true, explicitlyAuthorized: true },
+    { event: authorizedEvent, visibility: "public", isRelationshipScoped: true, authorization: shareAuthorization(authorizedEvent.id) },
     { event: event(characterB.id, "B 的公开事件"), visibility: "public" },
   ],
   publicBehaviorConstraints: [

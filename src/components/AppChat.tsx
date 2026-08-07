@@ -2890,11 +2890,6 @@ ${turnSettings.disableBracketActions
       const shouldLoadLongTermMemory = (!isConnectedVoiceCall || callTopicShiftDetected)
         && !isCrossDayNewSession;
 
-      const legacyDefaultMemory = activeRelationship?.id === `relation_default_${activeCharacter.id}` ? activeCharacter.compressedMemory : undefined;
-      if ((activeRelationship?.compressedMemory || legacyDefaultMemory) && shouldLoadLongTermMemory) {
-        charDefText += `\n- Legacy compressed summary / 旧版关系摘要（仅作非权威补充，不可直接当作已确认事实）: ${activeRelationship?.compressedMemory || legacyDefaultMemory}`;
-      }
-
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = shouldLoadLongTermMemory
@@ -2965,6 +2960,8 @@ ${turnSettings.disableBracketActions
         ? buildChatPromptContext(cognitiveContext, {
           maxFacts: topK,
           relevantMemoryIds: relevantMemories.map((memory) => memory.id),
+          hasConfirmedClaim: Boolean(truthRetrieval?.projection.confirmedFacts.length),
+          hasDerivedSummary: Boolean(truthRetrieval?.summaries.length),
         })
         : undefined;
       const cognitivePromptBlock = formatChatPromptContext(chatPromptContext);
@@ -4145,11 +4142,6 @@ ${resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).d
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
 
-      const legacyDefaultMemory = activeRelationship?.id === `relation_default_${activeCharacter.id}` ? activeCharacter.compressedMemory : undefined;
-      if (activeRelationship?.compressedMemory || legacyDefaultMemory) {
-        charDefText += `\n- Legacy compressed summary / 旧版关系摘要（仅作非权威补充，不可直接当作已确认事实）: ${activeRelationship?.compressedMemory || legacyDefaultMemory}`;
-      }
-
       // Add OOC comment correction as high priority instruction
       charDefText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
 Your previous response was marked as "OOC" (Out Of Character). 
@@ -4272,6 +4264,8 @@ ${timeLogString}
         const cognitivePrompt = formatChatPromptContext(buildChatPromptContext(regenerationCognitiveContext, {
           maxFacts: 0,
           relevantMemoryIds: [],
+          hasConfirmedClaim: Boolean(truthRetrieval?.projection.confirmedFacts.length),
+          hasDerivedSummary: Boolean(truthRetrieval?.summaries.length),
         }));
         if (cognitivePrompt) assembledInstructions.push(cognitivePrompt);
       }

@@ -6,6 +6,7 @@ import {
 import {
   buildOfflineStoryCompletedEvent,
   buildRelationshipCreatedEvent,
+  captureOfflineStoryCompletedEvent,
 } from "../src/features/characterLife/services/characterEventCaptureService";
 import { createRelationship } from "../src/domain/relationship/characterRelationship";
 import type { OfflineStory } from "../src/types";
@@ -40,6 +41,11 @@ assert.equal(storyEvent?.kind, "offline_story_completed");
 assert.equal(storyEvent?.source, "offline_story");
 assert.equal(storyEvent?.occurredAt, story.archivedAt);
 assert.equal(buildOfflineStoryCompletedEvent({ ...story, relationId: undefined }, relationship.userIdentityId), undefined);
+assert.equal(
+  captureOfflineStoryCompletedEvent(story, relationship.userIdentityId, 401).success,
+  false,
+  "legacy capture cannot bypass explicit reality confirmation",
+);
 
 const once = appendCharacterEvents([], [relationshipEvent, storyEvent!]);
 const twice = appendCharacterEvents(once, [relationshipEvent, storyEvent!]);

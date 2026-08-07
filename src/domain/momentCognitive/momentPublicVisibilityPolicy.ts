@@ -6,20 +6,42 @@ import type {
   MomentPublicHistoryCandidate,
   MomentPublicVisibility,
 } from "./momentPublicCognitiveTypes";
+import type { CharacterEvent } from "../characterLife/characterEventTypes";
+import {
+  evaluatePublicShareAuthorization,
+  type PublicShareAuthorization,
+  type PublicShareAuthorizationTarget,
+} from "../publicCognitive/publicShareAuthorization";
 
 export interface MomentPublicVisibilityCandidate {
   visibility?: MomentPublicVisibility;
+  /** @deprecated Boolean opt-in is ignored; use authorization.status=authorized. */
   explicitlyAuthorized?: boolean;
   isRelationshipScoped?: boolean;
+  authorization?: PublicShareAuthorization;
+  shareAuthorization?: PublicShareAuthorization;
 }
+
+const resolveAuthorization = (
+  candidate: MomentPublicVisibilityCandidate,
+): PublicShareAuthorization | undefined => candidate.authorization || candidate.shareAuthorization;
+
+const isAuthorizedRelationshipShare = (
+  candidate: MomentPublicVisibilityCandidate,
+  target: PublicShareAuthorizationTarget | undefined,
+): boolean => {
+  if (!candidate.isRelationshipScoped) return true;
+  if (!target) return false;
+  return evaluatePublicShareAuthorization(resolveAuthorization(candidate), target).allowed;
+};
 
 /** Unknown, relationship-scoped, and private sources are denied by default. */
 export function canExposeToMomentPublicContext(
   candidate: MomentPublicVisibilityCandidate | undefined,
+  target?: PublicShareAuthorizationTarget,
 ): boolean {
   if (candidate?.visibility !== "public") return false;
-  if (candidate.isRelationshipScoped && candidate.explicitlyAuthorized !== true) return false;
-  return true;
+  return isAuthorizedRelationshipShare(candidate, target);
 }
 
 export function selectPublicMomentHistory(
@@ -50,7 +72,15 @@ export function selectAuthorizedPublicFacts(
   characterId: string,
 ) {
   return facts
-    .filter((fact) => fact.characterId === characterId && canExposeToMomentPublicContext(fact))
+    .filter((fact) => fact.characterId === characterId && canExposeToMomentPublicContext(fact, fact.isRelationshipScoped
+      ? {
+        sourceEventId: fact.sourceEventId || "",
+        relationId: fact.authorization?.relationId || fact.shareAuthorization?.relationId || "",
+        characterId: fact.characterId,
+        userIdentityId: fact.authorization?.userIdentityId || fact.shareAuthorization?.userIdentityId || "",
+        scope: "moment",
+      }
+      : undefined))
     .map(({ content }) => ({ content }));
 }
 
@@ -59,7 +89,13 @@ export function selectPublicMomentEvents(
   characterId: string,
 ) {
   return events
-    .filter(({ event, ...candidate }) => event.characterId === characterId && canExposeToMomentPublicContext(candidate))
+    .filter(({ event, ...candidate }) => event.characterId === characterId && canExposeToMomentPublicContext(candidate, {
+      sourceEventId: event.id,
+      relationId: event.relationId,
+      characterId: event.characterId,
+      userIdentityId: event.userIdentityId,
+      scope: "moment",
+    }))
     .map(({ event }) => ({
       kind: event.kind,
       summary: event.summary,
@@ -72,6 +108,6 @@ export function selectPublicBehaviorConstraints(
   constraints: readonly MomentPublicBehaviorConstraintCandidate[],
 ) {
   return constraints
-    .filter(canExposeToMomentPublicContext)
+    .filter((candidate) => canExposeToMomentPublicContext(candidate))
     .map(({ description }) => ({ description }));
 }

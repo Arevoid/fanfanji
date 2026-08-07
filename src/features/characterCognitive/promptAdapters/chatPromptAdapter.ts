@@ -42,7 +42,7 @@ function projectChatRelationshipContext(context: Parameters<CognitivePromptAdapt
 /** Builds a prompt-safe direct-chat projection without formatting Prompt text. */
 export const buildChatPromptContext: CognitivePromptAdapter<ChatPromptContext> = (context, options) => ({
   persona: projectPromptPersona(context),
-  relationship: projectPromptRelationship(context),
+  relationship: projectPromptRelationship(context, options),
   ...projectChatRelationshipContext(context),
   relevantMemories: selectChatPromptFacts(context, options),
   safeEvents: selectSafePromptEvents(context, options),
@@ -77,6 +77,9 @@ export function formatChatPromptContext(context: ChatPromptContext | undefined):
   const relationshipEvents = context.relationshipTimeline?.recentEvents.map((event) => `- ${event.summary}`) ?? [];
   const openLoops = context.relationshipTimeline?.openLoops.map((item) => `- ${item}`) ?? [];
   const relationshipBoundaries = context.relationshipTimeline?.boundaries.map((item) => `- ${item}`) ?? [];
+  const legacySummary = context.relationship.legacySummary
+    ? [`- ${context.relationship.legacySummary.content} (source=${context.relationship.legacySummary.source}; weak reference only)`]
+    : [];
   const routine = context.routineContext;
   const routineContext = routine ? [
     "Routine context (behavior reference only):",
@@ -91,6 +94,7 @@ export function formatChatPromptContext(context: ChatPromptContext | undefined):
     relationshipEvents.length === 0 &&
     openLoops.length === 0 &&
     relationshipBoundaries.length === 0 &&
+    legacySummary.length === 0 &&
     routineContext.length === 0
   ) return "";
 
@@ -103,6 +107,7 @@ export function formatChatPromptContext(context: ChatPromptContext | undefined):
     ...(relationshipEvents.length > 0 ? ["Recent relationship events:", ...relationshipEvents] : []),
     ...(openLoops.length > 0 ? ["Open relationship loops:", ...openLoops] : []),
     ...(relationshipBoundaries.length > 0 ? ["Relationship boundaries:", ...relationshipBoundaries] : []),
+    ...(legacySummary.length > 0 ? ["Legacy summary (source=legacy-unverified; weak reference, never an authoritative fact):", ...legacySummary] : []),
     ...routineContext,
     ...(boundaries.length > 0 ? ["Knowledge boundaries:", ...boundaries] : []),
   ].join("\n");

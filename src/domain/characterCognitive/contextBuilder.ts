@@ -10,6 +10,7 @@ import type { RelationshipTimeline } from "../characterLife/relationshipTimeline
 import type { RelationshipState } from "../characterLife/relationshipStateTypes";
 import { classifyTimeOfDay, getCurrentRoutineState } from "../characterLife/characterRoutine/characterRoutinePolicy";
 import { selectKnownFacts, selectRecentEvents } from "./contextPolicy";
+import { LEGACY_SUMMARY_SOURCE } from "./legacySummaryPolicy";
 
 function assertRelationshipScope(input: BuildCharacterCognitiveContextInput): CharacterCognitiveIdentityScope {
   const { character, relation, conversationId } = input;
@@ -106,7 +107,15 @@ export function buildCharacterCognitiveContext(
       userIdentityId: relation.userIdentityId,
       conversationId: relation.conversationId,
       stage: relation.relationship,
-      ...(relation.compressedMemory ? { compressedMemory: relation.compressedMemory } : {}),
+      ...(relation.compressedMemory?.trim()
+        ? {
+          legacySummary: {
+            content: relation.compressedMemory.trim(),
+            source: LEGACY_SUMMARY_SOURCE,
+            relationId: relation.id,
+          },
+        }
+        : {}),
       ...(relation.lastActiveTime === undefined ? {} : { lastActiveTime: relation.lastActiveTime }),
       ...(relation.scheduledProactiveTime === undefined ? {} : { scheduledProactiveTime: relation.scheduledProactiveTime }),
       updatedAt: relation.updatedAt,
