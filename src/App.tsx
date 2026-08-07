@@ -2495,9 +2495,9 @@ export default function App() {
         .phone-screen-container .rounded-[26px],
         .phone-screen-container .rounded-[40px],
         .phone-screen-container .rounded-full:not(img):not(.avatar-img):not(.avatar-icon):not(input):not(select):not(textarea),
-        .phone-screen-container button,
-        .phone-screen-container [class*="rounded-"]:not(img):not(.avatar-img):not(.avatar-icon):not(input):not(select):not(textarea),
-        .phone-screen-container .back-btn,
+        .phone-screen-container button:not(.chat-header-control--plain),
+        .phone-screen-container [class*="rounded-"]:not(img):not(.avatar-img):not(.avatar-icon):not(input):not(select):not(textarea):not(.chat-header-control--plain),
+        .phone-screen-container .back-btn:not(.chat-header-control--plain),
         .phone-screen-container #schedule_back_btn,
         .phone-screen-container .chat-bubble-self,
         .phone-screen-container .chat-bubble-other,
@@ -2749,7 +2749,7 @@ export default function App() {
         .phone-screen-container button[title="返回"],
         .phone-screen-container button[title="关闭"],
         .phone-screen-container #schedule_back_btn,
-        .phone-screen-container .back-btn {
+        .phone-screen-container .back-btn:not(.chat-header-control--plain) {
           border-radius: 32px !important;
           background-color: var(--surface) !important;
           border: 1px solid var(--border) !important;

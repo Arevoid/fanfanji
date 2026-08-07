@@ -6758,7 +6758,7 @@ ${instructionsPrompt}`;
                   setIsShowingCardModal(false);
                   setAdvancedSettingsSection(null);
                 }}
-                className="w-8 h-8 rounded-none bg-transparent flex items-center justify-center hover:bg-transparent hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button"
+                className="w-8 h-8 rounded-none bg-transparent flex items-center justify-center hover:bg-transparent hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button chat-header-control--plain"
               >
                 <span className="cv-back-icon flex items-center justify-center w-full h-full">
                   <ChevronLeft className="w-4 h-4 text-[var(--text-primary)]" />
@@ -6828,7 +6828,7 @@ ${instructionsPrompt}`;
                   setAdvancedSettingsSection(null);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
-                className="w-8 h-8 rounded-none bg-transparent flex items-center justify-center hover:bg-transparent hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button"
+                className="w-8 h-8 rounded-none bg-transparent flex items-center justify-center hover:bg-transparent hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button chat-header-control--plain"
               >
                 <span className="cv-menu-icon flex items-center justify-center w-full h-full">
                   <MoreHorizontal className="w-4 h-4 text-[var(--text-primary)]" />
