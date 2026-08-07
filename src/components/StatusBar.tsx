@@ -6,9 +6,10 @@ interface StatusBarProps {
   wallpaper?: string;
   hasUserWallpaper?: boolean;
   fallbackTheme: ResolvedTheme;
+  hideStatusBar?: boolean;
 }
 
-export default function StatusBar({ wallpaper, hasUserWallpaper = false, fallbackTheme }: StatusBarProps) {
+export default function StatusBar({ wallpaper, hasUserWallpaper = false, fallbackTheme, hideStatusBar = false }: StatusBarProps) {
   const [time, setTime] = useState("");
   const [isDark, setIsDark] = useState(false);
 
@@ -82,6 +83,8 @@ export default function StatusBar({ wallpaper, hasUserWallpaper = false, fallbac
       setIsDark(lower.includes("dark") || lower.includes("night") || lower.includes("black") || lower.includes("charcoal"));
     };
   }, [fallbackTheme, hasUserWallpaper, wallpaper]);
+
+  if (hideStatusBar) return null;
 
   return (
     <div 

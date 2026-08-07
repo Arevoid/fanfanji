@@ -14,7 +14,6 @@ import {
   Check,
   Save,
   Trash2,
-  Lock,
   Plus,
   Eye,
   EyeOff,
@@ -395,6 +394,7 @@ export default function AppSettings({
   const [chatGlobalCSS, setChatGlobalCSS] = useState(settings.chatGlobalCSS || "");
   const [chatIcons, setChatIcons] = useState<ChatIconOverrides>(() => sanitizeChatIcons(settings.chatIcons));
   const [showHomeButton, setShowHomeButton] = useState(!!settings.showHomeButton);
+  const [hideStatusBar, setHideStatusBar] = useState(!!settings.hideStatusBar);
   const [dockColor, setDockColor] = useState(settings.dockColor || "#ffffff");
   const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
   const [widgetOpacity, setWidgetOpacity] = useState(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70);
@@ -1203,8 +1203,8 @@ export default function AppSettings({
           </div>
         ) : (
           /* Independent sub-pages */
-          <div className="flex-1 overflow-y-auto p-4 pb-24 bg-slate-50/50">
-            <div className="max-w-md mx-auto space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 pb-[34px] bg-[var(--app-bg)]">
+            <div className="max-w-md mx-auto space-y-3">
           
           {/* PROFILE SETTINGS TAB */}
           {activeTab === "appearance" && (
@@ -1340,215 +1340,104 @@ export default function AppSettings({
 
           {/* API SETTINGS TAB */}
           {activeTab === "api" && (
-            <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                <Lock className="w-3.5 h-3.5" />
-                <span>智能体模型设置</span>
-              </h3>
-
-              {/* 预设配置 Profile Selector */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">预设配置</label>
+            <div className="space-y-3 text-left">
+              <div className="px-1 text-[14px] leading-5 text-[#999]">当前模型配置</div>
+              <section className="settings-card bg-[var(--surface)] rounded-[16px] border border-[var(--border)] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-4">
                 <div className="flex items-center gap-2">
                   <select
+                    aria-label="当前模型配置"
                     value={activeApiPresetId}
                     onChange={(e) => handleSelectPreset(e.target.value)}
-                    className="flex-1 px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
+                    className="h-10 min-w-0 flex-1 rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm font-medium text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)]"
                   >
                     {apiPresets.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
+                      <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
-                  
-                  <button
-                    onClick={handleAddPreset}
-                    type="button"
-                    className="p-2 bg-slate-100 hover:bg-slate-200 rounded-[16px] transition-colors"
-                    title="添加新配置"
-                  >
-                    <Plus className="w-4 h-4 text-slate-600" />
+                  <button onClick={handleAddPreset} type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-raised)]" title="添加新配置" aria-label="添加新配置">
+                    <Plus className="h-5 w-5" />
                   </button>
-                  
-                  <button
-                    onClick={() => handleDeletePreset(activeApiPresetId)}
-                    type="button"
-                    className="p-2 bg-rose-50 hover:bg-rose-100 rounded-[16px] transition-colors"
-                    title="删除当前配置"
-                  >
-                    <Trash2 className="w-4 h-4 text-rose-600" />
+                  <button onClick={() => handleDeletePreset(activeApiPresetId)} type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-rose-100 bg-rose-50 text-rose-600 transition-colors hover:bg-rose-100" title="删除当前配置" aria-label="删除当前配置">
+                    <Trash2 className="h-5 w-5" />
                   </button>
                 </div>
-              </div>
+              </section>
 
-              {/* 配置名称 Input */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">配置名称 / PRESET NAME</label>
-                <input
-                  type="text"
-                  value={presetName}
-                  onChange={(e) => setPresetName(e.target.value)}
-                  placeholder="请输入配置名称"
-                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-bold"
-                />
-              </div>
-
-              {/* API 地址 (Endpoint) */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">API 地址 / ENDPOINT (选填，留空则为官方Gemini)</label>
-                <input
-                  type="text"
-                  value={apiEndpoint}
-                  onChange={(e) => setApiEndpoint(e.target.value)}
-                  placeholder="例如 https://api.deepseek.com/v1"
-                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-mono"
-                />
-              </div>
-
-              {/* API 密钥 (API Key) */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">API 密钥 / API KEY</label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="请输入 API Key"
-                    className="w-full pl-3 pr-10 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* 模型选择 / MODEL */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-[10px] font-bold text-slate-500">模型选择 / MODEL</label>
-                  <button
-                    onClick={handleFetchModels}
-                    disabled={isFetchingModels}
-                    type="button"
-                    className="text-[9px] text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${isFetchingModels ? "animate-spin" : ""}`} />
-                    <span>点击拉取列表</span>
-                  </button>
-                </div>
-                
-                {modelSuggestions.length > 0 ? (
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
-                  >
-                    {modelSuggestions.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    placeholder="先拉取列表或手动输入模型名"
-                    className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-semibold"
-                  />
-                )}
-              </div>
-
-              {/* API 温度 / TEMPERATURE */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-[10px] font-bold text-slate-500">API 温度 / TEMPERATURE</label>
-                  <span className="text-xs font-mono font-bold text-slate-700">{apiTemperature.toFixed(1)}</span>
-                </div>
-                <input
-                  type="range"
-                  min="0.0"
-                  max="2.0"
-                  step="0.1"
-                  value={apiTemperature}
-                  onChange={(e) => setApiTemperature(parseFloat(e.target.value))}
-                  className="w-full accent-neutral-950"
-                />
-              </div>
-
-              {/* 流式兼容模式 / STREAM COMPATIBLE */}
-              <div className="flex items-center justify-between py-2 border-t border-b border-slate-100">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-700">流式兼容模式</h4>
-                  <p className="text-[9px] text-slate-400 leading-normal">开启后兼容流式数据输出格式</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setStreamCompatible(!streamCompatible)}
-                  className={`w-9 h-5 rounded-full transition-colors relative focus:outline-none ${
-                    streamCompatible ? "bg-emerald-500" : "bg-slate-200"
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 bg-white w-4 h-4 rounded-full transition-transform shadow-sm ${
-                      streamCompatible ? "translate-x-4" : ""
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {/* Bottom Actions */}
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={handleTestConnection}
-                  disabled={isTesting}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
-                >
-                  {isTesting ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <div className="px-1 pt-1 text-[14px] leading-5 text-[#999]">基本信息</div>
+              <section className="settings-card overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_2px_12px_rgba(0,0,0,0.06)] divide-y divide-[var(--divider)]">
+                <label className="block px-4 py-3">
+                  <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)]">配置名称</span>
+                  <input type="text" value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="请输入配置名称" className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm font-medium text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--focus-ring)]" />
+                </label>
+                <label className="block px-4 py-3">
+                  <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)]">API 地址（Endpoint）</span>
+                  <input type="text" value={apiEndpoint} onChange={(e) => setApiEndpoint(e.target.value)} placeholder="例如 https://api.deepseek.com/v1" className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm font-mono text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--focus-ring)]" />
+                </label>
+                <label className="block px-4 py-3">
+                  <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)]">API 密钥（Key）</span>
+                  <span className="relative block">
+                    <input type={showPassword ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="请输入 API Key" className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 pr-10 text-sm font-mono text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--focus-ring)]" />
+                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]" aria-label={showPassword ? "隐藏 API 密钥" : "显示 API 密钥"}>
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </span>
+                </label>
+                <div className="px-4 py-3">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-[12px] font-medium text-[var(--text-secondary)]">模型选择（Model）</span>
+                    <button onClick={handleFetchModels} disabled={isFetchingModels} type="button" className="flex items-center gap-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-60">
+                      <RefreshCw className={`h-3.5 w-3.5 ${isFetchingModels ? "animate-spin" : ""}`} />
+                      <span>{isFetchingModels ? "拉取中…" : "拉取模型列表"}</span>
+                    </button>
+                  </div>
+                  {modelSuggestions.length > 0 ? (
+                    <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm font-medium text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--focus-ring)]">
+                      {modelSuggestions.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
                   ) : (
-                    <Sparkles className="w-3.5 h-3.5" />
+                    <input type="text" value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} placeholder="先拉取列表或手动输入模型名" className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm font-medium text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--focus-ring)]" />
                   )}
+                </div>
+              </section>
+
+              <div className="px-1 pt-1 text-[14px] leading-5 text-[#999]">高级设置</div>
+              <section className="settings-card overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_2px_12px_rgba(0,0,0,0.06)] divide-y divide-[var(--divider)]">
+                <div className="px-4 py-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <label htmlFor="api-temperature" className="text-[12px] font-medium text-[var(--text-secondary)]">API 温度（Temperature）</label>
+                    <span className="text-sm font-semibold text-[var(--text-primary)]">{apiTemperature.toFixed(1)}</span>
+                  </div>
+                  <input id="api-temperature" type="range" min="0.0" max="2.0" step="0.1" value={apiTemperature} onChange={(e) => setApiTemperature(parseFloat(e.target.value))} className="w-full accent-[var(--text-primary)]" />
+                </div>
+                <div className="flex min-h-[56px] items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <h4 className="text-sm font-medium text-[var(--text-primary)]">流式兼容模式</h4>
+                    <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">开启后兼容流式数据输出格式</p>
+                  </div>
+                  <button type="button" role="switch" aria-checked={streamCompatible} onClick={() => setStreamCompatible(!streamCompatible)} className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${streamCompatible ? "border-[var(--text-primary)] bg-[var(--text-primary)]" : "border-[var(--border)] bg-[var(--surface-muted)]"}`}>
+                    <span className={`absolute left-0.5 h-5 w-5 rounded-full bg-[var(--surface)] shadow-sm transition-transform ${streamCompatible ? "translate-x-4" : "translate-x-0"}`} />
+                  </button>
+                </div>
+              </section>
+
+              <div className="space-y-2 pt-1">
+                <button type="button" onClick={handleTestConnection} disabled={isTesting} className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--button-primary-bg)] text-sm font-semibold text-[var(--button-primary-text)] shadow-sm transition-colors hover:bg-[var(--button-primary-hover-bg)] disabled:opacity-60">
+                  {isTesting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                   <span>测试连接</span>
                 </button>
-
-                <button
-                  type="button"
-                  onClick={handleSaveApiConfig}
-                  className="flex-1 py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm flex items-center justify-center gap-1.5"
-                >
-                  <Save className="w-3.5 h-3.5" />
+                <button type="button" onClick={handleSaveApiConfig} className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[12px] border border-[var(--border)] bg-[var(--surface)] text-sm font-semibold text-[var(--text-primary)] shadow-sm transition-colors hover:bg-[var(--surface-muted)]">
+                  <Save className="h-4 w-4" />
                   <span>保存配置</span>
                 </button>
               </div>
 
-              {testResult && (
-                <div
-                  className={`p-3 rounded-[16px] text-xs font-semibold border ${
-                    testResult.success
-                      ? "bg-emerald-50 text-emerald-800 border-emerald-100"
-                      : "bg-rose-50 text-rose-800 border-rose-100"
-                  }`}
-                >
-                  {testResult.msg}
-                </div>
-              )}
+              {testResult && <div className={`rounded-[12px] border p-3 text-xs font-medium ${testResult.success ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800"}`}>{testResult.msg}</div>}
             </div>
           )}
 
           {activeTab === "image_api" && (
-            <div className="space-y-4">
+            <div className="space-y-3 text-left">
+              <div className="settings-section-header">图片设置</div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between"><div><span className="text-sm font-bold text-slate-800 block">图片生成总开关</span><span className="text-[10px] text-slate-400">关闭时任何角色都不能生成图片</span></div><button type="button" role="switch" aria-checked={enableImageGeneration} aria-label="图片生成总开关" onClick={() => updateImageGenerationEnabled(!enableImageGeneration)} className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${enableImageGeneration ? "bg-neutral-950" : "bg-slate-200"}`}><span className={`absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-transform duration-200 ${enableImageGeneration ? "translate-x-5" : "translate-x-0"}`} /></button></div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4"><div className="flex items-center justify-between"><h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">图片 API 配置</h3></div>
                 <div className="flex gap-2"><select value={activeImageApiPresetId} onChange={(event) => selectImagePreset(event.target.value)} className="flex-1 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageApiPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select><button type="button" onClick={addImagePreset} className="p-2 rounded-xl bg-slate-100"><Plus className="w-4 h-4" /></button><button type="button" onClick={deleteImagePreset} className="p-2 rounded-xl bg-rose-50 text-rose-600"><Trash2 className="w-4 h-4" /></button></div>
@@ -2817,36 +2706,59 @@ export default function AppSettings({
 
           {/* SYSTEM CONFIG TAB */}
           {activeTab === "system_config" && (
-            <div className="space-y-4 text-left">
+            <div className="space-y-4 text-left" data-system-settings>
+              <div className="settings-section-header">系统偏好</div>
               {/* Floating Home Button Settings */}
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-xs font-bold text-slate-800 tracking-wide">一键回到主页悬浮按钮</h4>
+                    <h4 className="text-xs font-bold text-slate-800 tracking-wide">悬浮按钮</h4>
                     <p className="text-[10px] text-slate-400 mt-1 leading-normal">
-                      在屏幕边缘显示一个半透明悬浮按钮，支持自由拖拽移动位置。点击可一键回到桌面主页。
+                      点击可一键回到桌面主页
                     </p>
                   </div>
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={showHomeButton}
                     onClick={() => {
                       const nextVal = !showHomeButton;
                       setShowHomeButton(nextVal);
                       handleSave({ showHomeButton: nextVal });
                     }}
-                    className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-1 shrink-0 ${
+                    className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors ${
                       showHomeButton ? "bg-neutral-950" : "bg-slate-200"
                     }`}
                   >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
-                        showHomeButton ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
+                    <span className={`absolute left-0.5 bg-white shadow-sm transition-transform ${showHomeButton ? "translate-x-[18px]" : "translate-x-0"}`} />
                   </button>
                 </div>
               </div>
 
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 tracking-wide">隐藏状态栏</h4>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-normal">开启后隐藏手机顶部的时间、信号和电量状态栏</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={hideStatusBar}
+                    onClick={() => {
+                      const nextVal = !hideStatusBar;
+                      setHideStatusBar(nextVal);
+                      handleSave({ hideStatusBar: nextVal });
+                    }}
+                    className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors ${hideStatusBar ? "bg-neutral-950" : "bg-slate-200"}`}
+                  >
+                    <span className={`absolute left-0.5 bg-white shadow-sm transition-transform ${hideStatusBar ? "translate-x-[18px]" : "translate-x-0"}`} />
+                  </button>
+                </div>
+              </div>
+
+              {false && (
+                <>
               {/* PWA 渐进式独立应用管理器 */}
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -2907,12 +2819,15 @@ export default function AppSettings({
                   </div>
                 )}
               </div>
+                </>
+              )}
             </div>
           )}
 
           {/* SYSTEM SETTINGS & BACKUP TAB */}
           {activeTab === "system" && (
             <div className="space-y-4 text-left">
+              <div className="settings-section-header">数据备份</div>
               {/* Data Backup and Restore */}
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">数据备份与还原</h3>
@@ -3041,6 +2956,7 @@ export default function AppSettings({
                 </div>
               </div>
 
+              <div className="settings-section-header">桌面模块</div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <div>
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">桌面模块备份</h3>
@@ -3061,6 +2977,7 @@ export default function AppSettings({
                 </div>
               </div>
 
+              <div className="settings-section-header">危险操作</div>
               {/* Reset Cache and Return to Default */}
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-rose-500 uppercase tracking-wider">危险区域</h3>
@@ -3087,7 +3004,8 @@ export default function AppSettings({
 
           {/* MINIMAX TTS SETTINGS TAB */}
           {activeTab === "minimax" && (
-            <div className="space-y-4 text-left pb-20 overflow-y-auto h-full pr-1 w-full max-w-md mx-auto">
+            <div className="space-y-3 text-left pb-[34px] w-full max-w-md mx-auto">
+              <div className="settings-section-header">语音设置</div>
               {/* General Toggle Switch */}
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between">
                 <div>
@@ -3101,7 +3019,7 @@ export default function AppSettings({
                     onChange={(e) => setEnableMiniMaxTts(e.target.checked)}
                     className="sr-only"
                   />
-                  <div className={`w-11 h-6 rounded-full transition-colors duration-200 relative ${
+                  <div className={`settings-compact-toggle rounded-full transition-colors duration-200 relative ${
                     enableMiniMaxTts ? "bg-indigo-600" : "bg-slate-200"
                   }`}>
                     <div className={`absolute top-[2px] left-[2px] bg-white border border-slate-300 rounded-full h-5 w-5 transition-transform duration-200 ${

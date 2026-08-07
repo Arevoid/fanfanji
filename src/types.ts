@@ -684,6 +684,8 @@ export interface UserSettings {
   apiPresets?: ApiPreset[];
   activeApiPresetId?: string;
   showHomeButton?: boolean;
+  /** Hide the simulated phone status bar when enabled. */
+  hideStatusBar?: boolean;
   dockColor?: string;
   dockOpacity?: number;
   widgetOpacity?: number;

@@ -2483,7 +2483,7 @@ export default function App() {
           background-color: var(--surface) !important;
         }
 
-        /* 2. Unified Border Radius: Strict 32px Rounding */
+        /* 2. Unified Container Radius: form controls are handled separately below. */
         .phone-screen-container .rounded-xl,
         .phone-screen-container .rounded-2xl,
         .phone-screen-container .rounded-3xl,
@@ -2494,12 +2494,9 @@ export default function App() {
         .phone-screen-container .rounded-[22px],
         .phone-screen-container .rounded-[26px],
         .phone-screen-container .rounded-[40px],
-        .phone-screen-container .rounded-full:not(img):not(.avatar-img):not(.avatar-icon),
+        .phone-screen-container .rounded-full:not(img):not(.avatar-img):not(.avatar-icon):not(input):not(select):not(textarea),
         .phone-screen-container button,
-        .phone-screen-container input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
-        .phone-screen-container select,
-        .phone-screen-container textarea,
-        .phone-screen-container [class*="rounded-"]:not(img):not(.avatar-img):not(.avatar-icon),
+        .phone-screen-container [class*="rounded-"]:not(img):not(.avatar-img):not(.avatar-icon):not(input):not(select):not(textarea),
         .phone-screen-container .back-btn,
         .phone-screen-container #schedule_back_btn,
         .phone-screen-container .chat-bubble-self,
@@ -2546,15 +2543,84 @@ export default function App() {
           border-color: var(--border) !important;
         }
 
-        /* For inputs, add clean padding and force the 32px rounding */
+        /* Form controls use a fixed rectangular radius; never inherit avatar/pill rounding. */
         .phone-screen-container input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
         .phone-screen-container textarea,
         .phone-screen-container select {
-          border-radius: 32px !important;
+          border-radius: 14px;
           background-color: var(--input-bg) !important;
           color: var(--text-primary) !important;
           box-shadow: 0 4px 12px var(--shadow-color) !important;
           outline: none !important;
+        }
+
+        /* Settings pages use one consistent card primitive across every secondary tab. */
+        .phone-screen-container [data-settings-shell] .settings-card {
+          border-radius: 16px !important;
+          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+          background: var(--surface) !important;
+          border-color: var(--border) !important;
+        }
+        .phone-screen-container [data-settings-shell] .bg-white.p-5 {
+          border-radius: 16px !important;
+          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+          background: var(--surface) !important;
+          border-color: var(--border) !important;
+        }
+        .phone-screen-container [data-settings-shell] .settings-section-header {
+          color: var(--text-tertiary);
+          font-size: 14px;
+          line-height: 20px;
+          padding-inline: 4px;
+        }
+        .phone-screen-container [data-settings-shell] .settings-compact-toggle {
+          width: 42px;
+          height: 24px;
+          border-radius: 12px !important;
+        }
+        .phone-screen-container [data-settings-shell] button[role="switch"] {
+          width: 42px;
+          height: 24px;
+          border-radius: 12px !important;
+        }
+        .phone-screen-container [data-settings-shell] button[role="switch"] > span {
+          width: 20px;
+          height: 20px;
+          border-radius: 50% !important;
+        }
+        .phone-screen-container [data-settings-shell] .settings-compact-toggle > span,
+        .phone-screen-container [data-settings-shell] .settings-compact-toggle > div {
+          width: 20px;
+          height: 20px;
+          border-radius: 50% !important;
+        }
+        .phone-screen-container [data-settings-shell] .settings-compact-toggle > div {
+          flex: 0 0 20px;
+        }
+        .phone-screen-container [data-settings-shell] .settings-card button:not([role="switch"]),
+        .phone-screen-container [data-settings-shell] .bg-white.p-5 button:not([role="switch"]) {
+          border-radius: 12px !important;
+        }
+        /* Image API actions mirror the API page: two full-width stacked buttons. */
+        .phone-screen-container [data-settings-shell] .settings-section-header + .bg-white.p-5 + .settings-section-header + .bg-white.p-5 > div:last-child {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding-top: 4px;
+        }
+        .phone-screen-container [data-settings-shell] .settings-section-header + .bg-white.p-5 + .settings-section-header + .bg-white.p-5 > div:last-child > button {
+          width: 100%;
+          height: 44px;
+          flex: none;
+        }
+        .phone-screen-container [data-settings-shell] .settings-section-header + .bg-white.p-5 + .settings-section-header + .bg-white.p-5 > div:last-child > button:first-child {
+          background: var(--button-primary-bg) !important;
+          color: var(--button-primary-text) !important;
+        }
+        .phone-screen-container [data-settings-shell] .settings-section-header + .bg-white.p-5 + .settings-section-header + .bg-white.p-5 > div:last-child > button:last-child {
+          border: 1px solid var(--border) !important;
+          background: var(--surface) !important;
+          color: var(--text-primary) !important;
         }
 
         /* Diary editing follows the compact offline-story card geometry. */
@@ -2831,7 +2897,7 @@ export default function App() {
               setGlobalNotification(null);
             }}
             className="absolute left-3.5 right-3.5 z-50 animate-slide-down bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 p-3 flex items-center gap-3 cursor-pointer select-none animate-fade-in"
-            style={{ top: "calc(env(safe-area-inset-top, 0px) + 48px)" }}
+             style={{ top: settings.hideStatusBar ? "8px" : "calc(env(safe-area-inset-top, 0px) + 48px)" }}
           >
             {/* Avatar */}
             <img
@@ -2869,7 +2935,7 @@ export default function App() {
             <div 
               className="home-screen-drag-surface flex-1 min-h-0 overflow-hidden flex flex-col p-4 select-none touch-none"
               style={{
-                paddingTop: "calc(env(safe-area-inset-top, 0px) + 40px)",
+                 paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 40px)",
                 paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 24px)"
               }}
               onContextMenu={(event) => event.preventDefault()}
@@ -3350,7 +3416,7 @@ export default function App() {
             <div 
               className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full"
               style={{
-                paddingTop: "calc(env(safe-area-inset-top, 0px) + 36px)",
+                 paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
                 paddingBottom: "env(safe-area-inset-bottom, 0px)"
               }}
             >
@@ -3604,6 +3670,7 @@ export default function App() {
               wallpaper={activeWallpaper}
               hasUserWallpaper={Boolean(activeWallpaper)}
               fallbackTheme={resolvedTheme}
+              hideStatusBar={settings.hideStatusBar}
             />;
           })()}
         </div>
