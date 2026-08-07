@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
@@ -162,41 +163,669 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
 
-const CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 支持全面美化自定义，以下是常用选择器说明： */
-.cv-header { /* 导航栏/顶部 */ }
-.cv-messages-list { /* 聊天背景/消息列表 */ }
-.user-avatar { /* 个人头像 */ }
-.ai-avatar { /* 对方头像 */ }
-.chat-bubble-self { /* 个人气泡 */ }
-.chat-bubble-other { /* 对方气泡 */ }
-.cv-footer { /* 底部输入栏 */ }
-.chat-input { /* 输入框样式 */ }
+const CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面：设置页、档案馆及其他应用不会应用本样式。 */
+/* ==================== 主题变量 ==================== */
+#conv-screen {
+  /* 页面与消息 */
+  --chat-page-bg: var(--app-bg);
+  --chat-header-bg: var(--surface);
+  --chat-message-list-bg: var(--app-bg);
+  --chat-text: var(--text-primary);
+  --chat-muted-text: var(--text-secondary);
+  --chat-divider: var(--divider);
 
-/* 自定义图标样式（隐藏默认 SVG 并设置图片链接）： */
-.cv-back-icon svg { display: none !important; }
-.cv-back-icon {
-  background: url('返回按钮图片URL') center/contain no-repeat !important;
+  /* 气泡边框：可切换 solid / dashed / dotted，不使用超大圆角值。 */
+  --chat-bubble-border: var(--border);
+  --chat-bubble-border-width: 1px;
+  --chat-bubble-border-style: solid;
+  /* 需要虚线时改为：--chat-bubble-border-style: dashed; */
+
+  /* 底部输入栏容器 */
+  --chat-composer-bg: var(--surface);
+  --chat-composer-text: var(--text-primary);
+  --chat-composer-border: var(--border);
+  --chat-composer-border-width: 1px;
+  --chat-composer-radius: var(--radius-xl);
+  --chat-composer-shadow: none;
+
+  /* 文本输入框 */
+  --chat-input-bg: var(--input-bg);
+  --chat-input-text: var(--text-primary);
+  --chat-input-placeholder: var(--input-placeholder);
+  --chat-input-border: var(--border);
+  --chat-input-border-width: 1px;
+  --chat-input-radius: var(--radius-sm);
+  --chat-input-shadow: none;
+  --chat-input-focus-border: var(--accent);
+  --chat-input-focus-shadow: 0 0 0 2px var(--focus-ring);
+
+  /* 加号、仅发送、发送并回复按钮 */
+  --chat-button-border: var(--border);
+  --chat-button-border-width: 1px;
+  --chat-button-radius: var(--radius-full);
+  --chat-button-shadow: none;
+  --chat-attach-bg: var(--button-secondary-bg);
+  --chat-attach-text: var(--button-secondary-text);
+  --chat-attach-hover-bg: var(--surface-raised);
+  --chat-attach-hover-text: var(--button-secondary-text);
+  --chat-send-only-bg: var(--button-secondary-bg);
+  --chat-send-only-text: var(--button-secondary-text);
+  --chat-send-only-hover-bg: var(--surface-raised);
+  --chat-send-only-hover-text: var(--button-secondary-text);
+  --chat-send-bg: var(--button-primary-bg);
+  --chat-send-text: var(--button-primary-text);
+  --chat-send-border: var(--button-primary-bg);
+  --chat-send-hover-bg: var(--button-primary-hover-bg);
+  --chat-send-hover-text: var(--button-primary-text);
+  --chat-send-hover-border: var(--button-primary-hover-bg);
+  --chat-button-disabled-bg: var(--button-disabled-bg);
+  --chat-button-disabled-text: var(--button-disabled-text);
+  --chat-button-disabled-border: var(--button-disabled-border);
+  --chat-button-disabled-opacity: 0.4;
 }
 
-.cv-menu-icon svg { display: none !important; }
-.cv-menu-icon {
-  background: url('菜单按钮图片URL') center/contain no-repeat !important;
+/* ==================== 页面结构 ==================== */
+.chat-page { background: var(--chat-page-bg); color: var(--chat-text); }
+.chat-page__background { background: var(--chat-page-bg); }
+.cv-header,
+.chat-header,
+.header { background: var(--chat-header-bg); color: var(--chat-text); }
+.cv-header .back-btn,
+.cv-header .menu-btn { background: transparent; color: var(--chat-text); }
+.header-title { color: var(--chat-text); }
+.header-title-avatar,
+.user-avatar,
+.ai-avatar { border-radius: 50%; }
+.header-title-name { color: var(--chat-text); }
+.character-status { color: var(--accent); }
+.cv-back-icon,
+.cv-menu-icon { color: var(--chat-text); }
+
+/* 消息滚动区域、时间戳与消息元数据 */
+.cv-messages-list { background: var(--chat-message-list-bg); color: var(--chat-text); }
+.chat-timestamp { color: var(--chat-muted-text); }
+.chat-timestamp__label { background: var(--surface-muted); color: var(--chat-muted-text); }
+.msg-meta-header { color: var(--chat-muted-text); }
+.msg-meta-name,
+.msg-meta-date,
+.msg-meta-time { color: var(--chat-muted-text); }
+.msg-meta-divider { border-color: var(--chat-divider); }
+
+/* ==================== 消息气泡与分组 ==================== */
+.cv-bubble,
+.message-bubble,
+.message-content { color: var(--chat-text); }
+.chat-bubble-self { background: var(--button-primary-bg); color: var(--button-primary-text); }
+.chat-bubble-other { background: var(--surface-raised); color: var(--chat-text); }
+.chat-bubble-self,
+.chat-bubble-other,
+.voice-message-bar,
+.transfer-card,
+.received-transfer-card {
+  border: var(--chat-bubble-border-width) var(--chat-bubble-border-style) var(--chat-bubble-border);
+  border-radius: 14px;
+  box-shadow: none;
 }
 
-.cv-plus-icon svg { display: none !important; }
-.cv-plus-icon {
-  background: url('加号按钮图片URL') center/contain no-repeat !important;
+/* 同一发送者连续消息：首条有尾巴和装饰，中间/末尾不输出尾巴。 */
+.msg-group-top.chat-bubble-self,
+.msg-group-top.chat-bubble-other { border-radius: 14px; }
+.msg-group-middle.chat-bubble-self,
+.msg-group-middle.chat-bubble-other {
+  border-radius: 4px;
+}
+.msg-group-bottom.chat-bubble-self,
+.msg-group-bottom.chat-bubble-other {
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 14px;
 }
 
-.cv-send-only-icon svg { display: none !important; }
-.cv-send-only-icon {
-  background: url('仅发送按钮图片URL') center/contain no-repeat !important;
+/* ==================== Portal 尾巴 ==================== */
+/* .bubble-tip 是空的 Portal 节点；请自行定义形状、尺寸、颜色和位置。 */
+.cv-bubble-tip-portal-layer,
+.cv-bubble-tip-portal { pointer-events: none; overflow: visible; }
+.bubble-tip { position: absolute; z-index: 10; }
+.bubble-tip.self-tip { /* 我方消息右上角 */ }
+.bubble-tip.other-tip { /* 对方消息左上角 */ }
+/* 示例：双层圆点尾巴（按需取消注释并修改）
+.bubble-tip.self-tip,
+.bubble-tip.other-tip {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.bubble-tip.self-tip { right: -8px; top: 0; }
+.bubble-tip.other-tip { left: -8px; top: 0; }
+.bubble-tip::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+*/
+
+/* ==================== 气泡四角装饰 ==================== */
+/* 每组第一条消息才输出 bubble-deco；素材、尺寸、偏移全部由用户 CSS 决定。 */
+.bubble-deco-wrapper { position: relative; overflow: visible; }
+.bubble-deco {
+  position: absolute;
+  z-index: 20;
+  overflow: visible;
+  pointer-events: none;
+}
+/* 示例：使用图片装饰（按需修改 URL 和角落位置）
+.bubble-deco {
+  width: 48px;
+  height: 48px;
+  right: -20px;
+  top: -20px;
+  background: url("装饰图片URL") center / contain no-repeat;
+}
+*/
+
+/* ==================== 引用消息 ==================== */
+.message-quote-reply-wrapper,
+.message-quote-reply-wrapper--self,
+.message-quote-reply-wrapper--other { color: var(--chat-text); }
+.message-quote__header,
+.message-quote__content,
+.message-quote__reply-body { color: inherit; }
+
+/* ==================== 底部输入栏 ==================== */
+.cv-footer,
+.chat-input-area { color: var(--chat-composer-text); }
+.chat-composer--default,
+.chat-composer--floating,
+.chat-composer--liquid {
+  background: var(--chat-composer-bg);
+  border: var(--chat-composer-border-width) solid var(--chat-composer-border);
+  border-radius: var(--chat-composer-radius);
+  box-shadow: var(--chat-composer-shadow);
+}
+.chat-composer__form { color: var(--chat-composer-text); }
+.chat-input,
+.chat-composer__input {
+  background: var(--chat-input-bg);
+  color: var(--chat-input-text);
+  border: var(--chat-input-border-width) solid var(--chat-input-border);
+  border-radius: var(--chat-input-radius);
+  box-shadow: var(--chat-input-shadow);
+}
+.chat-input::placeholder,
+.chat-composer__input::placeholder { color: var(--chat-input-placeholder); }
+.chat-input:focus,
+.chat-composer__input:focus {
+  border-color: var(--chat-input-focus-border);
+  box-shadow: var(--chat-input-focus-shadow);
+}
+.chat-composer__button,
+.chat-composer__send-button {
+  border: var(--chat-button-border-width) solid var(--chat-button-border);
+  border-radius: var(--chat-button-radius);
+  box-shadow: var(--chat-button-shadow);
+  color: currentColor;
+}
+.chat-composer__attach-button,
+.cv-func-btn,
+.toggle-tools-btn {
+  background: var(--chat-attach-bg);
+  color: var(--chat-attach-text);
+}
+.chat-composer__attach-button:hover,
+.chat-composer__attach-button.chat-composer__button--open {
+  background: var(--chat-attach-hover-bg);
+  color: var(--chat-attach-hover-text);
+}
+.chat-composer__send-only-button,
+.cv-send-only-btn {
+  background: var(--chat-send-only-bg);
+  color: var(--chat-send-only-text);
+}
+.chat-composer__send-only-button:hover:not(:disabled) {
+  background: var(--chat-send-only-hover-bg);
+  color: var(--chat-send-only-hover-text);
+}
+.chat-composer__send-reply-button,
+.send-button {
+  background: var(--chat-send-bg);
+  color: var(--chat-send-text);
+  border-color: var(--chat-send-border);
+}
+.chat-composer__send-reply-button:hover:not(:disabled),
+.send-button:hover:not(:disabled) {
+  background: var(--chat-send-hover-bg);
+  color: var(--chat-send-hover-text);
+  border-color: var(--chat-send-hover-border);
+}
+.chat-composer__button:disabled {
+  background: var(--chat-button-disabled-bg);
+  color: var(--chat-button-disabled-text);
+  border-color: var(--chat-button-disabled-border);
+  opacity: var(--chat-button-disabled-opacity);
+}
+.chat-composer__button svg,
+.cv-plus-icon svg,
+.cv-send-only-icon svg,
+.cv-send-reply-icon svg {
+  color: currentColor;
+  stroke: currentColor;
+}
+.chat-composer__send-reply-button svg,
+.cv-send-reply-icon svg { fill: currentColor; }
+.chat-composer__attachment-panel { color: var(--chat-composer-text); }
+
+/* ==================== 自定义图标 ==================== */
+/* 隐藏默认 SVG 后填入图片 URL；url() 内不要留多余空格。 */
+.cv-back-icon svg { display: none; }
+.cv-back-icon { background: url("返回按钮图片URL") center / contain no-repeat; }
+.cv-menu-icon svg { display: none; }
+.cv-menu-icon { background: url("菜单按钮图片URL") center / contain no-repeat; }
+.cv-plus-icon svg { display: none; }
+.cv-plus-icon { background: url("加号按钮图片URL") center / contain no-repeat; }
+.cv-send-only-icon svg { display: none; }
+.cv-send-only-icon { background: url("仅发送按钮图片URL") center / contain no-repeat; }
+.cv-send-reply-icon svg { display: none; }
+.cv-send-reply-icon { background: url("发送回复按钮图片URL") center / contain no-repeat; }
+`;
+
+const CHAT_CSS_NESTED_AT_RULES = /^(?:@media|@supports|@container|@layer|@document|@scope)\b/i;
+const CHAT_CSS_NON_SELECTOR_AT_RULES = /^(?:@(?:-\w+-)?keyframes|@font-face|@page|@property)\b/i;
+// Keep custom chat CSS inside the conversation-surface wrappers. The settings
+// sheet is a sibling inside #api-chat-screen, so it is deliberately excluded.
+const CHAT_USER_CSS_SCOPE_SELECTOR = "#conv-screen.user-custom-chat-css:not([data-chat-settings-open=\"true\"]) #api-chat-screen > .chat-content-scope";
+const CHAT_CSS_ROOT_CLASS_SELECTOR = /^(?:\.chat-page|\.chat-theme|\.style-liquid-glass|\.user-custom-chat-css)(?=[.#:\[\s]|$)/i;
+
+/** Browsers reject declarations containing typographic/non-breaking hyphens. */
+function normalizeChatCssSyntax(css: string): string {
+  return css.replace(/[\u2010-\u2015\u2212]/g, "-");
 }
 
-.cv-send-reply-icon svg { display: none !important; }
-.cv-send-reply-icon {
-  background: url('发送回复按钮图片URL') center/contain no-repeat !important;
-}`;
+type BubbleTipAnchor = {
+  key: string;
+  side: "self" | "other";
+  left: number;
+  top: number;
+  height: number;
+};
+
+function BubbleTipPortalLayer({ enabled }: { enabled: boolean }) {
+  const [portalHost, setPortalHost] = useState<HTMLDivElement | null>(null);
+  const [anchors, setAnchors] = useState<BubbleTipAnchor[]>([]);
+
+  useLayoutEffect(() => {
+    if (!enabled) {
+      setAnchors([]);
+      return;
+    }
+
+    const root = document.getElementById("conv-screen");
+    if (!root) return;
+
+    let frame = 0;
+    const updatePositions = () => {
+      frame = 0;
+      const next: BubbleTipAnchor[] = [];
+      root.querySelectorAll<HTMLElement>(
+        ".chat-bubble-self.msg-group-top, .chat-bubble-other.msg-group-top",
+      ).forEach((bubble, index) => {
+        if (bubble.closest(".cv-bubble-tip-portal-layer")) return;
+        const rect = bubble.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        const side = bubble.classList.contains("chat-bubble-self") ? "self" : "other";
+        next.push({
+          key: `${side}-${index}`,
+          side,
+          left: side === "self" ? rect.right : rect.left,
+          top: rect.top,
+          height: rect.height,
+        });
+      });
+
+      setAnchors((previous) => {
+        if (
+          previous.length === next.length
+          && previous.every((item, index) => {
+            const candidate = next[index];
+            return item.key === candidate.key
+              && item.side === candidate.side
+              && Math.abs(item.left - candidate.left) < 0.5
+              && Math.abs(item.top - candidate.top) < 0.5
+              && Math.abs(item.height - candidate.height) < 0.5;
+          })
+        ) {
+          return previous;
+        }
+        return next;
+      });
+    };
+    const scheduleUpdate = () => {
+      if (!frame) frame = window.requestAnimationFrame(updatePositions);
+    };
+
+    scheduleUpdate();
+    const mutationObserver = new MutationObserver(scheduleUpdate);
+    mutationObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style"],
+    });
+    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener("scroll", scheduleUpdate, true);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      mutationObserver.disconnect();
+      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener("scroll", scheduleUpdate, true);
+    };
+  }, [enabled]);
+
+  return (
+    <div
+      ref={(node) => {
+        if (node !== portalHost) setPortalHost(node);
+      }}
+      className="cv-bubble-tip-portal-layer"
+      aria-hidden="true"
+    >
+      {portalHost && anchors.map((anchor) => createPortal(
+        <div
+          key={anchor.key}
+          className="cv-bubble-tip-portal"
+          style={{ left: anchor.left, top: anchor.top, width: 0, height: anchor.height }}
+        >
+          <div className={`bubble-tip ${anchor.side}-tip`} />
+        </div>,
+        portalHost,
+        anchor.key,
+      ))}
+    </div>
+  );
+}
+
+function splitLeadingCssTrivia(value: string): { leading: string; body: string } {
+  let index = 0;
+  while (index < value.length) {
+    if (/\s/.test(value[index])) {
+      index += 1;
+      continue;
+    }
+    if (value.startsWith("/*", index)) {
+      const end = value.indexOf("*/", index + 2);
+      if (end < 0) return { leading: value, body: "" };
+      index = end + 2;
+      continue;
+    }
+    break;
+  }
+  return { leading: value.slice(0, index), body: value.slice(index) };
+}
+
+function splitCssSelectorList(value: string): string[] {
+  const selectors: string[] = [];
+  let start = 0;
+  let parentheses = 0;
+  let brackets = 0;
+  let quote = "";
+  let comment = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const next = value[index + 1];
+    if (comment) {
+      if (char === "*" && next === "/") {
+        comment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (!quote && char === "/" && next === "*") {
+      comment = true;
+      index += 1;
+      continue;
+    }
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === "(") parentheses += 1;
+    else if (char === ")") parentheses = Math.max(0, parentheses - 1);
+    else if (char === "[") brackets += 1;
+    else if (char === "]") brackets = Math.max(0, brackets - 1);
+    else if (char === "," && parentheses === 0 && brackets === 0) {
+      selectors.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+  selectors.push(value.slice(start));
+  return selectors;
+}
+
+function prefixChatCssSelectors(prelude: string): string {
+  const { leading, body } = splitLeadingCssTrivia(prelude);
+  const trimmed = body.trim();
+  if (!trimmed || trimmed.startsWith("@")) return prelude;
+  const selectorBody = body.trimEnd();
+  const trailing = body.slice(selectorBody.length);
+  const prefixed = splitCssSelectorList(selectorBody).map((selector) => {
+    const trimmedSelector = selector.trim();
+    if (!trimmedSelector) return selector;
+    if (trimmedSelector.startsWith(CHAT_USER_CSS_SCOPE_SELECTOR)) return selector;
+    // Preserve the user's chat-root target while adding the runtime scope class.
+    // The extra class is intentional: built-in voice rules target
+    // `#conv-screen .voice-message-bar.chat-bubble-*`; matching user rules need
+    // equivalent specificity so a generic `.chat-bubble-*` declaration can
+    // still override those settings when custom CSS is active.
+    if (trimmedSelector.startsWith("#conv-screen")) {
+      return selector.replace("#conv-screen", CHAT_USER_CSS_SCOPE_SELECTOR);
+    }
+    // These classes are mounted on the chat content wrappers. Do not insert a
+    // descendant combinator before the class, or root-style selectors would
+    // miss the wrapper itself.
+    if (CHAT_CSS_ROOT_CLASS_SELECTOR.test(trimmedSelector)) {
+      return selector.replace(trimmedSelector, `${CHAT_USER_CSS_SCOPE_SELECTOR}${trimmedSelector}`);
+    }
+    if (trimmedSelector === ":root") return selector.replace(trimmedSelector, CHAT_USER_CSS_SCOPE_SELECTOR);
+    if (trimmedSelector.startsWith(":root")) {
+      return selector.replace(trimmedSelector, `${CHAT_USER_CSS_SCOPE_SELECTOR}${trimmedSelector.slice(5)}`);
+    }
+    if (/^(?:html|body)(?:\b|\s|[.#:\[])/i.test(trimmedSelector)) {
+      return selector.replace(trimmedSelector, `${CHAT_USER_CSS_SCOPE_SELECTOR}${trimmedSelector.slice(trimmedSelector.match(/^(?:html|body)/i)?.[0].length || 0)}`);
+    }
+    return selector.replace(trimmedSelector, `${CHAT_USER_CSS_SCOPE_SELECTOR} ${trimmedSelector}`);
+  }).join(",");
+  return `${leading}${prefixed}${trailing}`;
+}
+
+/** Prefix user CSS selectors without touching declarations, comments or keyframes. */
+function scopeUserChatCss(css: string): string {
+  css = normalizeChatCssSyntax(css);
+  const output: string[] = [];
+  const stack: Array<{ prefixRules: boolean; segmentStart: number }> = [{ prefixRules: true, segmentStart: 0 }];
+  let emittedUntil = 0;
+  let comment = false;
+  let quote = "";
+
+  for (let index = 0; index < css.length; index += 1) {
+    const char = css[index];
+    const next = css[index + 1];
+    if (comment) {
+      if (char === "*" && next === "/") {
+        comment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (!quote && char === "/" && next === "*") {
+      comment = true;
+      index += 1;
+      continue;
+    }
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === ";") {
+      stack[stack.length - 1].segmentStart = index + 1;
+      continue;
+    }
+    if (char === "{") {
+      const current = stack[stack.length - 1];
+      const prelude = css.slice(current.segmentStart, index);
+      const { body } = splitLeadingCssTrivia(prelude);
+      const atRule = body.trim();
+      const isNestedAtRule = CHAT_CSS_NESTED_AT_RULES.test(atRule);
+      const isNonSelectorAtRule = CHAT_CSS_NON_SELECTOR_AT_RULES.test(atRule);
+      output.push(css.slice(emittedUntil, current.segmentStart));
+      output.push(current.prefixRules && !atRule.startsWith("@") && !isNonSelectorAtRule
+        ? prefixChatCssSelectors(prelude)
+        : prelude);
+      output.push("{");
+      output.push("");
+      stack.push({
+        prefixRules: current.prefixRules && (isNestedAtRule || !atRule.startsWith("@")) && !isNonSelectorAtRule,
+        segmentStart: index + 1,
+      });
+      emittedUntil = index + 1;
+      continue;
+    }
+    if (char === "}") {
+      const current = stack.pop();
+      if (!current) continue;
+      output.push(css.slice(emittedUntil, index));
+      output.push("}");
+      emittedUntil = index + 1;
+      if (stack.length > 0) stack[stack.length - 1].segmentStart = index + 1;
+    }
+  }
+  output.push(css.slice(emittedUntil));
+  return output.join("");
+}
+
+
+function appendImportantToChatDeclaration(segment: string): string {
+  const withoutTrailingWhitespace = segment.replace(/\s+$/, "");
+  if (!withoutTrailingWhitespace || /!\s*important\s*$/i.test(withoutTrailingWhitespace)) {
+    return segment;
+  }
+  return `${withoutTrailingWhitespace} !important${segment.slice(withoutTrailingWhitespace.length)}`;
+}
+
+/**
+ * User CSS is intentionally the last authority.  Built-in character and
+ * preset rules still contain !important for backwards compatibility, so make
+ * ordinary user declarations important as well.  Keyframes/font-face/page
+ * descriptors are left untouched because !important is invalid there.
+ */
+function prioritizeUserChatCss(css: string): string {
+  const output: string[] = [];
+  const stack: Array<{ declarationBlock: boolean; skipPriority: boolean; segmentStart: number }> = [{
+    declarationBlock: false,
+    skipPriority: false,
+    segmentStart: 0,
+  }];
+  let emittedUntil = 0;
+  let comment = false;
+  let quote = "";
+  let parentheses = 0;
+
+  for (let index = 0; index < css.length; index += 1) {
+    const char = css[index];
+    const next = css[index + 1];
+    if (comment) {
+      if (char === "*" && next === "/") {
+        comment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (!quote && char === "/" && next === "*") {
+      comment = true;
+      index += 1;
+      continue;
+    }
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === "(") {
+      parentheses += 1;
+      continue;
+    }
+    if (char === ")") {
+      parentheses = Math.max(0, parentheses - 1);
+      continue;
+    }
+    if (parentheses > 0) continue;
+
+    if (char === ";") {
+      const current = stack[stack.length - 1];
+      if (current.declarationBlock && !current.skipPriority) {
+        output.push(css.slice(emittedUntil, current.segmentStart));
+        output.push(appendImportantToChatDeclaration(css.slice(current.segmentStart, index)));
+        output.push(";");
+        emittedUntil = index + 1;
+      }
+      current.segmentStart = index + 1;
+      continue;
+    }
+    if (char === "{") {
+      const current = stack[stack.length - 1];
+      const prelude = css.slice(current.segmentStart, index);
+      const { body } = splitLeadingCssTrivia(prelude);
+      const atRule = body.trim();
+      const isNonSelectorAtRule = CHAT_CSS_NON_SELECTOR_AT_RULES.test(atRule);
+      output.push(css.slice(emittedUntil, current.segmentStart));
+      output.push(prelude);
+      output.push("{");
+      emittedUntil = index + 1;
+      stack.push({
+        declarationBlock: !atRule.startsWith("@") && !current.skipPriority,
+        skipPriority: current.skipPriority || isNonSelectorAtRule,
+        segmentStart: index + 1,
+      });
+      continue;
+    }
+    if (char === "}") {
+      const current = stack.pop();
+      if (!current) continue;
+      if (current.declarationBlock && !current.skipPriority) {
+        output.push(css.slice(emittedUntil, current.segmentStart));
+        output.push(appendImportantToChatDeclaration(css.slice(current.segmentStart, index)));
+      } else {
+        output.push(css.slice(emittedUntil, index));
+      }
+      output.push("}");
+      emittedUntil = index + 1;
+      const parent = stack[stack.length - 1];
+      if (parent) parent.segmentStart = index + 1;
+    }
+  }
+
+  output.push(css.slice(emittedUntil));
+  return output.join("");
+}
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "image", label: "图片" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },
@@ -1204,6 +1833,36 @@ export default function AppChat({
   // Navigation State
   const activeRelationship = activeChatRelationId ? relationships.find((relation) => relation.id === activeChatRelationId) : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
+  const characterCustomChatCss = activeCharacter?.customChatCSS || activeCharacter?.customCss || "";
+  const userCustomChatCss = [settings.chatGlobalCSS, characterCustomChatCss]
+    .filter((css): css is string => Boolean(css && css.trim()))
+    .join("\n");
+  const hasUserCustomChatCss = userCustomChatCss.trim().length > 0;
+  const scopedUserCustomChatCss = hasUserCustomChatCss
+    ? prioritizeUserChatCss(scopeUserChatCss(userCustomChatCss))
+    : "";
+
+  // Keep the user stylesheet in the document cascade after the app's global
+  // styles as well as inside the chat subtree.  The head copy is deliberately
+  // scoped by scopeUserChatCss, so it cannot affect other applications.
+  useEffect(() => {
+    const styleId = "app-chat-user-custom-css";
+    const existing = document.getElementById(styleId);
+    if (!hasUserCustomChatCss) {
+      existing?.remove();
+      return;
+    }
+    const style = existing instanceof HTMLStyleElement
+      ? existing
+      : Object.assign(document.createElement("style"), { id: styleId });
+    style.setAttribute("data-user-chat-css", "true");
+    style.textContent = scopedUserCustomChatCss;
+    if (!existing) document.head.appendChild(style);
+    return () => {
+      if (style.textContent === scopedUserCustomChatCss) style.remove();
+    };
+  }, [hasUserCustomChatCss, scopedUserCustomChatCss]);
+
   // Long-lived callbacks can outlive the render in which they were created.
   // Keep the latest character/settings available at the actual send boundary.
   const latestActiveCharacterRef = useRef<Character | undefined>(activeCharacter);
@@ -1894,7 +2553,7 @@ export default function AppChat({
         textarea.remove();
       }
       setCssTemplateCopied(true);
-      showToast("CSS 示例模板已复制，可直接粘贴编辑");
+      showToast("CSS 模板已复制，可直接粘贴编辑");
       window.setTimeout(() => setCssTemplateCopied(false), 1500);
     } catch {
       showToast("复制失败，请手动选择占位符内容");
@@ -4099,6 +4758,43 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     });
   }, [pendingDiaryShareMessageId, activeRelationship?.id, activeRelationship?.conversationId, activeRelationship?.userIdentityId, activeCharacter?.id, activeCharacter?.isGroupChat, activeIdentityId, messages.length, onDiaryShareHandled]);
 
+  // The settings sheet is rendered inside the chat overlay for viewport
+  // positioning, but it is not part of the chat surface.  Never leave a
+  // previous/legacy user stylesheet mounted while that sheet is open: an old
+  // unscoped node can still style the shared overlay even after the scoped
+  // stylesheet has been updated.  Re-create the scoped head copy when the
+  // sheet closes so the chat resumes immediately without a reload.
+  useEffect(() => {
+    const styleNodes = () => {
+      const nodes = Array.from(document.querySelectorAll<HTMLStyleElement>(
+        'style[data-user-chat-css="true"], style#app-chat-user-custom-css',
+      ));
+      // Versions before the scoped stylesheet used an unmarked @scope node.
+      // Remove that legacy node as well; otherwise it can continue to style
+      // the settings sheet after a hot update without a full page reload.
+      const legacy = Array.from(document.querySelectorAll<HTMLStyleElement>("style"))
+        .filter((node) => node.textContent?.includes("@scope (#conv-screen)"));
+      return Array.from(new Set([...nodes, ...legacy]));
+    };
+    const removeUserStyles = () => {
+      styleNodes().forEach((node) => node.remove());
+    };
+
+    if (isShowingCardModal || !hasUserCustomChatCss) {
+      removeUserStyles();
+      return;
+    }
+
+    const styleId = "app-chat-user-custom-css";
+    const existing = document.getElementById(styleId);
+    const style = existing instanceof HTMLStyleElement
+      ? existing
+      : Object.assign(document.createElement("style"), { id: styleId });
+    style.setAttribute("data-user-chat-css", "true");
+    style.textContent = scopedUserCustomChatCss;
+    if (!existing) document.head.appendChild(style);
+  }, [isShowingCardModal, hasUserCustomChatCss, scopedUserCustomChatCss]);
+
   const handleRegenerateResponse = async (targetMsg: Message, oocComment: string) => {
     if (!activeChatCharId || !activeCharacter) return;
 
@@ -5452,6 +6148,14 @@ ${instructionsPrompt}`;
     setActiveChatCharId(null);
   };
 
+  // Keep the settings sheet outside #conv-screen so user-authored chat CSS
+  // can never reach it, even if a legacy stylesheet or an overly broad
+  // selector is still present in the document. The shell is the same phone
+  // viewport, so absolute inset positioning remains unchanged.
+  const chatSettingsPortalTarget = typeof document !== "undefined"
+    ? document.querySelector<HTMLElement>("[data-chat-shell]")
+    : null;
+
   return (
     <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans select-none overflow-hidden relative" data-chat-shell>
       <Modal
@@ -5517,17 +6221,29 @@ ${instructionsPrompt}`;
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter ? (
-        <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"}>
-          <div id="api-chat-screen" className="flex flex-col h-full w-full relative app-content chat-page__background">
-            {(settings.chatGlobalCSS || activeCharacter.customChatCSS || activeCharacter.customCss) && (
-              <style>{`@scope (#conv-screen) {
-                ${settings.chatGlobalCSS || ""}
-                ${activeCharacter.customChatCSS || activeCharacter.customCss || ""}
-              }`}</style>
-            )}
-
+        <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"} data-user-chat-css={hasUserCustomChatCss ? "active" : "inactive"} data-chat-settings-open={isShowingCardModal ? "true" : "false"}>
+            <div
+              id="api-chat-screen"
+              className={`flex flex-col h-full w-full relative app-content chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`}
+            >
             {/* Beginner manual style adjustments */}
             <style>{`
+              /* The phone shell applies a circular border to generic .back-btn
+                 elements. These are chat-only navigation controls: keep their
+                 32px hit area, but expose only the icon. */
+              #conv-screen .cv-header .back-btn,
+              #conv-screen .cv-header .menu-btn,
+              #conv-screen .chat-header__back-button,
+              #conv-screen .chat-header__more-button {
+                appearance: none !important;
+                -webkit-appearance: none !important;
+                background: transparent !important;
+                border: 0 !important;
+                border-radius: 0 !important;
+                box-shadow: none !important;
+                outline: none !important;
+              }
+
               /* Settings remark input: keep a rectangular control even when a
                  character's custom CSS applies circular input styles globally. */
               #conv-screen .cv-remark-input {
@@ -5537,12 +6253,133 @@ ${instructionsPrompt}`;
                 box-shadow: none !important;
               }
 
+              /* Keep the vertical message scroller while allowing custom
+                 bubble tips to extend outside their bubble horizontally. */
+              #conv-screen .cv-messages-list {
+                overflow-x: visible !important;
+                overflow-y: auto !important;
+              }
+
+              /* Bubble tips live in a portal layer outside the scrolling list.
+                 The layer only establishes a positioning environment; user CSS
+                 owns the tip's shape, size, color, and visual placement. */
+              #conv-screen .cv-bubble-tip-portal-layer {
+                position: absolute;
+                inset: 0;
+                overflow: visible;
+                pointer-events: none;
+                z-index: 1;
+              }
+              #conv-screen .cv-bubble-tip-portal {
+                position: fixed;
+                pointer-events: none;
+              }
+
+              /* Corner decorations are an empty, user-styled slot.  Keep the
+                 wrapper and slot open for artwork without imposing any visual
+                 size, color, border, or offset. */
+              #conv-screen .bubble-deco-wrapper {
+                position: relative;
+                overflow: visible;
+              }
+              #conv-screen .bubble-deco {
+                position: absolute;
+                z-index: 3;
+                pointer-events: none;
+                overflow: visible;
+              }
               #conv-screen .chat-bubble-self,
               #conv-screen .chat-bubble-other {
-                position: relative !important;
-                isolation: isolate;
-                z-index: 0;
-                overflow: visible !important;
+                overflow: visible;
+              }
+
+              /*
+               * Themeable chat composer surface.  The semantic variables are
+               * intentionally defined at the chat root so a user's scoped CSS
+               * can override them without changing the composer behavior.
+               * No color, radius, border, or shadow is required to be white or
+               * pill-shaped; light/dark token fallbacks come from tokens.css.
+               */
+              #conv-screen .chat-input-area {
+                color: var(--chat-composer-text, var(--text-primary));
+              }
+              #conv-screen .chat-input-area.chat-composer--default {
+                background: var(--chat-composer-bg, var(--surface));
+                border: var(--chat-composer-border-width, 1px) solid var(--chat-composer-border, var(--divider));
+                border-radius: var(--chat-composer-radius, 0);
+                box-shadow: var(--chat-composer-shadow, none);
+              }
+              #conv-screen .chat-input-area.chat-composer--floating {
+                background: var(--chat-composer-bg, var(--surface));
+                border: var(--chat-composer-border-width, 1px) solid var(--chat-composer-border, var(--border));
+                border-radius: var(--chat-composer-radius, var(--radius-xl));
+                box-shadow: var(--chat-composer-shadow, 0 4px 16px var(--shadow-color));
+              }
+              #conv-screen .chat-input-area.chat-composer--liquid {
+                background: var(--chat-composer-bg, transparent);
+                border: var(--chat-composer-border-width, 0px) solid var(--chat-composer-border, transparent);
+                border-radius: var(--chat-composer-radius, 0);
+                box-shadow: var(--chat-composer-shadow, none);
+              }
+              #conv-screen .chat-composer__input {
+                background: var(--chat-input-bg, var(--input-bg));
+                color: var(--chat-input-text, var(--text-primary));
+                border: var(--chat-input-border-width, 1px) solid var(--chat-input-border, var(--border));
+                border-radius: var(--chat-input-radius, var(--radius-sm));
+                box-shadow: var(--chat-input-shadow, none);
+              }
+              #conv-screen .chat-composer__input::placeholder {
+                color: var(--chat-input-placeholder, var(--input-placeholder));
+              }
+              #conv-screen .chat-composer__input:focus {
+                border-color: var(--chat-input-focus-border, var(--accent));
+                box-shadow: var(--chat-input-focus-shadow, 0 0 0 2px var(--focus-ring));
+              }
+              #conv-screen .chat-composer__button {
+                border: var(--chat-button-border-width, 1px) solid var(--chat-button-border, var(--border));
+                border-radius: var(--chat-button-radius, var(--radius-full));
+                box-shadow: var(--chat-button-shadow, none);
+                transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, opacity 150ms ease, transform 150ms ease;
+              }
+              #conv-screen .chat-composer__attach-button {
+                background: var(--chat-attach-bg, var(--button-secondary-bg));
+                color: var(--chat-attach-text, var(--button-secondary-text));
+              }
+              #conv-screen .chat-composer__attach-button:hover,
+              #conv-screen .chat-composer__attach-button.chat-composer__button--open {
+                background: var(--chat-attach-hover-bg, var(--surface-raised));
+                color: var(--chat-attach-hover-text, var(--chat-attach-text, var(--button-secondary-text)));
+              }
+              #conv-screen .chat-composer__send-only-button {
+                background: var(--chat-send-only-bg, var(--button-secondary-bg));
+                color: var(--chat-send-only-text, var(--button-secondary-text));
+              }
+              #conv-screen .chat-composer__send-only-button:hover:not(:disabled) {
+                background: var(--chat-send-only-hover-bg, var(--surface-raised));
+                color: var(--chat-send-only-hover-text, var(--chat-send-only-text, var(--button-secondary-text)));
+              }
+              #conv-screen .chat-composer__send-reply-button {
+                background: var(--chat-send-bg, var(--button-primary-bg));
+                color: var(--chat-send-text, var(--button-primary-text));
+                border-color: var(--chat-send-border, var(--button-primary-bg));
+              }
+              #conv-screen .chat-composer__send-reply-button:hover:not(:disabled) {
+                background: var(--chat-send-hover-bg, var(--button-primary-hover-bg));
+                color: var(--chat-send-hover-text, var(--button-primary-text));
+                border-color: var(--chat-send-hover-border, var(--button-primary-hover-bg));
+              }
+              #conv-screen .chat-composer__button svg {
+                color: currentColor;
+                stroke: currentColor;
+              }
+              #conv-screen .chat-composer__send-reply-button svg {
+                fill: currentColor;
+              }
+              #conv-screen .chat-composer__button:disabled {
+                border-color: var(--chat-button-disabled-border, var(--button-disabled-border));
+                background: var(--chat-button-disabled-bg, var(--button-disabled-bg));
+                color: var(--chat-button-disabled-text, var(--button-disabled-text));
+                opacity: var(--chat-button-disabled-opacity, 0.4);
               }
 
               ${settings.avatarBorderRadius !== undefined ? `
@@ -5589,58 +6426,6 @@ ${instructionsPrompt}`;
                 }
               `}
 
-              ${settings.otherBubbleRadius !== undefined ? `
-                #conv-screen .chat-bubble-other,
-                #conv-screen .voice-message-bar.chat-bubble-other {
-                  border-radius: ${settings.otherBubbleRadius}px !important;
-                }
-              ` : ''}
-
-              ${settings.selfBubbleRadius !== undefined ? `
-                #conv-screen .chat-bubble-self,
-                #conv-screen .voice-message-bar.chat-bubble-self {
-                  border-radius: ${settings.selfBubbleRadius}px !important;
-                }
-              ` : ''}
-
-              ${settings.bubbleTailEnabled ? `
-                #conv-screen .chat-bubble-self::after {
-                  content: '' !important;
-                  display: block !important;
-                  position: absolute;
-                  width: 13px;
-                  height: 13px;
-                  background: ${getBubbleBackgroundStyle(settings.selfBubbleBg || '#18181b', settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100)};
-                  border: none;
-                  border-radius: 0 0 4px 0;
-                  transform: rotate(45deg);
-                  right: -5px;
-                  z-index: -1;
-                  ${settings.bubbleTailVertical === 'top' ? 'top: 8px; bottom: auto;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px; top: auto;' : 'top: calc(50% - 6px); bottom: auto;'}
-                }
-
-                #conv-screen .chat-bubble-other::after {
-                  content: '' !important;
-                  display: block !important;
-                  position: absolute;
-                  width: 13px;
-                  height: 13px;
-                  background: ${getBubbleBackgroundStyle(settings.otherBubbleBg || '#f4f4f5', settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100)};
-                  border: none;
-                  border-radius: 0 0 0 4px;
-                  transform: rotate(45deg);
-                  left: -5px;
-                  z-index: -1;
-                  ${settings.bubbleTailVertical === 'top' ? 'top: 8px; bottom: auto;' : settings.bubbleTailVertical === 'bottom' ? 'bottom: 8px; top: auto;' : 'top: calc(50% - 6px); bottom: auto;'}
-                }
-              ` : `
-                #conv-screen .chat-bubble-self::after,
-                #conv-screen .chat-bubble-other::after {
-                  content: none !important;
-                  display: none !important;
-                }
-              `}
-
               ${settings.otherBubbleBg ? `
                 #conv-screen .chat-bubble-other,
                 #conv-screen .received-transfer-card,
@@ -5657,7 +6442,7 @@ ${instructionsPrompt}`;
                 #conv-screen .received-transfer-card *,
                 #conv-screen .voice-message-bar.chat-bubble-other,
                 #conv-screen .voice-message-bar.chat-bubble-other * {
-                  color: ${settings.otherBubbleColor} !important;
+                  color: ${settings.otherBubbleColor};
                 }
               ` : ''}
 
@@ -5677,7 +6462,7 @@ ${instructionsPrompt}`;
                 #conv-screen .transfer-card *,
                 #conv-screen .voice-message-bar.chat-bubble-self,
                 #conv-screen .voice-message-bar.chat-bubble-self * {
-                  color: ${settings.selfBubbleColor} !important;
+                  color: ${settings.selfBubbleColor};
                 }
               ` : ''}
 
@@ -5744,19 +6529,20 @@ ${instructionsPrompt}`;
                   position: relative !important;
                   width: 42px !important;
                   height: 42px !important;
-                  border-radius: 50% !important;
-                  background: rgba(255, 255, 255, 0.72) !important;
-                  backdrop-filter: blur(20px) saturate(190%) !important;
-                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
-                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05) !important;
+                  border-radius: 0 !important;
+                  background: transparent !important;
+                  backdrop-filter: none !important;
+                  -webkit-backdrop-filter: none !important;
+                  border: none !important;
+                  box-shadow: none !important;
                   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
                   display: flex !important;
                   align-items: center !important;
                   justify-content: center !important;
                 }
                 .cv-header .back-btn:hover {
-                  background: rgba(255, 255, 255, 0.85) !important;
+                  background: transparent !important;
+                  opacity: 0.72 !important;
                   transform: scale(1.05) !important;
                 }
                 /* 菜单按钮 */
@@ -5764,19 +6550,20 @@ ${instructionsPrompt}`;
                   position: relative !important;
                   width: 42px !important;
                   height: 42px !important;
-                  border-radius: 50% !important;
-                  background: rgba(255, 255, 255, 0.72) !important;
-                  backdrop-filter: blur(20px) saturate(190%) !important;
-                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
-                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05) !important;
+                  border-radius: 0 !important;
+                  background: transparent !important;
+                  backdrop-filter: none !important;
+                  -webkit-backdrop-filter: none !important;
+                  border: none !important;
+                  box-shadow: none !important;
                   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
                   display: flex !important;
                   align-items: center !important;
                   justify-content: center !important;
                 }
                 .cv-header .menu-btn:hover {
-                  background: rgba(255, 255, 255, 0.85) !important;
+                  background: transparent !important;
+                  opacity: 0.72 !important;
                   transform: scale(1.05) !important;
                 }
                 /* 中间标题胶囊 - 绝对完美水平及垂直居中 */
@@ -5838,11 +6625,6 @@ ${instructionsPrompt}`;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
                   border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
                   color: #1c1917 !important;
-                  border-radius: 20px !important;
-                  border-top-right-radius: 20px !important;
-                  border-top-left-radius: 20px !important;
-                  border-bottom-right-radius: 20px !important;
-                  border-bottom-left-radius: 20px !important;
                   padding: 11px 16px !important;
                   font-size: 12px !important;
                   font-weight: 600 !important;
@@ -5854,7 +6636,7 @@ ${instructionsPrompt}`;
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self *,
                 .phone-screen-container .style-liquid-glass .chat-bubble-self *,
                 .style-liquid-glass .chat-bubble-self * {
-                  color: #1c1917 !important;
+                  color: #1c1917;
                 }
 
                 #conv-screen.style-liquid-glass .chat-bubble-other,
@@ -5867,11 +6649,6 @@ ${instructionsPrompt}`;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
                   border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
                   color: #1c1917 !important;
-                  border-radius: 20px !important;
-                  border-top-right-radius: 20px !important;
-                  border-top-left-radius: 20px !important;
-                  border-bottom-right-radius: 20px !important;
-                  border-bottom-left-radius: 20px !important;
                   padding: 11px 16px !important;
                   font-size: 12px !important;
                   font-weight: 600 !important;
@@ -5883,7 +6660,7 @@ ${instructionsPrompt}`;
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other *,
                 .phone-screen-container .style-liquid-glass .chat-bubble-other *,
                 .style-liquid-glass .chat-bubble-other * {
-                  color: #1c1917 !important;
+                  color: #1c1917;
                 }
  
                 /* 气泡元数据 */
@@ -5914,9 +6691,6 @@ ${instructionsPrompt}`;
  
                 /* 4. 底部输入栏 (Bottom Input Bar) 悬浮 */
                 .cv-footer {
-                  background: transparent !important;
-                  border: none !important;
-                  box-shadow: none !important;
                   padding: 12px 14px 24px 14px !important;
                   margin-top: auto !important;
                 }
@@ -5932,58 +6706,47 @@ ${instructionsPrompt}`;
                 .cv-footer .send-button {
                   width: 42px !important;
                   height: 42px !important;
-                  border-radius: 50% !important;
-                  background: rgba(255, 255, 255, 0.72) !important;
                   backdrop-filter: blur(20px) saturate(190%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
-                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05) !important;
                   display: flex !important;
                   align-items: center !important;
                   justify-content: center !important;
-                  color: #1c1917 !important;
                   transition: all 0.2s ease !important;
                   flex-shrink: 0 !important;
                 }
                 .cv-footer .chat-input {
                   height: 42px !important;
-                  border-radius: 9999px !important;
-                  background: rgba(255, 255, 255, 0.45) !important;
                   backdrop-filter: blur(20px) saturate(190%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: 1.5px solid rgba(255, 255, 255, 0.45) !important;
-                  color: #1c1917 !important;
                   font-size: 11px !important;
                   font-weight: 700 !important;
                   letter-spacing: 0.04em !important;
                   padding-left: 16px !important;
                   padding-right: 16px !important;
-                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03) !important;
                   flex-grow: 1 !important;
                   flex-shrink: 1 !important;
                   min-width: 0 !important;
                 }
                 .cv-footer .chat-input::placeholder {
-                  color: rgba(28, 25, 23, 0.5) !important;
                   font-weight: 600 !important;
                   letter-spacing: 0.05em !important;
                 }
-                .cv-footer .cv-send-only-btn:disabled {
-                  opacity: 0.5 !important;
-                  background: rgba(255, 255, 255, 0.4) !important;
-                }
                 .cv-footer .cv-send-reply-icon svg {
-                  fill: #1c1917 !important;
-                  color: #1c1917 !important;
-                  stroke: #1c1917 !important;
+                  fill: currentColor !important;
+                  color: currentColor !important;
+                  stroke: currentColor !important;
                 }
                 .cv-footer .cv-send-only-icon svg {
-                  color: #1c1917 !important;
-                  stroke: #1c1917 !important;
+                  color: currentColor !important;
+                  stroke: currentColor !important;
                 }
               `}</style>
             )}
+            {hasUserCustomChatCss && !isShowingCardModal && (
+              <style data-user-chat-css="true">{scopedUserCustomChatCss}</style>
+            )}
             {/* Chat Window Header with standard classes and compact size */}
+            <div className={`chat-content-scope chat-page chat-theme chat-page__background shrink-0 ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`}>
             <div className={`flex items-center justify-between z-10 shrink-0 relative cv-header chat-header header app-top-container default-controls selection-controls ${
               isFloatingCute
                 ? "mx-3.5 mt-3.5 mb-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] px-4 py-2"
@@ -5995,10 +6758,10 @@ ${instructionsPrompt}`;
                   setIsShowingCardModal(false);
                   setAdvancedSettingsSection(null);
                 }}
-                className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button"
+                className="w-8 h-8 rounded-none bg-transparent flex items-center justify-center hover:bg-transparent hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button"
               >
                 <span className="cv-back-icon flex items-center justify-center w-full h-full">
-                  <ChevronLeft className="w-4 h-4 text-slate-700" />
+                  <ChevronLeft className="w-4 h-4 text-[var(--text-primary)]" />
                 </span>
               </button>
 
@@ -6065,19 +6828,20 @@ ${instructionsPrompt}`;
                   setAdvancedSettingsSection(null);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
-                className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button"
+                className="w-8 h-8 rounded-none bg-transparent flex items-center justify-center hover:bg-transparent hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button"
               >
                 <span className="cv-menu-icon flex items-center justify-center w-full h-full">
-                  <MoreHorizontal className="w-4 h-4 text-slate-700" />
+                  <MoreHorizontal className="w-4 h-4 text-[var(--text-primary)]" />
                 </span>
               </button>
+            </div>
             </div>
 
 
 
           {/* Character Details / Settings Full-Screen Page */}
-          {isShowingCardModal && (
-            <div className="absolute inset-0 z-50 bg-slate-50 flex flex-col h-full animate-slide-up">
+          {isShowingCardModal && chatSettingsPortalTarget && createPortal(
+            <div className="chat-settings-page absolute inset-0 z-50 bg-slate-50 flex flex-col h-full animate-slide-up">
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
                 <button
@@ -6613,49 +7377,14 @@ ${instructionsPrompt}`;
                           onClick={copyCssExampleTemplate}
                           className="text-[9px] text-slate-500 font-medium bg-slate-100 px-2 py-1 rounded-[8px] transition-colors hover:bg-slate-200"
                         >
-                          {cssTemplateCopied ? "已复制" : "复制示例模板"}
+                          {cssTemplateCopied ? "已复制" : "复制模板"}
                         </button>
                       </div>
                       <textarea
                         rows={12}
                         value={draftCustomCss}
                         onChange={(e) => setDraftCustomCss(e.target.value)}
-                        placeholder={`/* 支持全面美化自定义。以下是常用选择器说明： */
-.cv-header { /* 导航栏/顶栏 */ }
-.cv-messages-list { /* 聊天背景/消息列表 */ }
-.user-avatar { /* 个人头像 */ }
-.ai-avatar { /* 对方头像 */ }
-.chat-bubble-self { /* 个人气泡 */ }
-.chat-bubble-other { /* 对方气泡 */ }
-.cv-footer { /* 底部输入栏 */ }
-.chat-input { /* 输入框样式 */ }
-
-/* 自定义图标样式(隐藏默认SVG并设置图片链接)： */
-.cv-back-icon svg { display: none !important; }
-.cv-back-icon {
-  background: url('返回按钮图片URL') center/contain no-repeat !important;
-}
-
-.cv-menu-icon svg { display: none !important; }
-.cv-menu-icon {
-  background: url('菜单按钮图片URL') center/contain no-repeat !important;
-}
-
-.cv-plus-icon svg { display: none !important; }
-.cv-plus-icon {
-  background: url('加号按钮图片URL') center/contain no-repeat !important;
-}
-
-.cv-send-only-icon svg { display: none !important; }
-.cv-send-only-icon {
-  background: url('仅发送按钮图片URL') center/contain no-repeat !important;
-}
-
-.cv-send-reply-icon svg { display: none !important; }
-.cv-send-reply-icon {
-  background: url('发送回复按钮图片URL') center/contain no-repeat !important;
-}
-`}
+                        placeholder={CHARACTER_CSS_EXAMPLE_TEMPLATE}
                         className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-mono leading-relaxed h-48"
                       />
                     </div>
@@ -6966,15 +7695,16 @@ ${instructionsPrompt}`;
                   </div>
                 </div>
               )}
-            </div>
+            </div>,
+            chatSettingsPortalTarget,
           )}
 
           {/* Active Chat Messages body */}
-
+          <div className={`chat-content-scope chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} flex min-h-0 flex-1 flex-col`}>
           <MessageList
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
-            className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list chat-message-list"
+            className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-4 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
@@ -7124,17 +7854,34 @@ ${instructionsPrompt}`;
 
               const isSelf = msg.sender === "user";
               const prevMsg = idx > 0 ? visibleChatMessages[idx - 1] : null;
+              const nextMsg = idx + 1 < visibleChatMessages.length ? visibleChatMessages[idx + 1] : null;
+              const sameMessageGroup = (candidate: Message | null) => Boolean(
+                !msg.isNarration
+                &&
+                candidate
+                && !candidate.isNarration
+                && candidate.sender === msg.sender
+                && (
+                  msg.sender === "user"
+                  || !activeCharacter.isGroupChat
+                  || (
+                    Boolean(msg.senderId)
+                    && Boolean(candidate.senderId)
+                    && msg.senderId === candidate.senderId
+                  )
+                ),
+              );
+              const hasPreviousInGroup = sameMessageGroup(prevMsg);
+              const hasNextInGroup = sameMessageGroup(nextMsg);
+              const messageGroupPosition: "top" | "middle" | "bottom" = hasPreviousInGroup
+                ? (hasNextInGroup ? "middle" : "bottom")
+                : "top";
+              const messageGroupClass = `msg-group-${messageGroupPosition}`;
               // While an offline story is active, online messages remain a separate
               // live channel. Keep their avatars visible instead of treating them as
               // one collapsed story paragraph.
               const shouldCollapse = settings.collapseConsecutiveAvatars !== false && !isOfflineStoryActiveFor(activeChatCharId);
-              const isConsecutivePrev = !!(
-                prevMsg &&
-                !prevMsg.isNarration &&
-                !msg.isNarration &&
-                prevMsg.sender === msg.sender &&
-                (msg.sender === "user" || !activeCharacter.isGroupChat || (!!msg.senderId && !!prevMsg.senderId && prevMsg.senderId === msg.senderId))
-              );
+              const isConsecutivePrev = hasPreviousInGroup;
               const showAvatar = !isConsecutivePrev || !shouldCollapse;
               
               const groupSenderChar = !isSelf && activeCharacter.isGroupChat && msg.senderId
@@ -7142,7 +7889,6 @@ ${instructionsPrompt}`;
                 : null;
               const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? settings.avatar : activeCharacter.avatar);
               const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : (activeCharacter.remark || activeCharacter.name);
-
               const renderBubbleInner = () => {
                 return (
                   <div 
@@ -7175,8 +7921,9 @@ ${instructionsPrompt}`;
                     }}
                     className="flex items-center gap-1 group relative cursor-pointer select-none"
                   >
-                    {/* Actual chat bubble */}
-                    <div className="max-w-full">
+                    {/* Actual chat bubble + user-controlled corner decoration slot */}
+                    <div className={`bubble-deco-wrapper relative w-fit max-w-full overflow-visible ${messageGroupClass}`}>
+                      <div className="max-w-full">
                       {msg.diaryShareId ? (() => {
                         const share = diarySharesForCurrentIdentity.find((item) => item.id === msg.diaryShareId && item.messageId === msg.id && item.targetRelationId === msg.relationId && item.conversationId === msg.conversationId);
                         return share ? <div className="w-[210px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-sm"><div className="flex items-center gap-2 text-xs font-bold"><BookOpen size={15}/>日记分享</div><p className="mt-2 text-[11px] text-[var(--text-secondary)]">{share.snapshot.authorName} · {new Date(share.snapshot.occurredAt).toLocaleDateString("zh-CN")}</p><p className="mt-2 line-clamp-3 text-xs leading-5">{share.snapshot.body}</p></div> : <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">日记分享已不可用</div>;
@@ -7223,13 +7970,13 @@ ${instructionsPrompt}`;
                       })() : isCallRecordMarkup(msg.content) ? (() => {
                         const { callType, duration } = parseCallRecord(msg.content);
                         const bubbleStyle = isSelf
-                          ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-[#95ec69] text-[#191919] chat-bubble-self rounded-tr-sm")
-                          : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100");
+                          ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-[#95ec69] text-[#191919] chat-bubble-self")
+                          : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100");
                         return (
                           <button
                             type="button"
                             onClick={() => setCallRecordDetail(parseCallRecord(msg.content))}
-                            className={`inline-flex items-center gap-1.5 px-3 py-2 shadow-sm transition-transform active:scale-[0.98] cv-bubble message-bubble ${bubbleStyle}`}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 shadow-sm transition-transform active:scale-[0.98] cv-bubble message-bubble relative ${bubbleStyle} ${messageGroupClass}`}
                             title="查看通话内容"
                           >
                             <Phone className="w-3.5 h-3.5 shrink-0" />
@@ -7318,8 +8065,8 @@ ${instructionsPrompt}`;
                         const waveBars = generateWaveBars(msg.id, 10);
 
                         const bubbleBgAndShape = isSelf
-                          ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-[#95ec69] text-[#191919] chat-bubble-self rounded-tr-sm")
-                          : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100");
+                          ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-[#95ec69] text-[#191919] chat-bubble-self")
+                          : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100");
 
                         return (
                           <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} space-y-1`}>
@@ -7331,7 +8078,7 @@ ${instructionsPrompt}`;
                                   triggerMessageSpeech(msg);
                                   setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
                                 }}
-                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape}`}
+                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape} ${messageGroupClass}`}
                                 style={{ width: `${80 + duration * 6.5}px`, minWidth: "95px", maxWidth: "220px" }}
                               >
                                 {/* Left element: Play/Pause/Speaker icon */}
@@ -7370,7 +8117,6 @@ ${instructionsPrompt}`;
                                 <span className="font-sans text-[11px] font-bold text-current opacity-70 shrink-0">
                                   {formattedDuration}
                                 </span>
-
                                 {/* WeChat unplayed red dot at the top-right corner of the capsule */}
                                 {!isSelf && !voicePlayed[msg.id] && (
                                   <span className="absolute -right-1 -top-1 w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-sm" />
@@ -7399,9 +8145,9 @@ ${instructionsPrompt}`;
                               <div 
                                 className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble mt-0.5 max-w-[240px] ${
                                   isSelf
-                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
-                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
-                                } ${isSelf ? "self-end" : "self-start"}`}
+                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
+                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
+                                } ${isSelf ? "self-end" : "self-start"} ${messageGroupClass}`}
                               >
                                 <div className="text-left">{voiceText || "（空白语音内容）"}</div>
                               </div>
@@ -7411,9 +8157,9 @@ ${instructionsPrompt}`;
                       })() : (
                         <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"}` : `px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                           isSelf
-                            ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm")
-                            : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100")
-                        }`}>
+                            ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
+                            : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
+                        } ${messageGroupClass}`}>
                           {(() => {
                             const quoteReply = parseQuoteReply(msg.content);
                             return quoteReply ? (
@@ -7424,9 +8170,9 @@ ${instructionsPrompt}`;
                                 </div>
                                 <div className={`message-quote__reply-body px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                                   isSelf
-                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self rounded-tr-sm pr-6")
-                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 rounded-[18px] chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other rounded-tl-sm border border-slate-100 pr-6")
-                                }`}>{quoteReply.body}</div>
+                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self pr-6")
+                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other border border-slate-100 pr-6")
+                                } ${messageGroupClass}`}>{quoteReply.body}</div>
                               </>
                             ) : <div className="text-left">{msg.content}</div>;
                           })()}
@@ -7439,8 +8185,11 @@ ${instructionsPrompt}`;
                             </>
                           )}
 
-                          <div className="cv-bubble-tail hidden" />
                         </div>
+                      )}
+                      </div>
+                      {messageGroupPosition === "top" && (
+                        <div className="bubble-deco" aria-hidden="true" />
                       )}
                     </div>
                   </div>
@@ -7455,7 +8204,7 @@ ${instructionsPrompt}`;
                       isSelf ? "items-end" : "items-start"
                     } ${
                       (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
-                    } cv-msg-row message message-container`}
+                    } ${messageGroupClass} cv-msg-row message message-container`}
                   >
                     {/* Avatar + Meta Header */}
                     {showAvatar && (
@@ -7500,7 +8249,7 @@ ${instructionsPrompt}`;
                       isSelf ? "flex-row-reverse items-start justify-start" : "flex-row items-start justify-start"
                     } ${
                       (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
-                    } cv-msg-row message message-container`}
+                    } ${messageGroupClass} cv-msg-row message message-container`}
                   >
                     {/* Avatar */}
                     {showAvatar ? (
@@ -7572,7 +8321,7 @@ ${instructionsPrompt}`;
                       </div>
                     )}
                     <div className="max-w-[85%]">
-                      <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 rounded-2xl shadow-sm text-xs flex items-center space-x-1 chat-bubble-other message-bubble">
+                      <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 shadow-sm text-xs flex items-center space-x-1 chat-bubble-other message-bubble">
                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
@@ -7583,8 +8332,10 @@ ${instructionsPrompt}`;
               })()
             )}
 
-            <div ref={chatEndRef} />
+           <div ref={chatEndRef} />
           </MessageList>
+
+          <BubbleTipPortalLayer enabled={!isShowingCardModal && settings.bubbleTailEnabled} />
 
           {showImageGenerator && (
             <div className="absolute inset-0 z-[90] flex items-end bg-black/35 p-4" onClick={() => !isGeneratingImage && setShowImageGenerator(false)}>
@@ -7597,14 +8348,14 @@ ${instructionsPrompt}`;
             </div>
           )}
 
-          {/* Active Chat Footer Input form */}
-          <ChatComposer className={`${
-            isFloatingCute 
-              ? "mx-3.5 mb-3.5 mt-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area" 
-              : activeStylePreset === "liquid-glass"
-                ? "mx-3.5 mb-3.5 mt-1 bg-transparent border-0 shadow-none overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area"
-                : "bg-white border-t border-slate-100 shrink-0 flex flex-col cv-footer chat-input-area"
-          }`} quotePreview={quotedMessage && <QuotedMessagePreview message={quotedMessage} senderName={activeCharacter.remark || activeCharacter.name} onClear={() => setQuotedMessage(null)} closeIcon={<X className="w-3.5 h-3.5" />} />}>
+           {/* Active Chat Footer Input form */}
+           <ChatComposer className={`${
+             isFloatingCute
+               ? "mx-3.5 mb-3.5 mt-1 overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area chat-composer--floating"
+               : activeStylePreset === "liquid-glass"
+                 ? "mx-3.5 mb-3.5 mt-1 overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area chat-composer--liquid"
+                 : "shrink-0 flex flex-col cv-footer chat-input-area chat-composer--default"
+           }`} quotePreview={quotedMessage && <QuotedMessagePreview message={quotedMessage} senderName={activeCharacter.remark || activeCharacter.name} onClear={() => setQuotedMessage(null)} closeIcon={<X className="w-3.5 h-3.5" />} />}>
             
 
 
@@ -7632,10 +8383,10 @@ ${instructionsPrompt}`;
                   setShowAttachPanel(!showAttachPanel);
                   setShowStickerSelector(false);
                 }}
-                className={`w-10 h-10 rounded-full border border-slate-300 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn chat-composer__attach-button text-slate-700 ${
+                className={`w-10 h-10 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn chat-composer__button chat-composer__attach-button ${
                   showAttachPanel
-                    ? "bg-stone-100 rotate-45"
-                    : "bg-white hover:bg-slate-100"
+                    ? "chat-composer__button--open rotate-45"
+                    : "chat-composer__button--idle"
                 }`}
                 title="附加菜单"
               >
@@ -7656,11 +8407,7 @@ ${instructionsPrompt}`;
                         : "输入发言，继续剧本对话...")
                     : `发送消息给 ${activeCharacter.name}...`
                 }
-                className={`flex-1 h-10 border focus:outline-none rounded-[8px] px-4 text-xs text-slate-800 chat-input chat-composer__input ${
-                  isFloatingCute
-                    ? "bg-white/60 border-slate-200/40 focus:bg-white"
-                    : "bg-slate-50 border-slate-200/80"
-                }`}
+                className="flex-1 h-10 px-4 text-xs chat-input chat-composer__input"
               />
 
               {/* Send Button 1 (User send only - gray background with white upward arrow) */}
@@ -7668,7 +8415,7 @@ ${instructionsPrompt}`;
                 type="button"
                 onClick={(e) => handleSendOnly(e)}
                 disabled={!chatInputText.trim() || isTyping}
-                className="w-10 h-10 rounded-full bg-slate-300 hover:bg-slate-400 disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm cv-send-only-btn chat-composer__send-button"
+                className="w-10 h-10 transition-all flex items-center justify-center shrink-0 cv-send-only-btn chat-composer__button chat-composer__send-only-button chat-composer__send-button"
                 title="仅发送消息 (不立即得到回复)"
               >
                 <span className="cv-send-only-icon flex items-center justify-center w-full h-full">
@@ -7680,11 +8427,11 @@ ${instructionsPrompt}`;
               <button
                 type="submit"
                 disabled={isTyping}
-                className="w-10 h-10 rounded-full bg-slate-900 hover:bg-black disabled:opacity-40 text-white transition-all flex items-center justify-center shrink-0 shadow-sm send-button chat-composer__send-button"
+                className="w-10 h-10 transition-all flex items-center justify-center shrink-0 send-button chat-composer__button chat-composer__send-reply-button chat-composer__send-button"
                 title="发送消息并获取回复"
               >
                 <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
-                  <ChatIcon src={getChatIcon("send")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-white text-white" /></ChatIcon>
+                  <ChatIcon src={getChatIcon("send")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>
                 </span>
               </button>
             </form>
@@ -7939,6 +8686,7 @@ ${instructionsPrompt}`;
               </div>
             )}
           </ChatComposer>
+          </div>
 
           {/* Voice Text Input Modal Overlay */}
           {activeAttachModal === "voice" && (
