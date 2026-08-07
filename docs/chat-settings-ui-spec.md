@@ -372,6 +372,26 @@ textarea {
 }
 ```
 
+## 15.5 Wide Action Button 宽按钮
+
+适用于 API 设置、档案馆编辑、世界书词条编辑、线下剧本创建、记忆库自动总结等需要提交或确认的页面操作。
+
+- 使用 `WideActionGroup` 垂直排列宽按钮，按钮之间间距 `8px`。
+- 每个 `WideActionButton` 宽度 `100%`，建议高度 `44px`，水平居中文本。
+- 按钮使用固定像素圆角 `12px`（可在 `8px`、`12px`、`16px` 中按页面密度调整），禁止 `9999px`、`50%` 或 `rounded-full`。
+- 主操作使用深色实心背景（默认 `#111111`）和白色文字；次操作使用白色背景、浅灰边框和主文字颜色。
+- 宽按钮组中的按钮不包含文字前置图标；图标不应改变文字的视觉居中位置。
+- 保留原有按钮顺序、禁用态、加载态、提交回调和错误处理，只统一布局与视觉样式。
+
+推荐结构：
+
+```tsx
+<div className="settings-wide-action-group">
+  <button className="settings-wide-action settings-wide-action-primary">测试连接</button>
+  <button className="settings-wide-action settings-wide-action-secondary">保存配置</button>
+</div>
+```
+
 ## 16. 圆角使用边界
 
 ### 允许

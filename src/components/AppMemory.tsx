@@ -747,7 +747,7 @@ export default function AppMemory({
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-[24px] p-5 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4"
+              className="settings-panel-card p-5 w-full max-w-sm space-y-4"
             >
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
@@ -930,7 +930,8 @@ export default function AppMemory({
                     </div>
                   </div>
 
-                  <button
+                  <div className="settings-wide-action-group">
+                    <button
                     onClick={() => {
                       const char = displayCharacters.find(c => c.id === normalizeCharacterId(selectedCharForAutoSummary));
                       if (char && onUpdateCharacter) {
@@ -943,10 +944,11 @@ export default function AppMemory({
                       }
                       setShowRecallModal(false);
                     }}
-                    className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm"
-                  >
-                    保存设置
-                  </button>
+                      className="settings-wide-action settings-wide-action-primary"
+                    >
+                      保存设置
+                    </button>
+                  </div>
                 </div>
               )}
             </motion.div>

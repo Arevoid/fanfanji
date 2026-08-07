@@ -1702,7 +1702,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="max-h-full w-full max-w-sm overflow-y-auto rounded-2xl border border-slate-150 bg-white p-5 text-slate-800 space-y-4 shadow-2xl"
+              className="settings-panel-card max-h-full w-full max-w-sm overflow-y-auto p-5 text-slate-800 space-y-4"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
@@ -1839,12 +1839,14 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                 </div>
               </div>
 
-              <button
-                onClick={handleCreateStory}
-                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-colors shadow-md"
-              >
-                开启剧本空间
-              </button>
+              <div className="settings-wide-action-group">
+                <button
+                  onClick={handleCreateStory}
+                  className="settings-wide-action settings-wide-action-primary"
+                >
+                  开启剧本空间
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

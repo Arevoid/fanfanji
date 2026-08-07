@@ -162,6 +162,42 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
 
+const CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 支持全面美化自定义，以下是常用选择器说明： */
+.cv-header { /* 导航栏/顶部 */ }
+.cv-messages-list { /* 聊天背景/消息列表 */ }
+.user-avatar { /* 个人头像 */ }
+.ai-avatar { /* 对方头像 */ }
+.chat-bubble-self { /* 个人气泡 */ }
+.chat-bubble-other { /* 对方气泡 */ }
+.cv-footer { /* 底部输入栏 */ }
+.chat-input { /* 输入框样式 */ }
+
+/* 自定义图标样式（隐藏默认 SVG 并设置图片链接）： */
+.cv-back-icon svg { display: none !important; }
+.cv-back-icon {
+  background: url('返回按钮图片URL') center/contain no-repeat !important;
+}
+
+.cv-menu-icon svg { display: none !important; }
+.cv-menu-icon {
+  background: url('菜单按钮图片URL') center/contain no-repeat !important;
+}
+
+.cv-plus-icon svg { display: none !important; }
+.cv-plus-icon {
+  background: url('加号按钮图片URL') center/contain no-repeat !important;
+}
+
+.cv-send-only-icon svg { display: none !important; }
+.cv-send-only-icon {
+  background: url('仅发送按钮图片URL') center/contain no-repeat !important;
+}
+
+.cv-send-reply-icon svg { display: none !important; }
+.cv-send-reply-icon {
+  background: url('发送回复按钮图片URL') center/contain no-repeat !important;
+}`;
+
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "image", label: "图片" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },
   { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
@@ -1842,6 +1878,29 @@ export default function AppChat({
     setTimeout(() => setToastMessage(null), 1500);
   };
 
+  const copyCssExampleTemplate = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(CHARACTER_CSS_EXAMPLE_TEMPLATE);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = CHARACTER_CSS_EXAMPLE_TEMPLATE;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+      setCssTemplateCopied(true);
+      showToast("CSS 示例模板已复制，可直接粘贴编辑");
+      window.setTimeout(() => setCssTemplateCopied(false), 1500);
+    } catch {
+      showToast("复制失败，请手动选择占位符内容");
+    }
+  };
+
   // Moments form state
   const [momentInputText, setMomentInputText] = useState("");
   const [momentAttachedImage, setMomentAttachedImage] = useState<string | null>(null);
@@ -1871,6 +1930,7 @@ export default function AppChat({
   const [draftIsPinned, setDraftIsPinned] = useState(false);
   const [draftChatBg, setDraftChatBg] = useState<string | undefined>(undefined);
   const [draftCustomCss, setDraftCustomCss] = useState("");
+  const [cssTemplateCopied, setCssTemplateCopied] = useState(false);
   const [draftChatIcons, setDraftChatIcons] = useState<ChatIconOverrides>({});
   const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
@@ -6548,7 +6608,13 @@ ${instructionsPrompt}`;
                       <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-xs">
                        <div className="flex items-center justify-between">
                          <span className="text-slate-800 font-bold text-sm">个性化样式</span>
-                        <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">覆盖全局设置</span>
+                        <button
+                          type="button"
+                          onClick={copyCssExampleTemplate}
+                          className="text-[9px] text-slate-500 font-medium bg-slate-100 px-2 py-1 rounded-[8px] transition-colors hover:bg-slate-200"
+                        >
+                          {cssTemplateCopied ? "已复制" : "复制示例模板"}
+                        </button>
                       </div>
                       <textarea
                         rows={12}

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Character, WorldBookEntry } from "../types";
 import { apiSummarizePersonality } from "../utils/apiHelper";
-import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
+import { Plus, Trash2, Edit2, User, ChevronLeft, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
 import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile } from "../features/archives/characterExport";
@@ -650,7 +650,7 @@ export default function AppArchives({
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto p-4 pb-20">
         {isCreating ? (
-          <form onSubmit={handleSubmit} className="space-y-4 max-w-md mx-auto bg-white p-5 rounded-2xl shadow-sm border border-slate-100 animate-slide-up">
+          <form onSubmit={handleSubmit} className="settings-panel-card space-y-4 max-w-md mx-auto p-5 animate-slide-up">
             
             {/* Error Message Alert */}
             {errorMsg && (
@@ -842,12 +842,11 @@ export default function AppArchives({
             </div>
 
             {/* Save Button Only */}
-            <div className="pt-2">
+            <div className="settings-wide-action-group pt-2">
               <button
                 type="submit"
-                className="w-full py-3 rounded-[32px] bg-neutral-950 hover:bg-neutral-900 text-white font-bold text-sm transition-colors flex items-center justify-center space-x-1.5 shadow-sm"
+                className="settings-wide-action settings-wide-action-primary"
               >
-                <Save className="w-4 h-4" />
                 <span>保存人设</span>
               </button>
             </div>

@@ -7,7 +7,6 @@ import {
   User,
   Key,
   Palette,
-  Image,
   Sparkles,
   RefreshCw,
   Sliders,
@@ -160,6 +159,49 @@ const BACKUP_KEYS = [
 
 const BACKUP_KEY_SET = new Set<string>(BACKUP_KEYS);
 type BackupData = Partial<Record<(typeof BACKUP_KEYS)[number], string | null>>;
+
+const LIGHT_BACKUP_KEYS = [
+  "phone_characters",
+  "phone_characters_v3",
+  "phone_messages",
+  "phone_messages_v3",
+  "phone_conversation_summaries",
+  "phone_worldbook_entries",
+  "phone_memory_vault_items",
+  "phone_memory_vault_settings",
+  "phone_character_events",
+  "phone_character_knowledge_claims",
+  "phone_character_relationships",
+  "phone_diary_entries",
+  "phone_diary_shares",
+  "phone_diary_generation_tasks",
+  "phone_diary_translations",
+  "phone_diary_drafts",
+  "phone_forum_threads",
+  "phone_forum_replies",
+  "phone_forum_shares",
+  "phone_forum_profiles",
+  "phone_forum_dm_conversations",
+  "phone_forum_dm_messages",
+  "phone_offline_stories",
+] as const;
+
+function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][]): void {
+  const backupData: BackupData = {};
+  keys.forEach((key) => {
+    backupData[key] = sanitizeSystemBackupValue(key, localStorage.getItem(key));
+  });
+  const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  link.href = url;
+  link.download = `xiaoshouji_backup_${dateStr}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 export function sanitizeSystemBackupValue(
   key: string,
@@ -395,6 +437,7 @@ export default function AppSettings({
   const [chatIcons, setChatIcons] = useState<ChatIconOverrides>(() => sanitizeChatIcons(settings.chatIcons));
   const [showHomeButton, setShowHomeButton] = useState(!!settings.showHomeButton);
   const [hideStatusBar, setHideStatusBar] = useState(!!settings.hideStatusBar);
+  const [showBackupExportOptions, setShowBackupExportOptions] = useState(false);
   const [dockColor, setDockColor] = useState(settings.dockColor || "#ffffff");
   const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
   const [widgetOpacity, setWidgetOpacity] = useState(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70);
@@ -438,7 +481,7 @@ export default function AppSettings({
   const [avatarBorderWidth, setAvatarBorderWidth] = useState(settings.avatarBorderWidth !== undefined ? settings.avatarBorderWidth : 1);
   const [avatarBorderColor, setAvatarBorderColor] = useState(settings.avatarBorderColor || "#e4e4e7");
 
-  const [beautySubTab, setBeautySubTab] = useState<"desktop" | "chat" | "preset">("desktop");
+  const [beautySubTab, setBeautySubTab] = useState<"desktop" | "chat" | "preset">("chat");
 
   // Connection testing state
   const [isTesting, setIsTesting] = useState(false);
@@ -1029,7 +1072,7 @@ export default function AppSettings({
       case "appearance":
         return "外观设置";
       case "beauty":
-        return "美化设置";
+        return "美化样式";
       case "system_config":
         return "系统设置";
       case "system":
@@ -1136,11 +1179,7 @@ export default function AppSettings({
                 <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
 
-              <button onClick={() => setActiveTab("image_api")} className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left">
-                <div className="flex items-center gap-3"><div className="w-5 h-5 flex items-center justify-center text-slate-800"><Image className="w-5 h-5" /></div><span className="text-base font-medium text-slate-800">图片设置</span></div><ChevronRight className="w-4 h-4 text-[#C7C7CC]" />
-              </button>
-
-              {/* Voice Settings */}
+              {/* Voice and image settings */}
               <button
                 onClick={() => setActiveTab("minimax")}
                 className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
@@ -1149,7 +1188,7 @@ export default function AppSettings({
                   <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
                     <Volume2 className="w-5 h-5" />
                   </div>
-                  <span className="text-base font-medium text-slate-800">语音设置</span>
+                  <span className="text-base font-medium text-slate-800">语音图片</span>
                 </div>
                 <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
@@ -1163,7 +1202,7 @@ export default function AppSettings({
                   <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
                     <Palette className="w-5 h-5" />
                   </div>
-                  <span className="text-base font-medium text-slate-800">美化设置</span>
+                  <span className="text-base font-medium text-slate-800">美化样式</span>
                 </div>
                 <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
@@ -1420,14 +1459,12 @@ export default function AppSettings({
                 </div>
               </section>
 
-              <div className="space-y-2 pt-1">
-                <button type="button" onClick={handleTestConnection} disabled={isTesting} className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--button-primary-bg)] text-sm font-semibold text-[var(--button-primary-text)] shadow-sm transition-colors hover:bg-[var(--button-primary-hover-bg)] disabled:opacity-60">
-                  {isTesting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  <span>测试连接</span>
+              <div className="settings-wide-action-group pt-1">
+                <button type="button" onClick={handleTestConnection} disabled={isTesting} className="settings-wide-action settings-wide-action-primary disabled:opacity-60">
+                  {isTesting ? "测试中…" : "测试连接"}
                 </button>
-                <button type="button" onClick={handleSaveApiConfig} className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[12px] border border-[var(--border)] bg-[var(--surface)] text-sm font-semibold text-[var(--text-primary)] shadow-sm transition-colors hover:bg-[var(--surface-muted)]">
-                  <Save className="h-4 w-4" />
-                  <span>保存配置</span>
+                <button type="button" onClick={handleSaveApiConfig} className="settings-wide-action settings-wide-action-secondary">
+                  保存配置
                 </button>
               </div>
 
@@ -1447,14 +1484,14 @@ export default function AppSettings({
                 <div><div className="mb-1 flex justify-between"><span className="text-[10px] font-bold text-slate-500">图片模型</span><button type="button" disabled={isFetchingImageModels} onClick={fetchImageModels} className="text-[10px] font-bold text-blue-600">{isFetchingImageModels ? "拉取中…" : "拉取模型列表"}</button></div>{imageModelSuggestions.length ? <select value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageModelSuggestions.map((model) => <option key={model}>{model}</option>)}</select> : <input value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} placeholder="手动输入图片模型" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />}</div>
                 <p className="text-[10px] leading-relaxed text-slate-400">测试连接只检查配置与模型列表，不会生成图片。</p>
                 {imageTestResult && <p className={`text-[10px] ${imageTestResult.success ? "text-emerald-600" : "text-rose-600"}`}>{imageTestResult.message}</p>}
-                <div className="space-y-2 pt-1"><button type="button" onClick={testImageApi} disabled={isTestingImageApi} className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--button-primary-bg)] text-sm font-semibold text-[var(--button-primary-text)] shadow-sm transition-colors hover:bg-[var(--button-primary-hover-bg)] disabled:opacity-60">{isTestingImageApi ? "测试中…" : "测试连接"}</button><button type="button" onClick={saveImageApiConfig} className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[12px] border border-[var(--border)] bg-[var(--surface)] text-sm font-semibold text-[var(--text-primary)] shadow-sm transition-colors hover:bg-[var(--surface-muted)]">保存配置</button></div>
+                <div className="settings-wide-action-group pt-1"><button type="button" onClick={testImageApi} disabled={isTestingImageApi} className="settings-wide-action settings-wide-action-primary disabled:opacity-60">{isTestingImageApi ? "测试中…" : "测试连接"}</button><button type="button" onClick={saveImageApiConfig} className="settings-wide-action settings-wide-action-secondary">保存配置</button></div>
               </div>
             </div>
           )}
 
           {/* BEAUTY SETTINGS TAB */}
           {activeTab === "beauty" && (
-            <div className="space-y-4 text-left">
+            <div className="space-y-4 text-left" data-settings-beauty={beautySubTab}>
               {/* Classification Navigation Bar */}
               <div className="flex items-center p-1 bg-[var(--surface-muted)] border border-[var(--segmented-border)] rounded-[16px] gap-1.5 select-none mb-4">
                 <button
@@ -2467,7 +2504,7 @@ export default function AppSettings({
 
                     {/* 对方气泡 */}
                     <div className="space-y-3 p-3 bg-slate-50/50 rounded-[24px] border border-slate-100">
-                      <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">对方（角色）气泡</div>
+                      <div className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-wider">对方（角色）气泡</div>
                       
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2">
@@ -2828,43 +2865,61 @@ export default function AppSettings({
           {activeTab === "system" && (
             <div className="space-y-4 text-left">
               <div className="settings-section-header">数据备份</div>
+              {showBackupExportOptions && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal="true" aria-labelledby="backup-export-title">
+                  <div className="w-full max-w-sm rounded-[16px] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[0_8px_32px_rgba(0,0,0,0.16)]">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 id="backup-export-title" className="text-base font-semibold text-[var(--text-primary)]">选择导出方式</h3>
+                      <button type="button" onClick={() => setShowBackupExportOptions(false)} className="h-8 w-8 rounded-[12px] text-lg text-[var(--text-tertiary)]" aria-label="关闭">×</button>
+                    </div>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try {
+                            downloadSystemBackup(BACKUP_KEYS);
+                            setShowBackupExportOptions(false);
+                          } catch (err: any) {
+                            alert("导出备份失败: " + err.message);
+                          }
+                        }}
+                        className="w-full rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 text-left transition-colors hover:bg-[var(--surface-raised)]"
+                      >
+                        <span className="block text-sm font-semibold text-[var(--text-primary)]">完整导出</span>
+                        <span className="mt-1 block text-xs text-[var(--text-tertiary)]">本机内的所有数据完整导出</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try {
+                            downloadSystemBackup(LIGHT_BACKUP_KEYS);
+                            setShowBackupExportOptions(false);
+                          } catch (err: any) {
+                            alert("导出备份失败: " + err.message);
+                          }
+                        }}
+                        className="w-full rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 text-left transition-colors hover:bg-[var(--surface-raised)]"
+                      >
+                        <span className="block text-sm font-semibold text-[var(--text-primary)]">轻量导出</span>
+                        <span className="mt-1 block text-xs leading-5 text-[var(--text-tertiary)]">仅包含聊天、档案馆、世界书、记忆书、日记、线上线下</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               {/* Data Backup and Restore */}
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">数据备份与还原</h3>
                 
                 <p className="text-[10px] text-slate-400 leading-relaxed">
-                  您可以将本手机内的所有角色人设、对话记录、世界书词条、备忘录以及美化配置打包导出备份。未来可在任何设备上导入此文件进行100%完美还原。
+                  可以将本机内的配置打包导出备份，未来可在任何设备上导入此文件进行100%完美还原。音频和本地封面不会写入JSON，恢复后需重新导入本地文件。
                 </p>
 
-                <p className="text-[10px] leading-relaxed text-amber-600">
-                  本地歌曲元数据、双人音乐组件与关系听歌状态会进入 JSON 备份；音频和本地封面二进制不会写入 JSON，恢复后需重新导入本地文件。
-                </p>
-
-                <div className="grid grid-cols-2 gap-3 pt-2">
+                <div className="grid grid-cols-2 gap-3">
                   {/* Export Button */}
                   <button
                     type="button"
-                    onClick={() => {
-                      try {
-                        const backupData: BackupData = {};
-                        BACKUP_KEYS.forEach(key => {
-                          backupData[key] = sanitizeSystemBackupValue(key, localStorage.getItem(key));
-                        });
-
-                        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
-                        const url = URL.createObjectURL(blob);
-                        const link = document.createElement("a");
-                        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-                        link.href = url;
-                        link.download = `xiaoshouji_backup_${dateStr}.json`;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        URL.revokeObjectURL(url);
-                      } catch (err: any) {
-                        alert("导出备份失败: " + err.message);
-                      }
-                    }}
+                    onClick={() => setShowBackupExportOptions(true)}
                     className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group"
                   >
                     <Download className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
@@ -2960,7 +3015,7 @@ export default function AppSettings({
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <div>
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">桌面模块备份</h3>
-                  <p className="mt-2 text-[10px] leading-relaxed text-slate-400">单独备份和恢复桌面美化：壁纸、Dock 外观、桌面布局与小组件设置、应用文字与图标参数，以及自定义应用图标。不会包含聊天、角色、世界书或 API 配置。</p>
+                  <p className="mt-2 text-[10px] leading-relaxed text-slate-400">单独备份和恢复所有桌面美化，如壁纸、桌面布局、小组件设置与自定义应用图标等。</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <button type="button" onClick={downloadDesktopModuleBackup} className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group">
@@ -3007,7 +3062,7 @@ export default function AppSettings({
             <div className="space-y-3 text-left pb-[34px] w-full max-w-md mx-auto">
               <div className="settings-section-header">语音设置</div>
               {/* General Toggle Switch */}
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between">
+              <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm flex items-center justify-between">
                 <div>
                   <span className="text-sm font-bold text-slate-800 block">语音合成总开关</span>
                   <span className="text-[10px] text-slate-400">开启后，角色发言会根据人设和音色自动合成语音</span>
@@ -3019,7 +3074,7 @@ export default function AppSettings({
                     onChange={(e) => setEnableMiniMaxTts(e.target.checked)}
                     className="sr-only"
                   />
-                  <div className={`settings-compact-toggle rounded-full transition-colors duration-200 relative ${
+                  <div className={`settings-compact-toggle rounded-[12px] transition-colors duration-200 relative ${
                     enableMiniMaxTts ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)]"
                   }`}>
                     <div className={`absolute top-[2px] left-[2px] bg-white border border-slate-300 rounded-full h-5 w-5 transition-transform duration-200 ${
@@ -3030,7 +3085,7 @@ export default function AppSettings({
               </div>
 
               {/* API Credentials */}
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+              <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">MiniMax 开发者密钥</h3>
                 
                 <div className="space-y-3.5">
@@ -3044,7 +3099,7 @@ export default function AppSettings({
                         value={minimaxApiKey}
                         onChange={(e) => setMinimaxApiKey(e.target.value)}
                         placeholder="请输入 MiniMax API Key"
-                        className="w-full pl-3 pr-10 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-semibold"
+                        className="w-full pl-3 pr-10 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-semibold"
                       />
                       <button
                         type="button"
@@ -3065,7 +3120,7 @@ export default function AppSettings({
                       value={minimaxGroupId}
                       onChange={(e) => setMinimaxGroupId(e.target.value)}
                       placeholder="请输入 MiniMax Group ID"
-                      className="w-full px-3 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-semibold"
+                      className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-semibold"
                     />
                   </div>
 
@@ -3076,7 +3131,7 @@ export default function AppSettings({
                     <select
                       value={minimaxModel}
                       onChange={(e) => setMinimaxModel(e.target.value)}
-                      className="w-full px-3 py-2 rounded-[8px] bg-slate-55 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-bold"
+                      className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-bold"
                     >
                       <option value="speech-2.8-hd">speech-2.8-hd (超高解析度精品推荐)</option>
                       <option value="speech-2">speech-2 (高性价比第二代)</option>
@@ -3087,7 +3142,7 @@ export default function AppSettings({
               </div>
 
               {/* TTS Tuning Sliders */}
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+              <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">声线与朗读微调</h3>
                 
                 <div className="space-y-4">
@@ -3095,7 +3150,7 @@ export default function AppSettings({
                   <div>
                     <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1">
                       <span>语速 (Speed)</span>
-                      <span className="text-indigo-600 font-bold">{minimaxSpeed}x</span>
+                      <span className="text-[var(--text-primary)] font-bold">{minimaxSpeed}x</span>
                     </div>
                     <input
                       type="range"
@@ -3104,7 +3159,7 @@ export default function AppSettings({
                       step="0.1"
                       value={minimaxSpeed}
                       onChange={(e) => setMinimaxSpeed(Number(e.target.value))}
-                      className="w-full accent-indigo-600 cursor-pointer"
+                      className="w-full accent-[var(--text-primary)] cursor-pointer"
                     />
                     <div className="flex justify-between text-[8px] text-slate-400">
                       <span>极慢 (0.5)</span>
@@ -3117,7 +3172,7 @@ export default function AppSettings({
                   <div>
                     <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1">
                       <span>音调 (Pitch)</span>
-                      <span className="text-indigo-600 font-bold">{minimaxPitch > 0 ? `+${minimaxPitch}` : minimaxPitch}</span>
+                      <span className="text-[var(--text-primary)] font-bold">{minimaxPitch > 0 ? `+${minimaxPitch}` : minimaxPitch}</span>
                     </div>
                     <input
                       type="range"
@@ -3126,7 +3181,7 @@ export default function AppSettings({
                       step="1"
                       value={minimaxPitch}
                       onChange={(e) => setMinimaxPitch(Number(e.target.value))}
-                      className="w-full accent-indigo-600 cursor-pointer"
+                      className="w-full accent-[var(--text-primary)] cursor-pointer"
                     />
                     <div className="flex justify-between text-[8px] text-slate-400">
                       <span>浑厚低沉 (-12)</span>
@@ -3139,7 +3194,7 @@ export default function AppSettings({
                   <div>
                     <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1">
                       <span>音量 (Volume)</span>
-                      <span className="text-indigo-600 font-bold">{minimaxVol}x</span>
+                      <span className="text-[var(--text-primary)] font-bold">{minimaxVol}x</span>
                     </div>
                     <input
                       type="range"
@@ -3148,7 +3203,7 @@ export default function AppSettings({
                       step="0.1"
                       value={minimaxVol}
                       onChange={(e) => setMinimaxVol(Number(e.target.value))}
-                      className="w-full accent-indigo-600 cursor-pointer"
+                      className="w-full accent-[var(--text-primary)] cursor-pointer"
                     />
                     <div className="flex justify-between text-[8px] text-slate-400">
                       <span>极轻 (0.1)</span>
@@ -3163,11 +3218,63 @@ export default function AppSettings({
               <button
                 type="button"
                 onClick={handleSaveMiniMaxSettings}
-                className="w-full py-3.5 bg-neutral-950 hover:bg-neutral-900 text-white rounded-[16px] font-bold text-sm transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
+                className="settings-wide-action settings-wide-action-primary"
               >
-                <Save className="w-4 h-4 text-indigo-400" />
-                <span>保存 MiniMax 语音设置</span>
+                保存 MiniMax 语音设置
               </button>
+
+              <div className="settings-section-header pt-1">图片生成设置</div>
+              <section className="settings-card overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
+                <div className="flex items-center justify-between gap-3 border-b border-[var(--divider)] px-4 py-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">图片生成总开关</h3>
+                    <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">关闭时任何角色都不能生成图片</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={enableImageGeneration}
+                    aria-label="图片生成总开关"
+                    onClick={() => updateImageGenerationEnabled(!enableImageGeneration)}
+                    className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${enableImageGeneration ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)]"}`}
+                  >
+                    <span className={`absolute left-0.5 bg-[var(--surface)] shadow-sm transition-transform duration-200 ${enableImageGeneration ? "translate-x-[18px]" : "translate-x-0"}`} />
+                  </button>
+                </div>
+
+                <div className="space-y-3 px-4 py-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">图片 API 配置</h3>
+                    <span className="text-[10px] text-[var(--text-tertiary)]">预设</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <select value={activeImageApiPresetId} onChange={(event) => selectImagePreset(event.target.value)} className="h-10 min-w-0 flex-1 rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-xs text-[var(--text-primary)]">
+                      {imageApiPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                    </select>
+                    <button type="button" onClick={addImagePreset} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--text-primary)]" aria-label="添加图片 API 配置"><Plus className="h-4 w-4" /></button>
+                    <button type="button" onClick={deleteImagePreset} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-rose-100 bg-rose-50 text-rose-600" aria-label="删除图片 API 配置"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                  <input value={imagePresetName} onChange={(event) => { setImagePresetName(event.target.value); persistImagePresetDraft({ name: event.target.value }); }} placeholder="预设名称" className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm text-[var(--text-primary)]" />
+                  <input value={imageApiEndpoint} onChange={(event) => { setImageApiEndpoint(event.target.value); persistImagePresetDraft({ apiEndpoint: event.target.value }); }} placeholder="由中转服务商提供的 API 地址" className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm font-mono text-[var(--text-primary)]" />
+                  <div className="relative">
+                    <input type={showImagePassword ? "text" : "password"} value={imageApiKey} onChange={(event) => { setImageApiKey(event.target.value); persistImagePresetDraft({ apiKey: event.target.value }); }} placeholder="API Key" className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 pr-10 text-sm font-mono text-[var(--text-primary)]" />
+                    <button type="button" onClick={() => setShowImagePassword(!showImagePassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" aria-label={showImagePassword ? "隐藏图片 API 密钥" : "显示图片 API 密钥"}>{showImagePassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-[var(--text-secondary)]">图片模型</span>
+                      <button type="button" disabled={isFetchingImageModels} onClick={fetchImageModels} className="text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-60">{isFetchingImageModels ? "拉取中…" : "拉取模型列表"}</button>
+                    </div>
+                    {imageModelSuggestions.length ? <select value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm text-[var(--text-primary)]">{imageModelSuggestions.map((model) => <option key={model}>{model}</option>)}</select> : <input value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} placeholder="手动输入图片模型" className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm text-[var(--text-primary)]" />}
+                  </div>
+                  <p className="text-xs leading-5 text-[var(--text-tertiary)]">测试连接只检查配置与模型列表，不会生成图片。</p>
+                  {imageTestResult && <p className={`text-xs ${imageTestResult.success ? "text-emerald-600" : "text-rose-600"}`}>{imageTestResult.message}</p>}
+                  <div className="settings-wide-action-group pt-1">
+                    <button type="button" onClick={testImageApi} disabled={isTestingImageApi} className="settings-wide-action settings-wide-action-primary disabled:opacity-60">{isTestingImageApi ? "测试中…" : "测试连接"}</button>
+                    <button type="button" onClick={saveImageApiConfig} className="settings-wide-action settings-wide-action-secondary">保存配置</button>
+                  </div>
+                </div>
+              </section>
             </div>
           )}
         </div>

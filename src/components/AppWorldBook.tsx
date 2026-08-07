@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { WorldBookEntry, Character } from "../types";
-import { Plus, Trash2, Edit, Search, ChevronLeft, Save, BookOpen, Layers, Globe, User, X, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Edit, Search, ChevronLeft, BookOpen, Layers, Globe, User, X, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries, safeParseDocx } from "../utils/pngParser";
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
 
@@ -583,7 +583,7 @@ export default function AppWorldBook({
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 pb-24">
         {isEditing ? (
-          <form onSubmit={handleSubmit} className="space-y-4 max-w-md mx-auto bg-white p-5 rounded-xl shadow-sm border border-stone-200/40 animate-fade-in">
+          <form onSubmit={handleSubmit} className="settings-panel-card space-y-4 max-w-md mx-auto p-5 animate-fade-in">
             {formError && (
               <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium animate-fade-in text-left">
                 ⚠️ {formError}
@@ -899,12 +899,11 @@ export default function AppWorldBook({
               </div>
             </div>
 
-            <div className="pt-3">
+            <div className="settings-wide-action-group pt-3">
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-neutral-950 hover:bg-neutral-900 text-white font-bold text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-sm"
+                className="settings-wide-action settings-wide-action-primary"
               >
-                <Save className="w-3.5 h-3.5" />
                 <span>保存设定</span>
               </button>
             </div>

@@ -2573,6 +2573,9 @@ export default function App() {
           line-height: 20px;
           padding-inline: 4px;
         }
+        .phone-screen-container [data-settings-shell] [data-settings-beauty] [class~="rounded-[24px]"] {
+          border-radius: 16px !important;
+        }
         .phone-screen-container [data-settings-shell] .settings-compact-toggle {
           width: 42px;
           height: 24px;
@@ -2601,26 +2604,48 @@ export default function App() {
         .phone-screen-container [data-settings-shell] .bg-white.p-5 button:not([role="switch"]) {
           border-radius: 12px !important;
         }
-        /* Image API actions mirror the API page: two full-width stacked buttons. */
-        .phone-screen-container [data-settings-shell] .settings-section-header + .bg-white.p-5 + .settings-section-header + .bg-white.p-5 > div:last-child {
+
+        /* Shared settings primitives for feature pages outside the main settings shell. */
+        .phone-screen-container .settings-panel-card {
+          background: var(--surface) !important;
+          border: 1px solid var(--border) !important;
+          border-radius: 16px !important;
+          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+        }
+        .phone-screen-container .settings-wide-action-group {
           display: flex;
           flex-direction: column;
           gap: 8px;
-          padding-top: 4px;
-        }
-        .phone-screen-container [data-settings-shell] .settings-section-header + .bg-white.p-5 + .settings-section-header + .bg-white.p-5 > div:last-child > button {
           width: 100%;
-          height: 44px;
-          flex: none;
         }
-        .phone-screen-container [data-settings-shell] .settings-section-header + .bg-white.p-5 + .settings-section-header + .bg-white.p-5 > div:last-child > button:first-child {
-          background: var(--button-primary-bg) !important;
-          color: var(--button-primary-text) !important;
+        .phone-screen-container .settings-wide-action {
+          width: 100%;
+          min-height: 44px;
+          border-radius: 12px !important;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 16px;
+          font-size: 14px;
+          font-weight: 600;
+          line-height: 20px;
+          transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
         }
-        .phone-screen-container [data-settings-shell] .settings-section-header + .bg-white.p-5 + .settings-section-header + .bg-white.p-5 > div:last-child > button:last-child {
-          border: 1px solid var(--border) !important;
+        .phone-screen-container .settings-wide-action-primary {
+          background: var(--text-primary) !important;
+          color: var(--surface) !important;
+          border: 1px solid var(--text-primary) !important;
+        }
+        .phone-screen-container .settings-wide-action-primary:hover {
+          background: var(--text-secondary) !important;
+        }
+        .phone-screen-container .settings-wide-action-secondary {
           background: var(--surface) !important;
           color: var(--text-primary) !important;
+          border: 1px solid var(--border) !important;
+        }
+        .phone-screen-container .settings-wide-action-secondary:hover {
+          background: var(--surface-raised) !important;
         }
 
         /* Diary editing follows the compact offline-story card geometry. */
