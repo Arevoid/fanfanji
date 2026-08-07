@@ -6277,15 +6277,15 @@ ${instructionsPrompt}`;
                       <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
 
-                    <div className={`${draftEnableProactiveChat ? "min-h-[52px]" : "h-[52px]"} px-4`}>
-                      <div className="flex h-[52px] items-center justify-between gap-3">
+                    <div className={draftEnableProactiveChat ? "min-h-[52px]" : "contents"}>
+                      <div className="flex h-[52px] px-4 items-center justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <span className="text-slate-800 font-medium text-[16px] block">主动联络</span>
                         </div>
                         <SettingsSwitch checked={draftEnableProactiveChat} onChange={setDraftEnableProactiveChat} label="主动联络" />
                       </div>
                       {draftEnableProactiveChat && (
-                        <div className="flex items-end gap-3 pt-3">
+                        <div className="flex items-end gap-3 px-4 pt-3 pb-3">
                           <div className="flex flex-col flex-1">
                             <span className="text-[9px] text-slate-400 font-bold mb-1">开始时间</span>
                             <select value={draftProactiveStartTime} onChange={(e) => setDraftProactiveStartTime(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-medium font-mono focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none">
