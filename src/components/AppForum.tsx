@@ -93,7 +93,7 @@ import {
 import {
   buildForumProtectedNames,
 } from "../domain/forum/forumContentSafety";
-import { appendForumNotification, createForumNotification, createForumProfile, recordForumVisit, toPublicThreadSnapshot, updateForumLikeHistory } from "../domain/forum/forumProfileData";
+import { appendForumNotification, createForumNotification, createForumProfile, recordForumVisit, resolveForumPublicAuthor, toPublicThreadSnapshot, updateForumLikeHistory } from "../domain/forum/forumProfileData";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { compressImage } from "../utils/stickerDb";
 import { ForumDmList } from "../features/forum/components/ForumDmList";
@@ -238,7 +238,12 @@ export default function AppForum({
   const activeThread = identityThreads.find((thread) => thread.id === activeThreadId);
   const activeDmConversation = dmConversations.find((conversation) => conversation.id === activeDmConversationId);
   const activeProfile = profiles.find((profile) => profile.ownerIdentityId === activeIdentity.id) || createForumProfile(activeIdentity, 0);
-  const forumIdentity = useMemo(() => ({ ...activeIdentity, name: activeProfile.displayName, avatar: activeProfile.avatar || activeIdentity.avatar }), [activeIdentity, activeProfile.avatar, activeProfile.displayName]);
+  const forumProfileAvatarOverrides = useMemo(
+    () => profileAvatarUrl ? { [activeIdentity.id]: profileAvatarUrl } : {},
+    [activeIdentity.id, profileAvatarUrl],
+  );
+  const activeThreadAuthor = activeThread ? resolveForumPublicAuthor(activeThread, profiles, forumProfileAvatarOverrides) : undefined;
+  const forumIdentity = useMemo(() => ({ ...activeIdentity, name: activeProfile.displayName, avatar: profileAvatarUrl || activeProfile.avatar || activeIdentity.avatar }), [activeIdentity, activeProfile.avatar, activeProfile.displayName, profileAvatarUrl]);
   const activeReplies = useMemo(
     () => activeThread ? listForumRepliesForThread(replies, activeThread) : [],
     [replies, activeThread],
@@ -1215,6 +1220,7 @@ export default function AppForum({
                   <div key={thread.id}>
                     <ForumThreadCard
                       thread={thread}
+                      author={resolveForumPublicAuthor(thread, profiles, forumProfileAvatarOverrides)}
                       metrics={metrics}
                       formattedTime={formatForumTime(metrics.updatedAt)}
                       liked={thread.likedByIdentityIds.includes(activeIdentity.id)}
@@ -1239,16 +1245,16 @@ export default function AppForum({
           <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-5 pt-3">
             <article className="rounded-2xl bg-white p-4 shadow-sm">
               <div className="flex items-start gap-2.5">
-                <ForumAvatar author={activeThread.publicAuthor} className="h-10 w-10" />
+                <ForumAvatar author={activeThreadAuthor || activeThread.publicAuthor} className="h-10 w-10" />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[13px] font-semibold text-slate-800">
-                      {activeThread.publicAuthor.displayName}
+                      {(activeThreadAuthor || activeThread.publicAuthor).displayName}
                     </span>
                     <span className="rounded bg-neutral-950 px-1.5 py-0.5 text-[9px] font-semibold text-white">
                       楼主
                     </span>
-                    {activeThread.publicAuthor.isAnonymous && (
+                    {(activeThreadAuthor || activeThread.publicAuthor).isAnonymous && (
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500">匿名</span>
                     )}
                   </div>
@@ -1352,13 +1358,13 @@ export default function AppForum({
                     className="border-b border-slate-100 px-4 py-4 last:border-b-0"
                   >
                     <div className="flex items-start gap-2.5">
-                      <ForumAvatar author={reply.publicAuthor} className="h-8 w-8" />
+                      <ForumAvatar author={resolveForumPublicAuthor(reply, profiles, forumProfileAvatarOverrides)} className="h-8 w-8" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
                           <span className={`truncate text-[12px] font-semibold ${reply.isDeleted ? "text-slate-400" : "text-slate-700"}`}>
-                            {reply.isDeleted ? "已删除用户" : reply.publicAuthor.displayName}
+                            {reply.isDeleted ? "已删除用户" : resolveForumPublicAuthor(reply, profiles, forumProfileAvatarOverrides).displayName}
                           </span>
-                          {reply.publicAuthor.isAnonymous && !reply.isDeleted && (
+                          {resolveForumPublicAuthor(reply, profiles, forumProfileAvatarOverrides).isAnonymous && !reply.isDeleted && (
                             <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[8px] text-slate-500">匿名</span>
                           )}
                           {!reply.isDeleted && reply.kind === "author-update" && (

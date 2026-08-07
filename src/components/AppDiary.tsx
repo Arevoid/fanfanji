@@ -17,13 +17,8 @@ import type {
   UserSettings,
 } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
-import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
-import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
-import type { CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
-import type { CharacterEvent } from "../domain/characterLife/characterEventTypes";
 import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
-import { buildRelationshipCognitiveProjection } from "../features/characterLife/services/relationshipCognitiveProjectionService";
-import { buildCharacterRoutine } from "../domain/characterLife/characterRoutine/characterRoutineBuilder";
+import { buildDiaryCognitiveContext } from "../features/diary/services/diaryCognitiveContext";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { createDiaryId, getDiaryDayKey } from "../domain/diary/diaryData";
 import {
@@ -57,12 +52,6 @@ interface AppDiaryProps {
 }
 
 type Tab = "counterpart" | "mine" | "calendar";
-
-const getDiaryEventVisibility = (event: CharacterEvent): CharacterCognitiveEventCandidate["promptVisibility"] =>
-  event.status === "active"
-    && (event.kind === "relationship_created" || event.kind === "offline_story_completed")
-    ? "safe"
-    : "private";
 
 const formatDate = (value: number) =>
   new Date(value).toLocaleDateString("zh-CN", {
@@ -256,26 +245,11 @@ export default function AppDiary({
     const now = Date.now();
     const cognitiveContext = (() => {
       try {
-        const relationEvents = listCharacterEventsByRelation(relation.id);
-        const relationshipProjection = buildRelationshipCognitiveProjection({
-          relation,
-          events: relationEvents,
-          now,
-        });
-        return buildCharacterCognitiveContext({
+        return buildDiaryCognitiveContext({
           character,
           relation,
-          // Diary must not use user-private Memory as a generated fact source.
-          memories: [],
-          events: relationEvents.map((event) => ({
-            event,
-            promptVisibility: getDiaryEventVisibility(event),
-          })),
-          timeContext: { now },
-          knowledgeBoundary: createDirectChatKnowledgeBoundary(),
-          conversationId: relation.conversationId,
-          relationshipTimeline: relationshipProjection.timeline,
-          routine: buildCharacterRoutine(character.routine),
+          events: listCharacterEventsByRelation(relation.id),
+          now,
         });
       } catch {
         return undefined;

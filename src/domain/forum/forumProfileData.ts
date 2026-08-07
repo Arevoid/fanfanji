@@ -1,5 +1,28 @@
 import type { ForumLikeHistoryRecord, ForumNotification, ForumReply, ForumReplyPublicSnapshot, ForumThread, ForumThreadPublicSnapshot, ForumUserProfile, ForumVisitHistory, UserIdentity } from "../../types";
 
+/**
+ * Resolve ordinary, non-anonymous Forum users against the current local
+ * profile. NPC/virtual and anonymous records intentionally keep their stored
+ * public snapshot. Legacy user records without authorUserId fall back to the
+ * owner identity so existing data upgrades without a migration.
+ */
+export const resolveForumPublicAuthor = (
+  record: Pick<ForumThread | ForumReply, "publicAuthor" | "source" | "ownerIdentityId" | "authorUserId">,
+  profiles: readonly ForumUserProfile[],
+  avatarOverrides: Readonly<Record<string, string>> = {},
+): ForumThread["publicAuthor"] => {
+  if (record.source !== "user" || record.publicAuthor.isAnonymous) return record.publicAuthor;
+  const profileId = record.authorUserId || record.ownerIdentityId;
+  const profile = profiles.find((item) => item.ownerIdentityId === profileId);
+  if (!profile) return record.publicAuthor;
+  return {
+    displayName: profile.displayName || record.publicAuthor.displayName,
+    ...((avatarOverrides[profileId] || profile.avatar) ? { avatar: avatarOverrides[profileId] || profile.avatar } : {}),
+    kind: "user",
+    isAnonymous: false,
+  };
+};
+
 export const MAX_FORUM_VISITS = 200;
 export const MAX_FORUM_LIKES = 300;
 export const MAX_FORUM_NOTIFICATIONS = 300;

@@ -142,6 +142,7 @@ const isForumThread = (value: unknown): value is ForumThread => {
   const thread = value as Record<string, unknown>;
   return typeof thread.id === "string"
     && typeof thread.ownerIdentityId === "string"
+    && (thread.authorUserId === undefined || typeof thread.authorUserId === "string")
     && isPublicAuthor(thread.publicAuthor)
     && typeof thread.title === "string"
     && typeof thread.body === "string"
@@ -162,6 +163,7 @@ const isForumReply = (value: unknown): value is ForumReply => {
   return typeof reply.id === "string"
     && typeof reply.threadId === "string"
     && typeof reply.ownerIdentityId === "string"
+    && (reply.authorUserId === undefined || typeof reply.authorUserId === "string")
     && typeof reply.floor === "number"
     && Number.isInteger(reply.floor)
     && reply.floor >= 2

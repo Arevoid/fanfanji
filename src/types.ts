@@ -324,6 +324,8 @@ export interface ForumActorState {
 export interface ForumThread {
   id: string;
   ownerIdentityId: string;
+  /** Stable link to the current local Forum profile for non-anonymous user posts. */
+  authorUserId?: string;
   publicAuthor: ForumPublicAuthor;
   /** Private author mapping is never copied into a public snapshot or Message. */
   privateAuthorRelationId?: string;
@@ -347,6 +349,8 @@ export interface ForumReply {
   id: string;
   threadId: string;
   ownerIdentityId: string;
+  /** Stable link to the current local Forum profile for non-anonymous user replies. */
+  authorUserId?: string;
   /** Main post is floor 1. Reply floors are allocated once and never renumbered. */
   floor: number;
   /** Missing on phase-one records means a normal reply. */

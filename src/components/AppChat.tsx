@@ -39,6 +39,7 @@ import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelat
 import { generateInnerVoice } from "../features/chat/services/innerVoiceService";
 import { generateCharacterImage } from "../features/chat/services/characterImageService";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
+import { resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { createChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
@@ -1168,6 +1169,12 @@ export default function AppChat({
   // Navigation State
   const activeRelationship = activeChatRelationId ? relationships.find((relation) => relation.id === activeChatRelationId) : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
+  // Long-lived callbacks can outlive the render in which they were created.
+  // Keep the latest character/settings available at the actual send boundary.
+  const latestActiveCharacterRef = useRef<Character | undefined>(activeCharacter);
+  const latestActiveRelationshipRef = useRef<CharacterRelationship | undefined>(activeRelationship);
+  latestActiveCharacterRef.current = activeCharacter;
+  latestActiveRelationshipRef.current = activeRelationship;
   const currentChatMessages = messages.filter((m) => !m.isOffline && (activeRelationship
     ? m.relationId === activeRelationship.id
     : m.characterId === activeChatCharId && activeCharacter?.isGroupChat));
@@ -2503,7 +2510,7 @@ export default function AppChat({
         characterId: activeChatCharId || undefined,
       });
       let groupWbText = groupWbBlocks.formattedAll ? `\n\n【🚨 微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
-      if (activeCharacter.enableTimeAwareness !== false) {
+      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
         groupWbText += `\n【当前现实时间】\n${formatLocalTimeContext()}\n`;
       }
       groupWbText += `\n${formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id, groupMemberIds: groupMembers.map((member) => member.id) })}\n`;
@@ -2594,7 +2601,7 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
         },
         members: groupMembers,
         groupId: activeChatCharId,
-        disableBracketActions: activeCharacter.disableBracketActions || false,
+        disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
         createId: (index) => `group-reply-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`,
         currentTime: () => Date.now(),
       });
@@ -2683,6 +2690,11 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     cognitiveContext?: CharacterCognitiveContext,
   ) => {
     setIsTyping(true);
+    // Resolve toggles from the latest props for every send. A queued callback
+    // may have been created by an earlier render, so its captured character
+    // must never decide the next prompt or output filtering.
+    const turnCharacter = latestActiveCharacterRef.current || activeCharacter;
+    const turnSettings = resolveChatTurnSettings(turnCharacter);
     let pendingOfflineHandoffForReply: OfflineStory | undefined;
     if (options?.forumShareTrigger) setForumShareReplyError("");
 
@@ -2752,7 +2764,7 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
       // With time awareness enabled, the first message on a new calendar day
       // starts a fresh live session. Yesterday's tail remains stored, but it is
       // no longer sent as the topic that the model should answer right now.
-      const isCrossDayNewSession = activeCharacter.enableTimeAwareness !== false
+      const isCrossDayNewSession = turnSettings.enableTimeAwareness
         && Boolean(userMsg && latestHistoryMessage)
         && !isSameLocalDay(userMsg!.timestamp, latestHistoryMessage.timestamp);
       const slicedMsgs = msgsForHistory.slice(-limit);
@@ -2768,14 +2780,14 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
         }
         return {
           role: m.sender === "user" ? "user" : "model",
-          text: activeCharacter.enableTimeAwareness !== false
+          text: turnSettings.enableTimeAwareness
             ? formatHistoricalMessageForPrompt(contentText, m.timestamp, requestTime)
             : contentText,
         };
       });
 
       let timeLogString = "";
-      if (activeCharacter.enableTimeAwareness !== false) {
+      if (turnSettings.enableTimeAwareness) {
         const timeLogLines: string[] = [];
         let lastDayStr = "";
         
@@ -2829,13 +2841,13 @@ Do NOT say you are an AI or Gemini, unless that is your explicit character人设
 🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
 1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
 2. [🚨 RED PACKET CAPABILITY / 对方发红包设定]: You have the capability to send WeChat red packets (微信红包) to the user as a cute gesture, appreciation, surprise, or interactive response. To send a red packet, output a single separate line matching the format exactly: "[红包]|金额|祝福语" (e.g. "[红包]|8.88|天天开心" or "[红包]|5.20|一生一世"). You can mix normal conversational dialogue messages and red packets. E.g. "给你塞个小红包，要开心哦！\n[红包]|6.66|天天开心".
-${activeCharacter.disableBracketActions 
+${turnSettings.disableBracketActions
   ? `3. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
 4. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${activeCharacter.name}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`
   : `3. If your character's backstory, personality card, or World Book entries naturally utilize parenthesized action descriptions or physical gestures (e.g., "(微笑)", "（叹气）", "*摸摸头*"), you are encouraged to output them inside brackets/parentheses to maintain realistic roleplay expressiveness. Keep them spontaneous, descriptive, and emotionally rich.`
 }`;
 
-      if (!isOfflineModeActive && activeCharacter.disableBracketActions) {
+      if (!isOfflineModeActive && turnSettings.disableBracketActions) {
         mainPromptText += `\n4. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks. Maintain natural, realistic, text-message style dialogue.`;
       }
 
@@ -3037,7 +3049,7 @@ Answer only the user's newest message as today's opening. Do not resume, answer,
       }
 
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
-      if (activeCharacter.enableTimeAwareness !== false) {
+      if (turnSettings.enableTimeAwareness) {
         const timeStr = formatLocalTimeContext(requestTime);
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
@@ -3362,7 +3374,7 @@ ${stickerListStr}
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
           const replyCandidates = createDirectReplyCandidates({
             rawText: data.text,
-            disableBracketActions: activeCharacter.disableBracketActions || false,
+            disableBracketActions: turnSettings.disableBracketActions,
             keepPeriods,
             characterId: activeChatCharId,
             createId: (idx) => `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
@@ -3455,27 +3467,33 @@ ${stickerListStr}
   };
 
   const chatReplyController = createChatReplyController({
-    getContext: () => createChatRuntimeContext({
-      characterId: activeChatCharId && activeCharacter ? activeChatCharId : null,
-      relationId: activeRelationship?.id,
-      conversationId: activeCharacter?.isGroupChat
-        ? `group:${activeCharacter.id}`
-        : (activeRelationship?.conversationId || (activeRelationship ? getConversationId(activeRelationship.id) : null)),
-      userIdentityId: activeIdentityId,
-      isGroup: Boolean(activeCharacter?.isGroupChat),
-      groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
-    }),
+    getContext: () => {
+      const currentCharacter = latestActiveCharacterRef.current;
+      const currentRelationship = latestActiveRelationshipRef.current;
+      return createChatRuntimeContext({
+        characterId: activeChatCharId && currentCharacter ? activeChatCharId : null,
+        relationId: currentRelationship?.id,
+        conversationId: currentCharacter?.isGroupChat
+          ? `group:${currentCharacter.id}`
+          : (currentRelationship?.conversationId || (currentRelationship ? getConversationId(currentRelationship.id) : null)),
+        userIdentityId: activeIdentityId,
+        isGroup: Boolean(currentCharacter?.isGroupChat),
+        groupId: currentCharacter?.isGroupChat ? currentCharacter.id : undefined,
+      });
+    },
     getCognitiveContext: (runtimeContext) => {
+      const currentCharacter = latestActiveCharacterRef.current;
+      const currentRelationship = latestActiveRelationshipRef.current;
       if (runtimeContext.isGroup
-        || !activeCharacter
-        || !activeRelationship
+        || !currentCharacter
+        || !currentRelationship
         || !runtimeContext.characterId
         || !runtimeContext.relationId
-        || runtimeContext.characterId !== activeCharacter.id
-        || runtimeContext.relationId !== activeRelationship.id
-        || runtimeContext.userIdentityId !== activeRelationship.userIdentityId) return undefined;
+        || runtimeContext.characterId !== currentCharacter.id
+        || runtimeContext.relationId !== currentRelationship.id
+        || runtimeContext.userIdentityId !== currentRelationship.userIdentityId) return undefined;
 
-      const events: CharacterCognitiveEventCandidate[] = listCharacterEventsByRelation(activeRelationship.id).map((event) => ({
+      const events: CharacterCognitiveEventCandidate[] = listCharacterEventsByRelation(currentRelationship.id).map((event) => ({
         event,
         // These are the only deterministic event kinds currently captured.
         // Any future kind remains private until its prompt visibility is
@@ -3488,20 +3506,20 @@ ${stickerListStr}
 
       try {
         const relationshipProjection = buildRelationshipCognitiveProjection({
-          relation: activeRelationship,
+          relation: currentRelationship,
           events: events.map(({ event }) => event),
           now: Date.now(),
         });
         return buildCharacterCognitiveContext({
-          character: activeCharacter,
-          relation: activeRelationship,
+          character: currentCharacter,
+          relation: currentRelationship,
           memories: memories || [],
           events,
           timeContext: { now: Date.now() },
           knowledgeBoundary: createDirectChatKnowledgeBoundary(),
           conversationId: runtimeContext.conversationId || undefined,
           relationshipTimeline: relationshipProjection.timeline,
-          routine: buildCharacterRoutine(activeCharacter.routine),
+          routine: buildCharacterRoutine(currentCharacter.routine),
         });
       } catch {
         // Cognitive context is read-only and must never block the legacy reply
@@ -3719,7 +3737,7 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
           && relationship.userIdentityId === capturedDirectScope.userIdentityId
           && relationship.characterId === capturedDirectScope.characterId);
         if (!relationshipStillExists) return;
-        const cleanedText = cleanOnlineMessage(data.text, capturedCharacter.disableBracketActions || false);
+        const cleanedText = cleanOnlineMessage(data.text, resolveChatTurnSettings(latestActiveCharacterRef.current || capturedCharacter).disableBracketActions);
         const textMsg = createCapturedCharacterMessage(`char-rp-text-${Date.now()}`, cleanedText || data.text, Date.now() + 100);
         onSendMessageRaw(textMsg);
       }
@@ -4074,14 +4092,14 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
       const history = slicedMsgs.map((m) => {
         return {
           role: m.sender === "user" ? "user" : "model",
-          text: activeCharacter.enableTimeAwareness !== false
+          text: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness
             ? formatHistoricalMessageForPrompt(m.content, m.timestamp, requestTime)
             : m.content,
         };
       });
 
       let timeLogString = "";
-      if (activeCharacter.enableTimeAwareness !== false) {
+      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
         timeLogString = slicedMsgs.map((m) => {
           const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
             month: "long",
@@ -4104,13 +4122,13 @@ Do NOT say you are an AI or Gemini.
 
 🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
 1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
-${activeCharacter.disableBracketActions 
+${resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions
   ? `2. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
 3. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${activeCharacter.name}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`
   : `2. If your character's backstory, personality card, or World Book entries naturally utilize parenthesized action descriptions or physical gestures (e.g., "(微笑)", "（叹气）", "*摸摸头*"), you are encouraged to output them inside brackets/parentheses to maintain realistic roleplay expressiveness. Keep them spontaneous, descriptive, and emotionally rich.`
 }`;
 
-      if (activeCharacter.disableBracketActions) {
+      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions) {
         mainPromptText += `\n4. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
@@ -4221,7 +4239,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       assembledInstructions.push(mainPromptText);
 
       // 1.5 Time awareness prompt if enabled
-      if (activeCharacter.enableTimeAwareness !== false) {
+      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
         const timeStr = formatLocalTimeContext(requestTime);
         assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
 当前现实物理世界的时间是：${timeStr}。
@@ -4339,7 +4357,7 @@ ${stickerListStr}
         const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
         const replyCandidates = createRegeneratedReplyCandidates({
           rawText: data.text,
-          disableBracketActions: activeCharacter.disableBracketActions || false,
+          disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
           keepPeriods,
           characterId: activeChatCharId,
           createId: (idx) => `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
@@ -4617,7 +4635,7 @@ ${stickerListStr}
 3. This is an initiator message, so check in on the user or share something from your day.
 4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
 
-      if (activeCharacter.disableBracketActions) {
+      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions) {
         proactivePrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
@@ -4632,7 +4650,7 @@ ${stickerListStr}
         relationId: activeRelationship.id,
       });
       const wbPrompt = wbBlocks.formattedAll;
-      const timeContext = activeCharacter.enableTimeAwareness !== false
+      const timeContext = resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness
         ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
         : "";
       const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id });
@@ -4694,7 +4712,7 @@ ${proactivePrompt}`;
         requestAi: apiChat,
         request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
         characterId: activeChatCharId,
-        disableBracketActions: activeCharacter.disableBracketActions || false,
+        disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
         keepPeriods,
         createId: (idx) => `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
         currentTime: (idx) => Date.now() + idx,

@@ -130,6 +130,7 @@ export const createForumThread = (input: {
 }): ForumThread => ({
   id: input.id,
   ownerIdentityId: input.identity.id,
+  ...(input.anonymous ? {} : { authorUserId: input.identity.id }),
   publicAuthor: createForumPublicAuthor(input.identity, input.anonymous),
   title: input.title.trim(),
   body: input.body.trim(),
@@ -161,6 +162,7 @@ export const createForumReply = (input: {
   id: input.id,
   threadId: input.thread.id,
   ownerIdentityId: input.thread.ownerIdentityId,
+  ...(input.anonymous ? {} : { authorUserId: input.identity.id }),
   floor: nextForumReplyFloor(input.existingReplies, input.thread.id),
   kind: "reply",
   publicAuthor: createForumPublicAuthor(input.identity, input.anonymous),

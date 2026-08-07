@@ -1,10 +1,11 @@
 import { MessageCircle, ThumbsUp } from "lucide-react";
-import type { ForumThread } from "../../../types";
+import type { ForumPublicAuthor, ForumThread } from "../../../types";
 import { getForumLikeCount, type ForumThreadMetrics } from "../../../domain/forum/forumData";
 import { ForumAvatar } from "./ForumAvatar";
 
 export function ForumThreadCard({
   thread,
+  author = thread.publicAuthor,
   metrics,
   formattedTime,
   liked,
@@ -12,6 +13,7 @@ export function ForumThreadCard({
   onToggleLike,
 }: {
   thread: ForumThread;
+  author?: ForumPublicAuthor;
   metrics: ForumThreadMetrics;
   formattedTime: string;
   liked: boolean;
@@ -27,13 +29,13 @@ export function ForumThreadCard({
         aria-label={`查看帖子：${thread.title}`}
       >
         <div className="flex items-center gap-2.5">
-          <ForumAvatar author={thread.publicAuthor} className="h-9 w-9" />
+          <ForumAvatar author={author} className="h-9 w-9" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
-                {thread.publicAuthor.displayName}
+                {author.displayName}
               </span>
-              {thread.publicAuthor.isAnonymous && (
+              {author.isAnonymous && (
                 <span className="rounded-full bg-[var(--badge-muted-bg)] px-2 py-0.5 text-[9px] font-medium text-[var(--badge-muted-text)]">
                   匿名
                 </span>
