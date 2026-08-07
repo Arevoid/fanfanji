@@ -101,7 +101,6 @@ import {
   ArrowUp,
   MoreHorizontal,
   Bookmark,
-  Pin,
   Image as ImageIcon,
   Heart,
   MessageCircle,
@@ -133,13 +132,13 @@ import {
   Search,
   Wallet,
   ChevronRight,
-  Sparkles,
   CreditCard,
   Play,
   Pause,
   Loader2,
   Database,
-  Check
+  Check,
+  Edit3
 } from "lucide-react";
 
 import { getSpeechForText, MINIMAX_DEFAULT_VOICES } from "../utils/minimaxTts";
@@ -206,13 +205,13 @@ const SettingsSwitch = ({
     aria-checked={checked}
     aria-label={label}
     onClick={() => onChange(!checked)}
-    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${
-      checked ? "bg-[var(--segmented-active-bg)]" : "bg-[var(--surface-muted)] border border-[var(--border-strong)]"
+    className={`relative inline-flex h-6 w-[42px] shrink-0 items-center rounded-full border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${
+      checked ? "bg-neutral-950" : "bg-[#E5E5EA]"
     }`}
   >
     <span
-      className={`absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-[var(--surface)] shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-transform duration-200 ${
-        checked ? "translate-x-5" : "translate-x-0"
+      className={`absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-transform duration-200 ${
+        checked ? "translate-x-[18px]" : "translate-x-0"
       }`}
     />
   </button>
@@ -1303,7 +1302,15 @@ export default function AppChat({
 
   const [momentsFilterCharId, setMomentsFilterCharId] = useState<string | null>(null);
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
-  const [isShowingAdvancedSettings, setIsShowingAdvancedSettings] = useState(false);
+  const [advancedSettingsSection, setAdvancedSettingsSection] = useState<"memory" | "voiceImage" | "appearance" | null>(null);
+  const isShowingAdvancedSettings = advancedSettingsSection !== null;
+  const advancedSettingsTitle = advancedSettingsSection === "memory"
+    ? "记忆设置"
+    : advancedSettingsSection === "voiceImage"
+      ? "语音图片"
+      : advancedSettingsSection === "appearance"
+        ? "美化样式"
+        : "设置";
   const [singleCharacterMomentsId, setSingleCharacterMomentsId] = useState<string | null>(null);
   const [isShowingAddFriendDialog, setIsShowingAddFriendDialog] = useState(false);
   const [innerVoiceRecord, setInnerVoiceRecord] = useState<InnerVoiceRecord | null>(null);
@@ -1856,6 +1863,7 @@ export default function AppChat({
 
   // Settings draft states
   const [draftRemark, setDraftRemark] = useState("");
+  const [isEditingRemark, setIsEditingRemark] = useState(false);
   const [draftAvatar, setDraftAvatar] = useState<string | undefined>(undefined);
   const [isDeleteMemberMode, setIsDeleteMemberMode] = useState(false);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
@@ -4473,7 +4481,8 @@ ${stickerListStr}
         });
       }
 
-      setIsShowingAdvancedSettings(false);
+      setIsEditingRemark(false);
+      setAdvancedSettingsSection(null);
       setIsShowingCardModal(false);
     }
   };
@@ -5459,6 +5468,15 @@ ${instructionsPrompt}`;
 
             {/* Beginner manual style adjustments */}
             <style>{`
+              /* Settings remark input: keep a rectangular control even when a
+                 character's custom CSS applies circular input styles globally. */
+              #conv-screen .cv-remark-input {
+                height: 32px !important;
+                min-height: 32px !important;
+                border-radius: 12px !important;
+                box-shadow: none !important;
+              }
+
               #conv-screen .chat-bubble-self,
               #conv-screen .chat-bubble-other {
                 position: relative !important;
@@ -5915,7 +5933,7 @@ ${instructionsPrompt}`;
                 onClick={() => {
                   setActiveChatCharId(null);
                   setIsShowingCardModal(false);
-                  setIsShowingAdvancedSettings(false);
+                  setAdvancedSettingsSection(null);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button"
               >
@@ -5954,6 +5972,7 @@ ${instructionsPrompt}`;
               <button
                 onClick={() => {
                   setDraftRemark(activeCharacter.isGroupChat ? activeCharacter.name : (activeCharacter.remark || ""));
+                  setIsEditingRemark(false);
                   setDraftAvatar(activeCharacter.avatar);
                   setIsDeleteMemberMode(false);
                   setDraftIsPinned(activeCharacter.isPinned || false);
@@ -5983,7 +6002,7 @@ ${instructionsPrompt}`;
                   setDraftImageNegativePrompt(activeCharacter.imageNegativePrompt || "");
                   setDraftImageReferenceAssetId(activeCharacter.imageReferenceAssetId);
                   setDraftImageReferenceMimeType(activeCharacter.imageReferenceMimeType);
-                  setIsShowingAdvancedSettings(false);
+                  setAdvancedSettingsSection(null);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button"
@@ -6003,7 +6022,7 @@ ${instructionsPrompt}`;
               <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
                 <button
                   onClick={() => {
-                    if (isShowingAdvancedSettings) setIsShowingAdvancedSettings(false);
+                    if (isShowingAdvancedSettings) setAdvancedSettingsSection(null);
                     else setIsShowingCardModal(false);
                   }}
                   className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
@@ -6011,7 +6030,7 @@ ${instructionsPrompt}`;
                   <ChevronLeft className="w-4 h-4 text-slate-700" />
                 </button>
                 <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">
-                  {isShowingAdvancedSettings ? "扩展设置" : "设置"}
+                  {advancedSettingsTitle}
                 </h2>
                 <button
                   type="button"
@@ -6025,17 +6044,17 @@ ${instructionsPrompt}`;
               </div>
 
               {/* Body */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {!isShowingAdvancedSettings && (
-                  <>
-                 {/* Character Profile Summary & Remark Settings */}
-                <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm flex items-center gap-4">
+              <div className="flex-1 overflow-y-auto p-4 pb-[34px] space-y-3">
+                 {!isShowingAdvancedSettings && (
+                    <>
+                  {/* Character Profile Summary & Remark Settings */}
+                <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden flex items-center gap-3">
                   <div className="relative shrink-0">
                     <RenderAvatar
                       src={draftAvatar || (activeCharacter.isGroupChat ? "👥" : activeCharacter.avatar)}
                       alt={activeCharacter.name}
                       name={activeCharacter.name}
-                      className="w-16 h-16 rounded-2xl border border-slate-100 object-cover shrink-0 flex items-center justify-center text-3xl shadow-inner bg-slate-100 select-none"
+                      className="w-12 h-12 rounded-[16px] border border-slate-100 object-cover shrink-0 flex items-center justify-center text-3xl shadow-[0_2px_8px_rgba(0,0,0,0.08)] bg-slate-100 select-none"
                     />
                     {activeCharacter.isGroupChat && (
                       <label className="absolute -bottom-1 -right-1 bg-neutral-950 text-white rounded-full p-1 border-2 border-white cursor-pointer shadow-sm hover:bg-neutral-900 transition-colors">
@@ -6059,25 +6078,44 @@ ${instructionsPrompt}`;
                       </label>
                     )}
                   </div>
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <div className="text-base font-bold text-slate-800 truncate">
-                      {activeCharacter.isGroupChat ? "群聊名称设置" : activeCharacter.name}
-                    </div>
-                    <div>
-                      <input
-                        type="text"
-                        value={draftRemark}
-                        onChange={(e) => setDraftRemark(e.target.value)}
-                        placeholder={activeCharacter.isGroupChat ? "输入新群名..." : "设置备注昵称..."}
-                        className="w-full bg-slate-50 px-3 py-1.5 rounded-[8px] border border-slate-200 focus:outline-none text-xs text-slate-600 placeholder-slate-400 font-semibold"
-                      />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {isEditingRemark ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          value={draftRemark}
+                          onChange={(e) => setDraftRemark(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === "Escape") setIsEditingRemark(false);
+                          }}
+                          placeholder={activeCharacter.isGroupChat ? "输入新群名..." : "设置备注昵称..."}
+                          className="cv-remark-input h-8 min-w-0 flex-1 bg-[#F7F7F9] px-3 !rounded-[12px] border border-transparent shadow-none focus:outline-none text-sm text-slate-600 placeholder-slate-400 font-normal"
+                        />
+                      ) : (
+                        <span className="text-base font-medium text-slate-800 truncate">
+                          {activeCharacter.isGroupChat
+                            ? (draftRemark.trim() || activeCharacter.name)
+                            : activeCharacter.name}
+                          {!activeCharacter.isGroupChat && draftRemark.trim() && `（${draftRemark.trim()}）`}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingRemark((editing) => !editing)}
+                        aria-label={isEditingRemark ? "完成备注编辑" : "编辑备注昵称"}
+                        title={isEditingRemark ? "完成备注编辑" : "编辑备注昵称"}
+                        className="shrink-0 p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 </div>
 
                 {/* Group Members List for Group Chats */}
                 {activeCharacter.isGroupChat && (
-                  <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                  <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3">
                     <div className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2">
                       群聊成员 ({1 + (activeCharacter.memberIds?.length || 0)} 人)
                     </div>
@@ -6163,48 +6201,86 @@ ${instructionsPrompt}`;
                   </div>
                 )}
 
+                {/* Chat Background customizer */}
+                <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-xs">
+                  <span className="text-slate-800 font-medium block text-[15px]">背景壁纸</span>
+                  {draftChatBg ? (
+                    <div className="relative group rounded-[12px] overflow-hidden border border-slate-200 bg-slate-50 h-12 flex items-center justify-center">
+                      <img src={draftChatBg} className="absolute inset-0 w-full h-full object-cover opacity-60" />
+                      <div className="relative z-10 flex gap-2">
+                        <label className="cursor-pointer bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-[16px] text-[10px] font-bold transition-colors shadow-sm border border-slate-200">
+                          更换背景
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleDraftChatBgUpload}
+                            className="hidden"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setDraftChatBg(undefined)}
+                          className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-[16px] text-[10px] font-bold transition-colors shadow-sm"
+                        >
+                          移除
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="cursor-pointer flex h-12 flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-[#F7F7F9] hover:bg-slate-100/50 px-3 rounded-[12px] text-sm text-[#8E8E93] transition-colors group">
+                      <span className="font-medium group-hover:text-slate-700">点击上传背景图片</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleDraftChatBgUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                </div>
+
+                <div className="px-1 pt-1 text-[14px] font-medium text-[#999]">偏好设置</div>
+
                 {/* Chat behaviour */}
-                <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
+                <div className="bg-white py-0 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden text-xs">
                   {/* Settings toggles */}
-                  <div className="pt-1">
+                  <div className="divide-y divide-slate-100">
                     {/* Pin Chat */}
-                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                      <span className="text-[#52525b] font-bold text-xs">置顶聊天</span>
+                    <div className="flex h-[52px] px-4 items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-slate-800 font-medium text-[16px] block">置顶聊天</span>
+                      </div>
                       <SettingsSwitch checked={draftIsPinned} onChange={setDraftIsPinned} label="置顶聊天" />
                     </div>
 
                     {/* Disable Bracket Actions */}
-                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                      <div className="space-y-0.5">
-                        <span className="text-[#52525b] font-bold text-xs">过滤括号动描</span>
-                        <span className="text-[10px] text-slate-400 block">线上聊天仅保留语言交流，过滤括号动作描写。</span>
+                    <div className="flex h-[52px] px-4 items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-slate-800 font-medium text-[16px] block">过滤括号动作描写</span>
                       </div>
-                      <SettingsSwitch checked={draftDisableBracketActions} onChange={setDraftDisableBracketActions} label="过滤括号动描" />
+                      <SettingsSwitch checked={draftDisableBracketActions} onChange={setDraftDisableBracketActions} label="过滤括号动作描写" />
                     </div>
 
                     {/* Time Awareness */}
-                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                      <div className="space-y-0.5">
-                        <span className="text-[#52525b] font-bold text-xs">时间感知功能</span>
-                        <span className="text-[10px] text-slate-400 block">角色会结合当前日期与时间回应。</span>
+                    <div className="flex h-[52px] px-4 items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-slate-800 font-medium text-[16px] block">时间感知功能</span>
                       </div>
                       <SettingsSwitch checked={draftEnableTimeAwareness} onChange={setDraftEnableTimeAwareness} label="时间感知" />
                     </div>
 
                     {/* Auto Translate Toggle */}
-                    <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                      <div className="space-y-0.5">
-                        <span className="text-[#52525b] font-bold text-xs">全部自动翻译</span>
-                        <span className="text-[10px] text-slate-400 block">自动把对方的非中文发言翻译为中文。</span>
+                    <div className="flex h-[52px] px-4 items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-slate-800 font-medium text-[16px] block">全部自动翻译</span>
                       </div>
                       <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
 
-                    <div className="py-3 border-b border-slate-100">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5 pr-3">
-                          <span className="text-[#52525b] font-bold text-xs block">主动联络</span>
-                          <span className="text-[10px] text-slate-400 block">允许对方在设定时段内主动发来消息。</span>
+                    <div className="min-h-[52px] py-0 px-4">
+                      <div className="flex min-h-[52px] items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-slate-800 font-medium text-[16px] block">主动联络</span>
                         </div>
                         <SettingsSwitch checked={draftEnableProactiveChat} onChange={setDraftEnableProactiveChat} label="主动联络" />
                       </div>
@@ -6227,60 +6303,28 @@ ${instructionsPrompt}`;
                       )}
                     </div>
 
-                    <div className="flex items-center justify-between py-3">
-                      <div className="space-y-0.5 pr-3">
-                        <span className="text-[#52525b] font-bold text-xs block">主动来电</span>
-                        <span className="text-[10px] text-slate-400 block">允许对方有机会主动发起语音通话。</span>
+                    <div className="flex h-[52px] px-4 items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-slate-800 font-medium text-[16px] block">主动来电</span>
                       </div>
                       <SettingsSwitch checked={draftEnableProactiveCall} onChange={setDraftEnableProactiveCall} label="主动来电" />
                     </div>
                   </div>
                 </div>
 
-                    {/* Chat Background customizer */}
-                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
-                      <span className="text-[#52525b] font-bold block text-xs">专属背景壁纸</span>
-                      {draftChatBg ? (
-                        <div className="relative group rounded-[16px] overflow-hidden border border-slate-200 bg-slate-50 h-24 flex items-center justify-center">
-                          <img src={draftChatBg} className="absolute inset-0 w-full h-full object-cover opacity-60" />
-                          <div className="relative z-10 flex gap-2">
-                            <label className="cursor-pointer bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-[16px] text-[10px] font-bold transition-colors shadow-sm border border-slate-200">
-                              更换背景
-                              <input
-                                type="file"
-                                accept="image/*"
-                                onChange={handleDraftChatBgUpload}
-                                className="hidden"
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => setDraftChatBg(undefined)}
-                              className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-[16px] text-[10px] font-bold transition-colors shadow-sm"
-                            >
-                              移除
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <label className="cursor-pointer flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100/50 p-4 rounded-[16px] text-xs transition-colors group">
-                          <span className="text-slate-500 font-medium group-hover:text-slate-700">点击上传专属背景图片</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleDraftChatBgUpload}
-                            className="hidden"
-                          />
-                        </label>
-                      )}
-                    </div>
                   </>
                 )}
 
+                 {!isShowingAdvancedSettings && (
+                   <div className="px-1 pt-1 text-[14px] font-medium text-[#999]">更多设置</div>
+                 )}
+
                  {isShowingAdvancedSettings ? (
-                   <div className="bg-white p-3 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                   <>
+                     {advancedSettingsSection === "memory" && (
+                       <>
                      {/* Three-Layer Memory Optimization System Panel */}
-                      <div className="bg-[var(--surface)] p-5 rounded-[20px] border border-[var(--border)] shadow-sm space-y-4 text-xs">
+                        <div className="space-y-3 text-xs">
                       <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
                         <span className="text-slate-800 font-bold text-sm">记忆配置</span>
                       </div>
@@ -6440,10 +6484,13 @@ ${instructionsPrompt}`;
                           )}
                         </button>
                       </div>
-                    </div>
+                     </div>
+                       </>
+                     )}
 
-                    {/* MiniMax Character-specific Voice Settings */}
-                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
+                     {/* MiniMax Character-specific Voice Settings */}
+                      {advancedSettingsSection === "voiceImage" && (
+                     <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-xs">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-800 font-bold text-sm">语音设置</span>
                       </div>
@@ -6481,14 +6528,14 @@ ${instructionsPrompt}`;
                             <span>正常 (1.0)</span>
                             <span>极快 (2.0)</span>
                           </div>
-                        </div>
-
                       </div>
                     </div>
+                    </div>
+                    )}
 
-                    {/* Character Specific CSS Customizer */}
-                    {!activeCharacter.isGroupChat && (
-                      <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
+                     {/* Character Specific CSS Customizer */}
+                      {advancedSettingsSection === "voiceImage" && !activeCharacter.isGroupChat && (
+                       <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-xs">
                         <div className="flex items-center justify-between"><div><span className="text-slate-800 font-bold text-sm block">图片生成设置</span><span className="text-[10px] text-slate-400">外貌资料属于角色本身，所有身份共用；聊天与记录仍按关系隔离。</span></div><SettingsSwitch checked={draftEnableImageGeneration} onChange={setDraftEnableImageGeneration} label="角色图片生成" /></div>
                         <textarea rows={4} value={draftImageAppearancePrompt} onChange={(event) => setDraftImageAppearancePrompt(event.target.value)} placeholder="外貌、服饰、气质、镜头偏好…" className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs leading-relaxed outline-none" />
                         <textarea rows={2} value={draftImageNegativePrompt} onChange={(event) => setDraftImageNegativePrompt(event.target.value)} placeholder="负面提示词，例如：不要水印、不要文字、不要变脸…" className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs leading-relaxed outline-none" />
@@ -6496,9 +6543,11 @@ ${instructionsPrompt}`;
                       </div>
                     )}
 
-                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-800 font-bold text-sm">个性化样式</span>
+                     {advancedSettingsSection === "appearance" && (
+                     <>
+                      <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-xs">
+                       <div className="flex items-center justify-between">
+                         <span className="text-slate-800 font-bold text-sm">个性化样式</span>
                         <span className="text-[9px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded-full">覆盖全局设置</span>
                       </div>
                       <textarea
@@ -6541,62 +6590,76 @@ ${instructionsPrompt}`;
   background: url('发送回复按钮图片URL') center/contain no-repeat !important;
 }
 `}
-                        className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono leading-relaxed h-48"
+                        className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-mono leading-relaxed h-48"
                       />
                     </div>
 
-                    <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3 text-xs">
+                     <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-xs">
                       <div className="flex items-center justify-between"><span className="text-slate-800 font-bold text-sm">聊天图标覆盖</span><span className="text-[9px] text-slate-400">留空继承全局或默认图标</span></div>
                       <div className="grid grid-cols-2 gap-2">
                         {CHAT_ICON_FIELDS.map(({ key, label }) => <label key={key} className="space-y-1"><span className="block text-[10px] text-slate-500 font-medium">{label}图标</span><input value={draftChatIcons[key] || ""} onChange={(e) => updateDraftChatIcon(key, e.target.value)} placeholder="图片 URL" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" /></label>)}
                       </div>
-                    </div>
-
-                   </div>
-                 ) : (
-                   <button
-                     type="button"
-                     onClick={() => setIsShowingAdvancedSettings(true)}
-                     className="w-full bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
-                     aria-label="打开扩展设置"
-                   >
-                     <div className="min-w-0">
-                       <span className="text-slate-800 font-bold text-sm block">记忆、语音与外观设置</span>
-                       <span className="text-[10px] text-slate-400 block mt-1">记忆配置、语音、图片、个性化样式和聊天图标</span>
                      </div>
-                     <ChevronRight className="w-5 h-5 text-slate-300 shrink-0 ml-3" />
-                   </button>
-                 )}
+                     </>
+                     )}
+
+                   </>
+                  ) : (
+                    <div className="bg-white rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] divide-y divide-slate-100 overflow-hidden">
+                      {[
+                        { key: "memory", label: "记忆设置" },
+                        { key: "voiceImage", label: "语音图片" },
+                        { key: "appearance", label: "美化样式" },
+                      ].map(({ key, label }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setAdvancedSettingsSection(key as "memory" | "voiceImage" | "appearance")}
+                          className="w-full h-[52px] px-4 flex items-center gap-3 text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
+                          aria-label={`打开${label}`}
+                        >
+                          <span className="text-slate-800 font-medium text-[15px] flex-1">{label}</span>
+                          <ChevronRight className="w-5 h-5 text-[#C7C7CC] shrink-0 ml-3" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                  {!isShowingAdvancedSettings && (
-                   <>
-                   {/* Destructive actions */}
+                    <div className="space-y-3 pt-3">
+                    <div className="px-1 text-[14px] font-medium text-[#999]">危险操作</div>
+                    {/* Destructive actions */}
+                    <div className="bg-white rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] divide-y divide-slate-100 overflow-hidden">
                    <button
                     type="button"
                     onClick={() => setShowClearHistoryModal(true)}
-                    className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
+                     className="w-full h-[52px] px-4 flex items-center justify-between text-[16px] font-medium text-[#FF3B30] transition-colors hover:bg-red-50 active:bg-red-100"
                   >
-                    清空对话记录
+                     <span>清空对话记录</span>
+                     <ChevronRight className="w-5 h-5 text-[#C7C7CC]" />
                   </button>
 
                   {!activeCharacter.isGroupChat ? (
                     <button
                       type="button"
                       onClick={handleDeleteFriend}
-                      className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
+                       className="w-full h-[52px] px-4 flex items-center justify-between text-[16px] font-medium text-[#FF3B30] transition-colors hover:bg-red-50 active:bg-red-100"
                     >
-                      删除好友
+                       <span>删除好友</span>
+                       <ChevronRight className="w-5 h-5 text-[#C7C7CC]" />
                     </button>
                   ) : (
                     <button
                       type="button"
                       onClick={() => setShowDisbandGroupModal(true)}
-                      className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
+                        className="w-full h-[52px] px-4 flex items-center justify-between text-[16px] font-medium text-[#FF3B30] transition-colors hover:bg-red-50 active:bg-red-100"
                     >
-                      解除群聊
+                       <span>解除群聊</span>
+                       <ChevronRight className="w-5 h-5 text-[#C7C7CC]" />
                     </button>
                    )}
-                   </>
+                    </div>
+                    </div>
                  )}
               </div>
 
