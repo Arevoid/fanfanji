@@ -68,6 +68,21 @@
   border-color: var(--border);
 }
 
+/* Moment likes/comments are a WeChat-style shelf, not a light card in dark mode. */
+[data-theme-page="moments"] .moments-reaction-divider {
+  border-bottom: 1px solid var(--divider);
+}
+
+:root[data-theme="dark"] [data-theme-page="moments"] .moments-reaction-shelf {
+  background-color: var(--surface-raised) !important;
+  color: var(--text-primary);
+}
+
+:root[data-theme="dark"] [data-theme-page="moments"] .moments-reaction-divider,
+:root[data-theme="dark"] [data-theme-page="moments"] .moments-comment-item:not(:first-child) {
+  border-color: var(--divider) !important;
+}
+
 :root[data-theme="dark"] [data-theme-page="offline"] {
   --offline-page-bg: var(--app-bg);
   --offline-card-bg: var(--surface);

@@ -8862,10 +8862,10 @@ ${instructionsPrompt}`;
 
                           {/* Integrated Like & Comment Block (WeChat style) */}
                           {(mom.likes.length > 0 || getMomentComments(mom).length > 0) && (
-                            <div className="bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
+                            <div className="moments-reaction-shelf bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
                               {/* Likes list */}
                               {mom.likes.length > 0 && (
-                                <div className="flex items-center gap-1.5 text-[#576b95] font-bold flex-wrap pb-1 border-b border-slate-200/40">
+                                <div className="moments-reaction-divider flex items-center gap-1.5 text-[#576b95] font-bold flex-wrap pb-1">
                                   <Heart className="w-3 h-3 text-rose-500 fill-current shrink-0" />
                                   <span className="leading-tight">{mom.likes.join(", ")}</span>
                                 </div>
@@ -9773,10 +9773,10 @@ ${instructionsPrompt}`;
 
                           {/* WeChat-style integrated Like & Comment Shelf */}
                           {(mom.likes.length > 0 || getMomentComments(mom).length > 0) && (
-                            <div className="bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
+                            <div className="moments-reaction-shelf bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
                               {/* Likes shelf details */}
                               {mom.likes.length > 0 && (
-                                <div className="flex items-center gap-1.5 text-[#576b95] font-bold flex-wrap pb-1 border-b border-slate-200/40">
+                                <div className="moments-reaction-divider flex items-center gap-1.5 text-[#576b95] font-bold flex-wrap pb-1">
                                   <Heart className="w-3 h-3 text-rose-500 fill-current shrink-0" />
                                   <span className="leading-tight">{mom.likes.join(", ")}</span>
                                 </div>

@@ -1025,7 +1025,7 @@ export default function AppSettings({
       case "api":
         return "API 设置";
       case "image_api":
-        return "图片 API 设置";
+        return "图片设置";
       case "appearance":
         return "外观设置";
       case "beauty":
@@ -1035,7 +1035,7 @@ export default function AppSettings({
       case "system":
         return "系统备份";
       case "minimax":
-        return "MiniMax 语音设置";
+        return "语音设置";
       default:
         return "设置";
     }
@@ -1071,13 +1071,9 @@ export default function AppSettings({
       <div className="flex-1 flex overflow-hidden">
         {activeTab === null ? (
           /* Settings Main Entrance Menu (QQ Style) */
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[var(--app-bg)]">
+          <div className="flex-1 overflow-y-auto p-4 pb-[34px] space-y-3 bg-[#F7F7F9]">
             {/* QQ Style User Profile Card */}
-            <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm flex flex-col gap-4 relative overflow-hidden">
-              {/* Background decorative soft blur gradients */}
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50/40 rounded-full blur-2xl pointer-events-none" />
-              <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-purple-50/30 rounded-full blur-2xl pointer-events-none" />
-              
+            <div className="bg-white rounded-[16px] p-4 border border-[#F0F0F0] shadow-[0_2px_12px_rgba(0,0,0,0.06)] flex flex-col gap-3 relative overflow-hidden">
               <div className="flex items-start justify-between relative z-10">
                 <div className="flex gap-4">
                   {/* Avatar with modify overlay */}
@@ -1085,7 +1081,7 @@ export default function AppSettings({
                     <img
                       src={avatar}
                       alt={name}
-                      className="w-16 h-16 rounded-full border border-slate-200/80 object-cover shadow-sm bg-slate-50"
+                      className="w-12 h-12 rounded-full border border-slate-200/80 object-cover shadow-sm bg-slate-50"
                       referrerPolicy="no-referrer"
                     />
                     <label className="absolute -bottom-1 -right-1 bg-neutral-950 text-white rounded-full p-1 border-2 border-white cursor-pointer shadow-sm hover:bg-neutral-900 transition-colors">
@@ -1099,22 +1095,22 @@ export default function AppSettings({
                     </label>
                   </div>
 
-                  <div className="flex flex-col justify-center min-h-[64px]">
-                    <span className="text-base font-extrabold text-slate-800 tracking-tight">{name}</span>
+                  <div className="flex flex-col justify-center min-h-[48px]">
+                    <span className="text-base font-medium text-slate-800 tracking-tight">{name}</span>
                   </div>
                 </div>
 
                 {/* Edit button */}
                 <button
                   onClick={() => setActiveTab("profile")}
-                  className="text-[10.5px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors px-3 py-1.5 rounded-full shadow-sm"
+                  className="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors px-3 py-1.5 rounded-[8px]"
                 >
                   编辑资料
                 </button>
               </div>
 
               {/* Signature */}
-              <div className="space-y-1.5 pt-2 border-t border-slate-100/60 relative z-10 text-left">
+              <div className="space-y-1.5 pt-2 border-t border-slate-100 relative z-10 text-left">
                 <div className="text-xs text-slate-700 flex items-start gap-1">
                   <span className="text-slate-400 font-medium shrink-0">签名:</span>
                   <span className="italic text-slate-600 font-medium line-clamp-1">{signature || "暂无签名"}</span>
@@ -1122,99 +1118,86 @@ export default function AppSettings({
               </div>
             </div>
 
+            <div className="px-1 text-[14px] leading-5 text-[#999]">更多设置</div>
+
             {/* Navigation Entry List */}
-            <div className="bg-white rounded-[24px] border border-slate-100 shadow-sm overflow-hidden divide-y divide-slate-100/60">
-              {/* 2. API Settings */}
+            <div className="bg-white rounded-[16px] border border-[#F0F0F0] shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden divide-y divide-[#F0F0F0]">
+              {/* API Settings */}
               <button
                 onClick={() => setActiveTab("api")}
-                className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
+                className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
                     <Key className="w-5 h-5" />
                   </div>
-                  <div>
-                    <span className="text-sm font-bold text-slate-800">API 设置</span>
-                    <p className="text-[10px] text-slate-400 mt-0.5">配置大模型端点、API Key与模型选择</p>
-                  </div>
+                  <span className="text-base font-medium text-slate-800">API 设置</span>
                 </div>
-                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
+                <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
 
-              <button onClick={() => setActiveTab("image_api")} className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group">
-                <div className="flex items-center gap-3.5"><div className="w-6 h-6 flex items-center justify-center text-slate-800"><Image className="w-5 h-5" /></div><div><span className="text-sm font-bold text-slate-800">图片 API 设置</span><p className="text-[10px] text-slate-400 mt-0.5">管理图片生成服务与模型</p></div></div><ChevronRight className="w-5 h-5 text-slate-300" />
+              <button onClick={() => setActiveTab("image_api")} className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left">
+                <div className="flex items-center gap-3"><div className="w-5 h-5 flex items-center justify-center text-slate-800"><Image className="w-5 h-5" /></div><span className="text-base font-medium text-slate-800">图片设置</span></div><ChevronRight className="w-4 h-4 text-[#C7C7CC]" />
               </button>
 
-              {/* 3. Aesthetics Settings */}
+              {/* Voice Settings */}
+              <button
+                onClick={() => setActiveTab("minimax")}
+                className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
+                    <Volume2 className="w-5 h-5" />
+                  </div>
+                  <span className="text-base font-medium text-slate-800">语音设置</span>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
+              </button>
+
+              {/* Aesthetics Settings */}
               <button
                 onClick={() => setActiveTab("beauty")}
-                className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
+                className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
                     <Palette className="w-5 h-5" />
                   </div>
-                  <div>
-                    <span className="text-sm font-bold text-slate-800">美化设置</span>
-                    <p className="text-[10px] text-slate-400 mt-0.5">更换壁纸、上传自定义系统应用图标、注入CSS</p>
-                  </div>
+                  <span className="text-base font-medium text-slate-800">美化设置</span>
                 </div>
-                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
+                <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
 
               {/* 4. System Config */}
               <button
                 onClick={() => setActiveTab("system_config")}
-                className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
+                className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
                     <Sliders className="w-5 h-5" />
                   </div>
-                  <div>
-                    <span className="text-sm font-bold text-slate-800">系统设置</span>
-                    <p className="text-[10px] text-slate-400 mt-0.5">控制一键回到桌面悬浮按钮的开启状态</p>
-                  </div>
+                  <span className="text-base font-medium text-slate-800">系统设置</span>
                 </div>
-                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
+                <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
 
-              {/* MiniMax Settings */}
-              <button
-                onClick={() => setActiveTab("minimax")}
-                className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
-              >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
-                    <Volume2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <span className="text-sm font-bold text-slate-800">MiniMax 语音设置</span>
-                    <p className="text-[10px] text-slate-400 mt-0.5">配置 MiniMax TTS API、语音开关及试听音色</p>
-                  </div>
-                </div>
-                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
-              </button>
-
-              {/* 5. System Backup */}
+              {/* System Backup */}
               <button
                 onClick={() => setActiveTab("system")}
-                className="w-full flex items-center justify-between p-4 hover:bg-slate-50/85 transition-all text-left group"
+                className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
                     <RefreshCw className="w-5 h-5" />
                   </div>
-                  <div>
-                    <span className="text-sm font-bold text-slate-800">系统备份</span>
-                    <p className="text-[10px] text-slate-400 mt-0.5">本地数据打包导出，对话备份及恢复</p>
-                  </div>
+                  <span className="text-base font-medium text-slate-800">系统备份</span>
                 </div>
-                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-slate-400 transition-colors shrink-0" />
+                <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
             </div>
             
-            <div className="text-center pt-8">
+            <div className="text-center pt-3">
               <span className="text-[10px] font-mono text-slate-400">交流群：1060472750</span>
             </div>
           </div>
