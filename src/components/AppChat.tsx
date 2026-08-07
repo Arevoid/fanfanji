@@ -6277,8 +6277,8 @@ ${instructionsPrompt}`;
                       <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
 
-                    <div className="min-h-[52px] py-0 px-4">
-                      <div className="flex min-h-[52px] items-center justify-between gap-3">
+                    <div className={`${draftEnableProactiveChat ? "min-h-[52px]" : "h-[52px]"} px-4`}>
+                      <div className="flex h-[52px] items-center justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <span className="text-slate-800 font-medium text-[16px] block">主动联络</span>
                         </div>
