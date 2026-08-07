@@ -1303,6 +1303,7 @@ export default function AppChat({
 
   const [momentsFilterCharId, setMomentsFilterCharId] = useState<string | null>(null);
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
+  const [isShowingAdvancedSettings, setIsShowingAdvancedSettings] = useState(false);
   const [singleCharacterMomentsId, setSingleCharacterMomentsId] = useState<string | null>(null);
   const [isShowingAddFriendDialog, setIsShowingAddFriendDialog] = useState(false);
   const [innerVoiceRecord, setInnerVoiceRecord] = useState<InnerVoiceRecord | null>(null);
@@ -4472,6 +4473,7 @@ ${stickerListStr}
         });
       }
 
+      setIsShowingAdvancedSettings(false);
       setIsShowingCardModal(false);
     }
   };
@@ -5913,6 +5915,7 @@ ${instructionsPrompt}`;
                 onClick={() => {
                   setActiveChatCharId(null);
                   setIsShowingCardModal(false);
+                  setIsShowingAdvancedSettings(false);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button"
               >
@@ -5980,6 +5983,7 @@ ${instructionsPrompt}`;
                   setDraftImageNegativePrompt(activeCharacter.imageNegativePrompt || "");
                   setDraftImageReferenceAssetId(activeCharacter.imageReferenceAssetId);
                   setDraftImageReferenceMimeType(activeCharacter.imageReferenceMimeType);
+                  setIsShowingAdvancedSettings(false);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button"
@@ -5998,12 +6002,17 @@ ${instructionsPrompt}`;
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
                 <button
-                  onClick={() => setIsShowingCardModal(false)}
+                  onClick={() => {
+                    if (isShowingAdvancedSettings) setIsShowingAdvancedSettings(false);
+                    else setIsShowingCardModal(false);
+                  }}
                   className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
                 >
                   <ChevronLeft className="w-4 h-4 text-slate-700" />
                 </button>
-                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">设置</h2>
+                <h2 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">
+                  {isShowingAdvancedSettings ? "扩展设置" : "设置"}
+                </h2>
                 <button
                   type="button"
                   onClick={handleSaveSettings}
@@ -6017,6 +6026,8 @@ ${instructionsPrompt}`;
 
               {/* Body */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {!isShowingAdvancedSettings && (
+                  <>
                  {/* Character Profile Summary & Remark Settings */}
                 <div className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm flex items-center gap-4">
                   <div className="relative shrink-0">
@@ -6263,9 +6274,13 @@ ${instructionsPrompt}`;
                         </label>
                       )}
                     </div>
+                  </>
+                )}
 
+                 {isShowingAdvancedSettings ? (
+                   <div className="bg-white p-3 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
                      {/* Three-Layer Memory Optimization System Panel */}
-                      <div className="bg-[var(--surface)] p-5 rounded-[24px] border border-[var(--border)] shadow-sm space-y-4 text-xs">
+                      <div className="bg-[var(--surface)] p-5 rounded-[20px] border border-[var(--border)] shadow-sm space-y-4 text-xs">
                       <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
                         <span className="text-slate-800 font-bold text-sm">记忆配置</span>
                       </div>
@@ -6537,8 +6552,26 @@ ${instructionsPrompt}`;
                       </div>
                     </div>
 
-                  {/* Destructive actions */}
-                  <button
+                   </div>
+                 ) : (
+                   <button
+                     type="button"
+                     onClick={() => setIsShowingAdvancedSettings(true)}
+                     className="w-full bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
+                     aria-label="打开扩展设置"
+                   >
+                     <div className="min-w-0">
+                       <span className="text-slate-800 font-bold text-sm block">记忆、语音与外观设置</span>
+                       <span className="text-[10px] text-slate-400 block mt-1">记忆配置、语音、图片、个性化样式和聊天图标</span>
+                     </div>
+                     <ChevronRight className="w-5 h-5 text-slate-300 shrink-0 ml-3" />
+                   </button>
+                 )}
+
+                 {!isShowingAdvancedSettings && (
+                   <>
+                   {/* Destructive actions */}
+                   <button
                     type="button"
                     onClick={() => setShowClearHistoryModal(true)}
                     className="w-full rounded-[20px] border border-slate-100 bg-white py-4 text-sm font-bold text-red-500 shadow-sm transition-colors hover:bg-red-50 active:bg-red-100"
@@ -6562,7 +6595,9 @@ ${instructionsPrompt}`;
                     >
                       解除群聊
                     </button>
-                  )}
+                   )}
+                   </>
+                 )}
               </div>
 
               {/* Clear History Choice Modal Overlay */}
