@@ -6303,7 +6303,7 @@ ${instructionsPrompt}`;
                       )}
                     </div>
 
-                    <div className="flex h-[52px] px-4 items-center justify-between gap-3">
+                    <div className={`flex h-[52px] px-4 items-center justify-between gap-3 ${draftEnableProactiveChat ? "" : "border-t border-slate-100"}`}>
                       <div className="min-w-0 flex-1">
                         <span className="text-slate-800 font-medium text-[16px] block">主动来电</span>
                       </div>
