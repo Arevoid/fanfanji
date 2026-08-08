@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
-  ArrowLeft, Plus, Trash2, Send, Sparkles, BookOpen, 
+  ArrowLeft, Plus, Trash2, Pencil, Send, Sparkles, BookOpen,
   Link2, Calendar, MessageSquare, ChevronRight, HelpCircle, 
   Settings, RefreshCw, Layers, Cpu, MoreHorizontal
 } from "lucide-react";
@@ -27,7 +27,7 @@ import { countOfflineStoriesForRelation } from "../domain/relationship/offlineSt
 import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
 import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/offlineStoryEventCaptureService";
 import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../domain/prompt/offlineIdentityBinding";
-import { ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
+import { ConfirmDialog, IconButton, PopoverMenu } from "./ui";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -135,6 +135,9 @@ export default function AppOffline({
   
   // Creation modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingStory, setEditingStory] = useState<OfflineStory | null>(null);
+  const [editingStoryTitle, setEditingStoryTitle] = useState("");
+  const [editingStoryIfPrompt, setEditingStoryIfPrompt] = useState("");
   const [selectedCharIds, setSelectedCharIds] = useState<string[]>([]);
   const [newTitle, setNewTitle] = useState("");
 
@@ -257,7 +260,6 @@ export default function AppOffline({
   const [settingsStylePresetId, setSettingsStylePresetId] = useState("none");
   const [settingsStylePromptName, setSettingsStylePromptName] = useState("");
   const [settingsStylePromptContent, setSettingsStylePromptContent] = useState("");
-  const [settingsShowAvatars, setSettingsShowAvatars] = useState(true);
   const [settingsCustomCss, setSettingsCustomCss] = useState("");
 
   const [newPresetName, setNewPresetName] = useState("");
@@ -272,7 +274,6 @@ export default function AppOffline({
       setSettingsStylePresetId(activeStory.stylePresetId || "none");
       setSettingsStylePromptName(activeStory.stylePromptName || "");
       setSettingsStylePromptContent(activeStory.stylePromptContent || "");
-      setSettingsShowAvatars(activeStory.showAvatars !== false); // default to true
       setSettingsCustomCss(activeStory.customCss || "");
     }
   }, [activeStory, isSettingsOpen]);
@@ -291,7 +292,6 @@ export default function AppOffline({
       stylePresetId: settingsStylePresetId,
       stylePromptName: settingsStylePromptName,
       stylePromptContent: settingsStylePromptContent,
-      showAvatars: settingsShowAvatars,
       customCss: settingsCustomCss,
       updatedAt: Date.now()
     };
@@ -414,7 +414,7 @@ export default function AppOffline({
       localStorage.setItem(getOfflineStoryStorageKey(story.relationId), story.id);
     }
     if (story.mode === "director" || story.mode === "if") {
-      showToast("当前模式不会在结束时自动同步记忆；如需让线上角色记住，请在剧本设置中手动同步。");
+      showToast("当前剧情不会自动同步仅记忆，请手动同步");
     }
   };
 
@@ -602,6 +602,32 @@ export default function AppOffline({
     }
   };
 
+  const handleStartEditStory = (story: OfflineStory, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingStory(story);
+    setEditingStoryTitle(story.title);
+    setEditingStoryIfPrompt(story.ifPrompt || "");
+  };
+
+  const handleSaveStoryEdit = () => {
+    if (!editingStory) return;
+    const title = editingStoryTitle.trim();
+    if (!title) {
+      showToast("故事名称不能为空");
+      return;
+    }
+    const updatedStory: OfflineStory = {
+      ...editingStory,
+      title,
+      ...(editingStory.mode === "if" ? { ifPrompt: editingStoryIfPrompt.trim() || undefined } : {}),
+      updatedAt: Date.now(),
+    };
+    if (activeStoryRef.current?.id === updatedStory.id) saveActiveStorySnapshot(updatedStory);
+    else onSaveOfflineStory(updatedStory);
+    setEditingStory(null);
+    showToast("剧本已更新");
+  };
+
   // Sync memory manually
   const handleSyncMemoryToBrain = async (
     story: OfflineStory,
@@ -628,7 +654,7 @@ export default function AppOffline({
       sourceMessages,
     };
     if (!canSyncOfflineStoryToMemory(offlineStoryPolicyInput)) {
-      showToast("当前剧情暂时无法同步：需要单角色关系、有效用户剧情，并由续写结束自动确认或在设置中手动确认。");
+      showToast("当前剧情不会自动同步仅记忆，请手动同步");
       return story;
     }
 
@@ -1094,7 +1120,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-indigo-600/90 backdrop-blur-md text-white text-xs px-4 py-2 rounded-full shadow-lg border border-indigo-400 font-bold"
+            className="absolute top-16 left-1/2 -translate-x-1/2 z-50 max-w-[calc(100%-32px)] whitespace-nowrap rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-700 shadow-md"
           >
             {toast}
           </motion.div>
@@ -1276,13 +1302,22 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                         </div>
 
                         <div className="flex flex-col items-end justify-between h-full space-y-4">
-                          <button
-                            onClick={(e) => handleDeleteStory(story.id, e)}
-                            className="w-7 h-7 rounded-lg bg-slate-150/70 hover:bg-red-50 text-slate-500 hover:text-red-600 flex items-center justify-center transition-all opacity-100 border border-slate-200"
-                            title="删除"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={(e) => handleStartEditStory(story, e)}
+                              className="w-7 h-7 rounded-lg bg-slate-150/70 hover:bg-slate-100 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-all border border-slate-200"
+                              title="编辑剧本"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => handleDeleteStory(story.id, e)}
+                              className="w-7 h-7 rounded-lg bg-slate-150/70 hover:bg-red-50 text-slate-500 hover:text-red-600 flex items-center justify-center transition-all opacity-100 border border-slate-200"
+                              title="删除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                           <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
                         </div>
                       </div>
@@ -1492,20 +1527,6 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     </div>
                   </div>
 
-                  {/* Show Avatars Toggle */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm flex items-center justify-between text-left">
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 block">是否显示双方头像</span>
-                      <span className="text-[10px] text-slate-400">开启后会在剧本左右侧显示头像与名称标识</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settingsShowAvatars}
-                      onChange={(e) => setSettingsShowAvatars(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white cursor-pointer"
-                    />
-                  </div>
-
                   {/* Custom CSS */}
                   <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
                     <div className="flex items-center justify-between">
@@ -1654,7 +1675,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     message={msg}
                     character={charToUse}
                     settings={settings}
-                    showAvatars={activeStory.showAvatars !== false}
+                    showAvatars
                     menuOpen={activeNodeMenuId === msg.id}
                     onMenuToggle={() => setActiveNodeMenuId((current) => current === msg.id ? null : msg.id)}
                     onEdit={() => { setActiveNodeMenuId(null); handleStartEdit(msg.id, msg.content); }}
@@ -1670,13 +1691,13 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
 
             <div className="offline-composer-wrap">
               <form onSubmit={(event) => { event.preventDefault(); handleSendMessage(undefined, !inputText.trim()); }} className="offline-composer">
-                <Input
+                <input
                   type="text"
                   value={inputText}
                   onChange={(event) => setInputText(event.target.value)}
                   placeholder={activeStory.mode === "director" ? "继续写下去，或留下这一幕的方向…" : "继续写下去…"}
-                  className="offline-composer-input"
-                  inputClassName="offline-composer-input-field"
+                  className="offline-composer-input-field"
+                  disabled={isGenerating}
                 />
                 <IconButton type="submit" disabled={isGenerating} aria-label="发送并继续剧情" icon={<Send size={17} />} className="offline-composer-submit" />
               </form>
@@ -1732,6 +1753,52 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
           setPendingDeleteMessageId(null);
         }}
       />
+
+      <AnimatePresence>
+        {editingStory && (
+          <div
+            className="app-viewport-overlay fixed inset-x-0 top-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            onClick={() => setEditingStory(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="settings-panel-card w-full max-w-sm space-y-4 p-5 text-slate-800"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h3 className="text-sm font-bold text-slate-800">编辑剧本</h3>
+                <button type="button" onClick={() => setEditingStory(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600">取消</button>
+              </div>
+              <label className="block space-y-1">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">故事名称</span>
+                <input
+                  autoFocus
+                  value={editingStoryTitle}
+                  onChange={(event) => setEditingStoryTitle(event.target.value)}
+                  className="w-full rounded-[8px] border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500"
+                />
+              </label>
+              {editingStory.mode === "if" && (
+                <label className="block space-y-1">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-amber-600">IF 线设定</span>
+                  <textarea
+                    value={editingStoryIfPrompt}
+                    onChange={(event) => setEditingStoryIfPrompt(event.target.value)}
+                    rows={4}
+                    placeholder="填写或修改这条 IF 线的设定…"
+                    className="w-full resize-none rounded-[8px] border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500"
+                  />
+                </label>
+              )}
+              <div className="settings-wide-action-group">
+                <button type="button" onClick={handleSaveStoryEdit} className="settings-wide-action settings-wide-action-primary">保存修改</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>

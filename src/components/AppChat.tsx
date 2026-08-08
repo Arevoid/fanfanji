@@ -2656,15 +2656,7 @@ export default function AppChat({
   const isOfflineModeActive = false;
   const isInputNarration = false;
   const activeOfflineStoryId = null;
-  const [offlineStoryDraftMessage, setOfflineStoryDraftMessage] = useState<Message | null>(null);
-  const [offlineStoryTitleDraft, setOfflineStoryTitleDraft] = useState("");
-
-  const getDefaultOfflineStoryTitle = () => {
-    const charName = activeCharacter?.remark || activeCharacter?.name || "角色";
-    return `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`;
-  };
-
-  const handleStartOfflineFromMsg = (msg: Message, requestedTitle?: string) => {
+  const handleStartOfflineFromMsg = (msg: Message) => {
     if (!activeChatCharId || !activeCharacter) return;
     
     const charName = activeCharacter.remark || activeCharacter.name;
@@ -2708,7 +2700,7 @@ export default function AppChat({
       conversationId: activeRelationship?.conversationId,
       // A group is only a container; the actual offline actors are its members.
       characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
-      title: requestedTitle?.trim() || `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
+      title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: "continue",
@@ -11450,8 +11442,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
             <button
               onClick={() => {
-                setOfflineStoryDraftMessage(activeMenuMsg);
-                setOfflineStoryTitleDraft(getDefaultOfflineStoryTitle());
+                handleStartOfflineFromMsg(activeMenuMsg);
                 setActiveMenuMsg(null);
               }}
               className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
@@ -11501,36 +11492,6 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
               </button>
             )}
           </motion.div>
-        </div>
-      )}
-
-      {offlineStoryDraftMessage && (
-        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/45 p-5" onClick={() => setOfflineStoryDraftMessage(null)}>
-          <div className="w-full max-w-sm rounded-2xl border border-slate-100 bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <h2 className="text-base font-bold text-slate-900">转为线下故事</h2>
-            <p className="mt-1 text-xs leading-5 text-slate-500">可在进入线下模式前修改这段故事的名称。</p>
-            <label className="mt-4 block text-xs font-medium text-slate-700" htmlFor="offline-story-title-draft">故事名称</label>
-            <input
-              id="offline-story-title-draft"
-              autoFocus
-              value={offlineStoryTitleDraft}
-              onChange={(event) => setOfflineStoryTitleDraft(event.target.value)}
-              className="mt-2 h-11 w-full rounded-[8px] border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none focus:border-slate-500"
-            />
-            <div className="mt-5 flex gap-2">
-              <button type="button" onClick={() => setOfflineStoryDraftMessage(null)} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-sm font-semibold text-slate-600">取消</button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleStartOfflineFromMsg(offlineStoryDraftMessage, offlineStoryTitleDraft);
-                  setOfflineStoryDraftMessage(null);
-                }}
-                className="flex-1 rounded-xl bg-neutral-950 py-2.5 text-sm font-semibold text-white"
-              >
-                开启线下故事
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
