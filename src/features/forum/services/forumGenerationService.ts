@@ -3,6 +3,7 @@ import type {
   ForumPublicAuthor,
   ForumReply,
   ForumThread,
+  ForumCommunityNpc,
   ForumVirtualProfile,
   MemoryItem,
   Message,
@@ -24,6 +25,10 @@ import {
   createForumVirtualAuthor,
   getForumVirtualProfile,
 } from "../../../domain/forum/forumVirtualProfiles";
+import {
+  toForumCommunityNpcAuthor,
+  toForumCommunityNpcProfile,
+} from "../forumCommunityNpcData";
 import {
   forumThreadFingerprint,
   isForumThreadDuplicate,
@@ -105,7 +110,8 @@ interface ForumAiRequest {
 
 type ForumReplyAuthor =
   | { kind: "relation"; context: ForumRelationContext }
-  | { kind: "virtual"; profile: ForumVirtualProfile };
+  | { kind: "virtual"; profile: ForumVirtualProfile }
+  | { kind: "community-npc"; npc: ForumCommunityNpc; profile: ForumVirtualProfile; publicAuthor: ForumPublicAuthor };
 
 const defaultAiCall: ForumAiCall = (params) => apiChat({ ...params, history: [] });
 
@@ -247,6 +253,8 @@ const relationAuthor = (
 export const selectForumReplyAuthors = (input: {
   count: number;
   relationContexts: readonly ForumRelationContext[];
+  communityNpcs?: readonly ForumCommunityNpc[];
+  allowRelationshipAuthors?: boolean;
   random: () => number;
   seed: string;
 }): ForumReplyAuthor[] => {
@@ -256,7 +264,18 @@ export const selectForumReplyAuthors = (input: {
     kind: "virtual" as const,
     profile: getForumVirtualProfile(input.seed, index),
   }));
-  const includeFriend = input.relationContexts.length > 0
+  const enabledCommunityNpcs = (input.communityNpcs || []).filter((npc) => npc.enabled);
+  if (enabledCommunityNpcs.length > 0 && input.random() < 0.2) {
+    const authorIndex = Math.min(count - 1, Math.floor(input.random() * count));
+    const npc = enabledCommunityNpcs[Math.floor(input.random() * enabledCommunityNpcs.length)];
+    authors[authorIndex] = {
+      kind: "community-npc",
+      npc,
+      profile: toForumCommunityNpcProfile(npc),
+      publicAuthor: toForumCommunityNpcAuthor(npc),
+    };
+  }
+  const includeFriend = input.allowRelationshipAuthors !== false && input.relationContexts.length > 0
     && input.random() < FORUM_RELATION_REPLY_PROBABILITY;
   if (includeFriend) {
     const contextIndex = Math.min(
@@ -275,6 +294,7 @@ export const selectForumReplyAuthors = (input: {
 const buildThreadPrompt = (input: {
   relationContext?: ForumRelationContext;
   virtualProfile: ForumVirtualProfile;
+  communityNpc?: ForumCommunityNpc;
 }): { systemInstruction: string; message: string } => ({
   systemInstruction: `你只负责提出一个虚拟本地论坛帖候选，不执行任何写操作。
 ${FORUM_PUBLIC_TEXT_RULES}
@@ -300,6 +320,7 @@ const isThreadCandidatePublicSafe = (input: {
   candidate: ForumGeneratedThreadCandidate;
   relationContext?: ForumRelationContext;
   virtualProfile: ForumVirtualProfile;
+  communityNpc?: ForumCommunityNpc;
   protectedNames: readonly string[];
 }): ForumGeneratedThreadCandidate | undefined => {
   const anonymous = Boolean(input.relationContext && input.candidate.anonymous);
@@ -310,7 +331,7 @@ const isThreadCandidatePublicSafe = (input: {
       ]
     : input.relationContext
       ? []
-      : [input.virtualProfile.displayName];
+      : [input.communityNpc?.displayName || input.virtualProfile.displayName];
   const violation = findForumPrivateNameViolation({
     text: `${input.candidate.title}\n${input.candidate.body}`,
     protectedNames: input.protectedNames,
@@ -357,6 +378,7 @@ const createGeneratedThread = (input: {
   ownerIdentityId: string;
   relationContext?: ForumRelationContext;
   virtualProfile: ForumVirtualProfile;
+  communityNpc?: ForumCommunityNpc;
   candidate: ForumGeneratedThreadCandidate;
   occurredAt: number;
   now: number;
@@ -365,7 +387,9 @@ const createGeneratedThread = (input: {
   const anonymous = Boolean(character && input.candidate.anonymous);
   const publicAuthor = input.relationContext
     ? relationAuthor(input.relationContext, anonymous)
-    : createForumVirtualAuthor(input.virtualProfile);
+    : input.communityNpc
+      ? toForumCommunityNpcAuthor(input.communityNpc)
+      : createForumVirtualAuthor(input.virtualProfile);
   const threadId = id("forum-ai-thread");
   const thread: ForumThread = {
     id: threadId,
@@ -447,6 +471,8 @@ export async function generateForumThreads(input: {
   settings: UserSettings;
   now: number;
   random?: () => number;
+  /** Forum-only virtual identities. They are never real Characters or Relationships. */
+  communityNpcs?: readonly ForumCommunityNpc[];
   aiCall?: ForumAiCall;
   preferredRelationId?: string;
   /** Explicitly classified public candidates only; omitted records remain denied. */
@@ -502,11 +528,17 @@ export async function generateForumThreads(input: {
     const relationContext = chosenKind === "relationship"
       ? relationCandidates[index % relationCandidates.length]
       : undefined;
-    const virtualProfile = getForumVirtualProfile(
+    const enabledCommunityNpcs = (input.communityNpcs || []).filter((npc) => npc.enabled);
+    const communityNpc = !relationContext && enabledCommunityNpcs.length > 0 && random() < 0.2
+      ? enabledCommunityNpcs[Math.min(enabledCommunityNpcs.length - 1, Math.floor(random() * enabledCommunityNpcs.length))]
+      : undefined;
+    const virtualProfile = communityNpc
+      ? toForumCommunityNpcProfile(communityNpc)
+      : getForumVirtualProfile(
       `${input.ownerIdentityId}:${input.trigger}:${input.now}`,
       index,
     );
-    const prompt = buildThreadPrompt({ relationContext, virtualProfile });
+    const prompt = buildThreadPrompt({ relationContext, virtualProfile, communityNpc });
     const rawCandidate = await generateValidatedCandidate({
       aiCall,
       request: toAiRequest(input.settings, prompt),
@@ -515,6 +547,7 @@ export async function generateForumThreads(input: {
         candidate: value,
         relationContext,
         virtualProfile,
+        communityNpc,
         protectedNames,
       }),
     });
@@ -522,12 +555,13 @@ export async function generateForumThreads(input: {
     const candidate = relationContext
       ? { ...rawCandidate, anonymous: random() < DEFAULT_FORUM_POST_AUTHOR_POLICY.anonymousRelationshipProbability }
       : rawCandidate;
-    if (!isThreadCandidatePublicSafe({ candidate, relationContext, virtualProfile, protectedNames })) continue;
+    if (!isThreadCandidatePublicSafe({ candidate, relationContext, virtualProfile, communityNpc, protectedNames })) continue;
     const occurredAt = Math.min(input.now, input.now - (planned - index - 1) * 61_000);
     const generated = createGeneratedThread({
       ownerIdentityId: input.ownerIdentityId,
       relationContext,
       virtualProfile,
+      communityNpc,
       candidate,
       occurredAt,
       now: input.now,
@@ -595,6 +629,8 @@ const validateReplyCandidate = (input: {
         ]
     : input.author.kind === "virtual"
       ? [input.author.profile.displayName]
+      : input.author.kind === "community-npc"
+        ? [input.author.npc.displayName]
       : input.author.publicAuthor.isAnonymous
         ? []
         : [input.author.publicAuthor.displayName];
@@ -644,7 +680,9 @@ const createGeneratedReply = (input: {
     kind: "reply",
     publicAuthor: input.author.kind === "relation"
       ? relationAuthor(input.author.context, anonymous)
-      : createForumVirtualAuthor(input.author.profile),
+      : input.author.kind === "community-npc"
+        ? toForumCommunityNpcAuthor(input.author.npc)
+        : createForumVirtualAuthor(input.author.profile),
     body: input.candidate.body,
     ...quoteTargetFields(targetResult.target),
     source: input.author.kind === "relation"
@@ -698,6 +736,7 @@ export async function generateInitialRepliesForUserThread(input: {
   now: number;
   maxReplies?: number;
   random?: () => number;
+  communityNpcs?: readonly ForumCommunityNpc[];
   aiCall?: ForumAiCall;
   /** Explicit public candidates only; absence is denied by the public context policy. */
   publicEventCandidates?: readonly PublicCharacterEventCandidate[];
@@ -728,10 +767,12 @@ export async function generateInitialRepliesForUserThread(input: {
         currentTime: { now: input.now },
       }),
     }));
-  const replyCount = Math.max(1, Math.min(3, input.maxReplies ?? 2));
+  const replyCount = Math.max(1, Math.min(8, input.maxReplies ?? 8));
   const authors = selectForumReplyAuthors({
     count: replyCount,
     relationContexts,
+    communityNpcs: input.communityNpcs,
+    allowRelationshipAuthors: input.thread.source !== "user-anonymous",
     random,
     seed: `${input.thread.id}:initial`,
   });

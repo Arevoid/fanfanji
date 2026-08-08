@@ -1,7 +1,7 @@
 import type { Character, ForumActivityTask, ForumReply, ForumThread, MemoryItem, Message, UserSettings, WorldBookEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { commitForumMutation, getForumSnapshotForIdentity } from "../../../core/storage/repositories/forumRepository";
-import { planForumActivity, releaseForumPendingEvents, shouldAttemptAutomaticForumActivity } from "./forumActivityService";
+import { buildForumActivityActorSlots, planForumActivity, releaseForumPendingEvents, shouldAttemptAutomaticForumActivity } from "./forumActivityService";
 import { applyForumStoryUpdate, canScheduleStoryContinuation } from "../../../domain/forum/forumStoryArc";
 import { getForumThreadActivityAt } from "../../../domain/forum/forumData";
 
@@ -104,13 +104,29 @@ export const scheduleInitialForumReplies = async (context: ForumActivityRuntimeC
   const thread = snapshot.threads.find((item) => item.id === threadId);
   if (!thread || thread.ownerIdentityId !== context.ownerIdentityId) return [];
   if (snapshot.activityTasks.some((task) => task.threadId === threadId && task.trigger === "initial-replies")) return [];
-  const events = await planForumActivity({
+  let events = await planForumActivity({
     trigger: "initial-replies", ownerIdentityId: context.ownerIdentityId, thread,
     replies: snapshot.replies, actorStates: snapshot.actorStates, relationships: context.relationships,
     characters: context.characters, messages: context.messages, memories: context.memories,
     worldBookEntries: context.worldBookEntries, settings: context.settings, now, random: context.random,
   });
-  if (!events.length) return [];
+  // A user-created thread always deserves at least one visible forum response.
+  // This is a safe local fallback only when the model returns no valid event.
+  if (!events.length) {
+    const slot = buildForumActivityActorSlots({
+      trigger: "initial-replies", ownerIdentityId: context.ownerIdentityId, thread,
+      replies: snapshot.replies, relationships: context.relationships, characters: context.characters,
+      messages: context.messages, memories: context.memories, worldBookEntries: context.worldBookEntries,
+      settings: context.settings, random: context.random,
+    }).find((candidate) => candidate.actor.kind === "virtual");
+    if (!slot) return [];
+    events = [{
+      id: id("forum-pending-event"), ownerIdentityId: context.ownerIdentityId, threadId,
+      batchId: id("forum-activity-batch"), localId: "fallback-initial", actorSlotSnapshot: slot,
+      privateActor: slot.actor, kind: "reply", body: "先蹲一下，想听楼主后续。",
+      replyTarget: { type: "thread" }, scheduledAt: now, status: "pending", createdAt: now, updatedAt: now,
+    }];
+  }
   const first = events[0];
   const task: ForumActivityTask = {
     id: id("forum-activity-task"), ownerIdentityId: context.ownerIdentityId, threadId,
@@ -136,6 +152,9 @@ export const scheduleForumUserInteraction = async (
   const snapshot = getForumSnapshotForIdentity(context.ownerIdentityId);
   const thread = snapshot.threads.find((item) => item.id === threadId && item.ownerIdentityId === context.ownerIdentityId);
   if (!thread || !Number.isInteger(replyFloor) || replyFloor < 2) return [];
+  // A real forum does not answer every single floor. Keep a high but non-total
+  // response rate so the author still feels noticed without producing bot-like noise.
+  if ((context.random || Math.random)() >= 0.9) return [];
   const recentInteraction = snapshot.activityTasks.some((task) => task.threadId === threadId
     && task.trigger === "user-interaction"
     && task.startedAt >= now - 45_000);

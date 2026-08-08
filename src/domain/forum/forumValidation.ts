@@ -169,7 +169,9 @@ export const parseForumGeneratedEventBatch = (text: string): ForumGeneratedEvent
   if (!Array.isArray(events)) throw new Error("结构解析失败：缺少 events。");
   const localIds = new Set<string>();
   const valid: ForumGeneratedEventCandidate[] = [];
-  for (const item of events.slice(0, 4)) {
+  // User posts and direct user replies may intentionally start a richer
+  // discussion batch.  A hard cap still prevents pathological API output.
+  for (const item of events.slice(0, 10)) {
     if (!item || typeof item !== "object") continue;
     const event = item as Record<string, unknown>;
     const localId = cleanText(event.localId, 48);

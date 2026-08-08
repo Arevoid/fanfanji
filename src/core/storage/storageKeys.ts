@@ -13,6 +13,7 @@ export const storageKeys = {
   forumActorStates: "phone_forum_actor_states",
   forumActivityTasks: "phone_forum_activity_tasks",
   forumProfiles: "phone_forum_profiles",
+  forumCommunityNpcs: "phone_forum_community_npcs",
   forumVisitHistory: "phone_forum_visit_history",
   forumLikeHistory: "phone_forum_like_history",
   forumNotifications: "phone_forum_notifications",

@@ -11,8 +11,8 @@ export interface ForumPostAuthorPolicy {
 }
 
 export const DEFAULT_FORUM_POST_AUTHOR_POLICY: ForumPostAuthorPolicy = {
-  npcWeight: 70,
-  relationshipWeight: 30,
+  npcWeight: 90,
+  relationshipWeight: 10,
   anonymousRelationshipProbability: 0.6,
   recentWindowSize: 10,
   maxRelationshipPostsInWindow: 3,

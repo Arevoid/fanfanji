@@ -19,9 +19,9 @@ import {
 } from "lucide-react";
 import type {
   Character,
-  ForumActivityTask,
   ForumRootTab,
   ForumDmConversation as ForumDmConversationType,
+  ForumCommunityNpc,
   ForumGenerationTask,
   ForumReply,
   ForumThread,
@@ -69,7 +69,6 @@ import { getForumTranslationTargetLanguage, translateForumContent } from "../fea
 import { forceForumThreadActivity, scheduleForumUserInteraction, scheduleInitialForumReplies } from "../features/forum/services/forumActivityRuntime";
 import { BottomSheet, Button, ConfirmDialog, PopoverMenu } from "./ui";
 import { ForumAvatar } from "../features/forum/components/ForumAvatar";
-import { getForumVirtualProfile } from "../domain/forum/forumVirtualProfiles";
 import { ForumThreadCard } from "../features/forum/components/ForumThreadCard";
 import { ForumSnapshotDetail } from "../features/forum/components/ForumSnapshotDetail";
 import { appendForumShareOnce, listForumShareTargets } from "../domain/forum/forumShare";
@@ -80,7 +79,6 @@ import {
   finishForumGenerationTask,
   getThreadRefreshCooldownRemaining,
   hasEvaluatedLikeEngagement,
-  hasRecentSuccessfulLazyTask,
   removeForumGenerationTasksByThread,
   releaseForumGenerationTask,
 } from "../domain/forum/forumGenerationGuard";
@@ -96,6 +94,12 @@ import {
 import { appendForumNotification, createForumNotification, createForumProfile, recordForumVisit, resolveForumPublicAuthor, toPublicThreadSnapshot, updateForumLikeHistory } from "../domain/forum/forumProfileData";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { compressImage } from "../utils/stickerDb";
+import { createForumCommunityNpc } from "../features/forum/forumCommunityNpcData";
+import {
+  listForumCommunityNpcsForIdentity,
+  removeForumCommunityNpc,
+  upsertForumCommunityNpc,
+} from "../core/storage/repositories/forumCommunityNpcRepository";
 import { ForumDmList } from "../features/forum/components/ForumDmList";
 import { ForumDmConversation } from "../features/forum/components/ForumDmConversation";
 import { appendForumDmMessage, deleteForumDmConversation, markForumDmRead, openForumDmConversation, resolveForumDmActorFromPublicRecord } from "../domain/forum/forumDmData";
@@ -220,12 +224,16 @@ export default function AppForum({
   const [visibleReplyCount, setVisibleReplyCount] = useState(FORUM_REPLY_PAGE_SIZE);
   const [translatedContentIds, setTranslatedContentIds] = useState<Record<string, boolean>>({});
   const [translationLoadingIds, setTranslationLoadingIds] = useState<Record<string, boolean>>({});
+  const [communityNpcRevision, setCommunityNpcRevision] = useState(0);
+  const [showCommunityNpcComposer, setShowCommunityNpcComposer] = useState(false);
+  const [communityNpcName, setCommunityNpcName] = useState("");
+  const [communityNpcAvatar, setCommunityNpcAvatar] = useState("");
+  const [communityNpcPersona, setCommunityNpcPersona] = useState("");
   const replyLockRef = useRef(false);
   const postLockRef = useRef(false);
   const shareLockRef = useRef(false);
   const refreshLockRef = useRef(false);
   const threadRefreshLockRef = useRef(false);
-  const lazyAttemptedIdentityRef = useRef<string | null>(null);
   const homeMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
   const newestReplyRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -255,6 +263,10 @@ export default function AppForum({
     [relationships, characters, activeIdentity.id],
   );
   const selectedShareTarget = shareTargets.find((target) => target.relationship.id === selectedShareRelationId);
+  const communityNpcs = useMemo(
+    () => listForumCommunityNpcsForIdentity(activeIdentity.id),
+    [activeIdentity.id, communityNpcRevision],
+  );
 
   useEffect(() => {
     const safe = loadForumDataSafely({
@@ -341,111 +353,6 @@ export default function AppForum({
     onOpenForumShareHandled?.();
   }, [openForumShareId, activeIdentity.id, identityThreads, onOpenForumShareHandled, shares]);
 
-  useEffect(() => {
-    if (lazyAttemptedIdentityRef.current === activeIdentity.id) return;
-    lazyAttemptedIdentityRef.current = activeIdentity.id;
-    const now = Date.now();
-    const validRelations = shareTargets.map((target) => target.relationship);
-    const currentTasks = loadForumGenerationTasks(
-      new Set(relationships.map((relationship) => relationship.id)),
-      now,
-    ).value;
-    if (currentTasks.some((task) =>
-      task.ownerIdentityId === activeIdentity.id && task.status === "running")) return;
-    const eligible = validRelations.find((relationship) =>
-      !hasRecentSuccessfulLazyTask(currentTasks, activeIdentity.id, relationship.id, now));
-    if (!eligible || !settings.apiKey?.trim() || !settings.selectedModel?.trim()) return;
-    const windowKey = new Date(now).toISOString().slice(0, 10);
-    const taskKey = buildForumGenerationTaskKey({
-      ownerIdentityId: activeIdentity.id,
-      relationId: eligible.id,
-      trigger: "lazy",
-      windowKey,
-    });
-    const begun = beginForumGenerationTask({
-      tasks: currentTasks,
-      id: createId("forum-generation-task"),
-      taskKey,
-      ownerIdentityId: activeIdentity.id,
-      relationId: eligible.id,
-      characterId: eligible.characterId,
-      trigger: "lazy",
-      now,
-    });
-    if (!begun.task || !commitForumMutation({ generationTasks: begun.tasks }).success) {
-      releaseForumGenerationTask(taskKey);
-      return;
-    }
-    void generateForumThreads({
-      ownerIdentityId: activeIdentity.id,
-      count: 1,
-      trigger: "lazy",
-      preferredRelationId: eligible.id,
-      relationships,
-      characters,
-      messages,
-      memories,
-      worldBookEntries,
-      existingThreads: loadForumThreads().value,
-      settings,
-      now,
-    }).then((generated) => {
-      if (generated.threads.length === 0) throw new Error("生成内容无效");
-      const currentThreads = loadForumThreads().value;
-      const nextThreads = [...generated.threads, ...currentThreads];
-      const refreshActivityTasks: ForumActivityTask[] = generated.threads.flatMap((thread) => {
-        const generatedReplies = generated.replies.filter((reply) => reply.threadId === thread.id);
-        if (!generatedReplies.length) return [];
-        return [{
-          id: createId("forum-refresh-activity"),
-          ownerIdentityId: activeIdentity.id,
-          threadId: thread.id,
-          trigger: "automatic" as const,
-          status: "succeeded" as const,
-          startedAt: now,
-          completedAt: now,
-          pendingEvents: generatedReplies.map((reply, index) => {
-            const profile = getForumVirtualProfile(thread.id, index);
-            return {
-              id: createId("forum-refresh-pending"), ownerIdentityId: activeIdentity.id, threadId: thread.id,
-              batchId: `refresh-${thread.id}`, localId: `e${index + 1}`,
-              actorSlotSnapshot: { slotId: `virtual-${index + 1}`, publicAuthor: reply.publicAuthor, actor: { kind: "virtual" as const, virtualProfileId: profile.id }, safePublicStyle: profile.publicStyle },
-              privateActor: { kind: "virtual" as const, virtualProfileId: profile.id }, kind: "reply" as const, body: reply.body,
-              replyTarget: { type: "thread" as const }, scheduledAt: now + index * 45_000, status: "pending" as const,
-              createdAt: now, updatedAt: now,
-            };
-          }),
-          createdAt: now,
-          updatedAt: now,
-        }];
-      });
-      if (!commitForumMutation({
-        threads: nextThreads,
-        activityTasks: [...loadForumActivityTasks().value, ...refreshActivityTasks],
-      }).success) throw new Error("storage");
-      const latestTasks = loadForumGenerationTasks(
-        new Set(relationships.map((relationship) => relationship.id)),
-      ).value;
-      const finished = finishForumGenerationTask(latestTasks, begun.task.id, "succeeded", Date.now());
-      commitForumMutation({ generationTasks: finished });
-    }).catch(() => {
-      const latestTasks = loadForumGenerationTasks(
-        new Set(relationships.map((relationship) => relationship.id)),
-      ).value;
-      const finished = finishForumGenerationTask(latestTasks, begun.task.id, "failed", Date.now());
-      commitForumMutation({ generationTasks: finished });
-    }).finally(() => releaseForumGenerationTask(taskKey));
-  }, [
-    activeIdentity.id,
-    characters,
-    memories,
-    messages,
-    relationships,
-    settings,
-    shareTargets,
-    worldBookEntries,
-  ]);
-
   const reportStorageError = () => setError("保存失败，请检查浏览器存储空间后重试。");
 
   const persistTasks = (nextTasks: ForumGenerationTask[]) => {
@@ -510,6 +417,7 @@ export default function AppForum({
         existingThreads: currentThreads,
         settings,
         now,
+        communityNpcs,
       });
       if (generated.threads.length === 0) {
         throw new Error("生成内容无效：没有可写入的新帖子。");
@@ -882,6 +790,38 @@ export default function AppForum({
     setShowComposer(false);
   };
 
+  const resetCommunityNpcComposer = () => {
+    setCommunityNpcName("");
+    setCommunityNpcAvatar("");
+    setCommunityNpcPersona("");
+    setShowCommunityNpcComposer(false);
+  };
+
+  const saveCommunityNpc = () => {
+    const displayName = communityNpcName.trim();
+    const personaSummary = communityNpcPersona.trim();
+    if (!displayName || !personaSummary) {
+      setError("请填写论坛 NPC 的名字和人设");
+      return;
+    }
+    const npc = createForumCommunityNpc({
+      id: createId("forum-community-npc"),
+      ownerIdentityId: activeIdentity.id,
+      displayName,
+      avatar: communityNpcAvatar.trim() || undefined,
+      personaSummary,
+      now: Date.now(),
+    });
+    upsertForumCommunityNpc(npc);
+    setCommunityNpcRevision((value) => value + 1);
+    resetCommunityNpcComposer();
+  };
+
+  const updateCommunityNpc = (npc: ForumCommunityNpc, patch: Partial<ForumCommunityNpc>) => {
+    upsertForumCommunityNpc({ ...npc, ...patch, updatedAt: Date.now() });
+    setCommunityNpcRevision((value) => value + 1);
+  };
+
   const handleCreateThread = () => {
     const title = postTitle.trim();
     const body = postBody.trim();
@@ -1186,6 +1126,20 @@ export default function AppForum({
               {profileAvatarUrl || activeProfile.avatar ? <img src={profileAvatarUrl || activeProfile.avatar} alt="" className="h-14 w-14 rounded-full object-cover" /> : <span className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100"><User className="h-6 w-6 text-slate-400" /></span>}
               <span className="min-w-0 flex-1"><strong className="block truncate text-base">{activeProfile.displayName}</strong><small className="mt-1 block truncate text-slate-400">{activeProfile.bio || "点击完善论坛资料"}</small></span><Pencil className="h-4 w-4 text-slate-400" />
             </button>
+          </section>
+          <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div><h2 className="text-sm font-bold text-slate-800">论坛 NPC</h2><p className="mt-0.5 text-[10px] text-slate-400">仅在论坛内作为虚拟网友活跃，不会关联聊天或角色资料</p></div>
+              <button type="button" onClick={() => setShowCommunityNpcComposer(true)} className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white" aria-label="创建论坛 NPC"><Plus className="h-4 w-4" /></button>
+            </div>
+            {communityNpcs.length === 0 ? <p className="px-4 py-5 text-xs text-slate-400">还没有创建论坛 NPC；系统仍会使用随机论坛网友。</p> : communityNpcs.map((npc) => (
+              <div key={npc.id} className="flex items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-0">
+                {npc.avatar ? <img src={npc.avatar} alt="" className="h-9 w-9 rounded-full object-cover" /> : <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100"><User className="h-4 w-4 text-slate-400" /></span>}
+                <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-700">{npc.displayName}</p><p className="mt-0.5 line-clamp-1 text-[10px] text-slate-400">{npc.personaSummary}</p></div>
+                <button type="button" onClick={() => updateCommunityNpc(npc, { enabled: !npc.enabled })} className={`text-[11px] font-medium ${npc.enabled ? "text-emerald-600" : "text-slate-400"}`}>{npc.enabled ? "活跃" : "停用"}</button>
+                <button type="button" onClick={() => { removeForumCommunityNpc(activeIdentity.id, npc.id); setCommunityNpcRevision((value) => value + 1); }} className="text-[11px] text-rose-400">删除</button>
+              </div>
+            ))}
           </section>
           <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
             {[{ key: "history", label: "浏览历史", icon: History }, { key: "likes", label: "我的点赞", icon: ThumbsUp }, { key: "notifications", label: "消息提醒", icon: Bell }].map(({ key, label, icon: Icon }) => <button key={key} type="button" onClick={() => setSecondaryPage(key as "history" | "likes" | "notifications")} className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-4 text-left last:border-0"><Icon className="h-4 w-4 text-slate-500" /><span className="flex-1 text-sm">{label}</span>{key === "notifications" && notifications.some((item) => !item.readAt) && <span className="h-2 w-2 rounded-full bg-rose-500" />}</button>)}
@@ -1588,6 +1542,21 @@ export default function AppForum({
               <span className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${postAnonymously ? "translate-x-5" : "translate-x-0"}`} />
             </button>
           </div>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        open={showCommunityNpcComposer}
+        title="创建论坛 NPC"
+        description="这是仅在论坛中使用的虚拟网友身份，不会写入角色、关系或聊天记忆。"
+        onClose={resetCommunityNpcComposer}
+        showCloseButton
+        footer={<><Button variant="secondary" onClick={resetCommunityNpcComposer}>取消</Button><Button onClick={saveCommunityNpc} disabled={!communityNpcName.trim() || !communityNpcPersona.trim()}>保存</Button></>}
+      >
+        <div className="space-y-4">
+          <label className="block text-xs font-semibold text-slate-600">名字<input value={communityNpcName} onChange={(event) => setCommunityNpcName(event.target.value)} maxLength={32} placeholder="例如：热心网友" className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none" /></label>
+          <label className="block text-xs font-semibold text-slate-600">头像 URL（可选）<input value={communityNpcAvatar} onChange={(event) => setCommunityNpcAvatar(event.target.value)} maxLength={1000} placeholder="https://..." className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none" /></label>
+          <label className="block text-xs font-semibold text-slate-600">简单人设<textarea value={communityNpcPersona} onChange={(event) => setCommunityNpcPersona(event.target.value)} maxLength={300} rows={4} placeholder="例如：爱帮新人答疑的夜猫子，开头常说“谢邀”" className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none" /></label>
         </div>
       </BottomSheet>
 

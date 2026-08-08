@@ -23,7 +23,11 @@ const AUTOMATIC_THREAD_SOURCES = new Set<ForumThread["source"]>([
   "virtual",
 ]);
 
-/** Stable baseline likes for generated public posts; user posts remain organic. */
+/**
+ * Stable display-only likes for generated public posts.  The number is a
+ * popularity signal, not a fabricated reply count; readable floors remain the
+ * canonical reply collection.
+ */
 export const getForumBaselineLikeCount = (
   threadId: string,
   source: ForumThread["source"],
@@ -34,7 +38,7 @@ export const getForumBaselineLikeCount = (
     hash ^= character.charCodeAt(0);
     hash = Math.imul(hash, 16777619);
   }
-  return 2 + (hash >>> 0) % 19;
+  return (hash >>> 0) % 10_000;
 };
 
 const getLatestLiveReplyAt = (

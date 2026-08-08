@@ -23,6 +23,8 @@ import { canScheduleStoryContinuation } from "../../../domain/forum/forumStoryAr
 import { parseForumGeneratedEventBatch, type ForumGeneratedEventBatch } from "../../../domain/forum/forumValidation";
 import { buildForumProtectedNames, findForumPrivateNameViolation, isForumGeneratedReplyRelevant, validateForumGeneratedText } from "../../../domain/forum/forumContentSafety";
 import { buildForumRelationGenerationContext } from "./forumGenerationService";
+import { listForumCommunityNpcsForIdentity } from "../../../core/storage/repositories/forumCommunityNpcRepository";
+import { toForumCommunityNpcAuthor, toForumCommunityNpcProfile } from "../forumCommunityNpcData";
 import { apiChat } from "../../../utils/apiHelper";
 import {
   buildPublicForumActivityPromptContext,
@@ -80,8 +82,9 @@ const publicThreadText = (thread: ForumThread, replies: readonly ForumReply[]): 
   return `标题：${thread.title}\n主楼：${thread.body}\n公开楼层：\n${visible || "暂无"}`;
 };
 
-export const buildForumActivityActorSlots = (input: Omit<ForumActivityPlanInput, "actorStates" | "now" | "random" | "aiCall">): ForumActivityActorSlot[] => {
-  const relationshipSlots = input.relationships
+export const buildForumActivityActorSlots = (input: Omit<ForumActivityPlanInput, "actorStates" | "now" | "aiCall">): ForumActivityActorSlot[] => {
+  const random = input.random || Math.random;
+  const relationshipSlots = (input.thread.source === "user-anonymous" || random() >= 0.1 ? [] : input.relationships)
     .filter((relation) => relation.userIdentityId === input.ownerIdentityId)
     .map((relationship) => buildForumRelationGenerationContext({
       ownerIdentityId: input.ownerIdentityId,
@@ -114,6 +117,20 @@ export const buildForumActivityActorSlots = (input: Omit<ForumActivityPlanInput,
       safePublicStyle: profile.publicStyle,
     };
   });
+  const enabledCommunityNpcs = listForumCommunityNpcsForIdentity(input.ownerIdentityId)
+    .filter((npc) => npc.enabled);
+  const communitySlots = enabledCommunityNpcs.length > 0 && random() < 0.2
+    ? (() => {
+      const npc = enabledCommunityNpcs[Math.floor(random() * enabledCommunityNpcs.length)];
+      const profile = toForumCommunityNpcProfile(npc);
+      return [{
+        slotId: `community-${npc.id}`,
+        publicAuthor: toForumCommunityNpcAuthor(npc),
+        actor: { kind: "virtual" as const, virtualProfileId: profile.id },
+        safePublicStyle: profile.publicStyle,
+      }];
+    })()
+    : [];
   const relationshipAuthor = input.thread.privateAuthorRelationId
     ? relationshipSlots.find((slot) => slot.actor.kind === "relationship" && slot.actor.relationId === input.thread.privateAuthorRelationId)
     : undefined;
@@ -131,7 +148,7 @@ export const buildForumActivityActorSlots = (input: Omit<ForumActivityPlanInput,
     actor: { kind: "virtual" as const, virtualProfileId: virtualAuthor.id },
     safePublicStyle: virtualAuthor.publicStyle,
   }] : [];
-  return [...relationshipSlots, ...relationAuthorSlot, ...authorSlot, ...virtualSlots];
+  return [...relationshipSlots, ...relationAuthorSlot, ...authorSlot, ...communitySlots, ...virtualSlots];
 };
 
 const actorIsThreadAuthor = (slot: ForumActivityActorSlot, thread: ForumThread): boolean =>
@@ -226,11 +243,17 @@ export const planForumActivity = async (input: ForumActivityPlanInput): Promise<
     return input.ignoreActorCooldown || !state?.cooldownUntil || state.cooldownUntil <= input.now;
   });
   if (!eligible.length) return [];
+  const random = input.random || Math.random;
   const storyContinuation = canScheduleStoryContinuation(input.thread, input.replies, input.now)
-    && (input.random || Math.random)() < (input.thread.storyArc?.continuationProbability || 0);
+    && random() < (input.thread.storyArc?.continuationProbability || 0);
+  const requestedEventCount = input.trigger === "initial-replies"
+    ? 1 + Math.floor(random() * 8)
+    : input.trigger === "user-interaction"
+      ? 5 + Math.floor(random() * 6)
+      : 1 + Math.floor(random() * 4);
   const publicCognitiveSupplements = buildPublicActivityPromptSupplements(input, eligible);
   const prompt = {
-    systemInstruction: `你只生成一批公开论坛活动候选，不执行任何写操作。严格输出 JSON：{"events":[{"localId":"e1","actorSlot":"slot","kind":"reply","body":"回复","replyTo":{"type":"thread"},"delaySeconds":30}]}。每批 1-4 条；actorSlot 只能来自白名单；不得输出任意 ID、私人聊天、Memory、关系、点赞、转发、删除、图片或动作描写。author-update 只可由真实 AI 楼主发出。${storyContinuation ? "当前是开放连载帖的合理后续窗口：第一条必须是楼主的 author-update，延续公开前文，不得改名或编造私密背景。" : ""}`,
+    systemInstruction: `你只生成一批公开论坛活动候选，不执行任何写操作。严格输出 JSON：{"events":[{"localId":"e1","actorSlot":"slot","kind":"reply","body":"回复","replyTo":{"type":"thread"},"delaySeconds":30}]}。本批必须生成 ${requestedEventCount} 条事件；actorSlot 只能来自白名单；可使用 thread、floor 或先前 batch 楼层形成自然的引用回复，但不得重复同一种观点或让同一作者连续刷楼。不得输出任意 ID、私人聊天、Memory、关系、点赞、转发、删除、图片或动作描写。author-update 只可由真实 AI 楼主发出。${storyContinuation ? "当前是开放连载帖的合理后续窗口：第一条必须是楼主的 author-update，延续公开前文，不得改名或编造私密背景。" : ""}`,
     message: `${publicThreadText(input.thread, input.replies)}\n可用 actorSlots：${eligible.map((slot) => `${slot.slotId}｜${slot.publicAuthor.displayName}｜${slot.safePublicStyle}`).join("\n")}${publicCognitiveSupplements.length > 0 ? `\n${publicCognitiveSupplements.join("\n\n")}` : ""}`,
   };
   const result = await (input.aiCall || defaultAiCall)({

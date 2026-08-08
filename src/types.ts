@@ -303,6 +303,22 @@ export interface ForumVirtualProfile {
   publicStyle: string;
 }
 
+/**
+ * A user-created, forum-only community identity.  It is intentionally not a
+ * Character and must never be linked to chat, relationships, or Memory.
+ */
+export interface ForumCommunityNpc {
+  id: string;
+  ownerIdentityId: string;
+  displayName: string;
+  avatar?: string;
+  personaSummary: string;
+  publicStyle: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** Internal forum actor identity. Never copy this into a public forum DTO. */
 export type ForumActorRef =
   | { kind: "relationship"; relationId: string; characterId: string }
