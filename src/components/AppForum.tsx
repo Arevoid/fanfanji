@@ -11,7 +11,6 @@ import {
   ThumbsUp,
   Trash2,
   User,
-  Bell,
   History,
   Pencil,
   X,
@@ -127,7 +126,7 @@ interface AppForumProps {
   openForumShareId?: string | null;
   onOpenForumShareHandled?: () => void;
   onSendMessage: (message: Message) => void;
-  onOpenChat: (characterId: string, relationId: string, sourceMessageId: string) => void;
+  onOpenChat: (characterId: string, relationId: string) => void;
   onClose: () => void;
 }
 
@@ -197,7 +196,7 @@ export default function AppForum({
   );
   const { threads, replies, shares, generationTasks, profiles, visitHistory, likeHistory, notifications } = forumSnapshot;
   const [rootTab, setRootTab] = useState<"home" | "mine">("home");
-  const [secondaryPage, setSecondaryPage] = useState<"history" | "likes" | "notifications" | "profile" | "community-npcs" | null>(null);
+  const [secondaryPage, setSecondaryPage] = useState<"history" | "likes" | "profile" | "community-npcs" | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [activeStoryId, setActiveStoryId] = useState<string | null>(null);
   const [readonlySnapshot, setReadonlySnapshot] = useState<ForumThreadPublicSnapshot | null>(null);
@@ -611,8 +610,18 @@ export default function AppForum({
       setForumStoryRevision((revision) => revision + 1);
       return;
     }
-    if (action === "delete") { setNotice("故事评论为不可变楼层记录，暂不支持删除。") }
-    else { setNotice("故事帖子使用原文展示，暂不需要翻译。") }
+    if (action === "delete" && reply) {
+      if (!window.confirm("删除这条评论？楼层会保留，内容将显示为“该回复已删除”。")) return;
+      if (!StoryForumReplyRepository.tombstoneReply(storyId, view.thread.id, reply.id).success) {
+        setError("故事评论删除失败，请重试");
+        return;
+      }
+      setForumStoryRevision((revision) => revision + 1);
+      if (replyingTo?.id === reply.id) setReplyingTo(undefined);
+      return;
+    }
+    if (action === "delete") return;
+    setNotice("故事帖子使用原文展示，暂不需要翻译。");
   };
 
   const generateInitialReplies = async (thread: ForumThread) => {
@@ -902,11 +911,7 @@ export default function AppForum({
     resetShareSheet();
     setIsSharing(false);
     shareLockRef.current = false;
-    onOpenChat(
-      selectedShareTarget.character.id,
-      selectedShareTarget.relationship.id,
-      operation.message.id,
-    );
+    onOpenChat(selectedShareTarget.character.id, selectedShareTarget.relationship.id);
   };
 
   const resetComposer = () => {
@@ -1222,7 +1227,7 @@ export default function AppForum({
           <ChevronLeft className="h-5 w-5" />
         </button>
         <h1 className="absolute left-1/2 -translate-x-1/2 text-[17px] font-bold">
-          {activeStoryId ? "帖子详情" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : secondaryPage === "community-npcs" ? "论坛 NPC" : rootTab === "mine" ? "我的" : "论坛"}
+          {activeStoryId ? "帖子详情" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "community-npcs" ? "NPC角色" : rootTab === "mine" ? "我的" : "论坛"}
         </h1>
         {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && rootTab === "home" ? (
           <button
@@ -1243,7 +1248,7 @@ export default function AppForum({
             type="button"
             onClick={() => setShowCommunityNpcMenu(true)}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-950 text-white active:scale-95"
-            aria-label="论坛 NPC 操作"
+            aria-label="NPC角色操作"
           >
             <Plus className="h-4 w-4" />
           </button>
@@ -1308,9 +1313,9 @@ export default function AppForum({
         onClose={() => setShowCommunityNpcMenu(false)}
         anchorRef={communityNpcMenuAnchorRef}
         placement="bottom-end"
-        ariaLabel="论坛 NPC 操作"
+        ariaLabel="NPC角色操作"
       >
-        <button type="button" role="menuitem" onClick={() => { setShowCommunityNpcMenu(false); setShowCommunityNpcComposer(true); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"><Plus className="h-3.5 w-3.5" />新建 NPC</button>
+        <button type="button" role="menuitem" onClick={() => { setShowCommunityNpcMenu(false); setShowCommunityNpcComposer(true); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"><Plus className="h-3.5 w-3.5" />新建角色卡</button>
         <button type="button" role="menuitem" onClick={() => { setShowCommunityNpcMenu(false); communityNpcImportRef.current?.click(); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"><Upload className="h-3.5 w-3.5" />导入角色卡</button>
         <button type="button" role="menuitem" disabled={communityNpcs.length === 0} onClick={() => { setShowCommunityNpcMenu(false); setSelectedCommunityNpcIds(communityNpcs.map((npc) => npc.id)); setShowCommunityNpcExport(true); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"><Download className="h-3.5 w-3.5" />导出角色卡</button>
       </PopoverMenu>
@@ -1352,21 +1357,16 @@ export default function AppForum({
           </section>}
           {secondaryPage === "history" && <><HistoryList title="浏览历史" empty="暂无浏览记录" items={visitHistory} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setReadonlySnapshot(item.publicSnapshot); }} /><button type="button" onClick={() => { if (window.confirm("清空全部浏览历史？")) commitForumMutation({ visitHistory: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空浏览历史</button></>}
           {secondaryPage === "likes" && <><HistoryList title="我的点赞" empty="暂无点赞记录" items={likeHistory} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setReadonlySnapshot(item.publicSnapshot.thread); }} /><button type="button" onClick={() => { if (window.confirm("清空全部点赞记录？")) commitForumMutation({ likeHistory: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空点赞记录</button></>}
-          {secondaryPage === "notifications" && <><HistoryList title="消息提醒" empty="暂无新消息" items={notifications.filter((item) => item.type !== "direct-message")} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setNotice("原帖已删除或不可用"); commitForumMutation({ notifications: notifications.map((value) => value.id === item.id ? { ...value, readAt: Date.now() } : value) }); }} /><button type="button" onClick={() => { if (window.confirm("清空全部消息提醒？")) commitForumMutation({ notifications: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空消息提醒</button></>}
           {secondaryPage === "community-npcs" && <>
-            <section className="rounded-2xl bg-white p-4 shadow-sm">
-              <h2 className="text-sm font-bold text-slate-800">论坛专属 NPC</h2>
-              <p className="mt-1 text-xs leading-5 text-slate-400">这些匿名网友只会在论坛中发帖或参与评论，不会关联真实角色、聊天、关系或记忆。</p>
-            </section>
             {communityNpcs.length === 0 ? (
-              <section className="mt-3 rounded-2xl bg-white px-5 py-10 text-center shadow-sm">
+              <section className="rounded-2xl bg-white px-5 py-10 text-center shadow-sm">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100"><User className="h-5 w-5 text-slate-400" /></div>
-                <p className="mt-3 text-sm font-semibold text-slate-700">还没有论坛 NPC</p>
+                <p className="mt-3 text-sm font-semibold text-slate-700">还没有 NPC 角色</p>
                 <p className="mt-1 text-xs text-slate-400">可通过右上角 + 新建或导入角色卡。</p>
-                <Button className="mt-5" size="sm" onClick={() => setShowCommunityNpcComposer(true)}>新建 NPC</Button>
+                <Button className="mt-5" size="sm" onClick={() => setShowCommunityNpcComposer(true)}>新建角色卡</Button>
               </section>
             ) : (
-              <section className="mt-3 grid gap-3">
+              <section className="grid gap-3">
                 {communityNpcs.map((npc) => (
                   <article key={npc.id} className="rounded-2xl bg-white p-4 shadow-sm">
                     <div className="flex items-start gap-3">
@@ -1394,15 +1394,17 @@ export default function AppForum({
               <span className="min-w-0 flex-1"><strong className="block truncate text-base">{activeProfile.displayName}</strong><small className="mt-1 block truncate text-slate-400">{activeProfile.bio || "点击完善论坛资料"}</small></span><Pencil className="h-4 w-4 text-slate-400" />
             </button>
           </section>
-          <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
-            <button type="button" onClick={() => setSecondaryPage("community-npcs")} className="flex w-full items-center gap-3 px-4 py-4 text-left active:bg-slate-50">
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100"><User className="h-4 w-4 text-slate-500" /></span>
-              <span className="min-w-0 flex-1"><strong className="block text-sm text-slate-800">论坛 NPC</strong><small className="mt-0.5 block text-[10px] text-slate-400">管理论坛专属虚拟网友角色卡</small></span>
-              <span className="text-xs text-slate-400">{communityNpcs.length}</span><span className="text-slate-300">›</span>
+          <section className="mt-3 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+            <button type="button" onClick={() => setSecondaryPage("community-npcs")} className="flex h-[52px] w-full items-center px-4 text-left text-base text-slate-900 active:bg-slate-50">
+              <span className="flex-1">NPC角色</span>
+              <span className="mr-2 text-xs text-slate-400">{communityNpcs.length}</span><span className="text-xl leading-none text-slate-300">›</span>
             </button>
-          </section>
-          <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
-            {[{ key: "history", label: "浏览历史", icon: History }, { key: "likes", label: "我的点赞", icon: ThumbsUp }, { key: "notifications", label: "消息提醒", icon: Bell }].map(({ key, label, icon: Icon }) => <button key={key} type="button" onClick={() => setSecondaryPage(key as "history" | "likes" | "notifications")} className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-4 text-left last:border-0"><Icon className="h-4 w-4 text-slate-500" /><span className="flex-1 text-sm">{label}</span>{key === "notifications" && notifications.some((item) => !item.readAt) && <span className="h-2 w-2 rounded-full bg-rose-500" />}</button>)}
+            <button type="button" onClick={() => setSecondaryPage("history")} className="flex h-[52px] w-full items-center border-t border-slate-100 px-4 text-left text-base text-slate-900 active:bg-slate-50">
+              <span className="flex-1">浏览历史</span><span className="text-xl leading-none text-slate-300">›</span>
+            </button>
+            <button type="button" onClick={() => setSecondaryPage("likes")} className="flex h-[52px] w-full items-center border-t border-slate-100 px-4 text-left text-base text-slate-900 active:bg-slate-50">
+              <span className="flex-1">我的点赞</span><span className="text-xl leading-none text-slate-300">›</span>
+            </button>
           </section>
         </main>
       ) : !activeThread ? (
@@ -1717,7 +1719,7 @@ export default function AppForum({
       {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && (
         <nav className="flex shrink-0 border-t border-slate-100 bg-white pb-[max(8px,env(safe-area-inset-bottom))] pt-2" aria-label="论坛导航">
           <button type="button" onClick={() => setRootTab("home")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "home" ? "text-neutral-950" : "text-slate-400"}`}><MessageCircle className="h-5 w-5" />论坛</button>
-          <button type="button" onClick={() => setRootTab("mine")} className={`relative flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "mine" ? "text-neutral-950" : "text-slate-400"}`}><User className="h-5 w-5" />我的{notifications.some((item) => item.type !== "direct-message" && !item.readAt) && <span className="absolute ml-5 h-2 w-2 rounded-full bg-rose-500" />}</button>
+          <button type="button" onClick={() => setRootTab("mine")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "mine" ? "text-neutral-950" : "text-slate-400"}`}><User className="h-5 w-5" />我的</button>
         </nav>
       )}
 
@@ -1784,7 +1786,7 @@ export default function AppForum({
 
       <BottomSheet
         open={showCommunityNpcComposer}
-        title="创建论坛 NPC"
+        title="新建角色卡"
         description="这是仅在论坛中使用的虚拟网友身份，不会写入角色、关系或聊天记忆。"
         onClose={resetCommunityNpcComposer}
         showCloseButton

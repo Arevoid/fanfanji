@@ -5,7 +5,6 @@ import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 export interface ChatReplyRequest {
   userMsg: Message | null;
   customHistoryOverride?: Message[];
-  options?: { forumShareTrigger?: boolean };
 }
 
 export interface ChatReplyControllerDependencies {

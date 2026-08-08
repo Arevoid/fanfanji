@@ -341,7 +341,6 @@ export default function App() {
   const [activeApp, setActiveApp] = useState<string | null>(null);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
-  const [pendingForumShareMessageId, setPendingForumShareMessageId] = useState<string | null>(null);
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
@@ -3475,8 +3474,6 @@ export default function App() {
                     musicTracks={tracks}
                     identityMusicStates={identityMusicStates}
                     relationshipMusicStates={relationshipMusicStates}
-                    pendingForumShareMessageId={pendingForumShareMessageId}
-                    onForumShareHandled={() => setPendingForumShareMessageId(null)}
                     pendingDiaryShareMessageId={pendingDiaryShareMessageId}
                     onDiaryShareHandled={() => setPendingDiaryShareMessageId(null)}
                     onOpenForumShare={(shareId) => {
@@ -3542,10 +3539,9 @@ export default function App() {
                     openForumShareId={openForumShareId}
                     onOpenForumShareHandled={() => setOpenForumShareId(null)}
                     onSendMessage={handleSendMessage}
-                    onOpenChat={(characterId, relationId, sourceMessageId) => {
+                    onOpenChat={(characterId, relationId) => {
                       setActiveChatCharId(characterId);
                       setActiveChatRelationId(relationId);
-                      setPendingForumShareMessageId(sourceMessageId);
                       setActiveApp("chat");
                     }}
                     onClose={() => setActiveApp(null)}

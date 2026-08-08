@@ -11,7 +11,6 @@ import { getPendingExplicitImageRequest } from "../services/imageGenerationInten
 export type ChatResponseHandler = (
   userMessage: Message | null,
   history?: Message[],
-  options?: { forumShareTrigger?: boolean },
 ) => Promise<void> | void;
 
 export type CharacterImageHandler = (

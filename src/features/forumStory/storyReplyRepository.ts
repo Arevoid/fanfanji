@@ -165,11 +165,41 @@ export const updateReplyEngagement = (
   return saveStoryCollection(storageKeys.forumStoryReplies, next);
 };
 
+/**
+ * Soft-delete a story reply while preserving its immutable floor and all
+ * existing quote targets. This mirrors ordinary Forum reply deletion.
+ */
+export const tombstoneStoryReply = (
+  storyId: string,
+  threadId: string,
+  replyId: string,
+  now = Date.now(),
+): StorageWriteResult => {
+  const current = loadStoryReplies().value;
+  const index = current.findIndex((reply) => reply.storyId === storyId && reply.threadId === threadId && reply.id === replyId);
+  if (index < 0 || current[index].isDeleted) return failedStoryWrite();
+  const nextReply: StoryForumReply = {
+    ...current[index],
+    body: "该回复已删除",
+    isDeleted: true,
+    deletedAt: now,
+    likedByIdentityIds: [],
+    likeCount: 0,
+    hotScore: 0,
+    updatedAt: now,
+  };
+  if (!isStoryForumReplyRecord(nextReply)) return failedStoryWrite();
+  const next = [...current];
+  next[index] = nextReply;
+  return saveStoryCollection(storageKeys.forumStoryReplies, next);
+};
+
 export const StoryForumReplyRepository = {
   load: loadStoryReplies,
   listReplies: listStoryReplies,
   appendReply: appendStoryReply,
   updateReplyEngagement,
+  tombstoneReply: tombstoneStoryReply,
 };
 
 export const StoryReplyRepository = StoryForumReplyRepository;

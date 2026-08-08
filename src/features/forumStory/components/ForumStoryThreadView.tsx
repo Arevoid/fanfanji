@@ -91,13 +91,13 @@ export function ForumStoryThreadView({
           const reply = isUpdate ? undefined : entry.reply;
           const entryAuthor = isUpdate ? threadAuthor : authorFor(reply!.authorName, view.characters.find((character) => character.id === reply!.storyCharacterId)?.avatar);
           const label = isUpdate ? "楼主更新" : undefined;
-          const content = isUpdate ? `${entry.update.title ? `${entry.update.title}\n` : ""}${entry.update.content}` : reply!.body;
+          const content = isUpdate ? `${entry.update.title ? `${entry.update.title}\n` : ""}${entry.update.content}` : reply!.isDeleted ? "该回复已删除" : reply!.body;
           return <div key={isUpdate ? entry.update.id : reply!.id} className="border-b border-slate-100 px-4 py-4 last:border-b-0">
             <div className="flex items-start gap-2.5">
               <ForumAvatar author={entryAuthor} className="h-8 w-8" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate text-[12px] font-semibold text-slate-700">{entryAuthor.displayName}</span>
+                  <span className={`truncate text-[12px] font-semibold ${reply?.isDeleted ? "text-slate-400" : "text-slate-700"}`}>{reply?.isDeleted ? "已删除用户" : entryAuthor.displayName}</span>
                   {label && <span className="rounded bg-neutral-950 px-1.5 py-0.5 text-[8px] font-semibold text-white">{label}</span>}
                 </div>
                 <time className="text-[9px] text-slate-400">{formatStoryTime(entry.occurredAt)}</time>
@@ -105,8 +105,8 @@ export function ForumStoryThreadView({
               <span className="text-[10px] font-medium text-slate-300">{entry.floor} 楼</span>
             </div>
             {reply?.quoteContent && <div className="ml-10 mt-2 rounded-lg border-l-2 border-slate-300 bg-slate-50 px-3 py-2 text-[11px] leading-4 text-slate-500"><div className="mb-0.5 font-medium text-slate-600">回复 {reply.floor - 1} 楼</div><p className="break-words">{reply.quoteContent}</p></div>}
-            <p className="ml-10 mt-2 whitespace-pre-wrap break-words text-[13px] leading-5 text-slate-700">{content}</p>
-            {!isUpdate && <div className="ml-10 mt-3 flex items-center gap-4">
+            <p className={`ml-10 mt-2 whitespace-pre-wrap break-words text-[13px] leading-5 ${reply?.isDeleted ? "italic text-slate-400" : "text-slate-700"}`}>{content}</p>
+            {!isUpdate && !reply!.isDeleted && <div className="ml-10 mt-3 flex items-center gap-4">
               <button type="button" onClick={() => onLikeReply?.(storyId, reply!.id)} className="inline-flex items-center gap-1 text-[11px] text-slate-400"><ThumbsUp className="h-3.5 w-3.5" />{reply!.likeCount}</button>
               <button type="button" onClick={() => onUtilityAction?.("delete", storyId, reply)} className="text-[11px] text-slate-300 active:text-red-500">删除</button>
               <button type="button" onClick={() => { setReplyingTo(reply); document.getElementById("forum-reply-input")?.focus(); }} className="inline-flex items-center gap-1 text-[11px] text-slate-400"><Reply className="h-3.5 w-3.5" />回复此楼</button>

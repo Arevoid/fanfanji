@@ -1313,8 +1313,6 @@ interface AppChatProps {
   musicTracks?: MusicTrack[];
   identityMusicStates?: IdentityMusicState[];
   relationshipMusicStates?: RelationshipMusicState[];
-  pendingForumShareMessageId?: string | null;
-  onForumShareHandled?: () => void;
   pendingDiaryShareMessageId?: string | null;
   onDiaryShareHandled?: () => void;
   onOpenForumShare?: (shareId: string) => void;
@@ -1638,15 +1636,11 @@ export default function AppChat({
   musicTracks = [],
   identityMusicStates = [],
   relationshipMusicStates = [],
-  pendingForumShareMessageId,
-  onForumShareHandled,
   pendingDiaryShareMessageId,
   onDiaryShareHandled,
   onOpenForumShare,
 }: AppChatProps) {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
-  const [forumShareReplyError, setForumShareReplyError] = useState("");
-  const forumShareReplyInFlightRef = useRef<Set<string>>(new Set());
   const diaryShareReplyInFlightRef = useRef<Set<string>>(new Set());
 
   // MiniMax Real-time TTS Playback States
@@ -3632,7 +3626,6 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
   const executeDirectReplyPipeline = async (
     userMsg: Message | null,
     customHistoryOverride?: Message[],
-    options?: { forumShareTrigger?: boolean },
     cognitiveContext?: CharacterCognitiveContext,
   ) => {
     setIsTyping(true);
@@ -3642,8 +3635,6 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
     const turnCharacter = latestActiveCharacterRef.current || activeCharacter;
     const turnSettings = resolveChatTurnSettings(turnCharacter);
     let pendingOfflineHandoffForReply: OfflineStory | undefined;
-    if (options?.forumShareTrigger) setForumShareReplyError("");
-
     const isRedPacket = userMsg && isRedPacketMarkup(userMsg.content);
     if (isRedPacket) {
       const capturedMessage = userMsg!;
@@ -4374,11 +4365,7 @@ ${stickerListStr}
           content: `⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`,
           timestamp: Date.now(),
         };
-        if (options?.forumShareTrigger) {
-          setForumShareReplyError("帖子已成功转发，但 AI 暂时没有返回有效回复。你可以稍后继续发送消息讨论。");
-        } else {
-          onSendMessage(errMsg);
-        }
+        onSendMessage(errMsg);
       }
     } catch (err: any) {
       const errMsgStr = err?.message || "";
@@ -4399,11 +4386,7 @@ ${stickerListStr}
           : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`,
         timestamp: Date.now(),
       };
-      if (options?.forumShareTrigger) {
-        setForumShareReplyError(`帖子已成功转发，但 AI 回复失败：${errMsgStr || "请检查网络和 API 配置后重试。"}`);
-      } else {
-        onSendMessage(errMsg);
-      }
+      onSendMessage(errMsg);
     } finally {
       setIsTyping(false);
     }
@@ -4471,8 +4454,8 @@ ${stickerListStr}
       }
     },
     generateGroupReply: generateResponseForGroupChat,
-    generateDirectReply: ({ userMsg, customHistoryOverride, options, cognitiveContext }) =>
-      executeDirectReplyPipeline(userMsg, customHistoryOverride, options, cognitiveContext),
+    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext }) =>
+      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext),
   });
 
   const chatSideEffectController = createChatSideEffectController({
@@ -4486,10 +4469,13 @@ ${stickerListStr}
   const generateResponseForUserMessage = async (
     userMsg: Message | null,
     customHistoryOverride?: Message[],
-    options?: { forumShareTrigger?: boolean },
-  ) => chatReplyController.generate({ userMsg, customHistoryOverride, options });
+  ) => chatReplyController.generate({ userMsg, customHistoryOverride });
 
-  const sendCustomMessage = (contentString: string, capturedContext = activeRuntimeContext) => {
+  const sendCustomMessage = (
+    contentString: string,
+    capturedContext = activeRuntimeContext,
+    options: { triggerReply?: boolean } = {},
+  ) => {
     if (!activeChatCharId || !activeCharacter || !isCapturedRuntimeCurrent(capturedContext)) return;
     const userMsg = createUserTextMessage({
       id: Date.now().toString(),
@@ -4511,7 +4497,12 @@ ${stickerListStr}
       });
       if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture chat-artifact knowledge claim.");
     }
-    generateResponseForUserMessage(normalizedUserMsg);
+    // Sending a sticker is an ambient reaction rather than a request for a
+    // conversational turn. Keep it visible in history, but wait for the user
+    // to send text before asking the character to answer.
+    if (options.triggerReply !== false) {
+      generateResponseForUserMessage(normalizedUserMsg);
+    }
   };
 
   /** This is the only AppChat path that imports the image-generation service.
@@ -4924,40 +4915,6 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
       window.removeEventListener(VISUAL_VIEWPORT_CHANGE_EVENT, handleViewportChange);
     };
   }, [activeChatCharId]);
-
-  useEffect(() => {
-    if (!pendingForumShareMessageId || !activeRelationship || !activeCharacter || activeCharacter.isGroupChat) return;
-    if (activeRelationship.userIdentityId !== activeIdentityId) return;
-    const shareMessage = messages.find((message) =>
-      message.id === pendingForumShareMessageId
-      && message.forumShareId
-      && message.relationId === activeRelationship.id
-      && message.conversationId === (activeRelationship.conversationId || getConversationId(activeRelationship.id)));
-    if (!shareMessage || forumShareReplyInFlightRef.current.has(shareMessage.id)) return;
-    forumShareReplyInFlightRef.current.add(shareMessage.id);
-    const relationHistory = messages.filter((message) =>
-      message.relationId === activeRelationship.id
-      && message.conversationId === shareMessage.conversationId
-      && !message.isOffline);
-    void generateResponseForUserMessage(
-      shareMessage,
-      relationHistory,
-      { forumShareTrigger: true },
-    ).finally(() => {
-      forumShareReplyInFlightRef.current.delete(shareMessage.id);
-      onForumShareHandled?.();
-    });
-  }, [
-    pendingForumShareMessageId,
-    activeRelationship?.id,
-    activeRelationship?.conversationId,
-    activeRelationship?.userIdentityId,
-    activeCharacter?.id,
-    activeCharacter?.isGroupChat,
-    activeIdentityId,
-    messages.length,
-    onForumShareHandled,
-  ]);
 
   useEffect(() => {
     if (!pendingDiaryShareMessageId || !activeRelationship || !activeCharacter || activeCharacter.isGroupChat) return;
@@ -8644,11 +8601,6 @@ ${instructionsPrompt}`;
                 {imageGenerationError}
               </div>
             )}
-            {forumShareReplyError && (
-              <div role="status" className="mx-3 mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-700">
-                {forumShareReplyError}
-              </div>
-            )}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -8869,7 +8821,7 @@ ${instructionsPrompt}`;
                           <div
                             key={sticker.id}
                             onClick={() => {
-                              sendCustomMessage(`[表情]|${sticker.name}|${sticker.url}`);
+                              sendCustomMessage(`[表情]|${sticker.name}|${sticker.url}`, activeRuntimeContext, { triggerReply: false });
                               setShowStickerSelector(false);
                             }}
                             onContextMenu={(e) => {
