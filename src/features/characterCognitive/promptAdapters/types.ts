@@ -76,6 +76,14 @@ export interface PromptAdapterOptions {
 /** Explicit Moment-public input; unknown visibility is denied before this boundary. */
 export interface MomentPromptAdapterOptions extends PromptAdapterOptions {
   publicContext?: MomentPublicCognitiveContext;
+  /**
+   * A read-only, strictly relation-scoped snapshot for a character's own
+   * Moments. It is intentionally passed separately from the public feed
+   * projection so callers must opt in to using relationship material.
+   */
+  relationContext?: CharacterCognitiveContext;
+  /** Already visibility-filtered WorldBook entries for this exact relation. */
+  relationWorldKnowledge?: readonly CognitivePromptWorldSetting[];
 }
 
 export interface ChatPromptContext {
@@ -100,6 +108,11 @@ export interface ChatPromptContext {
 
 export interface MomentPromptContext {
   persona: CognitivePromptPersona;
+  relationship?: CognitivePromptRelationship;
+  /** Confirmed, same-relation memory facts only. */
+  relationFacts: readonly CognitivePromptFact[];
+  /** Confirmed, same-relation events only. */
+  relationEvents: readonly CognitivePromptEvent[];
   publicFacts: readonly CognitivePromptFact[];
   publicEvents: readonly CognitivePromptEvent[];
   publicWorldKnowledge: readonly CognitivePromptWorldSetting[];

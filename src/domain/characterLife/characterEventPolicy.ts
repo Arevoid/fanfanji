@@ -28,11 +28,7 @@ const normalizeSource = (source: string): string => source.trim().toLowerCase();
 const sourceHasRejectedMarker = (source: string): boolean => {
   const normalized = normalizeSource(source);
   return REJECTED_SOURCE_MARKERS.some((marker) =>
-    normalized === marker
-    || normalized.startsWith(`${marker}:`)
-    || normalized.startsWith(`${marker}-`)
-    || normalized.includes(`:${marker}:`)
-    || normalized.includes(`-${marker}-`));
+    new RegExp(`(^|[:_-])${marker}($|[:_-])`).test(normalized));
 };
 
 const hasCompleteScope = (event: CharacterEvent): boolean =>

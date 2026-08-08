@@ -8,14 +8,19 @@ import type {
   CharacterCognitiveEventCandidate,
 } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { CharacterEvent } from "../../../domain/characterLife/characterEventTypes";
+import { isCharacterEventTrusted } from "../../../domain/characterLife/characterEventPolicy";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { Character, MemoryItem } from "../../../types";
 
+/**
+ * A Moment may draw on confirmed events from its own relationship.  This is
+ * deliberately broader than the old two-event allowlist: users can choose to
+ * express an established relationship or a confirmed offline experience
+ * publicly.  The context builder still enforces the exact relation, character
+ * and user-identity scope before anything reaches a prompt.
+ */
 const getMomentEventVisibility = (event: CharacterEvent): CharacterCognitiveEventCandidate["promptVisibility"] =>
-  event.status === "active"
-    && (event.kind === "relationship_created" || event.kind === "offline_story_completed")
-    ? "safe"
-    : "private";
+  isCharacterEventTrusted(event) ? "safe" : "private";
 
 /**
  * Builds the read-only cognitive snapshot for one Moment AI attempt.

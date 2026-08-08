@@ -1,6 +1,8 @@
 import type { Character, MomentComment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
 import type { MomentPublicCognitiveContext } from "../../../domain/momentCognitive/momentPublicCognitiveTypes";
+import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import type { CognitivePromptWorldSetting } from "../../characterCognitive/promptAdapters/types";
 import { appendMomentPublicPromptContext } from "../../characterCognitive/promptAdapters/momentPromptAdapter";
 import { sanitizeMomentPublishText } from "./momentContent";
 import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
@@ -18,8 +20,13 @@ export async function requestAutomaticMomentComment(input: {
   temporalContext?: MomentTemporalContext;
   /** Required for production public comments; omitted only for legacy callers. */
   publicContext?: MomentPublicCognitiveContext;
+  relationContext?: CharacterCognitiveContext;
+  relationWorldKnowledge?: readonly CognitivePromptWorldSetting[];
 }): Promise<MomentComment | undefined> {
-  const response = await input.requestAi(appendMomentPublicPromptContext(input.request, input.publicContext));
+  const response = await input.requestAi(appendMomentPublicPromptContext(input.request, input.publicContext, {
+    relationContext: input.relationContext,
+    relationWorldKnowledge: input.relationWorldKnowledge,
+  }));
   if (!response?.text) return undefined;
   const now = input.now || Date.now;
   const random = input.random || Math.random;

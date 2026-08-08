@@ -1,6 +1,8 @@
 import type { Character, MemoryItem, Moment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
 import type { MomentPublicCognitiveContext } from "../../../domain/momentCognitive/momentPublicCognitiveTypes";
+import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import type { CognitivePromptWorldSetting } from "../../characterCognitive/promptAdapters/types";
 import { appendMomentPublicPromptContext } from "../../characterCognitive/promptAdapters/momentPromptAdapter";
 import { sanitizeMomentPublishText } from "./momentContent";
 import { assessMomentUniqueness, isMomentSkipResponse } from "./momentUniqueness";
@@ -88,8 +90,14 @@ export async function requestCharacterMoment(input: {
   existingMoments?: readonly Moment[];
   /** Required for production character generation; omitted only for legacy callers. */
   publicContext?: MomentPublicCognitiveContext;
+  /** Confirmed material for this exact relationship only. */
+  relationContext?: CharacterCognitiveContext;
+  relationWorldKnowledge?: readonly CognitivePromptWorldSetting[];
 }): Promise<{ moment?: Moment; memory?: MemoryItem }> {
-  const response = await input.requestAi(appendMomentPublicPromptContext(input.request, input.publicContext));
+  const response = await input.requestAi(appendMomentPublicPromptContext(input.request, input.publicContext, {
+    relationContext: input.relationContext,
+    relationWorldKnowledge: input.relationWorldKnowledge,
+  }));
   if (!response?.text) return {};
   const now = input.occurredAt || input.now || Date.now;
   const random = input.random || Math.random;

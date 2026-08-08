@@ -89,6 +89,7 @@ import { MomentsApp } from "../features/moments/MomentsApp";
 import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
+import { buildMomentCognitiveContext } from "../features/moments/services/momentCognitiveContext";
 import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
 import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
@@ -1357,6 +1358,22 @@ const buildPublicMomentContext = (input: {
   ...(input.routine ? { routine: input.routine } : {}),
   currentTime: { now: input.now },
 });
+
+/**
+ * Resolve WorldBook entries only inside the same direct relationship.  The
+ * formatted strings never contain relationship or identity identifiers.
+ */
+const buildMomentWorldKnowledge = (
+  entries: WorldBookEntry[],
+  character: Character,
+  relationship: CharacterRelationship,
+  scanText: string,
+) => buildWorldBookSystemBlocks(entries, character.id, scanText, {
+  scenario: "chat",
+  characterId: relationship.characterId,
+  userIdentityId: relationship.userIdentityId,
+  relationId: relationship.id,
+}).allTriggered.map((entry) => ({ title: entry.title, content: entry.content }));
 
 /** Stores only a short diversity hint; topic history is never a fact source. */
 const compactTopicHint = (values: readonly string[]): string => values
@@ -5884,6 +5901,27 @@ ${instructionsPrompt}`;
     }
   };
 
+  /** Build a private-but-scope-locked source snapshot for a character's own Moments. */
+  const buildRelationMomentContext = (
+    character: Character,
+    relationship: CharacterRelationship,
+    occurredAt: number,
+  ) => buildMomentCognitiveContext({
+    character,
+    relationship,
+    memories: memories || [],
+    events: listCharacterEventsByRelation(relationship.id),
+    occurredAt,
+    routine: buildCharacterRoutine(character.routine),
+  });
+
+  const momentSourceText = (context: CharacterCognitiveContext) => [
+    context.persona.personality,
+    context.persona.backstory,
+    ...context.knownFacts.map((fact) => fact.content),
+    ...context.recentEvents.map((event) => event.summary),
+  ].filter(Boolean).join("\n");
+
   const handleAutoCommentOnUserMoment = async (newMo: Moment) => {
     if (activeRelationships.length === 0) return;
 
@@ -5901,6 +5939,11 @@ ${instructionsPrompt}`;
       setTimeout(async () => {
         try {
           const temporalContext = createMomentTemporalContext(new Date());
+          const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
+          const relationWorldKnowledge = buildMomentWorldKnowledge(
+            worldBookEntries || [], friend, relationship,
+            `${newMo.content}\n${momentSourceText(relationContext)}`,
+          );
           const publicContext = buildPublicMomentContext({
             character: friend,
             moments: [newMo],
@@ -5909,12 +5952,12 @@ ${instructionsPrompt}`;
             now: Date.now(),
           });
 
-          const systemInstruction = `Your task: Write a short, natural comment on the public Moment.
+          const systemInstruction = `Your task: Write a short, natural comment on the Moment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
-1. The comment must be brief, extremely natural, and fit the public-safe character context supplied by the Moment Prompt Adapter.
+1. The comment must be brief, extremely natural, and fit the character and current relationship context supplied by the Moment Prompt Adapter.
 2. Keep it under 35 characters. Speak in Chinese.
 3. No OOC, no narrative brackets like (微笑), just the direct comment text.
-4. Respond only to the public Moment content. Do not infer or mention private messages, shared experiences, relationship status, or user profile details.
+4. You may naturally reference confirmed shared experiences or relationship facts from the supplied context, but never invent them or mention another relationship or user identity.
 `;
 
           const composedPrompt = PromptComposer.compose({
@@ -5936,6 +5979,8 @@ ${instructionsPrompt}`;
             cleanText: (text) => cleanOnlineMessage(text, true),
             temporalContext,
             publicContext,
+            relationContext,
+            relationWorldKnowledge,
           });
           if (comment) onAddCommentToMoment(newMo.id, comment);
         } catch (err) {
@@ -5984,6 +6029,11 @@ ${instructionsPrompt}`;
     setTimeout(async () => {
       try {
         const temporalContext = createMomentTemporalContext(new Date());
+        const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
+        const relationWorldKnowledge = buildMomentWorldKnowledge(
+          worldBookEntries || [], friend, relationship,
+          `${targetMoment.content}\n${userCommentText}\n${momentSourceText(relationContext)}`,
+        );
         const publicContext = buildPublicMomentContext({
           character: friend,
           moments: [targetMoment],
@@ -6002,12 +6052,12 @@ ${instructionsPrompt}`;
           now: Date.now(),
         });
 
-        const systemInstruction = `Your task: Write a short, extremely natural WeChat reply/comment to the public comment.
+        const systemInstruction = `Your task: Write a short, extremely natural WeChat reply/comment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
-1. The reply must be brief, lively, extremely natural, and match the public-safe character context supplied by the Moment Prompt Adapter.
+1. The reply must be brief, lively, extremely natural, and match the character and current relationship context supplied by the Moment Prompt Adapter.
 2. Keep it under 35 characters. Speak in Chinese.
 3. Speak directly to the user without formal prefixes. Do not write narrative actions or brackets like "(害羞)", just output the comment text.
-4. Respond only to the public Moment and public comments. Do not infer or mention private messages, shared experiences, relationship status, or user profile details.
+4. You may naturally reference only confirmed material from this supplied relationship context. Never invent shared experiences or use another relationship's information.
 `;
 
         const composedPrompt = PromptComposer.compose({
@@ -6030,6 +6080,8 @@ ${instructionsPrompt}`;
           cleanText: (text) => cleanOnlineMessage(text, true),
           temporalContext,
           publicContext,
+          relationContext,
+          relationWorldKnowledge,
         });
         if (reply) onAddCommentToMoment(momentId, reply);
       } catch (err) {
@@ -6049,6 +6101,11 @@ ${instructionsPrompt}`;
         .sort((left, right) => right.timestamp - left.timestamp)
         .slice(0, 12);
       const temporalContext = createMomentTemporalContext(new Date(occurredAt));
+      const relationContext = buildRelationMomentContext(friend, relationship, occurredAt);
+      const relationWorldKnowledge = buildMomentWorldKnowledge(
+        worldBookEntries || [], friend, relationship,
+        momentSourceText(relationContext),
+      );
       const publicContext = buildPublicMomentContext({
         character: friend,
         moments: ownerMomentHistory,
@@ -6057,18 +6114,18 @@ ${instructionsPrompt}`;
         now: occurredAt,
       });
 
-      const systemInstruction = `Your task: Write a WeChat Moment post (朋友圈) from the public-safe character context supplied by the Moment Prompt Adapter.
+      const systemInstruction = `Your task: Write a WeChat Moment post from the character's scoped life context supplied by the Moment Prompt Adapter.
 🚨 [CRITICAL WECHAT MOMENT RULES]:
-1. The post must fit the public character profile and be grounded only in public-safe material supplied to this request.
+1. The post must fit the character and may draw on confirmed material from this exact relationship, including confirmed offline experiences and relationship progress.
 2. The post content must be natural, engaging, and in Chinese.
-3. Keep the content brief and spontaneous (usually 10 to 100 characters), matching typical WeChat Moment style.
+3. Vary the form and length: a one-line fragment (5-30 Chinese characters), a short thought (20-60), or a concrete life record (60-160). Do not force every post into the same paragraph length or literary style.
 4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, or talk like an AI. Just output the text of the Moment post.
-5. Moments do not support chat stickers or sticker links. Never output [表情]、[表情]|名称|URL、blob: URL, sticker names, or any chat attachment markup. Use plain text only.
+5. Moments do not support chat stickers or sticker links. Never output [表情]、[表情]|名称|URL、blob: URL, sticker names, or chat attachment markup. Use post text, with only the dedicated final "(配图：...)" text-image line permitted by rule 7.
 6. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)".
-7. If this post needs an image, add one final separate line in exactly this format: "(配图：图片描述)". This line will be rendered as a text-image card, never as post body text.
+7. Decide explicitly whether this post benefits from a visual. When a concrete scene, food, object, ticket, music, street view, outfit, or shared outing is central, prefer a text-image card. Add one final separate line in exactly this format: "(配图：图片描述)". This is an allowed Moment-only rendering instruction, not a chat attachment or body text.
 8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
-9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the public feed history supplied by the Moment Prompt Adapter. Avoid generic filler such as weather, tiredness, coffee, work, or vague feelings unless a specific public character detail makes it genuinely new.
-10. Never infer private messages, Memory, shared experiences, relationship status, OfflineStory content, or user profile details. If there is no fresh public-safe topic, output exactly "SKIP" and nothing else.
+9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the supplied feed history. Prefer a specific detail from the scoped context over generic weather, tiredness, coffee, work, or vague feelings.
+10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or AI-inferred events. If there is no fresh scoped topic, output exactly "SKIP" and nothing else.
 `;
 
       const composedPrompt = PromptComposer.compose({
@@ -6094,6 +6151,8 @@ ${instructionsPrompt}`;
         temporalContext,
         existingMoments: ownerMomentHistory,
         publicContext,
+        relationContext,
+        relationWorldKnowledge,
       });
       if (generated.moment) {
         onAddMoment(generated.moment);

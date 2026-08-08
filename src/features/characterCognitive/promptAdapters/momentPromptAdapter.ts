@@ -1,7 +1,9 @@
 import {
   projectPromptPersona,
   projectPromptTime,
+  selectChatPromptFacts,
   selectMomentPublicFacts,
+  selectSafePromptEvents,
 } from "./promptVisibilityPolicy";
 import type { MomentPromptAdapterOptions, MomentPromptContext } from "./types";
 import type {
@@ -27,6 +29,22 @@ type MomentPromptContextWithRoutine = MomentPromptContext & {
     cooldownTopics: readonly string[];
   };
 };
+
+function projectRelationMomentContext(options: MomentPromptAdapterOptions | undefined): Pick<
+  MomentPromptContext,
+  "relationship" | "relationFacts" | "relationEvents"
+> {
+  const context = options?.relationContext;
+  if (!context) return { relationFacts: [], relationEvents: [] };
+  return {
+    // A Moment may use the relationship stage as immediate context, but a
+    // legacy summary is intentionally omitted: only confirmed facts/events
+    // are eligible material for a relationship-scoped Moment.
+    relationship: { stage: context.relationship.stage },
+    relationFacts: selectChatPromptFacts(context, options),
+    relationEvents: selectSafePromptEvents(context, options),
+  };
+}
 
 function projectMomentRoutineContext(
   context: CharacterCognitiveContext | undefined,
@@ -134,6 +152,7 @@ export function buildMomentPromptContext(
     : [];
   return {
     persona: projectPublicMomentPersona(context, options),
+    ...projectRelationMomentContext(options),
     publicFacts: publicContext?.authorizedPublicFacts.map(({ content }) => ({ content })) ?? selectMomentPublicFacts(context),
     publicEvents: publicContext?.publicEvents.map(({ kind, summary, occurredAt, confidence }) => ({
       kind,
@@ -141,8 +160,11 @@ export function buildMomentPromptContext(
       occurredAt,
       confidence,
     })) ?? [],
-    // MomentPublicCognitiveContext intentionally has no Forum/WorldBook input.
-    publicWorldKnowledge: [],
+    // Callers pass only WorldBook entries already filtered for the same
+    // character, identity and relation. The adapter removes all scope IDs.
+    publicWorldKnowledge: [...(options?.relationWorldKnowledge || [])]
+      .map(({ title, content }) => ({ title, content }))
+      .filter(({ title, content }) => Boolean(title.trim() && content.trim())),
     publicMomentHistory,
     publicCommentHistory,
     behaviorConstraints: publicContext?.publicBehaviorConstraints.map(({ description }) => ({ description })) ?? [],
@@ -168,9 +190,13 @@ export function buildMomentPromptContextFromPublicContext(
 export function appendMomentPublicPromptContext<T extends { systemInstruction?: string }>(
   request: T,
   publicContext: MomentPublicCognitiveContext | undefined,
+  options?: Omit<MomentPromptAdapterOptions, "publicContext">,
 ): T {
-  if (!publicContext) return request;
-  const supplement = formatMomentPromptContext(buildMomentPromptContextFromPublicContext(publicContext));
+  if (!publicContext && !options?.relationContext && !(options?.relationWorldKnowledge?.length)) return request;
+  const supplement = formatMomentPromptContext(buildMomentPromptContext(
+    options?.relationContext,
+    { ...options, publicContext },
+  ));
   if (!supplement) return request;
   return {
     ...request,
@@ -191,6 +217,15 @@ export function formatMomentPromptContext(context: MomentPromptContextWithRoutin
     ...(context.persona.personality ? [`- Personality: ${context.persona.personality}`] : []),
     ...(context.persona.backstory ? [`- Background: ${context.persona.backstory}`] : []),
   ];
+  const relationship = context.relationship
+    ? [
+      "Current relationship context (only this character and this user identity):",
+      `- Relationship stage: ${context.relationship.stage}`,
+      ...(context.relationship.legacySummary ? [`- Historical relationship note (weak reference): ${context.relationship.legacySummary.content}`] : []),
+    ]
+    : [];
+  const relationFacts = context.relationFacts.map((fact) => `- ${fact.content}`);
+  const relationEvents = context.relationEvents.map((event) => `- ${event.summary}`);
   const facts = context.publicFacts.map((fact) => `- ${fact.content}`);
   const events = context.publicEvents.map((event) => `- ${event.summary}`);
   const worldKnowledge = context.publicWorldKnowledge.map((setting) => `- ${setting.title}: ${setting.content}`);
@@ -221,10 +256,13 @@ export function formatMomentPromptContext(context: MomentPromptContextWithRoutin
   ] : [];
 
   return [
-    "[PUBLIC-SAFE MOMENT COGNITIVE CONTEXT]",
-    "Use only the verified public-safe information below when directly relevant. Do not invent shared scenes, locations, actions, or user experiences.",
+    "[MOMENT COGNITIVE CONTEXT]",
+    "Use only the scoped, confirmed information below when directly relevant. Do not invent shared scenes, locations, actions, or user experiences.",
     "Character focus:",
     ...persona,
+    ...relationship,
+    ...(relationEvents.length > 0 ? ["Confirmed events in this relationship:", ...relationEvents] : []),
+    ...(relationFacts.length > 0 ? ["Remembered facts in this relationship:", ...relationFacts] : []),
     ...(facts.length > 0 ? ["Verified public facts:", ...facts] : []),
     ...(events.length > 0 ? ["Verified public events:", ...events] : []),
     ...(worldKnowledge.length > 0 ? ["Public world knowledge:", ...worldKnowledge] : []),
