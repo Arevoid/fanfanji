@@ -83,6 +83,25 @@
   border-color: var(--divider) !important;
 }
 
+/* Main feed separators must not inherit Tailwind's light divide colour. */
+:root[data-theme="dark"] [data-theme-page="moments"] .divide-y > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--divider) !important;
+}
+
+/* The chat tab bar deliberately inverts its active state in dark mode: the
+ * current tab is subdued, while available destinations stay light. */
+:root[data-theme="dark"] .chat-tab-nav-item--active {
+  color: var(--text-tertiary) !important;
+}
+
+:root[data-theme="dark"] .chat-tab-nav-item--inactive {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page="forum"] .forum-thread-feed {
+  border-color: var(--divider) !important;
+}
+
 :root[data-theme="dark"] [data-theme-page="offline"] {
   --offline-page-bg: var(--app-bg);
   --offline-card-bg: var(--surface);

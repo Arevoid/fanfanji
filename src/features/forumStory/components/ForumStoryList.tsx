@@ -24,7 +24,7 @@ export function ForumStoryList({
 }) {
   if (items.length === 0) return null;
   return (
-    <section data-testid="forum-story-list">
+    <section data-testid="forum-story-list" className="border-b border-[var(--divider)]">
       {items.map((item) => (
         <article key={item.storyId} data-testid={`forum-story-${item.storyId}`} className="border-b border-[var(--divider)] bg-[var(--surface)] px-4 py-4 last:border-b-0">
           <button type="button" onClick={() => onOpen(item.storyId)} className="block w-full text-left active:opacity-70" aria-label={`查看帖子：${item.title}`}>

@@ -10580,11 +10580,11 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
         </div>
 
         {/* BOTTOM NAVIGATION BAR FOR CHAT APP (聊天、通讯录、朋友圈、我) */}
-        <div className="bg-slate-50 border-t border-slate-200/60 py-2 shrink-0 flex justify-around items-center text-[10px] font-bold text-slate-400 z-10">
+        <div className="chat-tab-nav bg-slate-50 border-t border-slate-200/60 py-2 shrink-0 flex justify-around items-center text-[10px] font-bold text-slate-400 z-10">
           <button
             onClick={() => setActiveTab("chats")}
-            className={`flex flex-col items-center space-y-1 ${
-              activeTab === "chats" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
+            className={`chat-tab-nav-item flex flex-col items-center space-y-1 ${
+              activeTab === "chats" ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"
             }`}
           >
             <div className="relative">
@@ -10603,8 +10603,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
           
           <button
             onClick={() => setActiveTab("contacts")}
-            className={`flex flex-col items-center space-y-1 ${
-              activeTab === "contacts" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
+            className={`chat-tab-nav-item flex flex-col items-center space-y-1 ${
+              activeTab === "contacts" ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"
             }`}
           >
             <Users className="w-5 h-5" />
@@ -10613,8 +10613,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
           <button
             onClick={() => setActiveTab("moments")}
-            className={`flex flex-col items-center space-y-1 ${
-              activeTab === "moments" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
+            className={`chat-tab-nav-item flex flex-col items-center space-y-1 ${
+              activeTab === "moments" ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"
             }`}
           >
             <div className="relative">
@@ -10630,8 +10630,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
           <button
             onClick={() => setActiveTab("me")}
-            className={`flex flex-col items-center space-y-1 ${
-              activeTab === "me" ? "text-neutral-950" : "text-neutral-400 hover:text-neutral-650"
+            className={`chat-tab-nav-item flex flex-col items-center space-y-1 ${
+              activeTab === "me" ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"
             }`}
           >
             <User className="w-5 h-5" />

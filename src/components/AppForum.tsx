@@ -1444,7 +1444,7 @@ export default function AppForum({
               </Button>
             </div>
           ) : identityThreads.length > 0 || forumStoryItems.length > 0 ? (
-            <div className="mt-3 overflow-hidden border-y border-slate-100 bg-white">
+            <div className="forum-thread-feed mt-3 overflow-hidden border-y border-slate-100 bg-white">
               <ForumStoryList
                 items={forumStoryItems}
                 onOpen={(storyId) => { setActiveStoryId(storyId); setError(""); setNotice(""); }}

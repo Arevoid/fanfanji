@@ -27,7 +27,7 @@ export function ContactList({ header, contacts, onSelect }: ContactListProps) {
       ) : (
         contacts.map(({ id, character, subtitle }) => (
           <div key={id} onClick={() => onSelect(id)} className="flex items-center p-3 hover:bg-[var(--surface-muted)] cursor-pointer transition-colors">
-            <img src={character.avatar} alt={character.name} className="w-10 h-10 rounded-full object-cover mr-3 bg-[var(--surface-muted)] border border-[var(--border)] shrink-0 aspect-square" referrerPolicy="no-referrer" />
+            <img src={character.avatar} alt={character.name} className="w-11 h-11 rounded-full object-cover mr-3 bg-[var(--surface-muted)] border border-[var(--border)] shrink-0 aspect-square" referrerPolicy="no-referrer" />
             <div className="flex-1 min-w-0">
               <h4 className="text-xs font-bold text-[var(--text-primary)] truncate">
                 {character.remark || character.name}

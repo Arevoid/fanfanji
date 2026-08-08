@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { 
   ArrowLeft, Plus, Trash2, Pencil, Send, Sparkles, BookOpen,
   Link2, Calendar, MessageSquare, ChevronRight, HelpCircle, 
-  Settings, RefreshCw, Layers, Cpu, MoreHorizontal
+  Settings, RefreshCw, Layers, MoreHorizontal
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, UserSettings, WorldBookEntry } from "../types";
@@ -583,9 +583,6 @@ export default function AppOffline({
     setNewStartFromChat(false);
     setNewTimeAwareness(false);
 
-    showToast(newStory.mode === "director" || newStory.mode === "if"
-      ? "故事已创建。当前模式不自动同步记忆；如需同步，请在剧本设置中手动操作。"
-      : "线下续写已创建；结束剧情时会自动总结并同步记忆。");
   };
 
   // Delete a story
@@ -1338,9 +1335,9 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
           >
             {isSettingsOpen ? (
               /* ================= STORY SETTINGS PAGE ================= */
-              <div className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50">
+              <div className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-[#F7F7F9]">
                 {/* Header */}
-                <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm z-10 shrink-0 relative">
+                <div className="px-4 py-3 bg-white border-b border-[#F0F0F0] flex items-center justify-between shadow-sm z-10 shrink-0 relative">
                   <button 
                     onClick={() => setIsSettingsOpen(false)}
                     className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors shrink-0"
@@ -1348,21 +1345,20 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                   >
                     <ArrowLeft className="w-4 h-4 text-slate-700" />
                   </button>
-                  <h3 className="text-xs font-bold text-slate-800 absolute left-1/2 -translate-x-1/2 w-max">
+                  <h3 className="text-base font-semibold text-[#111111] absolute left-1/2 -translate-x-1/2 w-max">
                     剧本高级设置
                   </h3>
                   <div className="w-8 h-8" />
                 </div>
 
                 {/* Settings Body */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+                <div className="flex-1 overflow-y-auto px-4 pb-[calc(34px+16px)] pt-4 space-y-5">
                   {/* Sync memory button is now placed at the top of settings as requested */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-2 text-left">
-                    <div className="flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-indigo-500" />
-                      <span className="text-xs font-bold text-slate-800">同步剧本记忆</span>
-                    </div>
-                    <p className="text-[10px] text-slate-400">
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">同步设置</h4>
+                    <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-2 text-left">
+                    <span className="text-[15px] font-medium text-[#111111]">同步剧本记忆</span>
+                    <p className="text-xs leading-5 text-[#8E8E93]">
                       {activeStory.mode === "continue"
                         ? "续写剧情结束时会自动总结并同步；也可以在此立即同步当前进展。"
                         : "导演和 IF 模式结束时不会自动同步。只有点击下方按钮手动确认后，剧情才会进入角色长期记忆并同步到线上。"}
@@ -1372,49 +1368,52 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       onClick={() => void handleSyncMemoryToBrain(activeStory, { userConfirmed: true, syncIntent: "manual_settings" })}
                       disabled={memorySyncingStoryId === activeStory.id}
                       aria-busy={memorySyncingStoryId === activeStory.id}
-                      className="w-full py-2 bg-[var(--button-secondary-bg)] hover:bg-[var(--surface-raised)] text-[var(--button-secondary-text)] font-bold rounded-[16px] border border-[var(--button-secondary-border)] transition-all text-xs flex items-center justify-center gap-1.5 shadow-sm disabled:bg-[var(--button-disabled-bg)] disabled:text-[var(--button-disabled-text)] disabled:border-[var(--button-disabled-border)] disabled:opacity-100"
+                      className="w-full rounded-xl border border-[#F0F0F0] bg-[#111111] py-3 text-xs font-semibold text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:bg-[#E5E5EA] disabled:text-[#8E8E93]"
                     >
-                      {memorySyncingStoryId === activeStory.id
-                        ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        : <Cpu className="w-3.5 h-3.5" />}
                       <span>{memorySyncingStoryId === activeStory.id ? "同步中，请稍候…" : "同步当前进展记忆至角色大脑"}</span>
                     </button>
-                  </div>
+                    </div>
+                  </section>
 
                   {/* Word limit */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
-                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">每次生成回复字数限制</label>
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">生成设置</h4>
+                  <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
+                    <label className="text-[15px] font-medium text-[#111111] block">每次生成回复字数限制</label>
                     <div className="flex gap-2">
                       <input
                         type="number"
                         value={settingsWordLimit}
                         onChange={(e) => setSettingsWordLimit(e.target.value)}
                         placeholder="不限制 (或输入数字，如：300)"
-                        className="flex-1 bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                        className="flex-1 rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-3 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                       />
                       {settingsWordLimit && (
                         <button
                           type="button"
                           onClick={() => setSettingsWordLimit("")}
-                          className="px-2.5 py-1 text-[10px] font-bold border border-slate-200 rounded-[16px] text-slate-500 hover:bg-slate-50"
+                          className="px-2.5 py-1 text-xs font-medium border border-[#F0F0F0] rounded-lg text-[#8E8E93] hover:bg-[#F7F7F9]"
                         >
                           清除限制
                         </button>
                       )}
                     </div>
-                    <p className="text-[10px] text-slate-400">设定单次生成的最大字数范围，避免回复过长或过短。</p>
+                    <p className="text-xs text-[#8E8E93]">设定单次生成的最大字数范围，避免回复过长或过短。</p>
                   </div>
+                  </section>
 
                   {/* Perspectives */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
-                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">人称写作视角选择</label>
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">写作视角</h4>
+                  <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
+                    <label className="text-[15px] font-medium text-[#111111] block">人称写作视角选择</label>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-500 block">对方 (角色们) 的人称</span>
+                        <span className="text-xs text-[#8E8E93] block">对方（角色们）的人称</span>
                         <select
                           value={settingsPartnerP}
                           onChange={(e) => setSettingsPartnerP(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                          className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-2.5 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                         >
                           <option value="third">名字</option>
                           <option value="first">我</option>
@@ -1423,11 +1422,11 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       </div>
 
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-500 block">我 (主角/用户) 的人称</span>
+                        <span className="text-xs text-[#8E8E93] block">我（主角/用户）的人称</span>
                         <select
                           value={settingsUserP}
                           onChange={(e) => setSettingsUserP(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                          className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-2.5 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                         >
                           <option value="first">我</option>
                           <option value="second">你</option>
@@ -1436,9 +1435,12 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       </div>
                     </div>
                   </div>
+                  </section>
 
                   {/* Style Presets */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">文风设置</h4>
+                  <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
                     <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">自定义剧本文风设定</label>
                     <div className="space-y-1">
                       <span className="text-[10px] text-slate-400 block font-medium">快捷文风预设</span>
@@ -1454,7 +1456,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                             setSettingsStylePromptContent(selId === "none" ? "" : matched.description);
                           }
                         }}
-                        className="min-w-0 flex-1 bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                        className="min-w-0 flex-1 rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-2.5 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                       >
                         {[...DEFAULT_STYLE_PRESETS.slice(0, 1), ...customPresets].map(p => (
                           <option key={p.id} value={p.id}>
@@ -1470,7 +1472,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                           setSettingsStylePromptContent("");
                         }}
                         aria-label="新建文风预设"
-                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-slate-200 bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#F0F0F0] bg-[#F7F7F9] text-[#111111] transition-colors hover:bg-[#EFEFF1]"
                       >
                         <Plus size={18} />
                       </button>
@@ -1479,14 +1481,14 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                         onClick={handleDeleteCustomPreset}
                           disabled={!hasSelectedCustomPreset}
                         aria-label="删除当前文风预设"
-                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-rose-100 bg-rose-50 text-rose-500 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-35"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-rose-100 bg-rose-50 text-rose-500 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-35"
                       >
                         <Trash2 size={17} />
                       </button>
                       </div>
                     </div>
 
-                    <div className="space-y-2 pt-1.5 border-t border-slate-100">
+                    <div className="space-y-2 pt-3 border-t border-[#F0F0F0]">
                       <div className="space-y-1">
                         <span className="text-[10px] text-slate-500 block">文风名称</span>
                         <input
@@ -1497,7 +1499,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                             setSettingsStylePresetId("custom_edit");
                           }}
                           placeholder="例如: 刀刀见血 / 王家卫风..."
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                          className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-3 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                         />
                       </div>
                       
@@ -1511,7 +1513,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                           }}
                           placeholder="描述你想要的语言笔触，例：充满电影感、留白极多，使用短句、充满孤寂感。角色说话前会微眯眼睛等..."
                           rows={3}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                          className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-3 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                         />
                       </div>
 
@@ -1519,16 +1521,19 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                         <button
                           type="button"
                           onClick={handleCreateCustomPreset}
-                          className="w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-[16px] border border-indigo-200/50 transition-all text-[10px]"
+                          className="w-full rounded-xl bg-[#111111] py-3 text-xs font-semibold text-white transition-colors hover:bg-black"
                         >
                           💾 保存当前文风为自定义永久预设
                         </button>
                       )}
                     </div>
                   </div>
+                  </section>
 
                   {/* Custom CSS */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">自定义美化</h4>
+                  <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">线下卡片美化 (自定义 CSS)</label>
                       <button
@@ -1569,18 +1574,19 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
 .offline-message-list { ... }
 .offline-msg-content { ... }`}
                       rows={5}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-[8px] px-3 py-2 text-emerald-400 font-mono text-[10px] focus:outline-none focus:border-indigo-500"
+                      className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-3 py-2 font-mono text-xs text-[#111111] outline-none focus:border-slate-400"
                     />
                     <p className="text-[10px] text-slate-400">在这里输入 CSS 样式规则，点击保存后即可在当前剧本空间内实时渲染应用！</p>
                   </div>
+                  </section>
                 </div>
 
                 {/* Footer buttons */}
-                <div className="p-4 bg-white border-t border-slate-100 flex gap-3 shrink-0">
+                <div className="p-4 bg-white border-t border-[#F0F0F0] shrink-0 space-y-2">
                   <button
                     type="button"
                     onClick={() => setIsSettingsOpen(false)}
-                    className="flex-1 py-3 rounded-[16px] border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold text-xs transition-colors"
+                    className="w-full rounded-xl border border-[#F0F0F0] bg-white py-3 text-xs font-semibold text-[#111111] transition-colors hover:bg-[#F7F7F9]"
                   >
                     取消
                   </button>
@@ -1590,7 +1596,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       handleSaveSettings();
                       setIsSettingsOpen(false);
                     }}
-                    className="flex-1 py-3 rounded-[16px] bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-colors shadow-md"
+                    className="w-full rounded-xl bg-[#111111] py-3 text-xs font-semibold text-white transition-colors hover:bg-black"
                   >
                     保存设置
                   </button>
