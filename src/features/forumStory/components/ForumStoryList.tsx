@@ -1,4 +1,4 @@
-import { BookOpen, ChevronRight } from "lucide-react";
+import { MessageCircle, ThumbsUp, UserRound } from "lucide-react";
 import type { ForumStoryUiListItem } from "../forumStoryUiData";
 
 const formatStoryTime = (timestamp: number): string => {
@@ -13,12 +13,6 @@ const formatStoryTime = (timestamp: number): string => {
   });
 };
 
-const statusClass: Record<ForumStoryUiListItem["status"], string> = {
-  连载中: "bg-emerald-50 text-emerald-600",
-  等待更新: "bg-amber-50 text-amber-600",
-  完结: "bg-slate-100 text-slate-500",
-};
-
 export function ForumStoryList({
   items,
   onOpen,
@@ -28,41 +22,30 @@ export function ForumStoryList({
 }) {
   if (items.length === 0) return null;
   return (
-    <section data-testid="forum-story-list" className="mx-4 mt-3 overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white shadow-sm">
-      <div className="flex items-center gap-2 border-b border-indigo-100 px-4 py-3">
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
-          <BookOpen className="h-4 w-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-bold text-slate-800">故事论坛</h2>
-          <p className="mt-0.5 text-[10px] text-slate-400">连续事件与楼层讨论</p>
-        </div>
-        <span className="text-[10px] text-slate-400">{items.length} 个故事</span>
-      </div>
-      <div>
-        {items.map((item) => (
-          <button
-            key={item.storyId}
-            type="button"
-            data-testid={`forum-story-${item.storyId}`}
-            onClick={() => onOpen(item.storyId)}
-            className="flex w-full items-center gap-3 border-b border-indigo-50 px-4 py-3.5 text-left transition-colors last:border-b-0 hover:bg-white/80 active:bg-white"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-2">
-                <strong className="truncate text-[13px] text-slate-800">{item.title}</strong>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-medium ${statusClass[item.status]}`}>
-                  {item.status}
-                </span>
-              </span>
-              <span className="mt-1 block text-[10px] text-slate-400">
-                第 {item.currentEpisode} 集 · 更新于 {formatStoryTime(item.updatedAt)}
-              </span>
-            </span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+    <section data-testid="forum-story-list" className="mt-3 border-y border-slate-100 bg-white">
+      {items.map((item) => (
+        <article key={item.storyId} data-testid={`forum-story-${item.storyId}`} className="border-b border-slate-100 px-4 py-4 last:border-b-0">
+          <button type="button" onClick={() => onOpen(item.storyId)} className="block w-full text-left active:opacity-70" aria-label={`查看帖子：${item.title}`}>
+            <div className="flex items-center gap-2.5">
+              {item.authorAvatar ? (
+                <img src={item.authorAvatar} alt="" className="h-9 w-9 rounded-full bg-slate-100 object-cover" />
+              ) : (
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100"><UserRound className="h-4 w-4 text-slate-400" /></span>
+              )}
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-semibold text-slate-800">{item.authorName}</span>
+                <time className="text-[10px] text-slate-400">{formatStoryTime(item.updatedAt)}</time>
+              </div>
+            </div>
+            <h2 className="mt-3 line-clamp-2 text-[16px] font-bold leading-6 text-slate-900">{item.title}</h2>
+            <p className="mt-1.5 line-clamp-3 whitespace-pre-wrap break-words text-[13px] leading-5 text-slate-600">{item.body}</p>
           </button>
-        ))}
-      </div>
+          <div className="mt-3 flex items-center gap-5 text-[11px] text-slate-400">
+            <span className="inline-flex items-center gap-1"><ThumbsUp className="h-3.5 w-3.5" />{item.likeCount}</span>
+            <span className="inline-flex items-center gap-1"><MessageCircle className="h-3.5 w-3.5" />{item.replyCount}</span>
+          </div>
+        </article>
+      ))}
     </section>
   );
 }

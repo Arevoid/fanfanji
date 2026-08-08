@@ -114,10 +114,11 @@ values.set("phone_forum_threads", JSON.stringify([{ id: "ordinary-thread", title
 
 const items = listForumStoryUiItems();
 assert.deepEqual(items.map((item) => item.storyId), ["story-b", "story-a"]);
-assert.equal(items[0].status, "等待更新");
-assert.equal(items[1].status, "连载中");
 assert.equal(items[1].title, "story-a public story");
-assert.equal(items[1].currentEpisode, 1);
+assert.equal(items[1].body, "story-a initial post");
+assert.equal(items[1].authorName, "匿名楼主");
+assert.equal(items[1].likeCount, 0);
+assert.equal(items[1].replyCount, 1);
 
 const storyAView = getForumStoryUiThread("story-a");
 assert.ok(storyAView);

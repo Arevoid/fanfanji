@@ -31,6 +31,7 @@ const AUTOMATIC_THREAD_SOURCES = new Set<ForumThread["source"]>([
 export const getForumBaselineLikeCount = (
   threadId: string,
   source: ForumThread["source"],
+  replyCount = 0,
 ): number => {
   if (!AUTOMATIC_THREAD_SOURCES.has(source)) return 0;
   let hash = 2166136261;
@@ -38,7 +39,21 @@ export const getForumBaselineLikeCount = (
     hash ^= character.charCodeAt(0);
     hash = Math.imul(hash, 16777619);
   }
-  return (hash >>> 0) % 10_000;
+  const normalizedReplyCount = Math.max(0, Math.floor(replyCount));
+  const [minimum, maximum] = normalizedReplyCount <= 5
+    ? [0, 200]
+    : normalizedReplyCount <= 10
+      ? [200, 350]
+      : normalizedReplyCount <= 20
+        ? [350, 1000]
+        : normalizedReplyCount <= 30
+          ? [1000, 2000]
+          : normalizedReplyCount <= 40
+            ? [2000, 3000]
+            : normalizedReplyCount <= 50
+              ? [3000, 4000]
+              : [3000, 5000];
+  return minimum + (hash >>> 0) % (maximum - minimum + 1);
 };
 
 const getLatestLiveReplyAt = (
@@ -64,11 +79,14 @@ export const normalizeForumThreadEngagement = (
   threads: readonly ForumThread[],
   replies: readonly ForumReply[],
 ): ForumThread[] => threads.map((thread) => {
-  const latestReplyAt = getLatestLiveReplyAt(thread, replies);
+  const liveReplies = replies.filter((reply) => reply.threadId === thread.id
+    && reply.ownerIdentityId === thread.ownerIdentityId
+    && !reply.isDeleted);
+  const latestReplyAt = liveReplies.reduce((latest, reply) => Math.max(latest, reply.occurredAt), 0);
   const lastActivityAt = Math.max(thread.createdAt, latestReplyAt);
-  const baseLikeCount = thread.baseLikeCount > 0
-    ? thread.baseLikeCount
-    : getForumBaselineLikeCount(thread.id, thread.source);
+  const baseLikeCount = AUTOMATIC_THREAD_SOURCES.has(thread.source)
+    ? getForumBaselineLikeCount(thread.id, thread.source, liveReplies.length)
+    : thread.baseLikeCount;
   return {
     ...thread,
     baseLikeCount,

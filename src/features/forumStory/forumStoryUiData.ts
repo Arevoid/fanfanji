@@ -1,25 +1,26 @@
 import type {
   ForumStory,
-  ForumStoryStatus,
   StoryCharacterId,
   StoryEvent,
   StoryThread,
 } from "../../domain/forumStory/forumStoryTypes";
 import { ForumStoryRepository } from "./forumStoryRepository";
 import { StoryEventRepository } from "./storyEventRepository";
+import { StoryCharacterRepository } from "./storyCharacterRepository";
 import { StoryForumReplyRepository, type StoryForumReply } from "./storyReplyRepository";
 import { StoryThreadRepository } from "./storyThreadRepository";
 import { StoryUpdateRepository } from "./storyUpdateRepository";
-
-export type ForumStoryUiStatus = "连载中" | "等待更新" | "完结";
 
 export interface ForumStoryUiListItem {
   storyId: string;
   threadId: string;
   title: string;
-  status: ForumStoryUiStatus;
+  body: string;
+  authorName: string;
+  authorAvatar?: string;
   updatedAt: number;
-  currentEpisode: number;
+  likeCount: number;
+  replyCount: number;
 }
 
 export interface ForumStoryUiCharacter {
@@ -53,12 +54,6 @@ export interface ForumStoryUiThread {
   updates: readonly ForumStoryUiUpdate[];
 }
 
-const statusLabel = (status: ForumStoryStatus): ForumStoryUiStatus => {
-  if (status === "completed") return "完结";
-  if (status === "waiting_update") return "等待更新";
-  return "连载中";
-};
-
 const selectMainThread = (story: ForumStory): StoryThread | undefined => {
   const threads = StoryThreadRepository.listThreads(story.id);
   return threads.find((thread) => thread.id === story.mainThreadId) || threads[0];
@@ -70,13 +65,19 @@ export const listForumStoryUiItems = (): ForumStoryUiListItem[] =>
     .map((story) => {
       const thread = selectMainThread(story);
       if (!thread) return undefined;
+      const author = thread.authorCharacterId
+        ? StoryCharacterRepository.getStoryCharactersByStoryId(story.id).find((character) => character.id === thread.authorCharacterId)
+        : undefined;
       return {
         storyId: story.id,
         threadId: thread.id,
         title: story.title || thread.title,
-        status: statusLabel(story.status),
+        body: thread.initialContent,
+        authorName: author?.identity.name || "匿名楼主",
+        ...(author?.identity.avatar ? { authorAvatar: author.identity.avatar } : {}),
         updatedAt: Math.max(story.updatedAt, thread.updatedAt),
-        currentEpisode: story.currentEpisode,
+        likeCount: thread.likeCount || 0,
+        replyCount: StoryForumReplyRepository.listReplies(story.id, thread.id).length,
       };
     })
     .filter((item): item is ForumStoryUiListItem => Boolean(item))

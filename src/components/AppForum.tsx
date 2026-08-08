@@ -16,6 +16,8 @@ import {
   History,
   Pencil,
   X,
+  Download,
+  Upload,
 } from "lucide-react";
 import type {
   Character,
@@ -198,7 +200,7 @@ export default function AppForum({
   );
   const { threads, replies, shares, generationTasks, profiles, visitHistory, likeHistory, notifications, dmConversations, dmMessages, dmTasks } = forumSnapshot;
   const [rootTab, setRootTab] = useState<ForumRootTab>("home");
-  const [secondaryPage, setSecondaryPage] = useState<"history" | "likes" | "notifications" | "profile" | null>(null);
+  const [secondaryPage, setSecondaryPage] = useState<"history" | "likes" | "notifications" | "profile" | "community-npcs" | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [activeStoryId, setActiveStoryId] = useState<string | null>(null);
   const [readonlySnapshot, setReadonlySnapshot] = useState<ForumThreadPublicSnapshot | null>(null);
@@ -237,6 +239,9 @@ export default function AppForum({
   const [communityNpcName, setCommunityNpcName] = useState("");
   const [communityNpcAvatar, setCommunityNpcAvatar] = useState("");
   const [communityNpcPersona, setCommunityNpcPersona] = useState("");
+  const [showCommunityNpcMenu, setShowCommunityNpcMenu] = useState(false);
+  const [showCommunityNpcExport, setShowCommunityNpcExport] = useState(false);
+  const [selectedCommunityNpcIds, setSelectedCommunityNpcIds] = useState<string[]>([]);
   const [forumStoryRevision, setForumStoryRevision] = useState(0);
   const [isStoryUpdating, setIsStoryUpdating] = useState(false);
   const replyLockRef = useRef(false);
@@ -245,6 +250,8 @@ export default function AppForum({
   const refreshLockRef = useRef(false);
   const threadRefreshLockRef = useRef(false);
   const homeMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const communityNpcMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const communityNpcImportRef = useRef<HTMLInputElement | null>(null);
   const newestReplyRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -906,6 +913,81 @@ export default function AppForum({
     setCommunityNpcRevision((value) => value + 1);
   };
 
+  const toggleCommunityNpcExport = (npcId: string) => {
+    setSelectedCommunityNpcIds((current) => current.includes(npcId)
+      ? current.filter((id) => id !== npcId)
+      : [...current, npcId]);
+  };
+
+  const exportCommunityNpcs = () => {
+    const cards = communityNpcs
+      .filter((npc) => selectedCommunityNpcIds.includes(npc.id))
+      .map(({ displayName, avatar, personaSummary, publicStyle, enabled }) => ({
+        displayName,
+        ...(avatar ? { avatar } : {}),
+        personaSummary,
+        publicStyle,
+        enabled,
+      }));
+    if (cards.length === 0) {
+      setError("请至少选择一个论坛 NPC 角色卡。");
+      return;
+    }
+    const blob = new Blob([JSON.stringify({ format: "forum-community-npc/v1", cards }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `论坛NPC角色卡-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setShowCommunityNpcExport(false);
+    setNotice(`已导出 ${cards.length} 个论坛 NPC 角色卡。`);
+  };
+
+  const importCommunityNpcs = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setError("");
+    let imported = 0;
+    try {
+      for (const file of Array.from(files)) {
+        const raw = JSON.parse(await file.text()) as unknown;
+        const candidates = Array.isArray(raw)
+          ? raw
+          : raw && typeof raw === "object" && Array.isArray((raw as { cards?: unknown }).cards)
+            ? (raw as { cards: unknown[] }).cards
+            : [raw];
+        for (const candidate of candidates) {
+          if (!candidate || typeof candidate !== "object") continue;
+          const card = candidate as Record<string, unknown>;
+          const displayName = typeof card.displayName === "string" ? card.displayName.trim().slice(0, 40) : "";
+          const personaSummary = typeof card.personaSummary === "string" ? card.personaSummary.trim().slice(0, 300) : "";
+          if (!displayName || !personaSummary) continue;
+          const npc = createForumCommunityNpc({
+            id: createId("forum-community-npc"),
+            ownerIdentityId: activeIdentity.id,
+            displayName,
+            ...(typeof card.avatar === "string" && card.avatar.trim() ? { avatar: card.avatar.trim() } : {}),
+            personaSummary,
+            publicStyle: typeof card.publicStyle === "string" ? card.publicStyle.trim().slice(0, 300) : personaSummary,
+            now: Date.now(),
+          });
+          const saved = upsertForumCommunityNpc({
+            ...npc,
+            enabled: typeof card.enabled === "boolean" ? card.enabled : true,
+          });
+          if (saved.success) imported += 1;
+        }
+      }
+      if (!imported) throw new Error("未找到可导入的论坛 NPC 角色卡。");
+      setCommunityNpcRevision((value) => value + 1);
+      setNotice(`已导入 ${imported} 个论坛 NPC 角色卡。`);
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "论坛 NPC 导入失败。");
+    }
+  };
+
   const handleCreateThread = () => {
     const title = postTitle.trim();
     const body = postBody.trim();
@@ -1105,7 +1187,7 @@ export default function AppForum({
           <ChevronLeft className="h-5 w-5" />
         </button>
         <h1 className="absolute left-1/2 -translate-x-1/2 text-[17px] font-bold">
-          {activeDmConversation ? activeDmConversation.participantPublicSnapshot.displayName : activeStoryId ? "故事论坛" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : rootTab === "mine" ? "我的" : rootTab === "dm" ? "私信" : "论坛"}
+          {activeDmConversation ? activeDmConversation.participantPublicSnapshot.displayName : activeStoryId ? "故事论坛" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : secondaryPage === "community-npcs" ? "论坛 NPC" : rootTab === "mine" ? "我的" : rootTab === "dm" ? "私信" : "论坛"}
         </h1>
         {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && !activeDmConversation && rootTab === "home" ? (
           <button
@@ -1119,6 +1201,16 @@ export default function AppForum({
             {isRefreshing
               ? <LoaderCircle className="h-4 w-4 animate-spin" />
               : <Plus className="h-4 w-4" />}
+          </button>
+        ) : secondaryPage === "community-npcs" ? (
+          <button
+            ref={communityNpcMenuAnchorRef}
+            type="button"
+            onClick={() => setShowCommunityNpcMenu(true)}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-950 text-white active:scale-95"
+            aria-label="论坛 NPC 操作"
+          >
+            <Plus className="h-4 w-4" />
           </button>
         ) : activeThread ? (
           <button
@@ -1168,6 +1260,19 @@ export default function AppForum({
         </button>
       </PopoverMenu>
 
+      <PopoverMenu
+        open={showCommunityNpcMenu}
+        onClose={() => setShowCommunityNpcMenu(false)}
+        anchorRef={communityNpcMenuAnchorRef}
+        placement="bottom-end"
+        ariaLabel="论坛 NPC 操作"
+      >
+        <button type="button" role="menuitem" onClick={() => { setShowCommunityNpcMenu(false); setShowCommunityNpcComposer(true); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"><Plus className="h-3.5 w-3.5" />新建 NPC</button>
+        <button type="button" role="menuitem" onClick={() => { setShowCommunityNpcMenu(false); communityNpcImportRef.current?.click(); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"><Upload className="h-3.5 w-3.5" />导入角色卡</button>
+        <button type="button" role="menuitem" disabled={communityNpcs.length === 0} onClick={() => { setShowCommunityNpcMenu(false); setSelectedCommunityNpcIds(communityNpcs.map((npc) => npc.id)); setShowCommunityNpcExport(true); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"><Download className="h-3.5 w-3.5" />导出角色卡</button>
+      </PopoverMenu>
+      <input ref={communityNpcImportRef} type="file" accept="application/json,.json" multiple className="hidden" onChange={(event) => { void importCommunityNpcs(event.target.files); event.target.value = ""; }} />
+
       {error && (
         <div role="alert" className="mx-4 mt-3 shrink-0 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">
           {error}
@@ -1205,6 +1310,38 @@ export default function AppForum({
           {secondaryPage === "history" && <><HistoryList title="浏览历史" empty="暂无浏览记录" items={visitHistory} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setReadonlySnapshot(item.publicSnapshot); }} /><button type="button" onClick={() => { if (window.confirm("清空全部浏览历史？")) commitForumMutation({ visitHistory: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空浏览历史</button></>}
           {secondaryPage === "likes" && <><HistoryList title="我的点赞" empty="暂无点赞记录" items={likeHistory} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setReadonlySnapshot(item.publicSnapshot.thread); }} /><button type="button" onClick={() => { if (window.confirm("清空全部点赞记录？")) commitForumMutation({ likeHistory: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空点赞记录</button></>}
           {secondaryPage === "notifications" && <><HistoryList title="消息提醒" empty="暂无新消息" items={notifications} onOpen={(item) => { if (item.type === "direct-message" && item.conversationId && dmConversations.some((conversation) => conversation.id === item.conversationId)) { setSecondaryPage(null); setRootTab("dm"); setActiveDmConversationId(item.conversationId); } else { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setNotice("原帖已删除或会话不可用"); } commitForumMutation({ notifications: notifications.map((value) => value.id === item.id ? { ...value, readAt: Date.now() } : value) }); }} /><button type="button" onClick={() => { if (window.confirm("清空全部消息提醒？")) commitForumMutation({ notifications: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空消息提醒</button></>}
+          {secondaryPage === "community-npcs" && <>
+            <section className="rounded-2xl bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-bold text-slate-800">论坛专属 NPC</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-400">这些匿名网友只会在论坛中发帖或参与评论，不会关联真实角色、聊天、关系或记忆。</p>
+            </section>
+            {communityNpcs.length === 0 ? (
+              <section className="mt-3 rounded-2xl bg-white px-5 py-10 text-center shadow-sm">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100"><User className="h-5 w-5 text-slate-400" /></div>
+                <p className="mt-3 text-sm font-semibold text-slate-700">还没有论坛 NPC</p>
+                <p className="mt-1 text-xs text-slate-400">可通过右上角 + 新建或导入角色卡。</p>
+                <Button className="mt-5" size="sm" onClick={() => setShowCommunityNpcComposer(true)}>新建 NPC</Button>
+              </section>
+            ) : (
+              <section className="mt-3 grid gap-3">
+                {communityNpcs.map((npc) => (
+                  <article key={npc.id} className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      {npc.avatar ? <img src={npc.avatar} alt="" className="h-12 w-12 rounded-full bg-slate-100 object-cover" /> : <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100"><User className="h-5 w-5 text-slate-400" /></span>}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2"><h3 className="truncate text-sm font-bold text-slate-800">{npc.displayName}</h3><span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${npc.enabled ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>{npc.enabled ? "活跃" : "停用"}</span></div>
+                        <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-slate-500">{npc.personaSummary}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium">
+                      <button type="button" onClick={() => updateCommunityNpc(npc, { enabled: !npc.enabled })} className={npc.enabled ? "text-slate-600" : "text-emerald-600"}>{npc.enabled ? "设为停用" : "恢复活跃"}</button>
+                      <button type="button" onClick={() => { if (window.confirm(`删除论坛 NPC「${npc.displayName}」？`)) { removeForumCommunityNpc(activeIdentity.id, npc.id); setCommunityNpcRevision((value) => value + 1); } }} className="text-rose-500">删除</button>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            )}
+          </>}
         </main>
       ) : !activeThread && rootTab === "dm" ? (
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24"><ForumDmList conversations={dmConversations} messages={dmMessages} onOpen={(id) => setActiveDmConversationId(id)} /></main>
@@ -1217,18 +1354,11 @@ export default function AppForum({
             </button>
           </section>
           <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <div><h2 className="text-sm font-bold text-slate-800">论坛 NPC</h2><p className="mt-0.5 text-[10px] text-slate-400">仅在论坛内作为虚拟网友活跃，不会关联聊天或角色资料</p></div>
-              <button type="button" onClick={() => setShowCommunityNpcComposer(true)} className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white" aria-label="创建论坛 NPC"><Plus className="h-4 w-4" /></button>
-            </div>
-            {communityNpcs.length === 0 ? <p className="px-4 py-5 text-xs text-slate-400">还没有创建论坛 NPC；系统仍会使用随机论坛网友。</p> : communityNpcs.map((npc) => (
-              <div key={npc.id} className="flex items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-0">
-                {npc.avatar ? <img src={npc.avatar} alt="" className="h-9 w-9 rounded-full object-cover" /> : <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100"><User className="h-4 w-4 text-slate-400" /></span>}
-                <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-700">{npc.displayName}</p><p className="mt-0.5 line-clamp-1 text-[10px] text-slate-400">{npc.personaSummary}</p></div>
-                <button type="button" onClick={() => updateCommunityNpc(npc, { enabled: !npc.enabled })} className={`text-[11px] font-medium ${npc.enabled ? "text-emerald-600" : "text-slate-400"}`}>{npc.enabled ? "活跃" : "停用"}</button>
-                <button type="button" onClick={() => { removeForumCommunityNpc(activeIdentity.id, npc.id); setCommunityNpcRevision((value) => value + 1); }} className="text-[11px] text-rose-400">删除</button>
-              </div>
-            ))}
+            <button type="button" onClick={() => setSecondaryPage("community-npcs")} className="flex w-full items-center gap-3 px-4 py-4 text-left active:bg-slate-50">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100"><User className="h-4 w-4 text-slate-500" /></span>
+              <span className="min-w-0 flex-1"><strong className="block text-sm text-slate-800">论坛 NPC</strong><small className="mt-0.5 block text-[10px] text-slate-400">管理论坛专属虚拟网友角色卡</small></span>
+              <span className="text-xs text-slate-400">{communityNpcs.length}</span><span className="text-slate-300">›</span>
+            </button>
           </section>
           <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
             {[{ key: "history", label: "浏览历史", icon: History }, { key: "likes", label: "我的点赞", icon: ThumbsUp }, { key: "notifications", label: "消息提醒", icon: Bell }].map(({ key, label, icon: Icon }) => <button key={key} type="button" onClick={() => setSecondaryPage(key as "history" | "likes" | "notifications")} className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-4 text-left last:border-0"><Icon className="h-4 w-4 text-slate-500" /><span className="flex-1 text-sm">{label}</span>{key === "notifications" && notifications.some((item) => !item.readAt) && <span className="h-2 w-2 rounded-full bg-rose-500" />}</button>)}
@@ -1321,7 +1451,7 @@ export default function AppForum({
               </p>
                 </>;
               })()}
-              <div className="mt-4 grid grid-cols-4 items-center gap-1 border-t border-slate-100 pt-3">
+              <div className="mt-4 grid grid-cols-5 items-center gap-1 border-t border-slate-100 pt-3">
                 <button
                   type="button"
                   onClick={() => handleToggleThreadLike(activeThread.id)}
@@ -1348,6 +1478,16 @@ export default function AppForum({
                   <Share2 className="h-4 w-4" />
                   转发
                 </button>
+                {resolveForumDmActorFromPublicRecord({ ownerIdentityId: activeIdentity.id, thread: activeThread, relationships, characters }) ? (
+                  <button
+                    type="button"
+                    onClick={() => openDmFromRecord(activeThread)}
+                    className="inline-flex min-w-0 items-center justify-center gap-1 text-[11px] font-medium text-slate-500"
+                  >
+                    <Mail className="h-4 w-4" />
+                    私信
+                  </button>
+                ) : <span aria-hidden="true" />}
                 <button
                   type="button"
                   onClick={() => setDeleteTarget({ kind: "thread", threadId: activeThread.id })}
@@ -1356,27 +1496,6 @@ export default function AppForum({
                   <Trash2 className="h-3.5 w-3.5" />
                   删除
                 </button>
-              </div>
-              {resolveForumDmActorFromPublicRecord({ ownerIdentityId: activeIdentity.id, thread: activeThread, relationships, characters }) && (
-                <button type="button" onClick={() => openDmFromRecord(activeThread)} className="mt-3 text-[11px] font-medium text-slate-400">发送私信</button>
-              )}
-              <div className="mt-2 flex justify-end">
-                {(() => {
-                  const key = getTranslationKey("thread", activeThread.id);
-                  return <button
-                    type="button"
-                    disabled={translationLoadingIds[key]}
-                    onClick={() => void toggleTranslation({
-                      contentType: "thread",
-                      contentId: activeThread.id,
-                      title: activeThread.title,
-                      body: activeThread.body,
-                    })}
-                    className="text-[11px] font-medium text-slate-400 disabled:text-slate-300"
-                  >
-                    {translationLoadingIds[key] ? "翻译中…" : translatedContentIds[key] ? "查看原文" : "翻译"}
-                  </button>;
-                })()}
               </div>
             </article>
 
@@ -1646,6 +1765,34 @@ export default function AppForum({
           <label className="block text-xs font-semibold text-slate-600">名字<input value={communityNpcName} onChange={(event) => setCommunityNpcName(event.target.value)} maxLength={32} placeholder="例如：热心网友" className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none" /></label>
           <label className="block text-xs font-semibold text-slate-600">头像 URL（可选）<input value={communityNpcAvatar} onChange={(event) => setCommunityNpcAvatar(event.target.value)} maxLength={1000} placeholder="https://..." className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none" /></label>
           <label className="block text-xs font-semibold text-slate-600">简单人设<textarea value={communityNpcPersona} onChange={(event) => setCommunityNpcPersona(event.target.value)} maxLength={300} rows={4} placeholder="例如：爱帮新人答疑的夜猫子，开头常说“谢邀”" className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none" /></label>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        open={showCommunityNpcExport}
+        title="导出论坛 NPC 角色卡"
+        description="可多选角色卡导出；导出文件仅包含论坛专属身份与人设。"
+        onClose={() => setShowCommunityNpcExport(false)}
+        showCloseButton
+        footer={<><Button variant="secondary" onClick={() => setShowCommunityNpcExport(false)}>取消</Button><Button onClick={exportCommunityNpcs} disabled={selectedCommunityNpcIds.length === 0}>导出 {selectedCommunityNpcIds.length || ""} 个角色卡</Button></>}
+      >
+        <label className="flex cursor-pointer items-center gap-3 border-b border-slate-100 pb-3 text-sm font-semibold text-slate-700">
+          <input
+            type="checkbox"
+            checked={communityNpcs.length > 0 && selectedCommunityNpcIds.length === communityNpcs.length}
+            onChange={(event) => setSelectedCommunityNpcIds(event.target.checked ? communityNpcs.map((npc) => npc.id) : [])}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          全选
+        </label>
+        <div className="mt-2 space-y-1">
+          {communityNpcs.map((npc) => (
+            <label key={npc.id} className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-slate-50">
+              <input type="checkbox" checked={selectedCommunityNpcIds.includes(npc.id)} onChange={() => toggleCommunityNpcExport(npc.id)} className="h-4 w-4 rounded border-slate-300" />
+              {npc.avatar ? <img src={npc.avatar} alt="" className="h-9 w-9 rounded-full bg-slate-100 object-cover" /> : <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100"><User className="h-4 w-4 text-slate-400" /></span>}
+              <span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-700">{npc.displayName}</strong><small className="mt-0.5 block truncate text-[10px] text-slate-400">{npc.personaSummary}</small></span>
+            </label>
+          ))}
         </div>
       </BottomSheet>
 

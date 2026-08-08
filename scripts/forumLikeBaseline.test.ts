@@ -48,4 +48,16 @@ const liked = toggleForumThreadLike([normalizedOnce], normalizedOnce.id, normali
 assert.equal(liked.likedByIdentityIds.includes(normalizedOnce.ownerIdentityId), true);
 assert.equal(getForumLikeCount(liked), normalizedOnce.baseLikeCount + 1);
 
-console.log("PASS forum generated posts have stable baseline likes and user likes remain additive");
+const within = (value: number, minimum: number, maximum: number) =>
+  assert.ok(value >= minimum && value <= maximum, `${value} should be within ${minimum}-${maximum}`);
+
+within(getForumBaselineLikeCount("reply-band-0", "ai-virtual", 0), 0, 200);
+within(getForumBaselineLikeCount("reply-band-5", "ai-virtual", 5), 0, 200);
+within(getForumBaselineLikeCount("reply-band-6", "ai-virtual", 6), 200, 350);
+within(getForumBaselineLikeCount("reply-band-10", "ai-virtual", 10), 200, 350);
+within(getForumBaselineLikeCount("reply-band-20", "ai-virtual", 20), 350, 1000);
+within(getForumBaselineLikeCount("reply-band-30", "ai-virtual", 30), 1000, 2000);
+within(getForumBaselineLikeCount("reply-band-40", "ai-virtual", 40), 2000, 3000);
+within(getForumBaselineLikeCount("reply-band-55", "ai-virtual", 55), 3000, 5000);
+
+console.log("PASS forum generated posts use comment-aligned baseline likes and user likes remain additive");
