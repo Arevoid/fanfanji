@@ -2605,21 +2605,6 @@ export default function AppSettings({
                     </div>
                   </div>
 
-                  {/* 自定义 CSS */}
-                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <span className="text-xs font-bold text-slate-700">旧版气泡 CSS（兼容）</span>
-                    <textarea
-                      rows={3}
-                      value={bubbleCss}
-                      onChange={(e) => {
-                        setBubbleCss(e.target.value);
-                        handleSave({ bubbleCss: e.target.value });
-                      }}
-                      placeholder={`.chat-bubble-self { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%) !important; }`}
-                      className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
-                    />
-                  </div>
-
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
                     <span className="text-xs font-bold text-slate-700">全局聊天样式 CSS</span>
                     <p className="text-[10px] text-slate-400 leading-relaxed">用于修改所有聊天页面视觉效果，包括背景、导航、气泡、消息、输入区域等。</p>

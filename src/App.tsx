@@ -198,16 +198,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   wallpaper: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
   customIcons: {},
   globalChatStylePreset: "default",
-  bubbleCss: `.chat-bubble-self {
-  background: #18181b !important;
-  color: #ffffff !important;
-  border-radius: 18px 18px 2px 18px !important;
-}
-.chat-bubble-other {
-  background: #f4f4f5 !important;
-  color: #18181b !important;
-  border-radius: 18px 18px 18px 2px !important;
-}`,
+  bubbleCss: "",
   globalCss: ``,
   chatGlobalCSS: ``,
   chatIcons: {},
@@ -2855,7 +2846,6 @@ export default function App() {
           cursor: pointer !important;
         }
 
-        ${settings.bubbleCss || ""}
         ${settings.globalCss || ""}
         @keyframes slide-up {
           from { transform: translateY(100%); opacity: 0; }

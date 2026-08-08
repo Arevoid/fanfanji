@@ -6635,6 +6635,26 @@ ${instructionsPrompt}`;
                 }
               `}
 
+              /* The persisted chat controls are the default visual authority
+                 whenever no user stylesheet is active.  This deliberately
+                 overrides only the historical built-in bubble CSS, while
+                 user-authored chat CSS still wins through its later scoped
+                 stylesheet. */
+              ${!hasUserCustomChatCss && settings.selfBubbleRadius !== undefined ? `
+                #conv-screen .chat-bubble-self,
+                #conv-screen .transfer-card,
+                #conv-screen .voice-message-bar.chat-bubble-self {
+                  border-radius: ${settings.selfBubbleRadius}px !important;
+                }
+              ` : ""}
+              ${!hasUserCustomChatCss && settings.otherBubbleRadius !== undefined ? `
+                #conv-screen .chat-bubble-other,
+                #conv-screen .received-transfer-card,
+                #conv-screen .voice-message-bar.chat-bubble-other {
+                  border-radius: ${settings.otherBubbleRadius}px !important;
+                }
+              ` : ""}
+
               ${settings.otherBubbleBg ? `
                 #conv-screen .chat-bubble-other,
                 #conv-screen .received-transfer-card,
@@ -8514,7 +8534,7 @@ ${instructionsPrompt}`;
                 const typingName = typingChar.remark || typingChar.name;
                 return (
                   <div className={`w-full flex flex-col items-start ${isTypingConsecutive ? "mt-1.5" : "mt-4.5"} cv-msg-row message message-container`}>
-                    {!isTypingConsecutive && (
+                    {!settings.hideNicknames && (
                       <div className="flex items-center gap-2.5 mb-1.5 select-none">
                         <RenderAvatar 
                           src={typingChar.avatar} 
@@ -8529,13 +8549,13 @@ ${instructionsPrompt}`;
                         </div>
                       </div>
                     )}
-                    <div className="max-w-[85%]">
+                    {settings.hideNicknames && <div className="max-w-[85%]">
                       <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 shadow-sm text-xs flex items-center space-x-1 chat-bubble-other message-bubble">
                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                       </div>
-                    </div>
+                    </div>}
                   </div>
                 );
               })()
