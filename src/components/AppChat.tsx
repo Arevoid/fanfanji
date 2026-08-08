@@ -29,7 +29,8 @@ import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } fro
 import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
 import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
 import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
-import { buildChatPromptContext, formatChatPromptContext } from "../features/characterCognitive/promptAdapters/chatPromptAdapter";
+import { buildChatPromptContext, formatChatPromptContext, formatConversationStateGuidance } from "../features/characterCognitive/promptAdapters/chatPromptAdapter";
+import { buildConversationState } from "../features/chat/services/conversationState";
 import { buildRelationMusicContext } from "../domain/prompt/musicContext";
 import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
@@ -3894,6 +3895,12 @@ ${turnSettings.disableBracketActions
         })
         : undefined;
       const cognitivePromptBlock = formatChatPromptContext(chatPromptContext);
+      // Conversation flow is a request-time projection of the current online
+      // thread. Keep it separate from Memory/Relationship/Truth data and do
+      // not apply it to immersive offline screenplay generation.
+      const conversationStatePrompt = !isOfflineModeActive && !activeCharacter.isGroupChat
+        ? formatConversationStateGuidance(buildConversationState(finalMsgs, activeChatCharId, Math.min(limit, 12)))
+        : "";
       const musicContext = activeRelationship && userMsg
         ? buildRelationMusicContext({
           userText: userMsg.content,
@@ -3947,6 +3954,7 @@ ${turnSettings.disableBracketActions
 
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
+      if (conversationStatePrompt) assembledInstructions.push(conversationStatePrompt);
       if (relationshipContext) assembledInstructions.push(relationshipContext);
       if (musicContext) assembledInstructions.push(musicContext);
       if (forumContext) assembledInstructions.push(forumContext);
