@@ -12,7 +12,6 @@ import {
   Trash2,
   User,
   Bell,
-  Mail,
   History,
   Pencil,
   X,
@@ -21,8 +20,6 @@ import {
 } from "lucide-react";
 import type {
   Character,
-  ForumRootTab,
-  ForumDmConversation as ForumDmConversationType,
   ForumCommunityNpc,
   ForumGenerationTask,
   ForumReply,
@@ -102,10 +99,6 @@ import {
   removeForumCommunityNpc,
   upsertForumCommunityNpc,
 } from "../core/storage/repositories/forumCommunityNpcRepository";
-import { ForumDmList } from "../features/forum/components/ForumDmList";
-import { ForumDmConversation } from "../features/forum/components/ForumDmConversation";
-import { appendForumDmMessage, deleteForumDmConversation, markForumDmRead, openForumDmConversation, resolveForumDmActorFromPublicRecord } from "../domain/forum/forumDmData";
-import { requestForumDmReply } from "../features/forum/services/forumDmService";
 import { listForumStoryUiItems } from "../features/forumStory/forumStoryUiData";
 import { ForumStoryList } from "../features/forumStory/components/ForumStoryList";
 import { ForumStoryThreadView } from "../features/forumStory/components/ForumStoryThreadView";
@@ -120,6 +113,7 @@ import { getForumStoryUiThread } from "../features/forumStory/forumStoryUiData";
 import type { ForumStoryUiReply } from "../features/forumStory/forumStoryUiData";
 import { StoryForumReplyRepository } from "../features/forumStory/storyReplyRepository";
 import { StoryEventRepository } from "../features/forumStory/storyEventRepository";
+import { ForumStoryRepository } from "../features/forumStory/forumStoryRepository";
 import { FORUM_HOME_PAGE_SIZE, FORUM_REPLY_PAGE_SIZE } from "../domain/forum/forumCapacity";
 
 interface AppForumProps {
@@ -201,8 +195,8 @@ export default function AppForum({
     () => getForumSnapshotForIdentity(activeIdentity.id),
     () => getForumSnapshotForIdentity(activeIdentity.id),
   );
-  const { threads, replies, shares, generationTasks, profiles, visitHistory, likeHistory, notifications, dmConversations, dmMessages, dmTasks } = forumSnapshot;
-  const [rootTab, setRootTab] = useState<ForumRootTab>("home");
+  const { threads, replies, shares, generationTasks, profiles, visitHistory, likeHistory, notifications } = forumSnapshot;
+  const [rootTab, setRootTab] = useState<"home" | "mine">("home");
   const [secondaryPage, setSecondaryPage] = useState<"history" | "likes" | "notifications" | "profile" | "community-npcs" | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [activeStoryId, setActiveStoryId] = useState<string | null>(null);
@@ -229,10 +223,6 @@ export default function AppForum({
   const [profileName, setProfileName] = useState("");
   const [profileBio, setProfileBio] = useState("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
-  const [activeDmConversationId, setActiveDmConversationId] = useState<string | null>(null);
-  const [dmBody, setDmBody] = useState("");
-  const [isDmSending, setIsDmSending] = useState(false);
-  const [showDeleteDmConfirmation, setShowDeleteDmConfirmation] = useState(false);
   const [visibleThreadCount, setVisibleThreadCount] = useState(FORUM_HOME_PAGE_SIZE);
   const [visibleReplyCount, setVisibleReplyCount] = useState(FORUM_REPLY_PAGE_SIZE);
   const [translatedContentIds, setTranslatedContentIds] = useState<Record<string, boolean>>({});
@@ -264,7 +254,6 @@ export default function AppForum({
   );
   const forumStoryItems = useMemo(() => listForumStoryUiItems(), [forumStoryRevision]);
   const activeThread = identityThreads.find((thread) => thread.id === activeThreadId);
-  const activeDmConversation = dmConversations.find((conversation) => conversation.id === activeDmConversationId);
   const activeProfile = profiles.find((profile) => profile.ownerIdentityId === activeIdentity.id) || createForumProfile(activeIdentity, 0);
   const forumProfileAvatarOverrides = useMemo(
     () => profileAvatarUrl ? { [activeIdentity.id]: profileAvatarUrl } : {},
@@ -337,10 +326,6 @@ export default function AppForum({
     const unread = notifications.filter((item) => item.threadId === activeThreadId && !item.readAt);
     if (unread.length) commitForumMutation({ notifications: notifications.map((item) => item.threadId === activeThreadId ? { ...item, readAt: Date.now() } : item) });
   }, [activeThreadId, notifications]);
-
-  useEffect(() => {
-    if (activeDmConversationId) commitForumMutation({ dmConversations: markForumDmRead(dmConversations, activeDmConversationId) });
-  }, [activeDmConversationId]);
 
   useEffect(() => {
     setTranslatedContentIds({});
@@ -595,6 +580,41 @@ export default function AppForum({
     }).catch(() => undefined);
   };
 
+  const likeForumStoryReply = (storyId: string, replyId: string) => {
+    const view = getForumStoryUiThread(storyId);
+    if (!view) return;
+    try {
+      ForumStoryEngagementService.addLike({ storyId, threadId: view.thread.id, replyId });
+      setForumStoryRevision((revision) => revision + 1);
+    } catch (storyError) {
+      setError(storyError instanceof Error ? storyError.message : "故事评论点赞失败");
+    }
+  };
+
+  const handleForumStoryUtility = async (
+    action: "share" | "delete" | "translate",
+    storyId: string,
+    reply?: ForumStoryUiReply,
+  ) => {
+    const view = getForumStoryUiThread(storyId);
+    if (!view) return;
+    if (action === "share") {
+      const text = `${view.thread.title}\n${view.thread.initialContent}`;
+      try { await navigator.clipboard?.writeText(text); setNotice("帖子内容已复制，可转发给朋友。"); }
+      catch { setNotice("当前浏览器不支持复制，请手动选择帖子内容。") }
+      return;
+    }
+    if (action === "delete" && !reply) {
+      if (!window.confirm("删除这条故事帖子？已生成的故事记录不会进入普通论坛。")) return;
+      if (!ForumStoryRepository.deleteStory(storyId).success) { setError("故事帖子删除失败"); return; }
+      setActiveStoryId(null);
+      setForumStoryRevision((revision) => revision + 1);
+      return;
+    }
+    if (action === "delete") { setNotice("故事评论为不可变楼层记录，暂不支持删除。") }
+    else { setNotice("故事帖子使用原文展示，暂不需要翻译。") }
+  };
+
   const generateInitialReplies = async (thread: ForumThread) => {
     setWaitingReplyThreadIds((ids) => [...new Set([...ids, thread.id])]);
     try {
@@ -804,7 +824,6 @@ export default function AppForum({
   };
 
   const handleBack = () => {
-    if (activeDmConversationId) { setActiveDmConversationId(null); setDmBody(""); return; }
     if (activeStoryId) { setActiveStoryId(null); setError(""); setNotice(""); return; }
     if (activeThreadId || readonlySnapshot) {
       setActiveThreadId(null);
@@ -819,46 +838,6 @@ export default function AppForum({
     if (secondaryPage) { setSecondaryPage(null); return; }
     if (rootTab === "mine") { setRootTab("home"); return; }
     onClose();
-  };
-
-  const openDmFromRecord = (thread?: ForumThread, reply?: ForumReply) => {
-    const resolved = resolveForumDmActorFromPublicRecord({ ownerIdentityId: activeIdentity.id, thread, reply, relationships, characters });
-    if (!resolved) { setError("该作者暂不支持论坛私信"); return; }
-    const opened = openForumDmConversation({ ownerIdentityId: activeIdentity.id, conversations: dmConversations, actor: resolved.actor, publicAuthor: resolved.publicAuthor, ...(thread ? { originThreadId: thread.id } : {}), ...(reply ? { originReplyId: reply.id } : {}) });
-    if (!commitForumMutation({ dmConversations: opened.conversations }).success) { reportStorageError(); return; }
-    setActiveDmConversationId(opened.conversation.id); setRootTab("dm");
-  };
-
-  const sendDm = async () => {
-    if (!activeDmConversation || !dmBody.trim() || isDmSending) return;
-    const appended = appendForumDmMessage({ messages: dmMessages, conversations: dmConversations, conversationId: activeDmConversation.id, ownerIdentityId: activeIdentity.id, sender: "user", body: dmBody });
-    if (!commitForumMutation({ dmConversations: appended.conversations, dmMessages: appended.messages }).success) { reportStorageError(); return; }
-    setDmBody(""); setIsDmSending(true); setError("");
-    try {
-      await requestForumDmReply({ conversation: activeDmConversation, conversations: appended.conversations, messages: appended.messages, tasks: dmTasks, threads, notifications, relationships, characters, settings, profileName: activeProfile.displayName, activeConversationId: activeDmConversation.id, isConversationCurrent: (conversationId, revision) => {
-        const current = getForumSnapshotForIdentity(activeIdentity.id).dmConversations.find((item) => item.id === conversationId);
-        return Boolean(current && current.revision === revision);
-      }, commit: (mutation) => commitForumMutation(mutation).success });
-    } catch (dmError) { setError(dmError instanceof Error ? dmError.message : "论坛私信回复失败，请稍后重试"); }
-    finally { setIsDmSending(false); }
-  };
-
-  const confirmDeleteDmConversation = () => {
-    if (!activeDmConversation) return;
-    const next = deleteForumDmConversation({
-      conversationId: activeDmConversation.id,
-      ownerIdentityId: activeIdentity.id,
-      conversations: dmConversations,
-      messages: dmMessages,
-      tasks: dmTasks,
-      notifications,
-    });
-    if (!commitForumMutation({ dmConversations: next.conversations, dmMessages: next.messages, dmTasks: next.tasks, notifications: next.notifications }).success) { reportStorageError(); return; }
-    setShowDeleteDmConfirmation(false);
-    setActiveDmConversationId(null);
-    setDmBody("");
-    setIsDmSending(false);
-    setNotice("私信会话已删除");
   };
 
   const openThread = (thread: ForumThread) => {
@@ -1243,9 +1222,9 @@ export default function AppForum({
           <ChevronLeft className="h-5 w-5" />
         </button>
         <h1 className="absolute left-1/2 -translate-x-1/2 text-[17px] font-bold">
-          {activeDmConversation ? activeDmConversation.participantPublicSnapshot.displayName : activeStoryId ? "帖子详情" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : secondaryPage === "community-npcs" ? "论坛 NPC" : rootTab === "mine" ? "我的" : rootTab === "dm" ? "私信" : "论坛"}
+          {activeStoryId ? "帖子详情" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : secondaryPage === "community-npcs" ? "论坛 NPC" : rootTab === "mine" ? "我的" : "论坛"}
         </h1>
-        {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && !activeDmConversation && rootTab === "home" ? (
+        {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && rootTab === "home" ? (
           <button
             ref={homeMenuAnchorRef}
             type="button"
@@ -1340,14 +1319,14 @@ export default function AppForum({
         </div>
       )}
 
-      {activeDmConversation ? (
-        <ForumDmConversation conversation={activeDmConversation} messages={dmMessages.filter((message) => message.conversationId === activeDmConversation.id)} body={dmBody} setBody={setDmBody} sending={isDmSending} onSend={() => void sendDm()} onDelete={() => setShowDeleteDmConfirmation(true)} />
-      ) : readonlySnapshot ? (
+      {readonlySnapshot ? (
         <ForumSnapshotDetail snapshot={readonlySnapshot} />
       ) : activeStoryId ? (
         <ForumStoryThreadView
           storyId={activeStoryId}
           onLike={likeForumStory}
+          onLikeReply={likeForumStoryReply}
+          onUtilityAction={handleForumStoryUtility}
           onSubmitComment={submitForumStoryComment}
           submitting={isStoryUpdating}
         />
@@ -1365,7 +1344,7 @@ export default function AppForum({
           </section>}
           {secondaryPage === "history" && <><HistoryList title="浏览历史" empty="暂无浏览记录" items={visitHistory} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setReadonlySnapshot(item.publicSnapshot); }} /><button type="button" onClick={() => { if (window.confirm("清空全部浏览历史？")) commitForumMutation({ visitHistory: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空浏览历史</button></>}
           {secondaryPage === "likes" && <><HistoryList title="我的点赞" empty="暂无点赞记录" items={likeHistory} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setReadonlySnapshot(item.publicSnapshot.thread); }} /><button type="button" onClick={() => { if (window.confirm("清空全部点赞记录？")) commitForumMutation({ likeHistory: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空点赞记录</button></>}
-          {secondaryPage === "notifications" && <><HistoryList title="消息提醒" empty="暂无新消息" items={notifications} onOpen={(item) => { if (item.type === "direct-message" && item.conversationId && dmConversations.some((conversation) => conversation.id === item.conversationId)) { setSecondaryPage(null); setRootTab("dm"); setActiveDmConversationId(item.conversationId); } else { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setNotice("原帖已删除或会话不可用"); } commitForumMutation({ notifications: notifications.map((value) => value.id === item.id ? { ...value, readAt: Date.now() } : value) }); }} /><button type="button" onClick={() => { if (window.confirm("清空全部消息提醒？")) commitForumMutation({ notifications: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空消息提醒</button></>}
+          {secondaryPage === "notifications" && <><HistoryList title="消息提醒" empty="暂无新消息" items={notifications.filter((item) => item.type !== "direct-message")} onOpen={(item) => { const thread = threads.find((value) => value.id === item.threadId); if (thread) openThread(thread); else setNotice("原帖已删除或不可用"); commitForumMutation({ notifications: notifications.map((value) => value.id === item.id ? { ...value, readAt: Date.now() } : value) }); }} /><button type="button" onClick={() => { if (window.confirm("清空全部消息提醒？")) commitForumMutation({ notifications: [] }); }} className="mt-4 w-full text-xs text-rose-500">清空消息提醒</button></>}
           {secondaryPage === "community-npcs" && <>
             <section className="rounded-2xl bg-white p-4 shadow-sm">
               <h2 className="text-sm font-bold text-slate-800">论坛专属 NPC</h2>
@@ -1399,8 +1378,6 @@ export default function AppForum({
             )}
           </>}
         </main>
-      ) : !activeThread && rootTab === "dm" ? (
-        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24"><ForumDmList conversations={dmConversations} messages={dmMessages} onOpen={(id) => setActiveDmConversationId(id)} /></main>
       ) : !activeThread && rootTab === "mine" ? (
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-4">
           <section className="rounded-2xl bg-white p-4 shadow-sm">
@@ -1507,7 +1484,7 @@ export default function AppForum({
               </p>
                 </>;
               })()}
-              <div className="mt-4 grid grid-cols-5 items-center gap-1 border-t border-slate-100 pt-3">
+                <div className="mt-4 grid grid-cols-4 items-center gap-1 border-t border-slate-100 pt-3">
                 <button
                   type="button"
                   onClick={() => handleToggleThreadLike(activeThread.id)}
@@ -1534,16 +1511,6 @@ export default function AppForum({
                   <Share2 className="h-4 w-4" />
                   转发
                 </button>
-                {resolveForumDmActorFromPublicRecord({ ownerIdentityId: activeIdentity.id, thread: activeThread, relationships, characters }) ? (
-                  <button
-                    type="button"
-                    onClick={() => openDmFromRecord(activeThread)}
-                    className="inline-flex min-w-0 items-center justify-center gap-1 text-[11px] font-medium text-slate-500"
-                  >
-                    <Mail className="h-4 w-4" />
-                    私信
-                  </button>
-                ) : <span aria-hidden="true" />}
                 <button
                   type="button"
                   onClick={() => setDeleteTarget({ kind: "thread", threadId: activeThread.id })}
@@ -1670,7 +1637,6 @@ export default function AppForum({
                             {translationLoadingIds[key] ? "翻译中…" : translatedContentIds[key] ? "查看原文" : "翻译"}
                           </button>;
                         })()}
-                        {resolveForumDmActorFromPublicRecord({ ownerIdentityId: activeIdentity.id, thread: activeThread, reply, relationships, characters }) && <button type="button" onClick={() => openDmFromRecord(activeThread, reply)} className="text-[11px] text-slate-400">私信</button>}
                       </div>
                     )}
                   </div>
@@ -1740,11 +1706,10 @@ export default function AppForum({
         </>
       )}
 
-      {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && !activeDmConversation && (
+      {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && (
         <nav className="flex shrink-0 border-t border-slate-100 bg-white pb-[max(8px,env(safe-area-inset-bottom))] pt-2" aria-label="论坛导航">
           <button type="button" onClick={() => setRootTab("home")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "home" ? "text-neutral-950" : "text-slate-400"}`}><MessageCircle className="h-5 w-5" />论坛</button>
-          <button type="button" onClick={() => setRootTab("dm")} className={`relative flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "dm" ? "text-neutral-950" : "text-slate-400"}`}><Mail className="h-5 w-5" />私信{dmConversations.reduce((total, item) => total + item.unreadCount, 0) > 0 && <span className="absolute ml-5 h-2 w-2 rounded-full bg-rose-500" />}</button>
-          <button type="button" onClick={() => setRootTab("mine")} className={`relative flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "mine" ? "text-neutral-950" : "text-slate-400"}`}><User className="h-5 w-5" />我的{notifications.some((item) => !item.readAt) && <span className="absolute ml-5 h-2 w-2 rounded-full bg-rose-500" />}</button>
+          <button type="button" onClick={() => setRootTab("mine")} className={`relative flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "mine" ? "text-neutral-950" : "text-slate-400"}`}><User className="h-5 w-5" />我的{notifications.some((item) => item.type !== "direct-message" && !item.readAt) && <span className="absolute ml-5 h-2 w-2 rounded-full bg-rose-500" />}</button>
         </nav>
       )}
 
@@ -1926,16 +1891,6 @@ export default function AppForum({
         cancelLabel="取消"
         onClose={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
-      />
-      <ConfirmDialog
-        open={showDeleteDmConfirmation}
-        title="删除会话？"
-        description="删除后将清除当前论坛私信记录，不会删除论坛帖子、普通聊天好友或角色档案。"
-        tone="danger"
-        confirmLabel="删除会话"
-        cancelLabel="取消"
-        onClose={() => setShowDeleteDmConfirmation(false)}
-        onConfirm={confirmDeleteDmConversation}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { Heart, MessageCircle, Reply, Send, ThumbsUp, UserRound } from "lucide-react";
+import { MessageCircle, Reply, Send, Share2, ThumbsUp, Trash2, UserRound } from "lucide-react";
 import { useState } from "react";
 import { getForumStoryUiThread, type ForumStoryUiReply } from "../forumStoryUiData";
 
@@ -15,11 +15,15 @@ const formatStoryTime = (timestamp: number): string => {
 export function ForumStoryThreadView({
   storyId,
   onLike,
+  onLikeReply,
+  onUtilityAction,
   onSubmitComment,
   submitting = false,
 }: {
   storyId: string;
   onLike?: (storyId: string) => void;
+  onLikeReply?: (storyId: string, replyId: string) => void;
+  onUtilityAction?: (action: "share" | "delete" | "translate", storyId: string, reply?: ForumStoryUiReply) => void;
   onSubmitComment?: (storyId: string, body: string, replyTo?: ForumStoryUiReply) => void | Promise<void>;
   submitting?: boolean;
 }) {
@@ -48,9 +52,11 @@ export function ForumStoryThreadView({
         </div>
         <h1 className="mt-4 break-words text-[18px] font-bold leading-7 text-slate-950">{view.thread.title}</h1>
         <p className="mt-2 whitespace-pre-wrap break-words text-[14px] leading-6 text-slate-700">{view.thread.initialContent}</p>
-        <div className="mt-4 grid grid-cols-2 items-center gap-1 border-t border-slate-100 pt-3">
+        <div className="mt-4 grid grid-cols-4 items-center gap-1 border-t border-slate-100 pt-3">
           <button type="button" onClick={() => onLike?.(storyId)} className="inline-flex items-center justify-center gap-1 text-[11px] font-medium text-slate-500"><ThumbsUp className="h-4 w-4" />{view.thread.likeCount || 0}</button>
           <button type="button" onClick={() => document.getElementById("forum-story-reply-input")?.focus()} className="inline-flex items-center justify-center gap-1 text-[11px] text-slate-500"><MessageCircle className="h-4 w-4" />{view.replies.length}</button>
+          <button type="button" onClick={() => onUtilityAction?.("share", storyId)} className="inline-flex items-center justify-center gap-1 text-[11px] font-medium text-slate-500"><Share2 className="h-4 w-4" />转发</button>
+          <button type="button" onClick={() => onUtilityAction?.("delete", storyId)} className="inline-flex items-center justify-center gap-1 text-[11px] font-medium text-rose-400 active:text-rose-600"><Trash2 className="h-3.5 w-3.5" />删除</button>
         </div>
       </article>
 
@@ -63,7 +69,7 @@ export function ForumStoryThreadView({
         {view.replies.length === 0 && view.updates.length === 0 ? <p className="px-4 py-10 text-center text-xs text-slate-400">还没有回复，来说点什么吧</p> : view.replies.map((reply) => <article key={reply.id} className="border-b border-slate-100 px-4 py-4 last:border-b-0">
           <div className="flex items-center gap-2 text-[11px]"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500"><UserRound className="h-3.5 w-3.5" /></span><span className="font-semibold text-slate-700">{reply.authorName}</span><span className="text-slate-300">#{reply.floor}</span><time className="ml-auto text-[9px] text-slate-400">{formatStoryTime(reply.occurredAt)}</time></div>
           <p className="ml-10 mt-2 whitespace-pre-wrap break-words text-[13px] leading-5 text-slate-700">{reply.body}</p>
-          <button type="button" onClick={() => { setReplyingTo(reply); document.getElementById("forum-story-reply-input")?.focus(); }} className="ml-10 mt-3 inline-flex items-center gap-1 text-[11px] text-slate-400"><Reply className="h-3.5 w-3.5" />回复此楼</button>
+          <div className="ml-10 mt-3 flex items-center gap-4"><button type="button" onClick={() => onLikeReply?.(storyId, reply.id)} className="inline-flex items-center gap-1 text-[11px] text-slate-400"><ThumbsUp className="h-3.5 w-3.5" />{reply.likeCount}</button><button type="button" onClick={() => onUtilityAction?.("delete", storyId, reply)} className="text-[11px] text-slate-300 active:text-red-500">删除</button><button type="button" onClick={() => { setReplyingTo(reply); document.getElementById("forum-story-reply-input")?.focus(); }} className="inline-flex items-center gap-1 text-[11px] text-slate-400"><Reply className="h-3.5 w-3.5" />回复此楼</button><button type="button" onClick={() => onUtilityAction?.("translate", storyId, reply)} className="text-[11px] text-slate-400">翻译</button></div>
         </article>)}
       </section>
     </main>

@@ -35,6 +35,7 @@ export interface ForumStoryUiReply {
   authorName: string;
   body: string;
   occurredAt: number;
+  likeCount: number;
   storyCharacterId?: StoryCharacterId;
 }
 
@@ -148,6 +149,7 @@ export const getForumStoryUiThread = (storyId: string): ForumStoryUiThread | und
       authorName: reply.publicAuthor.displayName,
       body: reply.body,
       occurredAt: reply.occurredAt,
+      likeCount: reply.likeCount ?? 0,
       ...(findEventForReply(events, reply.id)?.actorIds?.[0]
         ? { storyCharacterId: findEventForReply(events, reply.id)?.actorIds?.[0] }
         : {}),

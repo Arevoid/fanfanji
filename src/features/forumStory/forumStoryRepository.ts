@@ -43,11 +43,21 @@ export const updateStory = (storyId: string, patch: ForumStoryPatch): StorageWri
   return saveStoryCollection(storageKeys.forumStories, next);
 };
 
+/** Removes only the story root from the readable story list. Dependent
+ * append-only records remain isolated and unreachable, preserving their audit
+ * history instead of mutating historical events or replies. */
+export const deleteStory = (storyId: string): StorageWriteResult => {
+  const current = listStories();
+  if (!current.some((story) => story.id === storyId)) return failedStoryWrite();
+  return saveStoryCollection(storageKeys.forumStories, current.filter((story) => story.id !== storyId));
+};
+
 export const ForumStoryRepository = {
   load: loadStories,
   createStory,
   getStory,
   updateStory,
+  deleteStory,
   listStories,
 };
 
