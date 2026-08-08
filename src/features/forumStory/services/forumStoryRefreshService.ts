@@ -19,6 +19,9 @@ const STORY_THEMES = [
 ] as const;
 
 const FORUM_USER_SEEDS = [
+  { displayName: "蹲后续的", userType: "anonymous", style: "短句吃瓜，爱说蹲后续和催更，不写长分析", personaSummary: "普通围观网友，反应快，偶尔玩梗。" },
+  { displayName: "啊这也行", userType: "observer", style: "吐槽和震惊为主，句子很短，像真实刷帖路人", personaSummary: "随手路过的网友，不假装懂很多。" },
+  { displayName: "瓜子已备好", userType: "supporter", style: "爱吃瓜、会追问细节、偶尔回复别的楼层", personaSummary: "热闹但友好的论坛用户。" },
   { displayName: "路过的猹", userType: "observer", style: "吃瓜但不拱火，爱追问后续", personaSummary: "围观型网友，语气轻松，擅长提醒楼主补充细节。" },
   { displayName: "谢邀夜猫子", userType: "analyst", style: "先说结论再分析，偶尔以谢邀开头", personaSummary: "理性分析型网友，喜欢梳理时间线。" },
   { displayName: "楼下便利店", userType: "supporter", style: "温和支持，给出实际建议", personaSummary: "友好热心的网友，不会过度煽动。" },

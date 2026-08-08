@@ -218,13 +218,15 @@ const normalizeComment = (value: unknown): ForumStoryCommentCandidate => {
     ...(authorName ? { authorName } : {}),
     ...(replyToFloor !== undefined ? { replyToFloor } : {}),
     ...(quoteContent ? { quoteContent } : {}),
-    content: cleanPublicText(record.content ?? record.body, 1000, "content"),
+    // A forum floor is normally concise. Long-form reasoning belongs in the
+    // original post or an update, not in every generated reply.
+    content: cleanPublicText(record.content ?? record.body, 180, "content"),
   };
 };
 
 const normalizeCount = (value: unknown): number => {
   const count = typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 3;
-  return Math.max(1, Math.min(5, count));
+  return Math.max(1, Math.min(8, count));
 };
 
 export const buildForumStoryCommentPrompt = (
@@ -264,6 +266,9 @@ export const buildForumStoryCommentPrompt = (
       "For each comment return authorType (story_character or forum_user), authorId copied exactly from the supplied pool, and content. style is optional and may be ordinary|gossip|rational|question|supplement.",
       "A reply may include replyToFloor using only a listed existing floor, plus an optional quoteContent excerpt. Do not invent floors.",
       "Return one JSON object only: {\"comments\":[{\"authorType\":\"forum_user\",\"authorId\":\"existing pool id\",\"style\":\"ordinary\",\"replyToFloor\":2,\"quoteContent\":\"quoted excerpt\",\"content\":\"public comment\"}]}.",
+      "Write like a lively Chinese forum, not like an advice column or a novel. Most comments are 6-45 Chinese characters; at most one comment may be 46-100 characters and none may exceed 120 characters.",
+      "For every batch, use a natural mix: roughly half casual reactions (吃瓜、震惊、吐槽、蹲后续、玩梗), one or two short questions or replies to another floor, and at most one rational analysis or suggestion.",
+      "When an existing floor is available, at least one comment should reply to it. Do not make every commenter a professional, insider, or lecturer: casual users can disagree, tease, ask for details, or leave brief water-cooler reactions.",
       "Use distinct styles when possible, do not repeat an existing or another generated comment verbatim, and do not reveal a future ending.",
     ].join("\n"),
     message: [
@@ -288,7 +293,7 @@ export const parseForumStoryCommentCandidates = (text: string): ForumStoryCommen
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("ForumStory comments must be an object");
   const comments = (raw as Record<string, unknown>).comments;
   if (!Array.isArray(comments)) throw new Error("ForumStory comments are missing");
-  return comments.map(normalizeComment).slice(0, 5);
+  return comments.map(normalizeComment).slice(0, 8);
 };
 
 export const ForumStoryCommentPromptAdapter = {

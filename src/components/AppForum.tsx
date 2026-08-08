@@ -117,6 +117,9 @@ import { ForumStoryEngagementService } from "../features/forumStory/services/for
 import { ForumStoryUpdateService } from "../features/forumStory/services/forumStoryUpdateService";
 import { ForumStoryCommentService } from "../features/forumStory/services/forumStoryCommentService";
 import { getForumStoryUiThread } from "../features/forumStory/forumStoryUiData";
+import type { ForumStoryUiReply } from "../features/forumStory/forumStoryUiData";
+import { StoryForumReplyRepository } from "../features/forumStory/storyReplyRepository";
+import { StoryEventRepository } from "../features/forumStory/storyEventRepository";
 import { FORUM_HOME_PAGE_SIZE, FORUM_REPLY_PAGE_SIZE } from "../domain/forum/forumCapacity";
 
 interface AppForumProps {
@@ -537,6 +540,59 @@ export default function AppForum({
     } finally {
       setIsStoryUpdating(false);
     }
+  };
+
+  // Reader comments stay strictly inside the ForumStory repositories. They
+  // intentionally use a story-local reader identity rather than a real forum
+  // profile, Character, relationship or memory record.
+  const submitForumStoryComment = async (storyId: string, body: string, replyTo?: ForumStoryUiReply) => {
+    const view = getForumStoryUiThread(storyId);
+    if (!view) return;
+    const now = Date.now();
+    const readerId = `${storyId}:reader`;
+    const parent = replyTo ? StoryForumReplyRepository.listReplies(storyId, view.thread.id).find((reply) => reply.id === replyTo.id) : undefined;
+    const write = StoryForumReplyRepository.appendReply({
+      id: createId("forum-story-reader-reply"),
+      storyId,
+      threadId: view.thread.id,
+      ownerIdentityId: `story-scope:${storyId}`,
+      publicAuthor: { displayName: "我", kind: "virtual", isAnonymous: false },
+      body,
+      source: "ai-virtual",
+      occurredAt: now,
+      baseLikeCount: 0,
+      likedByIdentityIds: [],
+      createdAt: now,
+      updatedAt: now,
+      storyAuthorType: "forum_user",
+      storyAuthorId: readerId,
+      ...(parent ? { parentReplyId: parent.id, replyToUserId: parent.storyAuthorId, quoteContent: parent.body.slice(0, 180) } : {}),
+      storyCommentStyle: "ordinary",
+      storyCommentLabel: "论坛读者",
+    });
+    if (!write.success || !write.reply) throw new Error("故事评论保存失败");
+    const eventWrite = StoryEventRepository.appendEvent({
+      id: createId("forum-story-reader-event"),
+      storyId,
+      type: "comment_added",
+      source: "user",
+      status: "confirmed",
+      summary: `论坛读者: ${body.slice(0, 200)}`,
+      storyVersion: view.story.version,
+      occurredAt: now,
+      createdAt: now,
+      forumThreadId: view.thread.id,
+      forumReplyId: write.reply.id,
+      floorNumber: write.reply.floorNumber ?? write.reply.floor,
+      idempotencyKey: `${storyId}:reader:${write.reply.id}`,
+    });
+    if (!eventWrite.success) throw new Error("故事评论事件保存失败");
+    setForumStoryRevision((revision) => revision + 1);
+    // User participation gets a compact follow-up discussion, without putting
+    // any user identity or private data into the story prompt.
+    void ForumStoryCommentService.generateStoryComments({ story: view.story, thread: view.thread, settings, count: 3 }).then(() => {
+      setForumStoryRevision((revision) => revision + 1);
+    }).catch(() => undefined);
   };
 
   const generateInitialReplies = async (thread: ForumThread) => {
@@ -1187,7 +1243,7 @@ export default function AppForum({
           <ChevronLeft className="h-5 w-5" />
         </button>
         <h1 className="absolute left-1/2 -translate-x-1/2 text-[17px] font-bold">
-          {activeDmConversation ? activeDmConversation.participantPublicSnapshot.displayName : activeStoryId ? "故事论坛" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : secondaryPage === "community-npcs" ? "论坛 NPC" : rootTab === "mine" ? "我的" : rootTab === "dm" ? "私信" : "论坛"}
+          {activeDmConversation ? activeDmConversation.participantPublicSnapshot.displayName : activeStoryId ? "帖子详情" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "notifications" ? "消息提醒" : secondaryPage === "community-npcs" ? "论坛 NPC" : rootTab === "mine" ? "我的" : rootTab === "dm" ? "私信" : "论坛"}
         </h1>
         {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && !activeDmConversation && rootTab === "home" ? (
           <button
@@ -1292,8 +1348,8 @@ export default function AppForum({
         <ForumStoryThreadView
           storyId={activeStoryId}
           onLike={likeForumStory}
-          onRequestUpdate={(storyId) => void requestForumStoryUpdate(storyId)}
-          updating={isStoryUpdating}
+          onSubmitComment={submitForumStoryComment}
+          submitting={isStoryUpdating}
         />
       ) : !activeThread && secondaryPage ? (
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-4">

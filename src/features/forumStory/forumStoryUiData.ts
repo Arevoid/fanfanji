@@ -87,6 +87,7 @@ const findEventForReply = (events: readonly StoryEvent[], replyId: string): Stor
   events.find((event) => event.forumReplyId === replyId);
 
 const buildCharacters = (input: {
+  storyId: string;
   thread: StoryThread;
   events: readonly StoryEvent[];
   replies: readonly StoryForumReply[];
@@ -94,7 +95,9 @@ const buildCharacters = (input: {
   const characters = new Map<string, ForumStoryUiCharacter>();
   const authorId = input.thread.authorCharacterId;
   if (authorId) {
-    characters.set(authorId, { id: authorId, name: "故事楼主", role: "楼主" });
+    const author = StoryCharacterRepository.getStoryCharactersByStoryId(input.storyId)
+      .find((character) => character.id === authorId);
+    characters.set(authorId, { id: authorId, name: author?.identity.name || "匿名楼主", role: "楼主" });
   }
   for (const reply of input.replies) {
     const actorId = findEventForReply(input.events, reply.id)?.actorIds?.[0];
@@ -138,7 +141,7 @@ export const getForumStoryUiThread = (storyId: string): ForumStoryUiThread | und
   return {
     story,
     thread,
-    characters: buildCharacters({ thread, events, replies }),
+    characters: buildCharacters({ storyId: story.id, thread, events, replies }),
     replies: replies.map((reply) => ({
       id: reply.id,
       floor: reply.floor,
