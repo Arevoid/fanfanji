@@ -1258,7 +1258,15 @@ export default function AppForum({
             <RefreshCw className={`h-4 w-4 ${isThreadRefreshing ? "animate-spin" : ""}`} />
           </button>
         ) : activeStoryId ? (
-          <span className="h-9 w-9" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={() => void requestForumStoryUpdate(activeStoryId)}
+            disabled={isStoryUpdating}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-600 active:bg-slate-100 disabled:text-slate-300"
+            aria-label="刷新帖子动态"
+          >
+            <RefreshCw className={`h-4 w-4 ${isStoryUpdating ? "animate-spin" : ""}`} />
+          </button>
         ) : (
           <span className="h-9 w-9" aria-hidden="true" />
         )}
@@ -1399,10 +1407,6 @@ export default function AppForum({
         </main>
       ) : !activeThread ? (
         <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24">
-          <ForumStoryList
-            items={forumStoryItems}
-            onOpen={(storyId) => { setActiveStoryId(storyId); setError(""); setNotice(""); }}
-          />
           {identityThreads.length === 0 && forumStoryItems.length === 0 ? (
             <div className="flex min-h-full flex-col items-center justify-center px-8 py-16 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-sm">
@@ -1414,8 +1418,12 @@ export default function AppForum({
                 发布帖子
               </Button>
             </div>
-          ) : identityThreads.length > 0 ? (
+          ) : identityThreads.length > 0 || forumStoryItems.length > 0 ? (
             <div className="mt-3 overflow-hidden border-y border-slate-100 bg-white">
+              <ForumStoryList
+                items={forumStoryItems}
+                onOpen={(storyId) => { setActiveStoryId(storyId); setError(""); setNotice(""); }}
+              />
               {visibleThreads.map((thread) => {
                 const metrics = selectForumThreadMetrics(
                   thread,

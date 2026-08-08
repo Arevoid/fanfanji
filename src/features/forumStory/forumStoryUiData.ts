@@ -27,6 +27,7 @@ export interface ForumStoryUiCharacter {
   id: StoryCharacterId;
   name: string;
   role: string;
+  avatar?: string;
 }
 
 export interface ForumStoryUiReply {
@@ -98,7 +99,7 @@ const buildCharacters = (input: {
   if (authorId) {
     const author = StoryCharacterRepository.getStoryCharactersByStoryId(input.storyId)
       .find((character) => character.id === authorId);
-    characters.set(authorId, { id: authorId, name: author?.identity.name || "匿名楼主", role: "楼主" });
+    characters.set(authorId, { id: authorId, name: author?.identity.name || "匿名楼主", role: "楼主", ...(author?.identity.avatar ? { avatar: author.identity.avatar } : {}) });
   }
   for (const reply of input.replies) {
     const actorId = findEventForReply(input.events, reply.id)?.actorIds?.[0];
@@ -107,6 +108,7 @@ const buildCharacters = (input: {
       id: actorId,
       name: reply.publicAuthor.displayName,
       role: reply.storyCommentLabel || "故事角色",
+      ...(reply.publicAuthor.avatar ? { avatar: reply.publicAuthor.avatar } : {}),
     });
   }
   for (const event of input.events) {
