@@ -85,6 +85,7 @@ export const isStoryThreadRecord = (value: unknown): value is StoryThread => {
     && isFiniteNumber(value.updatedAt)
     && (value.viewCount === undefined || isNonNegativeInteger(value.viewCount))
     && (value.likeCount === undefined || isNonNegativeInteger(value.likeCount))
+    && (value.likedByIdentityIds === undefined || isStringArray(value.likedByIdentityIds))
     && (value.readerInterest === undefined || typeof value.readerInterest === "boolean")
     && (value.closedAt === undefined || isFiniteNumber(value.closedAt));
 };

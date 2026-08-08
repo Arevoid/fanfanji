@@ -18,6 +18,11 @@ export interface RecordForumStoryViewInput extends ForumStoryEngagementTargetInp
 export interface AddForumStoryLikeInput extends ForumStoryEngagementTargetInput {
   /** When omitted, the story thread itself receives the like. */
   replyId?: string;
+  /**
+   * Opaque reader token used only to prevent duplicate likes in one story
+   * scope. It is never sent to a prompt or linked to a relationship.
+   */
+  readerToken?: string;
   /** A story-scope aggregate signal; it never records a real user identity. */
   markReaderInterest?: boolean;
 }
@@ -45,6 +50,13 @@ const normalizeAmount = (amount: number | undefined): number => {
   return value;
 };
 
+const normalizeReaderToken = (readerToken: string | undefined): string | undefined => {
+  if (readerToken === undefined) return undefined;
+  const token = readerToken.trim();
+  if (!token || token.length > 256) throw new Error("ForumStory reader token is invalid");
+  return token;
+};
+
 const ensureWrite = (result: StorageWriteResult, label: string): void => {
   if (!result.success) throw new Error(`ForumStory ${label} save failed`);
 };
@@ -58,7 +70,7 @@ const getThreadOrThrow = (storyId: string, threadId: string): StoryThread => {
 const updateThreadEngagement = (
   storyId: string,
   threadId: string,
-  patch: Pick<StoryThread, "viewCount" | "likeCount"> & Partial<Pick<StoryThread, "readerInterest">>,
+  patch: Pick<StoryThread, "viewCount" | "likeCount"> & Partial<Pick<StoryThread, "readerInterest" | "likedByIdentityIds">>,
 ): StoryThread => {
   const thread = getThreadOrThrow(storyId, threadId);
   ensureWrite(StoryThreadRepository.updateThread(storyId, threadId, {
@@ -83,10 +95,14 @@ export const recordView = (input: RecordForumStoryViewInput): StoryThread => {
 /** Adds a simulated like to either the story thread or one of its replies. */
 export const addLike = (input: AddForumStoryLikeInput): StoryThread | StoryForumReply => {
   const amount = normalizeAmount(input.amount);
+  const readerToken = normalizeReaderToken(input.readerToken);
   if (!input.replyId) {
     const thread = getThreadOrThrow(input.storyId, input.threadId);
+    const likedByIdentityIds = thread.likedByIdentityIds ?? [];
+    if (readerToken && likedByIdentityIds.includes(readerToken)) return thread;
     return updateThreadEngagement(input.storyId, input.threadId, {
       likeCount: (thread.likeCount ?? 0) + amount,
+      ...(readerToken ? { likedByIdentityIds: [...likedByIdentityIds, readerToken] } : {}),
       ...(input.markReaderInterest ? { readerInterest: true } : {}),
     });
   }
@@ -94,11 +110,16 @@ export const addLike = (input: AddForumStoryLikeInput): StoryThread | StoryForum
   const reply = StoryForumReplyRepository.listReplies(input.storyId, input.threadId)
     .find((candidate) => candidate.id === input.replyId);
   if (!reply) throw new Error("ForumStory reply does not exist");
+  const likedByIdentityIds = reply.likedByIdentityIds ?? [];
+  if (readerToken && likedByIdentityIds.includes(readerToken)) return reply;
   ensureWrite(StoryForumReplyRepository.updateReplyEngagement(
     input.storyId,
     input.threadId,
     reply.id,
-    { likeCount: (reply.likeCount ?? 0) + amount },
+    {
+      likeCount: (reply.likeCount ?? 0) + amount,
+      ...(readerToken ? { likedByIdentityIds: [...likedByIdentityIds, readerToken] } : {}),
+    },
   ), "reply engagement");
   const updated = StoryForumReplyRepository.listReplies(input.storyId, input.threadId)
     .find((candidate) => candidate.id === reply.id);

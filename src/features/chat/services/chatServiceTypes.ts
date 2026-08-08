@@ -14,6 +14,8 @@ export interface ReplyCandidateContext {
   createId: (index: number) => string;
   currentTime: (index: number) => number;
   transformBubble?: (bubbleText: string, index: number) => string;
+  /** Defaults to false: character emoji/stickers require a deliberate per-turn allowance. */
+  allowEmoji?: boolean;
 }
 
 export interface ReplyCandidatesResult {

@@ -61,6 +61,13 @@ ForumStoryEngagementService.addLike({ storyId, threadId, amount: 2 });
 assert.equal(StoryThreadRepository.getThread(storyId, threadId)?.likeCount, 3);
 assert.throws(() => ForumStoryEngagementService.addLike({ storyId, threadId, amount: 0 }), /positive integer/);
 
+const readerToken = `${storyId}:reader:local`;
+ForumStoryEngagementService.addLike({ storyId, threadId, readerToken, markReaderInterest: true });
+assert.equal(StoryThreadRepository.getThread(storyId, threadId)?.likeCount, 4);
+assert.deepEqual(StoryThreadRepository.getThread(storyId, threadId)?.likedByIdentityIds, [readerToken]);
+ForumStoryEngagementService.addLike({ storyId, threadId, readerToken, markReaderInterest: true });
+assert.equal(StoryThreadRepository.getThread(storyId, threadId)?.likeCount, 4, "one reader can like a story thread only once");
+
 const author = {
   id: `${storyId}:character:author`,
   storyId,
@@ -115,6 +122,10 @@ const child = StoryForumReplyRepository.appendReply({
 assert.ok(child.reply);
 ForumStoryEngagementService.addLike({ storyId, threadId, replyId: first.reply!.id, amount: 3 });
 ForumStoryEngagementService.addLike({ storyId, threadId, replyId: second.reply!.id, amount: 1 });
+ForumStoryEngagementService.addLike({ storyId, threadId, replyId: first.reply!.id, readerToken });
+assert.equal(StoryForumReplyRepository.listReplies(storyId, threadId).find((reply) => reply.id === first.reply!.id)?.likeCount, 4);
+ForumStoryEngagementService.addLike({ storyId, threadId, replyId: first.reply!.id, readerToken });
+assert.equal(StoryForumReplyRepository.listReplies(storyId, threadId).find((reply) => reply.id === first.reply!.id)?.likeCount, 4, "one reader can like a story reply only once");
 
 const hotReplies = ForumStoryEngagementService.calculateHotReplies({
   storyId,

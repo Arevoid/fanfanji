@@ -24,6 +24,7 @@ export const createThread = (thread: StoryThread): StorageWriteResult => {
     ...thread,
     viewCount: thread.viewCount ?? 0,
     likeCount: thread.likeCount ?? 0,
+    likedByIdentityIds: thread.likedByIdentityIds ?? [],
   };
   if (!isStoryThreadRecord(normalizedThread)) return failedStoryWrite();
   const current = loadThreads().value;

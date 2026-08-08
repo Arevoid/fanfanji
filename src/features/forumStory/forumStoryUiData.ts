@@ -37,6 +37,7 @@ export interface ForumStoryUiReply {
   body: string;
   occurredAt: number;
   likeCount: number;
+  likedByIdentityIds: readonly string[];
   isDeleted?: boolean;
   storyCharacterId?: StoryCharacterId;
 }
@@ -153,6 +154,7 @@ export const getForumStoryUiThread = (storyId: string): ForumStoryUiThread | und
       body: reply.body,
       occurredAt: reply.occurredAt,
       likeCount: reply.likeCount ?? 0,
+      likedByIdentityIds: reply.likedByIdentityIds ?? [],
       ...(reply.isDeleted ? { isDeleted: true } : {}),
       ...(findEventForReply(events, reply.id)?.actorIds?.[0]
         ? { storyCharacterId: findEventForReply(events, reply.id)?.actorIds?.[0] }

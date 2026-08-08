@@ -156,9 +156,10 @@
 
 .offline-composer-wrap { flex: 0 0 auto; padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--offline-border); background: rgba(255, 255, 255, .94); }
 .offline-composer { max-width: 760px; gap: var(--space-2); margin: 0 auto; padding: 5px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-sm); }
-.offline-composer-input { min-width: 0; flex: 1; height: 36px; border: 0; background: transparent; }
-.offline-composer-input:focus-within { border: 0; box-shadow: none; }
-.offline-composer-input-field { color: var(--color-text-primary); font-size: 14px; }
+.offline-composer-input { min-width: 0; flex: 1; height: 42px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--input-bg); box-shadow: none; }
+.offline-composer-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--focus-ring); }
+.offline-composer-input-field { color: var(--text-primary); font-size: 14px; }
+.offline-composer-input-field::placeholder { color: var(--input-placeholder); }
 .offline-composer-submit { width: 36px; height: 36px; border-radius: var(--radius-md); background: var(--color-text-primary); color: var(--color-surface); }
 
 .offline-reading-sheet { height: 55vh; }

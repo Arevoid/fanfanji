@@ -262,6 +262,7 @@ export default function AppOffline({
 
   const [newPresetName, setNewPresetName] = useState("");
   const [newPresetContent, setNewPresetContent] = useState("");
+  const hasSelectedCustomPreset = customPresets.some((preset) => preset.id === settingsStylePresetId);
 
   useEffect(() => {
     if (activeStory && isSettingsOpen) {
@@ -317,6 +318,21 @@ export default function AppOffline({
     // Select the new preset
     setSettingsStylePresetId(newPreset.id);
     showToast("文风保存为预设成功！");
+  };
+
+  const handleDeleteCustomPreset = () => {
+    if (!hasSelectedCustomPreset) return;
+    const preset = customPresets.find((item) => item.id === settingsStylePresetId);
+    if (!preset) return;
+    if (!window.confirm(`确定删除文风预设「${preset.name}」吗？`)) return;
+
+    const updated = customPresets.filter((item) => item.id !== preset.id);
+    setCustomPresets(updated);
+    localStorage.setItem("offline_custom_style_presets", JSON.stringify(updated));
+    setSettingsStylePresetId("none");
+    setSettingsStylePromptName("");
+    setSettingsStylePromptContent("");
+    showToast("文风预设已删除");
   };
 
   const selectedChar = selectableCharacters.find(c => c.id === selectedCharId) || selectableCharacters[0];
@@ -1391,6 +1407,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">自定义剧本文风设定</label>
                     <div className="space-y-1">
                       <span className="text-[10px] text-slate-400 block font-medium">快捷文风预设</span>
+                      <div className="flex items-center gap-2">
                       <select
                         value={settingsStylePresetId}
                         onChange={(e) => {
@@ -1402,7 +1419,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                             setSettingsStylePromptContent(selId === "none" ? "" : matched.description);
                           }
                         }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                        className="min-w-0 flex-1 bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
                       >
                         {[...DEFAULT_STYLE_PRESETS.slice(0, 1), ...customPresets].map(p => (
                           <option key={p.id} value={p.id}>
@@ -1410,6 +1427,28 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                           </option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSettingsStylePresetId("custom_edit");
+                          setSettingsStylePromptName("");
+                          setSettingsStylePromptContent("");
+                        }}
+                        aria-label="新建文风预设"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-slate-200 bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200"
+                      >
+                        <Plus size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeleteCustomPreset}
+                          disabled={!hasSelectedCustomPreset}
+                        aria-label="删除当前文风预设"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-rose-100 bg-rose-50 text-rose-500 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <Trash2 size={17} />
+                      </button>
+                      </div>
                     </div>
 
                     <div className="space-y-2 pt-1.5 border-t border-slate-100">

@@ -236,6 +236,7 @@ export default function AppForum({
   const [selectedCommunityNpcIds, setSelectedCommunityNpcIds] = useState<string[]>([]);
   const [forumStoryRevision, setForumStoryRevision] = useState(0);
   const [isStoryUpdating, setIsStoryUpdating] = useState(false);
+  const storyLikeNoticeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const replyLockRef = useRef(false);
   const postLockRef = useRef(false);
   const shareLockRef = useRef(false);
@@ -244,6 +245,10 @@ export default function AppForum({
   const homeMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
   const communityNpcMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
   const communityNpcImportRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => () => {
+    if (storyLikeNoticeTimerRef.current !== null) window.clearTimeout(storyLikeNoticeTimerRef.current);
+  }, []);
   const newestReplyRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -479,13 +484,27 @@ export default function AppForum({
     }
   };
 
+  const storyReaderToken = (storyId: string) => `${storyId}:reader:${activeIdentity.id}`;
+
+  const showStoryLikeNotice = () => {
+    const message = "点赞过的帖子更大几率收到楼主的更新提醒哦";
+    setNotice(message);
+    if (storyLikeNoticeTimerRef.current !== null) window.clearTimeout(storyLikeNoticeTimerRef.current);
+    storyLikeNoticeTimerRef.current = window.setTimeout(() => {
+      setNotice((current) => current === message ? "" : current);
+      storyLikeNoticeTimerRef.current = null;
+    }, 3_000);
+  };
+
   const likeForumStory = (storyId: string) => {
     const view = getForumStoryUiThread(storyId);
     if (!view) return;
+    const readerToken = storyReaderToken(storyId);
+    if (view.thread.likedByIdentityIds?.includes(readerToken)) return;
     try {
-      ForumStoryEngagementService.addLike({ storyId, threadId: view.thread.id, markReaderInterest: true });
+      ForumStoryEngagementService.addLike({ storyId, threadId: view.thread.id, readerToken, markReaderInterest: true });
       setForumStoryRevision((revision) => revision + 1);
-      setNotice("已点赞。喜欢的故事会优先继续连载并走向结局。");
+      showStoryLikeNotice();
     } catch (storyError) {
       setError(storyError instanceof Error ? storyError.message : "故事点赞失败，请重试。");
     }
@@ -582,8 +601,11 @@ export default function AppForum({
   const likeForumStoryReply = (storyId: string, replyId: string) => {
     const view = getForumStoryUiThread(storyId);
     if (!view) return;
+    const readerToken = storyReaderToken(storyId);
+    const reply = view.replies.find((candidate) => candidate.id === replyId);
+    if (reply?.likedByIdentityIds.includes(readerToken)) return;
     try {
-      ForumStoryEngagementService.addLike({ storyId, threadId: view.thread.id, replyId });
+      ForumStoryEngagementService.addLike({ storyId, threadId: view.thread.id, replyId, readerToken });
       setForumStoryRevision((revision) => revision + 1);
     } catch (storyError) {
       setError(storyError instanceof Error ? storyError.message : "故事评论点赞失败");
@@ -1337,6 +1359,7 @@ export default function AppForum({
       ) : activeStoryId ? (
         <ForumStoryThreadView
           storyId={activeStoryId}
+          readerToken={storyReaderToken(activeStoryId)}
           onLike={likeForumStory}
           onLikeReply={likeForumStoryReply}
           onUtilityAction={handleForumStoryUtility}

@@ -5,6 +5,7 @@ import { buildProactivePromptContext, formatProactivePromptContext } from "../..
 import { requestAiReply } from "./aiReplyService";
 import { createCharacterTextMessage } from "./messageFactory";
 import { cleanAiReplyText, splitAiReplyBubbles } from "./messageParser";
+import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { AiChatRequest } from "./chatServiceTypes";
 
 export async function generateProactiveReplyCandidates(input: {
@@ -30,7 +31,7 @@ export async function generateProactiveReplyCandidates(input: {
     : input.request;
   const data = await requestAiReply(input.requestAi, request);
   if (!data?.text) return { data, messages: [] };
-  const cleanedText = cleanAiReplyText(data.text, input.disableBracketActions);
+  const cleanedText = suppressCharacterEmoji(cleanAiReplyText(data.text, input.disableBracketActions));
   // Internal scheduling metadata is model context, never user-visible chat.
   // Do not fall back to the raw response when sanitization removes everything.
   const bubbles = cleanedText ? splitAiReplyBubbles(cleanedText, input.keepPeriods) : [];

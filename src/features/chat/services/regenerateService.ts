@@ -1,10 +1,14 @@
 import { createCharacterTextMessage } from "./messageFactory";
 import { cleanAiReplyText, splitAiReplyBubbles } from "./messageParser";
+import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatServiceTypes";
 
 /** Regeneration preserves its legacy non-payment-normalizing parse path. */
 export function createRegeneratedReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
-  const cleanedText = cleanAiReplyText(context.rawText, context.disableBracketActions);
+  const cleanedText = suppressCharacterEmoji(
+    cleanAiReplyText(context.rawText, context.disableBracketActions),
+    context.allowEmoji,
+  );
   // Never restore raw model output after the sanitizer intentionally removed
   // an internal-only marker. Otherwise a marker-only reply becomes a bubble.
   const bubbles = cleanedText ? splitAiReplyBubbles(cleanedText, context.keepPeriods) : [];

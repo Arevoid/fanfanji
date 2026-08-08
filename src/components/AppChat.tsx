@@ -12,12 +12,13 @@ import { createDirectReplyCandidates } from "../features/chat/services/directCha
 import { createRegeneratedReplyCandidates } from "../features/chat/services/regenerateService";
 import { generateGroupReplyCandidates } from "../features/chat/services/groupChatService";
 import { generateProactiveReplyCandidates } from "../features/chat/services/proactiveMessageService";
+import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
 import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
-import { LIVING_HUMAN_PROMPT } from "../utils/livingPrompt";
+import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
@@ -1037,10 +1038,19 @@ const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
 
 const CHARACTER_MEDIA_USAGE_RULES = `[特殊媒体使用规则]
 日常聊天默认优先使用普通文字。语音和表情包是具有额外表达作用的特殊消息，不要把它们当作普通文字的随机替代品或每次回复的固定装饰。
+【表情频率硬限制】默认本轮不要使用 Unicode emoji、单独表情消息或表情包。仅当用户刚刚明确使用表情、角色最近 10 条消息没有使用过表情，且该表情能准确表达当前文字的同一情绪时，才最多使用一次。无法确认语义一致时绝对不要用；不得用 😏 等暧昧表情替代语言，也不得单独发送一个 emoji。
 只有在人设或世界书明确说明角色爱发语音/表情包、当前语境确实需要声音或即时情绪反应、或用户明确要求发送语音或表情包时，才自然使用。
 角色的性格和聊天习惯优先；沉稳、严谨、克制、冷淡或不习惯使用表情包的角色可以完全不自发表情包。
 不要为了显示功能而强迫角色使用特殊消息；不要连续多轮无理由发送语音或表情包；不要用表情包重复已经能由文字完整表达的内容。
 【图片绝对规则】你没有发送图片的能力。无论用户是否索要照片，绝对不得输出“（发送了一张图片）”“（发送了一张自拍）”“我给你发图了”等任何暗示已发图片的文字或动作描述。只有应用代码在实际生成并创建图片消息时，界面才会显示图片；你只输出真实的普通文字回复。`;
+
+const CHARACTER_EXPRESSION_PRIORITY = `[角色表达优先级：内置活人感 2.0]
+1. 角色人设、角色与用户的既定关系、已确认的角色事实，高于一切泛化的聊天风格建议。
+2. 当前用户消息与最近聊天上下文决定本轮回应什么；先接住用户正在说的事。
+3. 仅使用当前语境命中的世界书条目补充世界事实、身份或明确口癖。世界书不能在没有明确冲突时改写角色既有的称呼、亲疏、情感倾向或核心语气。
+4. 内置活人感 2.0 只用于让表达自然，绝不允许用跳脱、冷淡、敷衍、无故情绪或不匹配的表情把角色写偏。
+
+发送前自检：这是否像这个角色会对这个用户说的话？称呼、亲疏、情感倾向和禁用口吻是否一致？若不一致，重写。`;
 
 type ChatStylePreset = "default" | "floating-cute" | "liquid-glass";
 
@@ -2646,8 +2656,15 @@ export default function AppChat({
   const isOfflineModeActive = false;
   const isInputNarration = false;
   const activeOfflineStoryId = null;
+  const [offlineStoryDraftMessage, setOfflineStoryDraftMessage] = useState<Message | null>(null);
+  const [offlineStoryTitleDraft, setOfflineStoryTitleDraft] = useState("");
 
-  const handleStartOfflineFromMsg = (msg: Message) => {
+  const getDefaultOfflineStoryTitle = () => {
+    const charName = activeCharacter?.remark || activeCharacter?.name || "角色";
+    return `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`;
+  };
+
+  const handleStartOfflineFromMsg = (msg: Message, requestedTitle?: string) => {
     if (!activeChatCharId || !activeCharacter) return;
     
     const charName = activeCharacter.remark || activeCharacter.name;
@@ -2691,7 +2708,7 @@ export default function AppChat({
       conversationId: activeRelationship?.conversationId,
       // A group is only a container; the actual offline actors are its members.
       characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
-      title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
+      title: requestedTitle?.trim() || `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: "continue",
@@ -3805,6 +3822,8 @@ ${turnSettings.disableBracketActions
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：短期聊天记录已按用户限制截断；需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
 
+      charDefText += `\n\n[角色语气最终锚定]\n你是 ${activeCharacter.name}。核心性格与行为：${activeCharacter.personality}\n每一条可见回复都必须保持这一人设以及你与用户已确认的关系语气；不得为了制造“活人感”无故变冷淡、跳话题、敷衍或使用不符合人设的表达。`;
+
       const normalizeTopicText = (value: string) => value
         .replace(/\[[^\]]*\]/g, " ")
         .replace(/[\s\p{P}\p{S}]+/gu, "")
@@ -4132,10 +4151,10 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
 2. Do not repeat, paraphrase, or restart an answer already spoken during this call. Compare against your recent call lines and add only new information or a natural follow-up.
 3. Long-term archived memory is ${callTopicShiftDetected ? "available because the user shifted to a different topic; use only directly relevant facts" : "not loaded for this turn; stay with short-term live context"}.
 4. Never force an old memory into the conversation merely because it exists. If the user's meaning is unclear, ask a brief natural question instead of replaying an earlier answer.`);
-      } else if (allStickers1.length > 0) {
+      } else if (allStickers1.length > 0 && /^\[表情\]\|/.test(userMsg?.content || "")) {
         const stickerListStr = allStickers1.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
         assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
-你作为扮演角色，现在可以在符合上方特殊媒体使用规则时使用我的自定义表情包来回复我。只有表情包本身能表达即时反应、且不重复文字内容时，才可以单独一行发送表情包。
+用户刚刚发送了表情包；只有在符合上方频率限制、且表情包本身能表达即时反应、且不重复文字内容时，才可以单独一行发送表情包。除此之外不要使用任何表情包。
 发送表情包的格式必须完全符合以下严格语法格式：
 [表情]|表情名称|图片URL
 
@@ -4163,6 +4182,8 @@ ${stickerListStr}
 6. 【历史言行隔离与实时刷新法则（Chat History Isolation & Real-Time Sync）】：
    如果你在之前的聊天历史（Chat History）中因为当时的世界书设定而使用了某种前缀/后缀/口癖（例如之前每句话都有“喵”），但只要该设定在当前的最新的世界书词条中【已被修改、删除、停用（isActive 为 false）或根本不存在】，你必须【立即彻底抛弃并停止】使用该旧前缀/后缀/口癖！不要被历史消息中的言行所同化，不要产生路径依赖或行为惯性！你必须立刻与最新状态无缝同步，表现得如同该设定从未存在过一样。修改、删除或停用立即无缝实时刷新生效！`);
 
+      // Keep this after legacy World Book guidance: 2.0 is the effective final priority.
+      assembledInstructions.push(CHARACTER_EXPRESSION_PRIORITY);
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
       // Custom tool/attachment format descriptions for character context
@@ -4311,6 +4332,12 @@ ${stickerListStr}
             disableBracketActions: turnSettings.disableBracketActions,
             keepPeriods,
             characterId: activeChatCharId,
+            allowEmoji: mayCharacterUseEmoji({
+              latestUserMessage: userMsg?.content,
+              recentCharacterMessages: currentChatMessages
+                .filter((message) => message.sender === "character" && message.characterId === activeChatCharId)
+                .map((message) => message.content),
+            }),
             createId: (idx) => `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
             currentTime: () => Date.now(),
             transformBubble: (bubbleText, idx) => {
@@ -4933,43 +4960,6 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
     });
   }, [pendingDiaryShareMessageId, activeRelationship?.id, activeRelationship?.conversationId, activeRelationship?.userIdentityId, activeCharacter?.id, activeCharacter?.isGroupChat, activeIdentityId, messages.length, onDiaryShareHandled]);
 
-  // The settings sheet is rendered inside the chat overlay for viewport
-  // positioning, but it is not part of the chat surface.  Never leave a
-  // previous/legacy user stylesheet mounted while that sheet is open: an old
-  // unscoped node can still style the shared overlay even after the scoped
-  // stylesheet has been updated.  Re-create the scoped head copy when the
-  // sheet closes so the chat resumes immediately without a reload.
-  useEffect(() => {
-    const styleNodes = () => {
-      const nodes = Array.from(document.querySelectorAll<HTMLStyleElement>(
-        'style[data-user-chat-css="true"], style#app-chat-user-custom-css',
-      ));
-      // Versions before the scoped stylesheet used an unmarked @scope node.
-      // Remove that legacy node as well; otherwise it can continue to style
-      // the settings sheet after a hot update without a full page reload.
-      const legacy = Array.from(document.querySelectorAll<HTMLStyleElement>("style"))
-        .filter((node) => node.textContent?.includes("@scope (#conv-screen)"));
-      return Array.from(new Set([...nodes, ...legacy]));
-    };
-    const removeUserStyles = () => {
-      styleNodes().forEach((node) => node.remove());
-    };
-
-    if (isShowingCardModal || !hasUserCustomChatCss) {
-      removeUserStyles();
-      return;
-    }
-
-    const styleId = "app-chat-user-custom-css";
-    const existing = document.getElementById(styleId);
-    const style = existing instanceof HTMLStyleElement
-      ? existing
-      : Object.assign(document.createElement("style"), { id: styleId });
-    style.setAttribute("data-user-chat-css", "true");
-    style.textContent = scopedUserCustomChatCss;
-    if (!existing) document.head.appendChild(style);
-  }, [isShowingCardModal, hasUserCustomChatCss, scopedUserCustomChatCss]);
-
   const handleRegenerateResponse = async (targetMsg: Message, oocComment: string) => {
     if (!activeChatCharId || !activeCharacter) return;
 
@@ -5081,6 +5071,8 @@ ${resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).d
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
+
+      charDefText += `\n\n[角色语气最终锚定]\n你是 ${activeCharacter.name}。核心性格与行为：${activeCharacter.personality}\n每一条可见回复都必须保持这一人设以及你与用户已确认的关系语气；不得为了制造“活人感”无故变冷淡、跳话题、敷衍或使用不符合人设的表达。`;
 
       // Add OOC comment correction as high priority instruction
       charDefText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
@@ -5270,6 +5262,8 @@ ${stickerListStr}
 6. 【历史言行隔离与实时刷新法则（Chat History Isolation & Real-Time Sync）】：
    如果你在之前的聊天历史（Chat History）中因为当时的世界书设定而使用了某种前缀/后缀/口癖（例如之前每句话都有“喵”），但只要该设定在当前的最新的世界书词条中【已被修改、删除、停用（isActive 为 false）或根本不存在】，你必须【立即彻底抛弃并停止】使用该旧前缀/后缀/口癖！不要被历史消息中的言行所同化，不要产生路径依赖或行为惯性！你必须立刻与最新状态无缝同步，表现得如同该设定从未存在过一样。修改、删除或停用立即无缝实时刷新生效！`);
 
+      // Keep this after legacy World Book guidance: 2.0 is the effective final priority.
+      assembledInstructions.push(CHARACTER_EXPRESSION_PRIORITY);
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
       const composedPrompt = PromptComposer.compose({
@@ -5294,6 +5288,7 @@ ${stickerListStr}
           disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
           keepPeriods,
           characterId: activeChatCharId,
+          allowEmoji: false,
           createId: (idx) => `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
           currentTime: (idx) => Date.now() + idx,
         });
@@ -5632,7 +5627,12 @@ User Profile (interacting with you):
 ${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}${truthPrompt}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
 
-${proactivePrompt}`;
+${proactivePrompt}
+
+${CHARACTER_EXPRESSION_PRIORITY}
+[角色语气最终锚定]
+你是 ${activeCharacter.name}。核心性格与行为：${activeCharacter.personality}
+保持这一人设以及与用户已确认的关系语气；不要无故冷淡、跳话题、敷衍或使用不符合人设的表达。`;
 
       const composedPrompt = PromptComposer.compose({
         scenario: "proactive-message",
@@ -5804,7 +5804,12 @@ User Profile (interacting with you):
 ${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}${truthPrompt}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 ${taskPrompt}
 
-${instructionsPrompt}`;
+${instructionsPrompt}
+
+${CHARACTER_EXPRESSION_PRIORITY}
+[角色语气最终锚定]
+你是 ${friend.name}。核心性格与行为：${friend.personality}
+保持这一人设以及与用户已确认的关系语气；不要无故冷淡、跳话题、敷衍或使用不符合人设的表达。`;
 
       const composedPrompt = PromptComposer.compose({
         scenario: "proactive-message",
@@ -5915,6 +5920,7 @@ ${instructionsPrompt}`;
 2. Keep it under 35 characters. Speak in Chinese.
 3. No OOC, no narrative brackets like (微笑), just the direct comment text.
 4. You may naturally reference confirmed shared experiences or relationship facts from the supplied context, but never invent them or mention another relationship or user identity.
+${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 `;
 
           const composedPrompt = PromptComposer.compose({
@@ -6015,6 +6021,7 @@ ${instructionsPrompt}`;
 2. Keep it under 35 characters. Speak in Chinese.
 3. Speak directly to the user without formal prefixes. Do not write narrative actions or brackets like "(害羞)", just output the comment text.
 4. You may naturally reference only confirmed material from this supplied relationship context. Never invent shared experiences or use another relationship's information.
+${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 `;
 
         const composedPrompt = PromptComposer.compose({
@@ -6978,9 +6985,6 @@ ${instructionsPrompt}`;
                   stroke: currentColor !important;
                 }
               `}</style>
-            )}
-            {hasUserCustomChatCss && !isShowingCardModal && (
-              <style data-user-chat-css="true">{scopedUserCustomChatCss}</style>
             )}
             {/* Chat Window Header with standard classes and compact size */}
             <div className={`chat-content-scope chat-page chat-theme chat-page__background shrink-0 ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`}>
@@ -11446,7 +11450,8 @@ ${instructionsPrompt}`;
 
             <button
               onClick={() => {
-                handleStartOfflineFromMsg(activeMenuMsg);
+                setOfflineStoryDraftMessage(activeMenuMsg);
+                setOfflineStoryTitleDraft(getDefaultOfflineStoryTitle());
                 setActiveMenuMsg(null);
               }}
               className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
@@ -11496,6 +11501,36 @@ ${instructionsPrompt}`;
               </button>
             )}
           </motion.div>
+        </div>
+      )}
+
+      {offlineStoryDraftMessage && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/45 p-5" onClick={() => setOfflineStoryDraftMessage(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-slate-100 bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <h2 className="text-base font-bold text-slate-900">转为线下故事</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500">可在进入线下模式前修改这段故事的名称。</p>
+            <label className="mt-4 block text-xs font-medium text-slate-700" htmlFor="offline-story-title-draft">故事名称</label>
+            <input
+              id="offline-story-title-draft"
+              autoFocus
+              value={offlineStoryTitleDraft}
+              onChange={(event) => setOfflineStoryTitleDraft(event.target.value)}
+              className="mt-2 h-11 w-full rounded-[8px] border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none focus:border-slate-500"
+            />
+            <div className="mt-5 flex gap-2">
+              <button type="button" onClick={() => setOfflineStoryDraftMessage(null)} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-sm font-semibold text-slate-600">取消</button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleStartOfflineFromMsg(offlineStoryDraftMessage, offlineStoryTitleDraft);
+                  setOfflineStoryDraftMessage(null);
+                }}
+                className="flex-1 rounded-xl bg-neutral-950 py-2.5 text-sm font-semibold text-white"
+              >
+                开启线下故事
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

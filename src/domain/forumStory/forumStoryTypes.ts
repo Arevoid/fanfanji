@@ -62,6 +62,8 @@ export interface StoryThread {
   /** Story-scope simulated engagement counters. */
   readonly viewCount?: number;
   readonly likeCount?: number;
+  /** Opaque story-reader tokens that have already liked this thread. */
+  readonly likedByIdentityIds?: readonly string[];
   /** Story-scope aggregate only: a reader explicitly asked this story to continue. */
   readonly readerInterest?: boolean;
   readonly closedAt?: number;

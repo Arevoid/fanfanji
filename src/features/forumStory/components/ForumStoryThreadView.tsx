@@ -27,6 +27,7 @@ export function ForumStoryThreadView({
   onLikeReply,
   onUtilityAction,
   onSubmitComment,
+  readerToken,
   submitting = false,
 }: {
   storyId: string;
@@ -34,6 +35,8 @@ export function ForumStoryThreadView({
   onLikeReply?: (storyId: string, replyId: string) => void;
   onUtilityAction?: (action: "share" | "delete" | "translate", storyId: string, reply?: ForumStoryUiReply) => void;
   onSubmitComment?: (storyId: string, body: string, replyTo?: ForumStoryUiReply) => void | Promise<void>;
+  /** Opaque, story-scoped reader token used only for like-state rendering. */
+  readerToken?: string;
   submitting?: boolean;
 }) {
   const view = getForumStoryUiThread(storyId);
@@ -52,6 +55,7 @@ export function ForumStoryThreadView({
   if (!view) return <main className="min-h-0 flex-1 overflow-y-auto px-4 py-10 text-center text-sm text-slate-400">帖子暂不可用</main>;
   const author = view.characters.find((character) => character.id === view.thread.authorCharacterId);
   const threadAuthor = authorFor(author?.name || "匿名楼主", author?.avatar);
+  const threadLiked = Boolean(readerToken && view.thread.likedByIdentityIds?.includes(readerToken));
   const submit = async () => {
     const value = body.trim();
     if (!value || submitting || !onSubmitComment) return;
@@ -77,7 +81,7 @@ export function ForumStoryThreadView({
         <h1 className="mt-4 break-words text-[18px] font-bold leading-7 text-slate-950">{view.thread.title}</h1>
         <p className="mt-2 whitespace-pre-wrap break-words text-[14px] leading-6 text-slate-700">{view.thread.initialContent}</p>
         <div className="mt-4 grid grid-cols-4 items-center gap-1 border-t border-slate-100 pt-3">
-          <button type="button" onClick={() => onLike?.(storyId)} className="inline-flex min-w-0 items-center justify-center gap-1 text-[11px] font-medium text-slate-500"><ThumbsUp className="h-4 w-4" />{view.thread.likeCount || 0}</button>
+          <button type="button" onClick={() => onLike?.(storyId)} disabled={threadLiked} className={`inline-flex min-w-0 items-center justify-center gap-1 text-[11px] font-medium disabled:cursor-default ${threadLiked ? "text-rose-500" : "text-slate-500"}`} aria-label={threadLiked ? "已点赞" : "点赞"}><ThumbsUp className={`h-4 w-4 ${threadLiked ? "fill-current" : ""}`} />{view.thread.likeCount || 0}</button>
           <button type="button" onClick={() => document.getElementById("forum-reply-input")?.focus()} className="inline-flex min-w-0 items-center justify-center gap-1 text-[11px] text-slate-500"><MessageCircle className="h-4 w-4" />{view.replies.length}</button>
           <button type="button" onClick={() => onUtilityAction?.("share", storyId)} className="inline-flex min-w-0 items-center justify-center gap-1 text-[11px] font-medium text-slate-500"><Share2 className="h-4 w-4" />转发</button>
           <button type="button" onClick={() => onUtilityAction?.("delete", storyId)} className="inline-flex min-w-0 items-center justify-center gap-1 text-[11px] font-medium text-rose-400 active:text-rose-600"><Trash2 className="h-3.5 w-3.5" />删除</button>
@@ -89,6 +93,7 @@ export function ForumStoryThreadView({
         {entries.length === 0 ? <p className="px-4 py-10 text-center text-xs text-slate-400">还没有回复，来说点什么吧</p> : entries.map((entry) => {
           const isUpdate = entry.kind === "update";
           const reply = isUpdate ? undefined : entry.reply;
+          const replyLiked = Boolean(readerToken && reply?.likedByIdentityIds.includes(readerToken));
           const entryAuthor = isUpdate ? threadAuthor : authorFor(reply!.authorName, view.characters.find((character) => character.id === reply!.storyCharacterId)?.avatar);
           const label = isUpdate ? "楼主更新" : undefined;
           const content = isUpdate ? `${entry.update.title ? `${entry.update.title}\n` : ""}${entry.update.content}` : reply!.isDeleted ? "该回复已删除" : reply!.body;
@@ -107,7 +112,7 @@ export function ForumStoryThreadView({
             {reply?.quoteContent && <div className="ml-10 mt-2 rounded-lg border-l-2 border-slate-300 bg-slate-50 px-3 py-2 text-[11px] leading-4 text-slate-500"><div className="mb-0.5 font-medium text-slate-600">回复 {reply.floor - 1} 楼</div><p className="break-words">{reply.quoteContent}</p></div>}
             <p className={`ml-10 mt-2 whitespace-pre-wrap break-words text-[13px] leading-5 ${reply?.isDeleted ? "italic text-slate-400" : "text-slate-700"}`}>{content}</p>
             {!isUpdate && !reply!.isDeleted && <div className="ml-10 mt-3 flex items-center gap-4">
-              <button type="button" onClick={() => onLikeReply?.(storyId, reply!.id)} className="inline-flex items-center gap-1 text-[11px] text-slate-400"><ThumbsUp className="h-3.5 w-3.5" />{reply!.likeCount}</button>
+              <button type="button" onClick={() => onLikeReply?.(storyId, reply!.id)} disabled={replyLiked} className={`inline-flex items-center gap-1 text-[11px] disabled:cursor-default ${replyLiked ? "text-rose-500" : "text-slate-400"}`} aria-label={replyLiked ? "已点赞" : "点赞"}><ThumbsUp className={`h-3.5 w-3.5 ${replyLiked ? "fill-current" : ""}`} />{reply!.likeCount}</button>
               <button type="button" onClick={() => onUtilityAction?.("delete", storyId, reply)} className="text-[11px] text-slate-300 active:text-red-500">删除</button>
               <button type="button" onClick={() => { setReplyingTo(reply); document.getElementById("forum-reply-input")?.focus(); }} className="inline-flex items-center gap-1 text-[11px] text-slate-400"><Reply className="h-3.5 w-3.5" />回复此楼</button>
               <button type="button" onClick={() => onUtilityAction?.("translate", storyId, reply)} className="text-[11px] text-slate-400">翻译</button>

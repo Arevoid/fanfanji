@@ -43,7 +43,7 @@ export interface StoryForumReplyAppendResult extends StorageWriteResult {
   floorNumber?: number;
 }
 
-export type StoryForumReplyEngagementPatch = Pick<StoryForumReply, "likeCount" | "hotScore">;
+export type StoryForumReplyEngagementPatch = Partial<Pick<StoryForumReply, "likeCount" | "hotScore" | "likedByIdentityIds">>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -83,7 +83,7 @@ export const isStoryForumReplyRecord = (value: unknown): value is StoryForumRepl
     && Number.isFinite(value.occurredAt)
     && value.baseLikeCount === 0
     && Array.isArray(value.likedByIdentityIds)
-    && value.likedByIdentityIds.length === 0
+    && value.likedByIdentityIds.every((identityId) => typeof identityId === "string")
     && typeof value.createdAt === "number"
     && Number.isFinite(value.createdAt)
     && typeof value.updatedAt === "number"
@@ -158,6 +158,7 @@ export const updateReplyEngagement = (
     ...current[index],
     ...(patch.likeCount !== undefined ? { likeCount: patch.likeCount } : {}),
     ...(patch.hotScore !== undefined ? { hotScore: patch.hotScore } : {}),
+    ...(patch.likedByIdentityIds !== undefined ? { likedByIdentityIds: patch.likedByIdentityIds } : {}),
   };
   if (!isStoryForumReplyRecord(nextReply)) return failedStoryWrite();
   const next = [...current];
