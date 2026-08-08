@@ -22,6 +22,8 @@ export type ForumStoryExecutionTrigger = "time" | "comment_activity" | "hot_disc
 export type ForumStoryExecutionLogStatus = "pending" | "running" | "success" | "failed";
 
 export type StoryCreationSource = "user" | "system" | "template";
+/** Planned entirely inside story scope; it never represents a real-life fact. */
+export type ForumStoryNarrativeOutcome = "complete" | "abandoned" | "open";
 
 export interface ForumStory {
   readonly id: ForumStoryId;
@@ -30,6 +32,7 @@ export interface ForumStory {
   readonly premise: string;
   readonly status: ForumStoryStatus;
   readonly creationSource: StoryCreationSource;
+  readonly narrativeOutcome?: ForumStoryNarrativeOutcome;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly startedAt?: number;
@@ -59,6 +62,8 @@ export interface StoryThread {
   /** Story-scope simulated engagement counters. */
   readonly viewCount?: number;
   readonly likeCount?: number;
+  /** Story-scope aggregate only: a reader explicitly asked this story to continue. */
+  readonly readerInterest?: boolean;
   readonly closedAt?: number;
 }
 

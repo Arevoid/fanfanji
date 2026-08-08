@@ -18,6 +18,8 @@ export interface RecordForumStoryViewInput extends ForumStoryEngagementTargetInp
 export interface AddForumStoryLikeInput extends ForumStoryEngagementTargetInput {
   /** When omitted, the story thread itself receives the like. */
   replyId?: string;
+  /** A story-scope aggregate signal; it never records a real user identity. */
+  markReaderInterest?: boolean;
 }
 
 export interface CalculateForumStoryHotRepliesInput {
@@ -56,7 +58,7 @@ const getThreadOrThrow = (storyId: string, threadId: string): StoryThread => {
 const updateThreadEngagement = (
   storyId: string,
   threadId: string,
-  patch: Pick<StoryThread, "viewCount" | "likeCount">,
+  patch: Pick<StoryThread, "viewCount" | "likeCount"> & Partial<Pick<StoryThread, "readerInterest">>,
 ): StoryThread => {
   const thread = getThreadOrThrow(storyId, threadId);
   ensureWrite(StoryThreadRepository.updateThread(storyId, threadId, {
@@ -85,6 +87,7 @@ export const addLike = (input: AddForumStoryLikeInput): StoryThread | StoryForum
     const thread = getThreadOrThrow(input.storyId, input.threadId);
     return updateThreadEngagement(input.storyId, input.threadId, {
       likeCount: (thread.likeCount ?? 0) + amount,
+      ...(input.markReaderInterest ? { readerInterest: true } : {}),
     });
   }
 

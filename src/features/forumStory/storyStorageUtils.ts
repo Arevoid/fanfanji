@@ -59,6 +59,7 @@ export const isForumStoryRecord = (value: unknown): value is ForumStory => {
     && typeof value.premise === "string"
     && ["draft", "active", "waiting_update", "completed"].includes(String(value.status))
     && ["user", "system", "template"].includes(String(value.creationSource))
+    && (value.narrativeOutcome === undefined || ["complete", "abandoned", "open"].includes(String(value.narrativeOutcome)))
     && isFiniteNumber(value.createdAt)
     && isFiniteNumber(value.updatedAt)
     && (value.startedAt === undefined || isFiniteNumber(value.startedAt))
@@ -84,6 +85,7 @@ export const isStoryThreadRecord = (value: unknown): value is StoryThread => {
     && isFiniteNumber(value.updatedAt)
     && (value.viewCount === undefined || isNonNegativeInteger(value.viewCount))
     && (value.likeCount === undefined || isNonNegativeInteger(value.likeCount))
+    && (value.readerInterest === undefined || typeof value.readerInterest === "boolean")
     && (value.closedAt === undefined || isFiniteNumber(value.closedAt));
 };
 

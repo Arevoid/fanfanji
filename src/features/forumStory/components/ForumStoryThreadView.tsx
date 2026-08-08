@@ -1,4 +1,4 @@
-import { Clock3, UserRound } from "lucide-react";
+import { Clock3, Heart, RefreshCw, UserRound } from "lucide-react";
 import { getForumStoryUiThread } from "../forumStoryUiData";
 
 const formatStoryTime = (timestamp: number): string => {
@@ -13,7 +13,17 @@ const formatStoryTime = (timestamp: number): string => {
   });
 };
 
-export function ForumStoryThreadView({ storyId }: { storyId: string }) {
+export function ForumStoryThreadView({
+  storyId,
+  onLike,
+  onRequestUpdate,
+  updating = false,
+}: {
+  storyId: string;
+  onLike?: (storyId: string) => void;
+  onRequestUpdate?: (storyId: string) => void;
+  updating?: boolean;
+}) {
   const view = getForumStoryUiThread(storyId);
   if (!view) {
     return <main className="min-h-0 flex-1 overflow-y-auto px-4 py-10 text-center text-sm text-slate-400">故事内容暂不可用</main>;
@@ -59,6 +69,27 @@ export function ForumStoryThreadView({ storyId }: { storyId: string }) {
         </div>
         <h2 className="mt-3 break-words text-[17px] font-bold leading-6 text-slate-900">{view.thread.title}</h2>
         <p className="mt-2 whitespace-pre-wrap break-words text-[14px] leading-6 text-slate-700">{view.thread.initialContent}</p>
+        <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3">
+          <button
+            type="button"
+            onClick={() => onLike?.(storyId)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1.5 text-[11px] font-medium text-rose-500 active:bg-rose-100"
+          >
+            <Heart className="h-3.5 w-3.5" /> 赞 {view.thread.likeCount || 0}
+          </button>
+          {view.story.status !== "completed" && (
+            <button
+              type="button"
+              disabled={updating}
+              onClick={() => onRequestUpdate?.(storyId)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1.5 text-[11px] font-medium text-indigo-600 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${updating ? "animate-spin" : ""}`} />
+              {updating ? "楼主整理中" : "催更 / 刷新进展"}
+            </button>
+          )}
+          <span className="ml-auto text-[10px] text-slate-400">{view.thread.viewCount || 0} 浏览</span>
+        </div>
       </article>
 
       {view.updates.map((update) => (

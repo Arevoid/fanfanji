@@ -34,6 +34,7 @@ export interface ForumStoryUpdatePromptContext {
   characters: readonly ForumStoryUpdatePromptCharacter[];
   events: readonly ForumStoryUpdatePromptEvent[];
   comments?: readonly ForumStoryUpdatePromptComment[];
+  conclude?: boolean;
 }
 
 export interface ForumStoryUpdateCandidate {
@@ -126,7 +127,10 @@ export const buildForumStoryUpdatePrompt = (
       "Use only the supplied current story state, public StoryThread, story-scoped characters, immutable public StoryEvents, and public comment summaries.",
       "Do not read, infer, mention, or recreate Memory, Relationship, real Character entities, private user data, chat history, InnerVoice, CharacterEvent, userIdentityId, or relationId.",
       "Do not rewrite or contradict historical events. Advance only from the supplied facts and do not invent an unauthorized real-world fact.",
-      "The update must move the fictional story one episode forward without revealing a final ending, adding private context, or using roleplay stage directions, hidden reasoning, timestamps, or internal IDs.",
+      context.conclude
+        ? "Write the final public楼主更新: resolve the central conflict only from established facts and give readers a satisfying concise ending."
+        : "The update must move the fictional story one episode forward without revealing a final ending.",
+      "Do not add private context or use roleplay stage directions, hidden reasoning, timestamps, or internal IDs.",
       "Return one JSON object only: {\"title\":\"optional public title\",\"content\":\"public author update body\",\"eventProgression\":\"what public story event moved forward\"}.",
     ].join("\n"),
     message: [
@@ -142,7 +146,9 @@ export const buildForumStoryUpdatePrompt = (
       events.map((event) => `- #${event.sequence} ${event.type}: ${event.summary}`).join("\n"),
       "Recent public comments:",
       comments.length > 0 ? comments.map((comment) => `- ${comment.authorName}: ${comment.content}`).join("\n") : "none",
-      "Write the next public楼主更新. Keep it grounded in the timeline and comments; do not conclude the entire story.",
+      context.conclude
+        ? "Write the final public楼主更新. Keep it grounded in the timeline and comments; resolve the whole story now."
+        : "Write the next public楼主更新. Keep it grounded in the timeline and comments; do not conclude the entire story.",
     ].join("\n"),
   };
 };

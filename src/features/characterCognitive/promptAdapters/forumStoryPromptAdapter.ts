@@ -92,14 +92,14 @@ export const buildForumStoryInitialPrompt = (
 只能使用用户提供的故事主题、明确允许的公共背景和故事内角色资料。
 严格只输出一个 JSON 对象，不要 Markdown、解释文字或额外字段：
 {"title":"标题","body":"初始帖子正文","author":{"name":"发帖身份","role":"故事角色","personaSummary":"故事内人设摘要"},"characters":[{"name":"角色名","role":"角色身份","personaSummary":"故事内人设摘要"}],"storyBackground":"故事背景","initialState":"故事开始时的初始状态"}
-正文必须像自然的普通论坛首帖，不要动作旁白、心理标签、伪媒体、时间戳、内部 ID 或私密信息。characters 最多 6 个，author 必须出现在 characters 中。`,
+正文必须像自然的普通论坛首帖，不要动作旁白、心理标签、伪媒体、时间戳、内部 ID 或私密信息。首帖必须严格使用第一人称论坛发帖口吻，例如“我……”“我朋友……”“你们有没有发现……”“求助……”。即使是完整连载故事，也必须让楼主以自身视角陈述和提问；禁止写成“男主和女主……”式第三人称小说简介。首帖只抛出起因、悬念和当前困境，不要直接写出结局。characters 最多 6 个，author 必须出现在 characters 中。`,
     message: [
       `故事 scope：${context.storyScope}`,
       `故事主题：${theme}`,
       `明确允许的公共世界背景：${worldBackground || "无"}`,
       "可参考的故事内角色：",
       characterText,
-      "请生成一个有起因、公开背景和清晰初始状态的故事首帖；不要生成后续结局。",
+      "请生成一个有起因、公开背景和清晰初始状态的故事首帖；必须采用第一人称论坛口吻，不要生成后续结局。",
     ].join("\n"),
   };
 };

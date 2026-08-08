@@ -54,6 +54,8 @@ export interface GenerateForumStoryUpdateInput {
   storyCharacters?: readonly StoryCharacter[];
   settings: ForumStoryUpdateGenerationSettings;
   triggerReason?: StoryUpdateTriggerReason;
+  /** Explicit story-scope request to write the concluding episode. */
+  conclude?: boolean;
   now?: number;
   aiCall?: ForumStoryUpdateAiCall;
 }
@@ -166,6 +168,7 @@ export const generateStoryUpdate = async (
       authorName: reply.publicAuthor.displayName,
       content: reply.body,
     })),
+    conclude: input.conclude === true,
   });
   const parsedCandidate = await generateCandidate({
     prompt,
@@ -228,11 +231,29 @@ export const generateStoryUpdate = async (
   ensureWrite(eventWrite, "update event");
   if (!eventWrite.event) throw new Error("ForumStory update event read failed");
   const event = eventWrite.event;
+  if (input.conclude) {
+    const completionWrite = StoryEventRepository.appendEvent({
+      id: `${storyId}:event:story-completed:${nextEpisode}`,
+      storyId,
+      type: "story_completed",
+      source: author ? "npc" : "system",
+      status: "confirmed",
+      summary: `故事完结：${candidate.eventProgression}`,
+      storyVersion: story.version + 1,
+      occurredAt: now,
+      createdAt: now,
+      ...(author ? { actorIds: [author.id] } : {}),
+      forumThreadId: thread.id,
+      idempotencyKey: `${storyId}:story-completed:${nextEpisode}`,
+    });
+    ensureWrite(completionWrite, "completion event");
+  }
   ensureWrite(ForumStoryRepository.updateStory(storyId, {
-    status: "waiting_update",
+    status: input.conclude ? "completed" : "waiting_update",
     currentEpisode: nextEpisode,
     currentStoryTime: now,
     updatedAt: now,
+    ...(input.conclude ? { completedAt: now } : {}),
     version: story.version + 1,
   }), "story state");
   const updatedStory = ForumStoryRepository.getStory(storyId);

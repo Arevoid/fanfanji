@@ -107,6 +107,14 @@ import { requestForumDmReply } from "../features/forum/services/forumDmService";
 import { listForumStoryUiItems } from "../features/forumStory/forumStoryUiData";
 import { ForumStoryList } from "../features/forumStory/components/ForumStoryList";
 import { ForumStoryThreadView } from "../features/forumStory/components/ForumStoryThreadView";
+import {
+  advanceForumStoryOnManualRefresh,
+  generateForumStoryOnManualRefresh,
+} from "../features/forumStory/services/forumStoryRefreshService";
+import { ForumStoryEngagementService } from "../features/forumStory/services/forumStoryEngagementService";
+import { ForumStoryUpdateService } from "../features/forumStory/services/forumStoryUpdateService";
+import { ForumStoryCommentService } from "../features/forumStory/services/forumStoryCommentService";
+import { getForumStoryUiThread } from "../features/forumStory/forumStoryUiData";
 import { FORUM_HOME_PAGE_SIZE, FORUM_REPLY_PAGE_SIZE } from "../domain/forum/forumCapacity";
 
 interface AppForumProps {
@@ -229,6 +237,8 @@ export default function AppForum({
   const [communityNpcName, setCommunityNpcName] = useState("");
   const [communityNpcAvatar, setCommunityNpcAvatar] = useState("");
   const [communityNpcPersona, setCommunityNpcPersona] = useState("");
+  const [forumStoryRevision, setForumStoryRevision] = useState(0);
+  const [isStoryUpdating, setIsStoryUpdating] = useState(false);
   const replyLockRef = useRef(false);
   const postLockRef = useRef(false);
   const shareLockRef = useRef(false);
@@ -242,7 +252,7 @@ export default function AppForum({
     () => listForumThreadsForIdentity(threads, activeIdentity.id, replies),
     [threads, replies, activeIdentity.id],
   );
-  const forumStoryItems = useMemo(() => listForumStoryUiItems(), []);
+  const forumStoryItems = useMemo(() => listForumStoryUiItems(), [forumStoryRevision]);
   const activeThread = identityThreads.find((thread) => thread.id === activeThreadId);
   const activeDmConversation = dmConversations.find((conversation) => conversation.id === activeDmConversationId);
   const activeProfile = profiles.find((profile) => profile.ownerIdentityId === activeIdentity.id) || createForumProfile(activeIdentity, 0);
@@ -403,11 +413,15 @@ export default function AppForum({
     }
     try {
       const plannedCount = 1 + Math.floor(Math.random() * 5);
+      // Root content is generated only by this explicit refresh action. A
+      // refresh may reserve one of its 1–5 slots for a forum-story thread.
+      const shouldGenerateStory = plannedCount >= 2 && Math.random() < 0.45;
+      const normalThreadCount = plannedCount - (shouldGenerateStory ? 1 : 0);
       const currentThreads = loadForumThreads().value;
       const currentReplies = loadForumReplies().value;
-      const generated = await generateForumThreads({
+      const generated = normalThreadCount > 0 ? await generateForumThreads({
         ownerIdentityId: activeIdentity.id,
-        count: plannedCount,
+        count: normalThreadCount,
         trigger: "refresh",
         relationships,
         characters,
@@ -418,13 +432,36 @@ export default function AppForum({
         settings,
         now,
         communityNpcs,
-      });
-      if (generated.threads.length === 0) {
+      }) : { threads: [], replies: [] };
+      let storyCreated = false;
+      if (shouldGenerateStory) {
+        try {
+          await generateForumStoryOnManualRefresh({ settings, now });
+          storyCreated = true;
+          setForumStoryRevision((revision) => revision + 1);
+        } catch (storyError) {
+          // A story uses a separate AI request; normal refresh remains usable
+          // if that optional story request cannot produce valid content.
+          console.warn("Forum story refresh skipped", storyError);
+        }
+      }
+      let storyAdvanced = false;
+      if (!shouldGenerateStory && Math.random() < 0.35) {
+        try {
+          storyAdvanced = Boolean(await advanceForumStoryOnManualRefresh({ settings, now }));
+          if (storyAdvanced) setForumStoryRevision((revision) => revision + 1);
+        } catch (storyError) {
+          console.warn("Forum story continuation skipped", storyError);
+        }
+      }
+      if (generated.threads.length === 0 && !storyCreated && !storyAdvanced) {
         throw new Error("生成内容无效：没有可写入的新帖子。");
       }
       const nextThreads = [...generated.threads, ...currentThreads];
       const nextReplies = [...currentReplies, ...generated.replies];
-      if (!commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
+      if (generated.threads.length > 0 && !commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
+      if (storyCreated) setNotice("已加入一条可继续阅读的论坛体故事。");
+      else if (storyAdvanced) setNotice("一条论坛体故事有了新的楼主更新和讨论。");
       persistTasks(finishForumGenerationTask(
         loadForumGenerationTasks(new Set(relationships.map((relationship) => relationship.id))).value,
         begun.task.id,
@@ -445,6 +482,53 @@ export default function AppForum({
       releaseForumGenerationTask(taskKey);
       setIsRefreshing(false);
       refreshLockRef.current = false;
+    }
+  };
+
+  const likeForumStory = (storyId: string) => {
+    const view = getForumStoryUiThread(storyId);
+    if (!view) return;
+    try {
+      ForumStoryEngagementService.addLike({ storyId, threadId: view.thread.id, markReaderInterest: true });
+      setForumStoryRevision((revision) => revision + 1);
+      setNotice("已点赞。喜欢的故事会优先继续连载并走向结局。");
+    } catch (storyError) {
+      setError(storyError instanceof Error ? storyError.message : "故事点赞失败，请重试。");
+    }
+  };
+
+  const requestForumStoryUpdate = async (storyId: string) => {
+    if (isStoryUpdating) return;
+    const view = getForumStoryUiThread(storyId);
+    if (!view || view.story.status === "completed") return;
+    setIsStoryUpdating(true);
+    setError("");
+    try {
+      const updateResult = await ForumStoryUpdateService.generateStoryUpdate({
+        story: view.story,
+        thread: view.thread,
+        settings,
+        triggerReason: "manual",
+        // A liked story is promised a conclusion once it has received enough
+        // development; otherwise this remains a normal serial update.
+        conclude: view.thread.readerInterest === true && view.story.currentEpisode >= 3,
+      });
+      // Every update immediately receives a bounded, real forum discussion;
+      // the comment service persists only story-scoped identities and floors.
+      if (updateResult.story.status !== "completed") {
+        await ForumStoryCommentService.generateStoryComments({
+          story: updateResult.story,
+          thread: updateResult.thread,
+          settings,
+          count: 5 + Math.floor(Math.random() * 6),
+        });
+      }
+      setForumStoryRevision((revision) => revision + 1);
+      setNotice(updateResult.story.status === "completed" ? "楼主已发布最终结局。" : "楼主已更新，新的讨论已补进楼层。");
+    } catch (storyError) {
+      setError(storyError instanceof Error ? storyError.message : "故事更新失败，请稍后重试。");
+    } finally {
+      setIsStoryUpdating(false);
     }
   };
 
@@ -1100,7 +1184,12 @@ export default function AppForum({
       ) : readonlySnapshot ? (
         <ForumSnapshotDetail snapshot={readonlySnapshot} />
       ) : activeStoryId ? (
-        <ForumStoryThreadView storyId={activeStoryId} />
+        <ForumStoryThreadView
+          storyId={activeStoryId}
+          onLike={likeForumStory}
+          onRequestUpdate={(storyId) => void requestForumStoryUpdate(storyId)}
+          updating={isStoryUpdating}
+        />
       ) : !activeThread && secondaryPage ? (
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-4">
           {secondaryPage === "profile" && <section className="rounded-2xl bg-white p-4 shadow-sm">

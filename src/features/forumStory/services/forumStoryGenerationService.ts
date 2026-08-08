@@ -46,6 +46,9 @@ export interface CreateForumStoryInput {
   worldBackground?: string;
   /** Optional story-scoped role seeds; these are not Character entities. */
   characters?: readonly ForumStoryPromptCharacter[];
+  /** Origin of the story inside story scope; does not identify a real user. */
+  creationSource?: ForumStory["creationSource"];
+  narrativeOutcome?: ForumStory["narrativeOutcome"];
   storyId?: string;
   now?: number;
   aiCall?: ForumStoryAiCall;
@@ -145,7 +148,8 @@ export const createForumStory = async (input: CreateForumStoryInput): Promise<Fo
     seed: theme,
     premise: theme,
     status: "draft",
-    creationSource: "user",
+    creationSource: input.creationSource || "user",
+    ...(input.narrativeOutcome ? { narrativeOutcome: input.narrativeOutcome } : {}),
     createdAt: now,
     updatedAt: now,
     currentEpisode: 1,
