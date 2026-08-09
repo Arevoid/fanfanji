@@ -7,11 +7,7 @@ import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry
 import { compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, stripInternalDeliveryMarkers, type CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
-import { requestAiReply } from "../features/chat/services/aiReplyService";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
-import { createRegeneratedReplyCandidates } from "../features/chat/services/regenerateService";
-import { generateGroupReplyCandidates } from "../features/chat/services/groupChatService";
-import { generateProactiveReplyCandidates } from "../features/chat/services/proactiveMessageService";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
@@ -45,6 +41,7 @@ import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelat
 import { generateInnerVoice } from "../features/chat/services/innerVoiceService";
 import { generateCharacterImage } from "../features/chat/services/characterImageService";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
+import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
@@ -97,7 +94,6 @@ import { requestAutomaticMomentComment } from "../features/moments/services/mome
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
 import { buildMomentCognitiveContext } from "../features/moments/services/momentCognitiveContext";
 import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
-import { buildTextAiRuntimeConfig } from "../features/chat/services/textAiRuntimeConfig";
 import { prioritizeUserChatCss, scopeUserChatCss } from "../features/chat/styles/chatCssScope";
 import { sanitizeMomentPublishText } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
@@ -2686,19 +2682,9 @@ ${memberWbText}`;
       const promptMessage = buildGroupChatTaskMessage(historyText, Boolean(userMsg));
 
       // Call apiChat to generate responses
-      const composedPrompt = PromptComposer.compose({
-        scenario: "group-chat",
-        message: promptMessage,
-        history: [],
-        systemInstruction,
-        historyInjections: [...groupAtDepthInjections.values()],
-      });
-      const groupResult = await generateGroupReplyCandidates({
-        requestAi: apiChat,
-        request: {
-        ...composedPrompt,
-        ...buildTextAiRuntimeConfig(settings),
-        },
+      const groupResult = await generateGroupChatTurn({
+        prompt: { scenario: "group-chat", message: promptMessage, history: [], systemInstruction, historyInjections: [...groupAtDepthInjections.values()] },
+        settings,
         members: groupMembers,
         groupId: activeChatCharId,
         disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
@@ -3373,16 +3359,9 @@ ${stickerListStr}
 请你根据我们正在聊天的上下文话题或我们之前的对话脉络【极其自然、顺畅地继续对话】。如果当下适合，你也可以顺应氛围跟着发一个你自己的表情包，或者在文字对话里自然带过，保持微信好友日常聊天和斗图的真实、轻松感。`;
       }
 
-      const composedPrompt = PromptComposer.compose({
-        scenario: "direct-chat",
-        message: promptMessage,
-        history,
-        systemInstruction,
-        historyInjections: wbBlocks.at_depth,
-      });
-      const data = await requestAiReply(apiChat, {
-        ...composedPrompt,
-        ...buildTextAiRuntimeConfig(settings),
+      const data = await requestDirectChatTurn({
+        prompt: { scenario: "direct-chat", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
+        settings,
       });
 
       if (data && data.text) {
@@ -4310,29 +4289,21 @@ ${stickerListStr}
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       const systemInstruction = finalizeCharacterChatSystemInstruction({ instructions: assembledInstructions, characterProjection, characterDescriptionText, diagnosticLabel: "regenerate prompt" });
 
-      const composedPrompt = PromptComposer.compose({
-        scenario: "regenerate",
-        message: lastUserMsg.content,
-        history,
-        systemInstruction,
-        historyInjections: wbBlocks.at_depth,
-      });
-      const data = await requestAiReply(apiChat, {
-        ...composedPrompt,
-        ...buildTextAiRuntimeConfig(settings),
-      });
-
-      if (data && data.text) {
-        const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
-        const replyCandidates = createRegeneratedReplyCandidates({
-          rawText: data.text,
+      const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+      const { data, candidates: replyCandidates } = await generateRegeneratedChatTurn({
+        prompt: { scenario: "regenerate", message: lastUserMsg.content, history, systemInstruction, historyInjections: wbBlocks.at_depth },
+        settings,
+        candidateContext: {
           disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
           keepPeriods,
           characterId: activeChatCharId,
           allowEmoji: false,
           createId: (idx) => `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
           currentTime: (idx) => Date.now() + idx,
-        });
+        },
+      });
+
+      if (data && data.text && replyCandidates) {
         replyCandidates.messages.forEach(onSendMessage);
         if (replyCandidates.messages.length > 0) {
           recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
@@ -4716,20 +4687,16 @@ ${stickerListStr}
         instructionsPrompt,
       });
 
-      const composedPrompt = PromptComposer.compose({
-        scenario: "proactive-message",
-        message: "(你主动给用户发送了一条信息)",
-        history: recentConversation.recentMessages.map((message) => ({
-          role: message.sender === "user" ? "user" : "model",
-          text: message.content,
-        })),
-        systemInstruction,
-        historyInjections: wbBlocks.at_depth,
-      });
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
-      const proactiveResult = await generateProactiveReplyCandidates({
-        requestAi: apiChat,
-        request: { ...composedPrompt, ...buildTextAiRuntimeConfig(settings) },
+      const proactiveResult = await generateProactiveChatTurn({
+        prompt: {
+          scenario: "proactive-message",
+          message: "(你主动给用户发送了一条信息)",
+          history: recentConversation.recentMessages.map((message) => ({ role: message.sender === "user" ? "user" : "model", text: message.content })),
+          systemInstruction,
+          historyInjections: wbBlocks.at_depth,
+        },
+        settings,
         characterId: friend.id,
         disableBracketActions: friend.disableBracketActions || false,
         keepPeriods,
