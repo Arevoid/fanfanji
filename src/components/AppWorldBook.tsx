@@ -3,6 +3,7 @@ import { WorldBookEntry, Character, type WorldBookPosition } from "../types";
 import { Plus, Trash2, Edit, Search, ChevronLeft, BookOpen, Layers, Globe, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries, safeParseDocx } from "../utils/pngParser";
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
+import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
 import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
 
 export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBookEntry | null => {
@@ -47,33 +48,8 @@ export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBo
     triggerType = "constant";
   }
 
-  // Position Mapping (Requirement 4: author notes to approximate after character definition)
-  let position: WorldBookPosition = "after_char_def";
-  const rawPos = e.position;
-  if (typeof rawPos === "string") {
-    const lp = rawPos.toLowerCase();
-    if (lp.includes("system") || lp.includes("main") || lp.includes("first")) {
-      position = "after_main_prompt";
-    } else if (lp.includes("before_char")) {
-      position = "before_char_def";
-    } else if (lp.includes("after_char")) {
-      position = "after_char_def";
-    } else if (lp.includes("an") || lp.includes("author") || lp.includes("note")) {
-      position = "after_char_def";
-    } else if (lp === "at_depth" || lp.includes("at-depth") || lp.includes("depth")) {
-      position = "at_depth";
-    } else if (lp.includes("history") || lp.includes("chat")) {
-      position = "before_chat_history";
-    }
-  } else if (typeof rawPos === "number") {
-    if (rawPos === 0) position = "before_char_def";
-    else if (rawPos === 1) position = "after_char_def";
-    else if (rawPos === 2 || rawPos === 3) position = "after_char_def";
-    else if (rawPos === 4) position = "at_depth";
-    else position = "after_main_prompt";
-  } else if (e.position) {
-    position = e.position;
-  }
+  // Author notes remain approximated as after-character-definition for compatibility.
+  const position = normalizeImportedWorldBookPosition(e.position);
 
   // Depth (1-15)
   let depth = 5;

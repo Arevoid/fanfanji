@@ -37,6 +37,11 @@ import { useTheme } from "../features/theme/ThemeProvider";
 import { sanitizeAppearanceSettings, type ThemeMode } from "../features/theme/theme";
 import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
 import { PromptDebugPanel } from "../features/promptDebug/components/PromptDebugPanel";
+import {
+  getSettingsBackTarget,
+  getSettingsHeaderTitle,
+  type SettingsTab,
+} from "../features/settings/settingsNavigation";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -356,7 +361,7 @@ export default function AppSettings({
   onDeletePreset,
   onClose,
 }: AppSettingsProps) {
-  const [activeTab, setActiveTab] = useState<"profile" | "api" | "image_api" | "appearance" | "beauty" | "system_config" | "system" | "minimax" | "prompt_debug" | null>(null);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(null);
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
 
   // PWA states
@@ -979,41 +984,10 @@ export default function AppSettings({
     { key: "settings", label: "设置" }
   ];
 
-  const getHeaderTitle = () => {
-    switch (activeTab) {
-      case "profile":
-        return "基础设置";
-      case "api":
-        return "API 设置";
-      case "image_api":
-        return "图片设置";
-      case "appearance":
-        return "外观设置";
-      case "beauty":
-        return "美化样式";
-      case "system_config":
-        return "系统设置";
-      case "system":
-        return "系统备份";
-      case "minimax":
-        return "语音设置";
-      case "prompt_debug":
-        return "提示词检查器";
-      default:
-        return "设置";
-    }
-  };
-
   const handleBack = () => {
-    if (activeTab === "prompt_debug") {
-      setActiveTab("system_config");
-      return;
-    }
-    if (activeTab !== null) {
-      setActiveTab(null);
-    } else {
-      onClose();
-    }
+    const target = getSettingsBackTarget(activeTab);
+    if (target === "close") onClose();
+    else setActiveTab(target);
   };
 
   return (
@@ -1029,7 +1003,7 @@ export default function AppSettings({
         </button>
         
         <h1 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">
-          {getHeaderTitle()}
+          {getSettingsHeaderTitle(activeTab)}
         </h1>
         <div className="w-8 h-8" />
       </div>

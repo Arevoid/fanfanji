@@ -1,4 +1,5 @@
 import { Character, WorldBookEntry } from "../types";
+import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
 
 // PNG Character Card text chunk parser
 export async function parsePngChunks(file: File): Promise<string | null> {
@@ -194,24 +195,7 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
     kwString = String(stEntry.keywords);
   }
 
-  let mappedPos: WorldBookEntry["position"] = "after_char_def";
-  const stPos = stEntry.position;
-  if (stPos !== undefined && stPos !== null) {
-    const pStr = String(stPos).toLowerCase();
-    if (pStr.includes("author") || pStr === "3") {
-      mappedPos = "after_char_def";
-    } else if (pStr.includes("before_char") || pStr.includes("before_body") || pStr === "0") {
-      mappedPos = "before_char_def";
-    } else if (pStr.includes("after_char") || pStr.includes("after_body") || pStr === "1") {
-      mappedPos = "after_char_def";
-    } else if (pStr.includes("chat") || pStr.includes("story") || pStr === "2") {
-      mappedPos = "before_chat_history";
-    } else if (pStr.includes("depth") || pStr === "4") {
-      mappedPos = "at_depth";
-    } else if (pStr.includes("main")) {
-      mappedPos = "after_main_prompt";
-    }
-  }
+  const mappedPos = normalizeImportedWorldBookPosition(stEntry.position, "silly-tavern");
 
   let mappedDepth = 5;
   if (stEntry.insertion_order !== undefined && stEntry.insertion_order !== null) {
