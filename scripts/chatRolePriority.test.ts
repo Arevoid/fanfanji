@@ -85,8 +85,9 @@ const matchedBlocks = buildWorldBookSystemBlocks([
 assert.match(matchedBlocks.formattedAll, /第三食堂/, "keyword entries must activate from recent context");
 
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const chatPromptBuilderSource = readFileSync(new URL("../src/features/chat/prompts/chatPromptBuilders.ts", import.meta.url), "utf8");
 assert.match(chatSource, /projectCharacterPrompt\(activeCharacter, activeRelationship\?\.relationship\)/);
-assert.match(chatSource, /assembleChatInstructions\(assembledInstructions/);
+assert.match(chatPromptBuilderSource, /assembleChatInstructions\(input\.instructions/);
 assert.match(chatSource, /slice\(-10\)/, "World Book activation must scan roughly ten recent messages");
 assert.doesNotMatch(chatSource, /buildStableRoleAnchor/);
 assert.doesNotMatch(chatSource, /includeAllVisibleEntries: true/, "direct chat must not inject every visible World Book entry");
