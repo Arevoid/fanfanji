@@ -7449,7 +7449,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                handleSendAndReply(e);
+                handleSendOnly(e);
               }}
               className="px-3 py-2 flex items-center gap-2 chat-composer__form"
             >
@@ -7502,7 +7502,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
               {/* Send Button 2 (Send and AI Reply - black background with white paper plane) */}
               <button
-                type="submit"
+                type="button"
+                onClick={(e) => handleSendAndReply(e)}
                 disabled={isTyping}
                 className="w-10 h-10 transition-all flex items-center justify-center shrink-0 send-button chat-composer__button chat-composer__send-reply-button chat-composer__send-button"
                 title="发送消息并获取回复"
@@ -8904,7 +8905,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                       >
                         <div className="flex items-center gap-3.5">
                           <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
-                            <Wallet className="w-5 h-5 text-emerald-500" />
+                            <Wallet className="w-5 h-5 text-slate-800" />
                           </div>
                           <div>
                             <span className="text-sm font-bold text-slate-800">我的钱包</span>
@@ -8924,7 +8925,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                       >
                         <div className="flex items-center gap-3.5">
                           <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
-                            <Smile className="w-5 h-5 text-indigo-500" />
+                            <Smile className="w-5 h-5 text-slate-800" />
                           </div>
                           <div>
                             <span className="text-sm font-bold text-slate-800">表情包管理</span>
@@ -8944,7 +8945,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                       >
                         <div className="flex items-center gap-3.5">
                           <div className="w-6 h-6 flex items-center justify-center text-slate-800 transition-transform group-hover:scale-105 shrink-0">
-                            <FolderHeart className="w-5 h-5 text-rose-500" />
+                            <FolderHeart className="w-5 h-5 text-slate-800" />
                           </div>
                           <div>
                             <span className="text-sm font-bold text-slate-800">我的收藏</span>

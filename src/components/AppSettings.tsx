@@ -2990,7 +2990,7 @@ export default function AppSettings({
                 </label>
               </div>
 
-              <div className="space-y-2 border-b border-[var(--divider)] px-4 py-4">
+              <div className="space-y-2 px-4 py-4">
                 <label className="block text-xs font-bold text-slate-700">语音平台</label>
                 <select
                   value={ttsProvider}

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Sticker, StickerGroup, UserSettings } from "../types";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
+import { parseStickerImportLine } from "../utils/stickerImport";
 import {
   Trash2,
   Link,
@@ -173,12 +174,12 @@ export default function StickerSettings({
   // Batch URLs import
   const handleBulkUrlsImport = async () => {
     if (!bulkUrls.trim() || !activeGroup) return;
-    const urls = bulkUrls
+    const importedLines = bulkUrls
       .split("\n")
-      .map((url) => url.trim())
-      .filter((url) => url.startsWith("http://") || url.startsWith("https://"));
+      .map(parseStickerImportLine)
+      .filter((item): item is NonNullable<typeof item> => item !== null);
 
-    if (urls.length === 0) {
+    if (importedLines.length === 0) {
       setModalConfig({
         title: "无效链接",
         message: "请输入有效的 http 或 https 图片链接！",
@@ -189,14 +190,15 @@ export default function StickerSettings({
     }
 
     const newStickers: Sticker[] = [];
-    for (const url of urls) {
+    for (const importedLine of importedLines) {
+      const { url } = importedLine;
       const stickerId = `sticker-url-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
       // Extract file name from URL segments
-      let extractedName = "未命名表情";
+      let extractedName = importedLine.name || "未命名表情";
       try {
         const pathname = new URL(url).pathname;
         const filename = pathname.substring(pathname.lastIndexOf("/") + 1);
-        if (filename) {
+        if (!importedLine.name && filename) {
           const cleanFilename = filename.replace(/\.[^/.]+$/, "");
           if (cleanFilename && cleanFilename.length > 1) {
             extractedName = decodeURIComponent(cleanFilename);
@@ -628,14 +630,14 @@ export default function StickerSettings({
 
             <div className="space-y-1">
               <label className="block text-[10px] text-slate-400 font-extrabold uppercase">
-                请输入表情包的图片URL (一行一个链接)
+                每行输入“表情包名称 + 图片 URL”
               </label>
               <textarea
                 value={bulkUrls}
                 onChange={(e) => setBulkUrls(e.target.value)}
                 rows={6}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white transition-all resize-none"
-                placeholder="https://example.com/sticker1.png&#10;https://example.com/sticker2.jpg"
+                placeholder="开心 | https://example.com/happy.png&#10;委屈：https://example.com/sad.jpg&#10;震惊https://example.com/shocked.webp"
               />
             </div>
 

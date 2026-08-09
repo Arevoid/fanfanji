@@ -21,8 +21,12 @@ assert.match(settings, />\s*保存设置\s*</);
 assert.match(settingsNavigation, /minimax:\s*"语音图片"/);
 assert.match(
   settings,
-  /<section className="settings-card overflow-hidden[\s\S]*?语音合成总开关[\s\S]*?border-b border-\[var\(--divider\)\][\s\S]*?语音平台[\s\S]*?Mossland 接口配置[\s\S]*?<\/section>/,
+  /<section className="settings-card overflow-hidden[\s\S]*?<div className="flex items-center justify-between gap-3 border-b border-\[var\(--divider\)\] px-4 py-3">[\s\S]*?语音合成总开关[\s\S]*?<div className="space-y-2 px-4 py-4">[\s\S]*?语音平台[\s\S]*?Mossland 接口配置[\s\S]*?<\/section>/,
 );
+assert.doesNotMatch(settings, /className="space-y-2 border-b border-\[var\(--divider\)\] px-4 py-4"[\s\S]*?语音平台/);
+assert.match(chat, /onSubmit=\{\(e\) => \{[\s\S]*?handleSendOnly\(e\);[\s\S]*?type="button"[\s\S]*?onClick=\{\(e\) => handleSendAndReply\(e\)\}/);
+assert.match(chat, /<Smile className="w-5 h-5 text-slate-800" \/>/);
+assert.match(chat, /<FolderHeart className="w-5 h-5 text-slate-800" \/>/);
 assert.match(chat, /Mossland VOICE ID[\s\S]*MiniMax VOICE ID/);
 
 console.log("requested UI cleanup tests passed");
