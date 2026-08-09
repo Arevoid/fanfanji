@@ -255,7 +255,11 @@ export const parseTextToWorldBookEntries = (text: string, filename: string): Wor
     content: trimmedText,
     characterId: "global",
     category: "导入词条",
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    triggerType: "constant",
+    isActive: true,
+    position: "after_char_def",
+    depth: 5,
   }];
 };
 

@@ -3,6 +3,7 @@ import { WorldBookEntry, Character } from "../types";
 import { Plus, Trash2, Edit, Search, ChevronLeft, BookOpen, Layers, Globe, User, X, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries, safeParseDocx } from "../utils/pngParser";
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
+import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
 
 export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBookEntry | null => {
   if (!e || typeof e !== "object") return null;
@@ -396,6 +397,14 @@ export default function AppWorldBook({
 
       let imported: WorldBookEntry[] = [];
 
+      const importStructuredTextWorldBook = (text: string): WorldBookEntry[] => {
+        const parsed = parseStructuredCharacterDocument(text, file.name);
+        if (parsed.worldBookEntries.length === 0) return parseTextToWorldBookEntries(text, file.name);
+        return parsed.worldBookEntries
+          .map((entry) => mapSillyTavernEntry(entry, "global"))
+          .filter(Boolean) as WorldBookEntry[];
+      };
+
       if (isPng) {
         const charaStr = await parsePngChunks(file);
         if (!charaStr) {
@@ -449,7 +458,7 @@ export default function AppWorldBook({
           r.onerror = () => reject(new Error("读取 TXT 失败"));
           r.readAsText(file);
         });
-        imported = parseTextToWorldBookEntries(text, file.name);
+        imported = importStructuredTextWorldBook(text);
       } else if (isDocx) {
         const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
           const r = new FileReader();
@@ -458,7 +467,7 @@ export default function AppWorldBook({
           r.readAsArrayBuffer(file);
         });
         const text = await safeParseDocx(arrayBuffer);
-        imported = parseTextToWorldBookEntries(text, file.name);
+        imported = importStructuredTextWorldBook(text);
       } else {
         throw new Error("请上传 .json 配置文件、.png 角色卡、.txt 或 .docx 文档文件！");
       }

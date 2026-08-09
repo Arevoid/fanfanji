@@ -27,18 +27,6 @@ export interface WorldBookSystemBlocks {
   formattedAll: string;
 }
 
-/**
- * A small number of character-defining entries need to be available even when
- * the user starts a chat with a short message such as "在吗". They remain
- * subject to the normal scope/visibility checks. Direct chat can explicitly
- * opt into its full visible World Book through the read context.
- */
-const isPersistentRoleEntry = (entry: WorldBookEntry): boolean => {
-  if (entry.triggerType === "constant") return true;
-  const descriptor = `${entry.title} ${entry.category || ""} ${entry.keywords || ""}`.toLowerCase();
-  return /(核心|身份|关系|称呼|口癖|人格|性格|世界观|世界设定|character|identity|relationship|persona|calling|speech)/i.test(descriptor);
-};
-
 export function buildWorldBookSystemBlocks(
   propEntries: WorldBookEntry[],
   characterId: string,
@@ -47,13 +35,8 @@ export function buildWorldBookSystemBlocks(
 ): WorldBookSystemBlocks {
   const latestWorldBookEntries = getLatestWorldBookEntries(propEntries);
   const scanTextLower = scanText.toLowerCase();
-  const includeAllVisibleEntries = readContext?.includeAllVisibleEntries === true;
 
   const triggeredEntries: {
-    entry: WorldBookEntry;
-    text: string;
-  }[] = [];
-  const persistentRoleEntries: {
     entry: WorldBookEntry;
     text: string;
   }[] = [];
@@ -94,22 +77,11 @@ export function buildWorldBookSystemBlocks(
       entry,
       text: `【设定 - ${entry.title}】\n${entry.content}`
     };
-    if (includeAllVisibleEntries || isTriggered) {
-      triggeredEntries.push(candidate);
-    } else if (isPersistentRoleEntry(entry)) {
-      persistentRoleEntries.push(candidate);
-    }
+    if (isTriggered) triggeredEntries.push(candidate);
   }
 
   // Sort entries by depth ascending (smaller depth is closer / higher priority)
-  const triggeredIds = new Set(triggeredEntries.map(({ entry }) => entry.id));
-  const alwaysRelevant = includeAllVisibleEntries
-    ? []
-    : persistentRoleEntries
-      .filter(({ entry }) => !triggeredIds.has(entry.id))
-      .sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5))
-      .slice(0, 3);
-  const sortedTriggered = [...triggeredEntries, ...alwaysRelevant]
+  const sortedTriggered = triggeredEntries
     .sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5));
 
   const entriesByPos = {

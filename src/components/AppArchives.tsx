@@ -5,6 +5,7 @@ import { Plus, Trash2, Edit2, User, ChevronLeft, AlertCircle, X, Camera, Image, 
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
 import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile } from "../features/archives/characterExport";
+import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
 
 interface AppArchivesProps {
   characters: Character[];
@@ -244,6 +245,27 @@ export default function AppArchives({
       let importedChar: Character;
       let characterBook: any = null;
 
+      const importStructuredTextCharacter = (text: string): Character => {
+        const parsed = parseStructuredCharacterDocument(text, file.name);
+        const id = "char-import-" + Date.now();
+        if (parsed.worldBookEntries.length > 0) {
+          characterBook = { entries: parsed.worldBookEntries };
+        }
+        return {
+          id,
+          name: parsed.name,
+          age: parsed.age,
+          gender: parsed.gender,
+          mbti: parsed.mbti,
+          avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
+          personality: parsed.personality,
+          backstory: parsed.description,
+          greeting: "",
+          album: [],
+          references: [],
+        };
+      };
+
       if (isPng) {
         const charaStr = await parsePngChunks(file);
         if (!charaStr) {
@@ -296,17 +318,7 @@ export default function AppArchives({
           r.onerror = () => reject(new Error("读取 TXT 配置文件失败"));
           r.readAsText(file);
         });
-        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-        importedChar = {
-          id: "char-import-" + Date.now(),
-          name: nameWithoutExt,
-          avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
-          personality: text.trim(),
-          backstory: "",
-          greeting: "",
-          album: [],
-          references: [],
-        };
+        importedChar = importStructuredTextCharacter(text);
       } else if (isDocx) {
         const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
           const r = new FileReader();
@@ -315,17 +327,7 @@ export default function AppArchives({
           r.readAsArrayBuffer(file);
         });
         const text = await safeParseDocx(arrayBuffer);
-        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-        importedChar = {
-          id: "char-import-" + Date.now(),
-          name: nameWithoutExt,
-          avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
-          personality: text.trim(),
-          backstory: "",
-          greeting: "",
-          album: [],
-          references: [],
-        };
+        importedChar = importStructuredTextCharacter(text);
       } else {
         throw new Error("请上传 .png 角色卡、.json 配置文件、.txt 或 .docx 文档文件！");
       }

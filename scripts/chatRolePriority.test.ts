@@ -62,11 +62,16 @@ const entry = (id: string, title: string, triggerType: WorldBookEntry["triggerTy
 });
 
 const blocks = buildWorldBookSystemBlocks([
-  entry("identity", "核心身份与关系", "keys"),
+  entry("identity", "核心身份与关系", "constant"),
   entry("place", "第三食堂", "keys"),
 ], "character-a", "你好", { scenario: "chat", characterId: "character-a" });
 assert.match(blocks.formattedAll, /核心身份与关系/, "persistent identity entries must be available for a short opening");
 assert.doesNotMatch(blocks.formattedAll, /第三食堂/, "unrelated entries must stay topic-triggered");
+
+const matchedBlocks = buildWorldBookSystemBlocks([
+  entry("place", "第三食堂", "keys"),
+], "character-a", "要不要去第三食堂", { scenario: "chat", characterId: "character-a" });
+assert.match(matchedBlocks.formattedAll, /第三食堂/, "keyword entries must activate from recent context");
 
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 assert.match(chatSource, /projectCharacterPrompt\(activeCharacter, activeRelationship\?\.relationship\)/);
@@ -75,6 +80,10 @@ assert.match(chatSource, /slice\(-10\)/, "World Book activation must scan roughl
 assert.doesNotMatch(chatSource, /buildStableRoleAnchor/);
 assert.doesNotMatch(chatSource, /includeAllVisibleEntries: true/, "direct chat must not inject every visible World Book entry");
 assert.doesNotMatch(chatSource, /Do not force warmth/, "base chat prompt must not bias every role toward coldness");
+assert.doesNotMatch(chatSource, /Keep replies concise, warm/, "proactive chat must not force a warm and brief persona");
+assert.doesNotMatch(chatSource, /温暖、有爱的微信回复|假设 you 听到了我用温暖/, "media events must not force warmth or invent voice tone");
+assert.match(chatSource, /MEDIA_EVENT_PERSONA_RESPONSE_RULE/);
+assert.match(chatSource, /projectCharacterPrompt\(friend, relationship\.relationship\)/, "proactive chat must use the same character projection");
 assert.match(chatSource, /removeLegacyWorldBookPriorityDirective/);
 assert.match(chatSource, /WORLD_BOOK_CONTEXT_PRIORITY/);
 

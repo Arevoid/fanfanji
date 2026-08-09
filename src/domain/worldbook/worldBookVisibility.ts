@@ -7,8 +7,6 @@ export interface WorldBookReadContext {
   characterId?: string;
   userIdentityId?: string;
   relationId?: string;
-  /** Direct chat may request every visible entry instead of trigger-only retrieval. */
-  includeAllVisibleEntries?: boolean;
 }
 
 const isNonEmpty = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;

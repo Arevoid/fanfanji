@@ -1046,6 +1046,8 @@ const CHARACTER_MEDIA_USAGE_RULES = `[特殊媒体使用规则]
 不要为了显示功能而强迫角色使用特殊消息；不要连续多轮无理由发送语音或表情包；不要用表情包重复已经能由文字完整表达的内容。
 【图片绝对规则】你没有发送图片的能力。无论用户是否索要照片，绝对不得输出“（发送了一张图片）”“（发送了一张自拍）”“我给你发图了”等任何暗示已发图片的文字或动作描述。只有应用代码在实际生成并创建图片消息时，界面才会显示图片；你只输出真实的普通文字回复。`;
 
+const MEDIA_EVENT_PERSONA_RESPONSE_RULE = `只把上述媒体事件当作本轮已发生的事实。回复的称呼、冷暖、亲疏、主动性、情绪强度、长度与气泡数量必须由角色卡、既定关系和当前语境决定；不要预设温暖、冷淡、亲密、可爱、感激或简短。`;
+
 const CHARACTER_EXPRESSION_PRIORITY = `[角色表达优先级]
 1. 角色人设首先决定角色会怎么说、会不会主动、热情还是克制、会不会调侃、追问、嘴硬或拒绝。角色卡中明确写出的亲疏、称呼和情感方向不得被默认关系状态削弱。
 2. 当前用户消息与最近聊天上下文决定本轮回应什么；先理解用户正在说的事，再按上述角色设定自然反应。
@@ -4006,9 +4008,9 @@ ${turnSettings.disableBracketActions
 - 红包留言：“${greeting}”
 
 【行为及回复规则】：
-1. 你已经【拆开并领取】了这个红包。你感到开心、意外、被宠溺、受宠若惊、感激或者开玩笑，具体情绪取决于你的人设！
-2. 在你的本轮回复中，你必须【极其自然且生动地对此做出反应】（例如：开心地谢谢对方、调侃对方是大款、撒娇、承诺用这个钱去买你喜欢的东西、或者也想礼貌地找机会回礼等）。
-3. 请用你完全符合人设的角色口吻和微信聊天风格来回复。绝对不要说“系统”、“格式”或“指令”等AI字眼。`);
+1. 你已经拆开并领取了这个红包；只把金额和留言当作确定事实。
+2. 角色可以感谢、调侃、迟疑、拒绝后续类似行为或作出其他反应，具体选择完全服从角色卡、既定关系和当前语境，不默认开心、感激、撒娇或亲密。
+3. 只输出角色真正会发送的微信消息，不要提及“系统”“格式”或“指令”。`);
       }
 
       if (isCrossDayNewSession) {
@@ -4033,8 +4035,8 @@ ${timeLogString}
    - 两条消息不在同一天（跨天了）：必须判定为“长时间间隔”，视作很久以前的消息，你绝对不能说“刚才给你发了/刚发过”！
    - 两条消息同一天、间隔小于 5 分钟：判定为近期/短时间连续。
    - 两条消息同一天、间隔超过 5 分钟：判定为有一段时间没发（不属于短时间连续）。
-   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”！
-   - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
+   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天。是否问候、如何问候必须服从角色人设和双方关系，不能统一强制礼貌或亲密。
+   - 如果上一条消息距今已过去数小时或数天，只在当前消息确实需要时体现时间流逝；不要强制追问行程、表达想念或套用固定寒暄。
 2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
 3. 【🚨 极其重要】：上方时间仅是内部推理元数据，不是要发送给用户的内容。禁止在回复中输出或复述任何时间标签、时间戳、时钟气泡或前缀，包括但不限于 \`[发送时间: ...]\`、\`[15:10]\`、\`【15:10】\`。如果需要自然提到时间，只能把它写进完整对话句子中。回复必须保持干净，只输出角色真正要说的话。`);
       }
@@ -4091,14 +4093,14 @@ ${timeLogString}
 
 【AI 剧情记忆判定及语音回复行为规则（最高执行优先级）】:
 ${isLastVoiceOld 
-  ? `1. 【跨天长间隔/长间隔判定】: 由于你上一条语音是昨天或更早日期（或同一天超过5分钟前）发送的，属于长时间间隔，视作很久以前。用户今天再次索要语音时，你【绝对不能】以“刚发过一条”、“怎么又想要”、“刚刚才发过”等理由回绝或推脱！如果想要表现迟疑，只能是因为害羞、当前场合不便等性格特征，决不能说“刚发过/刚刚才发过”！请自然正常地配合发送语音。`
-  : `1. 【同一天短时间连续索要】: 由于你上一条语音和当前时间在【同一天且间隔小于 5 分钟】。此时，判定为短时间内连续索要语音，你才可以自然、娇嗔或傲娇地说出“刚给你发过一条语音”、“不是刚发过一条吗”这类台词来傲娇拒绝或调侃。`
+  ? `1. 【跨天长间隔/长间隔判定】: 上一条语音已经是较早的历史，不能以“刚发过一条”作为当前反应依据。是否发送、迟疑或拒绝以及具体口吻，完全服从角色人设、当前场合和双方关系。`
+  : `1. 【同一天短时间连续索要】: 上一条语音确实刚发送不久，角色可以把这一事实纳入反应；是否调侃、拒绝或继续发送以及具体口吻，完全服从角色人设。`
 }
 2. 聊天历史中带有“居中分割时间标签”的分割条是视觉上的日期和时间断层标识，请通过它们辅助区分跨天长间隔。`;
       } else if (isVoiceRelatedTurn) {
         voiceIntervalPrompt = `[🚨 语音发送间隔及剧情记忆规则]
 - 你（${activeCharacter.name}）在当前的历史聊天中还没有给用户发送过语音消息。
-- 当用户向你索要语音时，请极其自然、温柔或傲娇地配合（或者因害羞、场合不便等原因迟疑，但绝对不能说“刚给你发过”等自相矛盾的话）。`;
+- 不得声称“刚给你发过”。是否配合、迟疑或拒绝以及具体语气，完全服从角色人设、当前场合和双方关系。`;
       }
       if (voiceIntervalPrompt) {
         assembledInstructions.push(voiceIntervalPrompt);
@@ -4231,20 +4233,20 @@ ${stickerListStr}
       // Custom tool/attachment format descriptions for character context
       let promptMessage = userMsg ? userMsg.content : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
       if (promptMessage.startsWith("data:image/")) {
-        promptMessage = `[发送图片/照片] 我给你发送了一张照片，请对此做出符合你人设、生动有趣、短小、像真正情侣或朋友一样的回复。`;
+        promptMessage = `[发送图片/照片] 我给你发送了一张照片。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
       } else if (promptMessage.startsWith("[红包]")) {
         const parts = promptMessage.split("|");
         const amount = parts[1] || "8.88";
         const greeting = parts[2] || "恭喜发财，万事如意";
-        promptMessage = `[发送红包] 我给你发送了一个金额为 ${amount} 元的微信红包，祝福语是：“${greeting}”。请对此做出非常符合你人设、自然且简短可亲的回复，表达谢谢并表达心意。`;
+        promptMessage = `[发送红包] 我给你发送了一个金额为 ${amount} 元的微信红包，祝福语是：“${greeting}”。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
       } else if (promptMessage.startsWith("[位置]")) {
         const parts = promptMessage.split("|");
         const loc = parts[1] || "位置";
-        promptMessage = `[发送位置] 我给你分享了一个微信位置：[${loc}]。请对此做出非常符合你人设、极其自然简短的回复，展现你听到这个地点时的真实性格反应。`;
+        promptMessage = `[发送位置] 我给你分享了一个微信位置：[${loc}]。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
       } else if (promptMessage.startsWith("[音乐]")) {
         const parts = promptMessage.split("|");
         const title = parts[1] || "音乐";
-        promptMessage = `[分享音乐] 我给你分享了一首音乐：《${title}》。这是一次线上音乐分享聊天；请围绕这首歌，用符合你人设的简短、真实文字回复。
+        promptMessage = `[分享音乐] 我给你分享了一首音乐：《${title}》。这是一次线上音乐分享聊天。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}
 禁止为了回应这次分享而补写地点、动作或双方共同场景，也不要新增未提供的现场状态。`;
       } else if (promptMessage.startsWith("[文件]")) {
         const parts = promptMessage.split("|");
@@ -4256,23 +4258,23 @@ ${stickerListStr}
         } catch (e) {
           decodedContent = fileContentRaw;
         }
-        promptMessage = `[分享文件] 我给你分享了一篇备忘录笔记，标题是《${title}》，内容如下：\n"""\n${decodedContent}\n"""\n请针对这篇笔记的标题和具体内容，做出非常符合你人设、温暖、极具代入感且简短亲密的回复。`;
+        promptMessage = `[分享文件] 我给你分享了一篇备忘录笔记，标题是《${title}》，内容如下：\n"""\n${decodedContent}\n"""\n请针对标题和具体内容回应。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
       } else if (promptMessage.startsWith("[视频通话]")) {
         const parts = promptMessage.split("|");
         const status = parts[1] || "已结束";
-        promptMessage = `[视频通话结束] 刚才我们进行了视频通话（通话状态：${status}）。请对此做出一个非常符合你人设、温暖、有爱的微信回复。`;
+        promptMessage = `[视频通话结束] 刚才我们进行了视频通话（通话状态：${status}）。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
       } else if (promptMessage.startsWith("[语音通话]")) {
         const parts = promptMessage.split("|");
         const status = parts[1] || "已结束";
-        promptMessage = `[语音通话结束] 刚才我们进行了语音通话（通话状态：${status}）。请对此做出一个非常符合 you 人设、温暖、有爱的微信回复。`;
+        promptMessage = `[语音通话结束] 刚才我们进行了语音通话（通话状态：${status}）。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
       } else if (promptMessage.startsWith("[语音]|")) {
         const parts = promptMessage.split("|");
         const secs = parts[1] || "5";
         const voiceText = parts.slice(2).join("|") || "";
         if (voiceText) {
-          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒），语音对应的文字内容是：“${voiceText}”。请针对我语音里所说的话，做出非常符合你人设、极富情感、微信风格的简短且温暖的回复。`;
+          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒），语音对应的文字内容是：“${voiceText}”。请针对语音中的实际内容回应。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
         } else {
-          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒）。由于微信语音默认无法直接识别文字，请假设 you 听到了我用温暖/俏皮的声音发给你的语音（内容可以由你自行结合之前的话题进行脑补/想象，或者是日常可爱的闲聊）。请对此做出一个非常符合你人设、温暖、极其简短像真人在微信回语音或文字一样的回复。`;
+          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒），但没有提供可确认的文字内容。不得脑补语音的具体内容或预设我的语气；可以按已知上下文自然承接，信息不足时按角色习惯询问。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
         }
       } else if (promptMessage.startsWith("[表情]|")) {
         const parts = promptMessage.split("|");
@@ -5611,8 +5613,8 @@ ${stickerListStr}
     try {
       let proactivePrompt = `Instructions:
 1. Speak in Chinese. Maintain character role-play thoroughly.
-2. WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
-3. This is an initiator message, so check in on the user or share something from your day.
+2. Use a natural WeChat style. Reply length, warmth, initiative, and emotional intensity must follow the character profile and relationship.
+3. This is an initiator message. Let the character decide whether to share, ask, tease, express affection, stay restrained, or use another natural opening; do not default to caretaking or a generic check-in.
 4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
 
       if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions) {
@@ -5656,32 +5658,29 @@ ${stickerListStr}
         routine: buildCharacterRoutine(activeCharacter.routine),
         topicHistory: loadProactiveTopicRecords().value,
       });
+      const proactiveCharacterProjection = projectCharacterPrompt(activeCharacter, activeRelationship.relationship);
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
 ---
 
 You are playing the role of "${activeCharacter.name}" in a WeChat chat.
-Roleplay Profile:
-- Age: ${activeCharacter.age}
-- Gender: ${activeCharacter.gender}
-- MBTI: ${activeCharacter.mbti}
-- Personality & Behavior: ${activeCharacter.personality}
-- Background Story: ${activeCharacter.backstory}
+${proactiveCharacterProjection.description.content}
+
+${proactiveCharacterProjection.personality.content}
+
+${proactiveCharacterProjection.relationship?.content || ""}
 
 User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}${truthPrompt}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
-It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly.
+${wbPrompt ? `[相关世界书背景设定]\n${wbPrompt}\n\n${WORLD_BOOK_CONTEXT_PRIORITY}\n\n` : ""}${timeContext}${knowledgeBoundary}${truthPrompt}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
+It has been 3 hours since the last conversation. Start a message in the way this character would naturally initiate contact with this user. Do not impose concern, warmth, brevity, or a generic check-in.
 
 ${proactivePrompt}
 
-${CHARACTER_EXPRESSION_PRIORITY}
-[角色语气最终锚定]
-你是 ${activeCharacter.name}。核心性格与行为：${activeCharacter.personality}
-保持这一人设以及与用户已确认的关系语气；不要无故冷淡、跳话题、敷衍或使用不符合人设的表达。`;
+${CHARACTER_EXPRESSION_PRIORITY}`;
 
       const composedPrompt = PromptComposer.compose({
         scenario: "proactive-message",
@@ -5786,8 +5785,8 @@ ${CHARACTER_EXPRESSION_PRIORITY}
     try {
       let instructionsPrompt = `Instructions:
 1. Speak in Chinese. Maintain character role-play thoroughly.
-2. WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
-3. This is an initiator message, so check in on the user or share something from your day.
+2. Use a natural WeChat style. Reply length, warmth, initiative, and emotional intensity must follow the character profile and relationship.
+3. This is an initiator message. Let the character decide whether to share, ask, tease, express affection, stay restrained, or use another natural opening; do not default to caretaking or a generic check-in.
 4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
 
       if (friend.disableBracketActions) {
@@ -5831,34 +5830,31 @@ ${CHARACTER_EXPRESSION_PRIORITY}
         routine: buildCharacterRoutine(friend.routine),
         topicHistory: loadProactiveTopicRecords().value,
       });
+      const proactiveCharacterProjection = projectCharacterPrompt(friend, relationship.relationship);
 
-      const taskPrompt = customTaskText || "It has been 3 hours since you last talked to the user. You decided to proactively send a message to check on them or share something interesting about your current state, life, or what you are doing right now, matching your personality and backstory perfectly. Keep it spontaneous, concise, and realistic.";
+      const taskPrompt = customTaskText || "It has been 3 hours since the last conversation. Start a message in the way this character would naturally initiate contact with this user. Do not impose concern, warmth, brevity, or a generic check-in.";
 
       const systemInstruction = `${LIVING_HUMAN_PROMPT}
 
 ---
 
 You are playing the role of "${friend.name}" in a WeChat chat.
-Roleplay Profile:
-- Age: ${friend.age}
-- Gender: ${friend.gender}
-- MBTI: ${friend.mbti}
-- Personality & Behavior: ${friend.personality}
-- Background Story: ${friend.backstory}
+${proactiveCharacterProjection.description.content}
+
+${proactiveCharacterProjection.personality.content}
+
+${proactiveCharacterProjection.relationship?.content || ""}
 
 User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}
 
-${wbPrompt ? `[🚨 相关世界书背景设定]\n${wbPrompt}\n\n[🚨 极其重要：世界书设定绝对最高优先 🚨]\n必须100%强制遵循上述世界书词条！如果其中要求了特殊语气词或特征口癖（例如：句末加某字，每句开头带某字），你发出的每一个气泡最前面或最后面都必须绝对、100%强制执行该设定！\n\n` : ""}${timeContext}${knowledgeBoundary}${truthPrompt}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
+${wbPrompt ? `[相关世界书背景设定]\n${wbPrompt}\n\n${WORLD_BOOK_CONTEXT_PRIORITY}\n\n` : ""}${timeContext}${knowledgeBoundary}${truthPrompt}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 ${taskPrompt}
 
 ${instructionsPrompt}
 
-${CHARACTER_EXPRESSION_PRIORITY}
-[角色语气最终锚定]
-你是 ${friend.name}。核心性格与行为：${friend.personality}
-保持这一人设以及与用户已确认的关系语气；不要无故冷淡、跳话题、敷衍或使用不符合人设的表达。`;
+${CHARACTER_EXPRESSION_PRIORITY}`;
 
       const composedPrompt = PromptComposer.compose({
         scenario: "proactive-message",
