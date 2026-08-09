@@ -118,19 +118,32 @@ import {
   X
 } from "lucide-react";
 
-const AppWorldBook = React.lazy(() => import("./components/AppWorldBook"));
-const AppForum = React.lazy(() => import("./components/AppForum"));
-const AppSettings = React.lazy(() => import("./components/AppSettings"));
-const AppOffline = React.lazy(() => import("./components/AppOffline"));
+const loadAppWorldBook = () => import("./components/AppWorldBook");
+const loadAppForum = () => import("./components/AppForum");
+const loadAppSettings = () => import("./components/AppSettings");
+const loadAppOffline = () => import("./components/AppOffline");
+
+const SECONDARY_APP_LOADERS: Record<string, () => Promise<unknown>> = {
+  worldbook: loadAppWorldBook,
+  forum: loadAppForum,
+  settings: loadAppSettings,
+  offline: loadAppOffline,
+};
+
+const preloadSecondaryApp = (appId: string) => {
+  const loader = SECONDARY_APP_LOADERS[appId];
+  if (loader) void loader();
+};
+
+const AppWorldBook = React.lazy(loadAppWorldBook);
+const AppForum = React.lazy(loadAppForum);
+const AppSettings = React.lazy(loadAppSettings);
+const AppOffline = React.lazy(loadAppOffline);
 
 function LazyAppBoundary({ children }: React.PropsWithChildren) {
   return (
     <React.Suspense
-      fallback={(
-        <div className="flex h-full items-center justify-center bg-[var(--app-bg)] text-sm text-[var(--text-secondary)]">
-          正在打开…
-        </div>
-      )}
+      fallback={<div className="h-full bg-[var(--app-bg)]" aria-hidden="true" />}
     >
       {children}
     </React.Suspense>
@@ -295,6 +308,22 @@ const DEFAULT_MESSAGES: Message[] = [];
 export default function App() {
   const { resolvedTheme } = useTheme();
   useVisualViewport();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const preloadAll = () => Object.values(SECONDARY_APP_LOADERS).forEach((loader) => void loader());
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(preloadAll, { timeout: 1500 });
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+    const handle = window.setTimeout(preloadAll, 600);
+    return () => window.clearTimeout(handle);
+  }, []);
+
   // Load initial states from LocalStorage or fallbacks
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
 
@@ -1618,6 +1647,7 @@ export default function App() {
   const handleItemClick = (item: HomeScreenItem) => {
     if (isEditingHomeScreen || suppressNextItemClickRef.current) return;
     if (item.type === "app") {
+      preloadSecondaryApp(item.id);
       setActiveApp(item.id);
     }
   };
@@ -3420,6 +3450,7 @@ export default function App() {
 
                     <div className="flex items-center justify-center w-full h-full">
                       <button
+                        onPointerDown={() => preloadSecondaryApp("settings")}
                         onClick={() => setActiveApp("settings")}
                         className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
                           isTransparentDockIcon("settings")
