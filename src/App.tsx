@@ -2540,8 +2540,15 @@ export default function App() {
           border-radius: 14px;
           background-color: var(--input-bg) !important;
           color: var(--text-primary) !important;
-          box-shadow: 0 4px 12px var(--shadow-color) !important;
+          /* Form controls stay visually flat; elevation belongs to their parent card. */
+          box-shadow: none !important;
           outline: none !important;
+        }
+
+        /* A file input is usually hidden behind a styled label. Keep that upload
+           control flat as well, without changing the surrounding settings card. */
+        .phone-screen-container label:has(input[type="file"]) {
+          box-shadow: none !important;
         }
 
         /* Settings pages use one consistent card primitive across every secondary tab. */
