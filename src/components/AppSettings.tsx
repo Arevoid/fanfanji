@@ -36,7 +36,6 @@ import { notifyAppearanceSettingsChanged } from "../features/theme/appearanceRep
 import { useTheme } from "../features/theme/ThemeProvider";
 import { sanitizeAppearanceSettings, type ThemeMode } from "../features/theme/theme";
 import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
-import { PromptDebugPanel } from "../features/promptDebug/components/PromptDebugPanel";
 import {
   getSettingsBackTarget,
   getSettingsHeaderTitle,
@@ -432,7 +431,7 @@ export default function AppSettings({
   const [iconBorderWidth, setIconBorderWidth] = useState(settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1);
   const [iconBorderOpacity, setIconBorderOpacity] = useState(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100);
   const [hideAppNames, setHideAppNames] = useState(!!settings.hideAppNames);
-  const [desktopAppTextColor, setDesktopAppTextColor] = useState(settings.desktopAppTextColor || "#ffffff");
+  const [desktopAppTextColor, setDesktopAppTextColor] = useState(settings.desktopAppTextColor || "#000000");
   const [desktopIconMode, setDesktopIconMode] = useState<"light" | "dark">(settings.desktopIconMode || "dark");
 
   // Beginner-friendly manual styling states
@@ -1596,7 +1595,7 @@ export default function AppSettings({
                         />
                         <input
                           type="color"
-                          value={/^#[0-9a-f]{6}$/i.test(desktopAppTextColor) ? desktopAppTextColor : "#ffffff"}
+                          value={/^#[0-9a-f]{6}$/i.test(desktopAppTextColor) ? desktopAppTextColor : "#000000"}
                           onChange={(event) => {
                             const value = event.target.value.toUpperCase();
                             setDesktopAppTextColor(value);
@@ -2741,14 +2740,8 @@ export default function AppSettings({
               </div>
                 </>
               )}
-              <button type="button" onClick={() => setActiveTab("prompt_debug")} className="w-full rounded-[16px] border border-dashed border-slate-300 bg-slate-50 p-4 text-left">
-                <div className="text-xs font-bold text-slate-700">高级诊断 · 提示词检查器</div>
-                <div className="mt-1 text-[10px] leading-relaxed text-slate-400">查看当前页面内最近的最终组装结果；刷新即清空，不保存、不备份。</div>
-              </button>
             </div>
           )}
-
-          {activeTab === "prompt_debug" && <PromptDebugPanel />}
 
           {/* SYSTEM SETTINGS & BACKUP TAB */}
           {activeTab === "system" && (

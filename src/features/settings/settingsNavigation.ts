@@ -7,7 +7,6 @@ export type SettingsTab =
   | "system_config"
   | "system"
   | "minimax"
-  | "prompt_debug"
   | null;
 
 const SETTINGS_TAB_TITLES: Record<Exclude<SettingsTab, null>, string> = {
@@ -19,7 +18,6 @@ const SETTINGS_TAB_TITLES: Record<Exclude<SettingsTab, null>, string> = {
   system_config: "系统设置",
   system: "系统备份",
   minimax: "语音设置",
-  prompt_debug: "提示词检查器",
 };
 
 export function getSettingsHeaderTitle(tab: SettingsTab): string {
@@ -27,7 +25,6 @@ export function getSettingsHeaderTitle(tab: SettingsTab): string {
 }
 
 export function getSettingsBackTarget(tab: SettingsTab): SettingsTab | "close" {
-  if (tab === "prompt_debug") return "system_config";
   if (tab !== null) return null;
   return "close";
 }

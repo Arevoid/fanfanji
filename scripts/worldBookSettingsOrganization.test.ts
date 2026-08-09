@@ -12,8 +12,6 @@ assert.equal(normalizeImportedWorldBookPosition(2, "silly-tavern"), "before_chat
 assert.equal(normalizeImportedWorldBookPosition(4, "silly-tavern"), "at_depth");
 
 assert.equal(getSettingsHeaderTitle(null), "设置");
-assert.equal(getSettingsHeaderTitle("prompt_debug"), "提示词检查器");
-assert.equal(getSettingsBackTarget("prompt_debug"), "system_config");
 assert.equal(getSettingsBackTarget("api"), null);
 assert.equal(getSettingsBackTarget(null), "close");
 

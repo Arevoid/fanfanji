@@ -798,8 +798,8 @@ export default function AppArchives({
             </div>
 
             {/* MiniMax Voice ID Binding */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-500">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">
                 绑定 MiniMax 专属音色 ID (选填)
               </label>
               <div className="flex gap-2">
@@ -808,7 +808,7 @@ export default function AppArchives({
                   value={minimaxVoiceId}
                   onChange={(e) => setMinimaxVoiceId(e.target.value)}
                   placeholder="请输入 MiniMax Voice ID"
-                  className="flex-1 px-3 py-2 rounded-[8px] bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
+                  className="flex-1 min-w-0 px-5 py-3 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
                 />
                 <button
                   type="button"
@@ -827,7 +827,7 @@ export default function AppArchives({
                   <span>{isAuditioning ? "停止" : "试听"}</span>
                 </button>
               </div>
-              <p className="text-[10px] text-slate-400 font-medium">
+              <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400 font-medium">
                 绑定专属音色后，该角色发送消息时会调用此音色。请确保在手机“设置” → “MiniMax 语音”中已配置相应参数。
               </p>
             </div>

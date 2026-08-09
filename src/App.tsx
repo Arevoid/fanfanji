@@ -275,6 +275,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   widgetOpacity: 70,
   dockBorderRadius: 26,
   widgetBorderRadius: 22,
+  desktopAppTextColor: "#000000",
   desktopIconMode: "dark",
   iconBorderEnabled: true,
   selfBubbleRadius: 6,
@@ -2438,7 +2439,7 @@ export default function App() {
           --app-default-icon-color: ${settings.desktopIconMode === "dark" ? "#1d1d1f" : "#f3f3f5"};
           --app-default-icon-surface: ${hexToRgba(settings.desktopIconMode === "dark" ? "#ffffff" : "#17181b", settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100)};
           --app-default-icon-border: ${settings.desktopIconMode === "dark" ? "#e5e5e2" : "#2d2e33"};
-          --desktop-app-text-color: ${settings.desktopAppTextColor || "#ffffff"};
+          --desktop-app-text-color: ${settings.desktopAppTextColor || "#000000"};
         }
         .phone-screen-container .app-icon-surface {
           background-color: var(--app-default-icon-surface) !important;

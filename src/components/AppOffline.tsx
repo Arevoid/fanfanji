@@ -677,7 +677,6 @@ export default function AppOffline({
       sourceMessages,
     };
     if (!canSyncOfflineStoryToMemory(offlineStoryPolicyInput)) {
-      showToast("当前模式不会自动同步记忆；请在剧本设置中手动确认同步。");
       return story;
     }
 
