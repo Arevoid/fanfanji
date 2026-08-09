@@ -5,7 +5,7 @@ import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { compressImage } from "../utils/pngParser";
-import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, stripInternalDeliveryMarkers, type CallTranscriptItem } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
@@ -46,6 +46,7 @@ import { resolveChatTurnSettings } from "../features/chat/services/chatTurnSetti
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
+import { useChatAttachmentState } from "../features/chat/hooks/useChatAttachmentState";
 import { createChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
 import { attachDirectScope, isMessageInDirectScope, resolveDirectInteractionScope, toDirectChatRuntimeContext, type MessageMutationScope } from "../features/chat/context/directInteractionScope";
 import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
@@ -2028,38 +2029,18 @@ export default function AppChat({
     draftImageReferenceAssetId, setDraftImageReferenceAssetId, draftImageReferenceMimeType, setDraftImageReferenceMimeType,
     loadCharacterDraft,
   } = useChatSettingsDraft();
-  const [showImageGenerator, setShowImageGenerator] = useState(false);
-  const [imageRequestText, setImageRequestText] = useState("");
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [imageGenerationError, setImageGenerationError] = useState<string | null>(null);
-
-  // Rich Attachment states
-  const [showAttachPanel, setShowAttachPanel] = useState(false);
-  const [activeAttachModal, setActiveAttachModal] = useState<"redpacket" | "music" | "location" | "file" | "calling" | "voice" | null>(null);
-  const [voiceText, setVoiceText] = useState("");
-  const [callingStatus, setCallingStatus] = useState<"ringing" | "connected" | "ended">("ringing");
-  const [callingDuration, setCallingDuration] = useState(0);
-  const [isIncomingCall, setIsIncomingCall] = useState(false);
-  const [, setCallStartTime] = useState<number>(0);
-  const [callingInputText, setCallingInputText] = useState("");
-  const [callTranscript, setCallTranscript] = useState<CallTranscriptItem[]>([]);
-  const [voiceCallRelationId, setVoiceCallRelationId] = useState<string | null>(null);
-  const callTranscriptEndRef = useRef<HTMLDivElement | null>(null);
-  const [callRecordDetail, setCallRecordDetail] = useState<ReturnType<typeof parseCallRecord> | null>(null);
-  const [redPacketAmount, setRedPacketAmount] = useState("8.88");
-  const [redPacketGreeting, setRedPacketGreeting] = useState("恭喜发财，万事如意");
-  const [showRedPacketOpenModal, setShowRedPacketOpenModal] = useState<boolean>(false);
-  const [openRedPacketDetail, setOpenRedPacketDetail] = useState<{
-    id: string;
-    amount: string;
-    greeting: string;
-    senderName: string;
-    senderAvatar: string;
-    sender: "user" | "character";
-    timestamp: number;
-    message: Message;
-  } | null>(null);
-  const [isOpeningRedPacket, setIsOpeningRedPacket] = useState<boolean>(false);
+  const {
+    showImageGenerator, setShowImageGenerator, imageRequestText, setImageRequestText,
+    isGeneratingImage, setIsGeneratingImage, imageGenerationError, setImageGenerationError,
+    showAttachPanel, setShowAttachPanel, activeAttachModal, setActiveAttachModal,
+    voiceText, setVoiceText, callingStatus, setCallingStatus, callingDuration, setCallingDuration,
+    isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,
+    callTranscript, setCallTranscript, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
+    callRecordDetail, setCallRecordDetail, redPacketAmount, setRedPacketAmount,
+    redPacketGreeting, setRedPacketGreeting, showRedPacketOpenModal, setShowRedPacketOpenModal,
+    openRedPacketDetail, setOpenRedPacketDetail, isOpeningRedPacket, setIsOpeningRedPacket,
+    setOpenTransferDetail, setShowTransferDetailModal, setOpenVoiceId, voiceTimer, setVoiceTimer,
+  } = useChatAttachmentState();
   const [isManualArchiving, setIsManualArchiving] = useState<boolean>(false);
 
   const estimatedTokens = React.useMemo(() => {
@@ -2175,11 +2156,6 @@ export default function AppChat({
       }
     }
   }, [messages, redPacketStatuses]);
-
-  const [, setOpenTransferDetail] = useState<{ amount: string; memo: string; isConfirmed: boolean } | null>(null);
-  const [, setShowTransferDetailModal] = useState<boolean>(false);
-  const [, setOpenVoiceId] = useState<string | null>(null);
-  const [voiceTimer, setVoiceTimer] = useState<any>(null);
 
   // Memory Compression and Proactive Chat states
   const [isCompressingMemory, setIsCompressingMemory] = useState(false);
