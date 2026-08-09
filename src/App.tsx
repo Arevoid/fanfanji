@@ -90,16 +90,12 @@ import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messagePa
 import StatusBar from "./components/StatusBar";
 import AppChat from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
-import AppWorldBook from "./components/AppWorldBook";
 import AppMusic from "./components/AppMusic";
-import AppForum from "./components/AppForum";
 import AppStore from "./components/AppStore";
-import AppSettings from "./components/AppSettings";
 import AppNotes from "./components/AppNotes";
 import AppDiary from "./components/AppDiary";
 import AppMemory from "./components/AppMemory";
 import { useForumActivityEngine } from "./features/forum/hooks/useForumActivityEngine";
-import AppOffline from "./components/AppOffline";
 import {
   BookOpen,
   Bookmark,
@@ -121,6 +117,25 @@ import {
   WalletCards,
   X
 } from "lucide-react";
+
+const AppWorldBook = React.lazy(() => import("./components/AppWorldBook"));
+const AppForum = React.lazy(() => import("./components/AppForum"));
+const AppSettings = React.lazy(() => import("./components/AppSettings"));
+const AppOffline = React.lazy(() => import("./components/AppOffline"));
+
+function LazyAppBoundary({ children }: React.PropsWithChildren) {
+  return (
+    <React.Suspense
+      fallback={(
+        <div className="flex h-full items-center justify-center bg-[var(--app-bg)] text-sm text-[var(--text-secondary)]">
+          正在打开…
+        </div>
+      )}
+    >
+      {children}
+    </React.Suspense>
+  );
+}
 
 const AppIcons = {
   archives: (className = "w-6 h-6") => <ContactRound className={className} strokeWidth={1.8} />,
@@ -3525,14 +3540,16 @@ export default function App() {
                 )}
 
                 {activeApp === "worldbook" && (
-                  <AppWorldBook
-                    entries={worldBookEntries}
-                    characters={characters}
-                    onSaveEntry={handleSaveWorldBookEntry}
-                    onSaveEntries={handleSaveWorldBookEntries}
-                    onDeleteEntry={handleDeleteWorldBookEntry}
-                    onClose={() => setActiveApp(null)}
-                  />
+                  <LazyAppBoundary>
+                    <AppWorldBook
+                      entries={worldBookEntries}
+                      characters={characters}
+                      onSaveEntry={handleSaveWorldBookEntry}
+                      onSaveEntries={handleSaveWorldBookEntries}
+                      onDeleteEntry={handleDeleteWorldBookEntry}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "music" && (
@@ -3558,24 +3575,26 @@ export default function App() {
                 )}
 
                 {activeApp === "forum" && (
-                  <AppForum
-                    activeIdentity={activeIdentity}
-                    characters={characters}
-                    relationships={relationships}
-                    messages={messages}
-                    memories={memories}
-                    worldBookEntries={worldBookEntries}
-                    settings={settings}
-                    openForumShareId={openForumShareId}
-                    onOpenForumShareHandled={() => setOpenForumShareId(null)}
-                    onSendMessage={handleSendMessage}
-                    onOpenChat={(characterId, relationId) => {
-                      setActiveChatCharId(characterId);
-                      setActiveChatRelationId(relationId);
-                      setActiveApp("chat");
-                    }}
-                    onClose={() => setActiveApp(null)}
-                  />
+                  <LazyAppBoundary>
+                    <AppForum
+                      activeIdentity={activeIdentity}
+                      characters={characters}
+                      relationships={relationships}
+                      messages={messages}
+                      memories={memories}
+                      worldBookEntries={worldBookEntries}
+                      settings={settings}
+                      openForumShareId={openForumShareId}
+                      onOpenForumShareHandled={() => setOpenForumShareId(null)}
+                      onSendMessage={handleSendMessage}
+                      onOpenChat={(characterId, relationId) => {
+                        setActiveChatCharId(characterId);
+                        setActiveChatRelationId(relationId);
+                        setActiveApp("chat");
+                      }}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "notes" && (
@@ -3621,14 +3640,16 @@ export default function App() {
                 )}
 
                 {activeApp === "settings" && (
-                  <AppSettings
-                    settings={settings}
-                    presets={presets}
-                    onSaveSettings={setSettings}
-                    onSavePreset={handleSavePreset}
-                    onDeletePreset={handleDeletePreset}
-                    onClose={() => setActiveApp(null)}
-                  />
+                  <LazyAppBoundary>
+                    <AppSettings
+                      settings={settings}
+                      presets={presets}
+                      onSaveSettings={setSettings}
+                      onSavePreset={handleSavePreset}
+                      onDeletePreset={handleDeletePreset}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "memory" && (
@@ -3650,48 +3671,50 @@ export default function App() {
                 )}
 
                 {activeApp === "offline" && (
-                  <AppOffline
-                    characters={characters}
-                    relationships={relationships}
-                    settings={settings}
-                    offlineStories={offlineStories}
-                    messages={messages}
-                    activeChatCharId={activeChatCharId}
-                    worldBookEntries={worldBookEntries}
-                    onSaveOfflineStory={handleSaveOfflineStory}
-                    onSaveRelationships={setRelationships}
-                    onDeleteOfflineStory={handleDeleteOfflineStory}
-                    onClose={() => setActiveApp(null)}
-                    activeChatRelationId={activeChatRelationId}
-                    onNavigateToChat={(charId, relationId, conversationId) => {
-                      const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
-                      const relationship = relationId
-                        ? relationships.find((candidate) =>
-                            candidate.id === relationId
-                            && candidate.userIdentityId === ownerIdentityId
-                            && resolveCanonicalCharacterId(candidate.characterId, characters)
-                              === resolveCanonicalCharacterId(charId, characters),
-                          )
-                        : undefined;
-                      if (relationId && (
-                        !relationship
-                        || (conversationId
-                          && conversationId !== (relationship.conversationId || getConversationId(relationship.id)))
-                      )) return;
-                      const groupCharacter = !relationId
-                        ? characters.find((character) => character.id === charId && character.isGroupChat)
-                        : undefined;
-                      if (!relationId && conversationId?.startsWith("group:")
-                        && (!groupCharacter || conversationId !== `group:${groupCharacter.id}`)) return;
-                      setActiveChatCharId(relationship?.characterId || charId);
-                      setActiveChatRelationId(relationship?.id || null);
-                      setActiveApp("chat");
-                    }}
-                    memories={memories}
-                    onSaveMemories={setMemories}
-                    onPersistMemories={persistOfflineStoryMemories}
-                    recallSettings={recallSettings}
-                  />
+                  <LazyAppBoundary>
+                    <AppOffline
+                      characters={characters}
+                      relationships={relationships}
+                      settings={settings}
+                      offlineStories={offlineStories}
+                      messages={messages}
+                      activeChatCharId={activeChatCharId}
+                      worldBookEntries={worldBookEntries}
+                      onSaveOfflineStory={handleSaveOfflineStory}
+                      onSaveRelationships={setRelationships}
+                      onDeleteOfflineStory={handleDeleteOfflineStory}
+                      onClose={() => setActiveApp(null)}
+                      activeChatRelationId={activeChatRelationId}
+                      onNavigateToChat={(charId, relationId, conversationId) => {
+                        const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+                        const relationship = relationId
+                          ? relationships.find((candidate) =>
+                              candidate.id === relationId
+                              && candidate.userIdentityId === ownerIdentityId
+                              && resolveCanonicalCharacterId(candidate.characterId, characters)
+                                === resolveCanonicalCharacterId(charId, characters),
+                            )
+                          : undefined;
+                        if (relationId && (
+                          !relationship
+                          || (conversationId
+                            && conversationId !== (relationship.conversationId || getConversationId(relationship.id)))
+                        )) return;
+                        const groupCharacter = !relationId
+                          ? characters.find((character) => character.id === charId && character.isGroupChat)
+                          : undefined;
+                        if (!relationId && conversationId?.startsWith("group:")
+                          && (!groupCharacter || conversationId !== `group:${groupCharacter.id}`)) return;
+                        setActiveChatCharId(relationship?.characterId || charId);
+                        setActiveChatRelationId(relationship?.id || null);
+                        setActiveApp("chat");
+                      }}
+                      memories={memories}
+                      onSaveMemories={setMemories}
+                      onPersistMemories={persistOfflineStoryMemories}
+                      recallSettings={recallSettings}
+                    />
+                  </LazyAppBoundary>
                 )}
               </div>
             </div>
