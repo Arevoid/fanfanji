@@ -17,7 +17,7 @@ const SETTINGS_TAB_TITLES: Record<Exclude<SettingsTab, null>, string> = {
   beauty: "美化样式",
   system_config: "系统设置",
   system: "系统备份",
-  minimax: "语音设置",
+  minimax: "语音图片",
 };
 
 export function getSettingsHeaderTitle(tab: SettingsTab): string {

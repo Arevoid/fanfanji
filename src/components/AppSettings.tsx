@@ -2966,8 +2966,9 @@ export default function AppSettings({
           {activeTab === "minimax" && (
             <div className="space-y-3 text-left pb-[34px] w-full max-w-md mx-auto">
               <div className="settings-section-header">语音设置</div>
+              <section className="settings-card overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
               {/* General Toggle Switch */}
-              <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--divider)] px-4 py-3">
                 <div>
                   <span className="text-sm font-bold text-slate-800 block">语音合成总开关</span>
                   <span className="text-[10px] text-slate-400">开启后，角色发言会根据人设和音色自动合成语音</span>
@@ -2989,7 +2990,7 @@ export default function AppSettings({
                 </label>
               </div>
 
-              <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm space-y-2">
+              <div className="space-y-2 border-b border-[var(--divider)] px-4 py-4">
                 <label className="block text-xs font-bold text-slate-700">语音平台</label>
                 <select
                   value={ttsProvider}
@@ -3004,7 +3005,7 @@ export default function AppSettings({
 
               {ttsProvider === "minimax" && <>
               {/* API Credentials */}
-              <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm space-y-4">
+              <div className="space-y-4 px-4 py-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">MiniMax 开发者密钥</h3>
                 
                 <div className="space-y-3.5">
@@ -3061,7 +3062,7 @@ export default function AppSettings({
               </div>
 
               {/* TTS Tuning Sliders */}
-              <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm space-y-4">
+              <div className="space-y-4 border-t border-[var(--divider)] px-4 py-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">声线与朗读微调</h3>
                 
                 <div className="space-y-4">
@@ -3135,7 +3136,7 @@ export default function AppSettings({
               </>}
 
               {ttsProvider === "mossland" && (
-                <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm space-y-4">
+                <div className="space-y-4 px-4 py-4">
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Mossland 接口配置</h3>
                   <div className="space-y-3.5">
                     <div>
@@ -3172,6 +3173,7 @@ export default function AppSettings({
                   </div>
                 </div>
               )}
+              </section>
 
               {/* Action Save Button */}
               <button
