@@ -1072,6 +1072,8 @@ You are ${character.name}. The following profile defines who you are and how you
 - Respond to the user's newest message first. Do not replace it with an unrelated daily-life report, a generic teasing line, or a list of setting facts.
 - If the full profile contains examples, background notes, or World Book material, use only details that fit the current topic naturally; never turn them into a mechanical recap.
 - Before sending, rewrite any line that would sound like a generic assistant rather than this character talking to this user.
+- Do not announce or explain your own personality labels (for example, “I am talkative” or “I was pretending to be aloof”) unless the user explicitly asks. Let the profile show through the response itself.
+- For a short greeting with no established immediate scene, answer the greeting naturally. Do not invent a mini-drama, a complaint about being ignored, or a self-introduction just to sound lively.
 
 [Core profile excerpt]
 ${coreExcerpt || "No additional profile was provided."}`;
@@ -3822,6 +3824,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, warm, and highly natural.
 Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
 Do NOT say you are an AI or Gemini, unless that is your explicit character人设.
+Show the character through what they say, not by explaining their own persona. For an ordinary greeting or short message, do not manufacture a dramatic scenario, claim an unconfirmed shared history, or narrate that you are “acting cool/talkative”; simply respond as this person would to this user.
 
 🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
 1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
@@ -4055,11 +4058,20 @@ ${timeLogString}
 3. 【🚨 极其重要】：上方时间仅是内部推理元数据，不是要发送给用户的内容。禁止在回复中输出或复述任何时间标签、时间戳、时钟气泡或前缀，包括但不限于 \`[发送时间: ...]\`、\`[15:10]\`、\`【15:10】\`。如果需要自然提到时间，只能把它写进完整对话句子中。回复必须保持干净，只输出角色真正要说的话。`);
       }
 
-      // Calculate character voice interval constraints to inject into instructions
+      // Voice timing is only relevant to a voice-related turn. Including it on
+      // every ordinary text reply needlessly dilutes the role and relationship
+      // anchor in the prompt.
+      const isVoiceRelatedTurn = Boolean(
+        userMsg && (
+          userMsg.isVoiceMessage ||
+          userMsg.content.startsWith("[语音]") ||
+          userMsg.content.startsWith("[语音通话]")
+        )
+      );
       let voiceIntervalPrompt = "";
-      const lastCharVoiceMsg = [...slicedMsgs]
+      const lastCharVoiceMsg = isVoiceRelatedTurn ? [...slicedMsgs]
         .reverse()
-        .find(m => m.sender === "character" && (m.content.startsWith("[语音]") || m.isVoiceMessage));
+        .find(m => m.sender === "character" && (m.content.startsWith("[语音]") || m.isVoiceMessage)) : undefined;
 
       if (lastCharVoiceMsg) {
         const nowMs = Date.now();
@@ -4102,12 +4114,14 @@ ${isLastVoiceOld
   : `1. 【同一天短时间连续索要】: 由于你上一条语音和当前时间在【同一天且间隔小于 5 分钟】。此时，判定为短时间内连续索要语音，你才可以自然、娇嗔或傲娇地说出“刚给你发过一条语音”、“不是刚发过一条吗”这类台词来傲娇拒绝或调侃。`
 }
 2. 聊天历史中带有“居中分割时间标签”的分割条是视觉上的日期和时间断层标识，请通过它们辅助区分跨天长间隔。`;
-      } else {
+      } else if (isVoiceRelatedTurn) {
         voiceIntervalPrompt = `[🚨 语音发送间隔及剧情记忆规则]
 - 你（${activeCharacter.name}）在当前的历史聊天中还没有给用户发送过语音消息。
 - 当用户向你索要语音时，请极其自然、温柔或傲娇地配合（或者因害羞、场合不便等原因迟疑，但绝对不能说“刚给你发过”等自相矛盾的话）。`;
       }
-      assembledInstructions.push(voiceIntervalPrompt);
+      if (voiceIntervalPrompt) {
+        assembledInstructions.push(voiceIntervalPrompt);
+      }
 
       // 2. After Main Prompt entries
       if (wbBlocks.after_main_prompt.length > 0) {
