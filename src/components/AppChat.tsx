@@ -22,6 +22,8 @@ import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../util
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
+import { assemblePromptBlocks, type PromptBlock, type PromptBlockKind } from "../domain/prompt/PromptBlock";
+import { projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
@@ -1045,46 +1047,12 @@ const CHARACTER_MEDIA_USAGE_RULES = `[特殊媒体使用规则]
 【图片绝对规则】你没有发送图片的能力。无论用户是否索要照片，绝对不得输出“（发送了一张图片）”“（发送了一张自拍）”“我给你发图了”等任何暗示已发图片的文字或动作描述。只有应用代码在实际生成并创建图片消息时，界面才会显示图片；你只输出真实的普通文字回复。`;
 
 const CHARACTER_EXPRESSION_PRIORITY = `[角色表达优先级]
-1. 角色人设、角色与用户的既定关系、已确认的角色事实与世界书设定，共同决定角色会怎么说、会不会主动、热情还是克制、会不会调侃、追问、嘴硬或拒绝。
+1. 角色人设首先决定角色会怎么说、会不会主动、热情还是克制、会不会调侃、追问、嘴硬或拒绝。角色卡中明确写出的亲疏、称呼和情感方向不得被默认关系状态削弱。
 2. 当前用户消息与最近聊天上下文决定本轮回应什么；先理解用户正在说的事，再按上述角色设定自然反应。
-3. 内置活人感 2.0 仅辅助避免模板化、重复和无意义填充，不得限制、修正或覆盖角色的性格、关系语气、口癖、情感倾向与边界。
+3. 已确认事实与当前命中的世界书补充角色和世界背景，但不得用无关设定淹没当前对话。
+4. 内置活人感 2.0 仅辅助避免模板化、重复和无意义填充，不得限制、修正或覆盖角色的性格、关系语气、口癖、情感倾向与边界。
 
 发送前自检：这是否像这个角色会对这个用户说的话？称呼、亲疏、情感倾向和禁用口吻是否一致？若不一致，重写。`;
-
-/**
- * Imported character cards can contain a complete role card, examples and a
- * World Book in one field. Keep the full character material in the acting
- * anchor; truncating its tail can silently drop the user-relationship rules
- * that define how a character behaves in direct chat.
- * This is request-scoped prompt shaping only; it does not write to Memory or
- * alter the character's stored profile.
- */
-export const buildStableRoleAnchor = (
-  character: Pick<Character, "name" | "personality" | "backstory">,
-  relationship?: CharacterRelationship["relationship"],
-): string => {
-  const source = [character.personality, character.backstory]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .join("\n\n")
-    .trim();
-  const fullProfile = source;
-  const relationshipLine = relationship && relationship !== "unknown"
-    ? `The current established relationship state is "${relationship}". Treat the profile's stated relationship dynamic, familiarity, boundaries, and emotional direction as binding behavior for this user.`
-    : "No concrete relationship state is available. Do not invent intimacy, shared history, or emotional obligations.";
-
-  return `[CORE ROLE AND RELATIONSHIP ANCHOR — highest acting priority]
-You are ${character.name}. The following profile defines who you are and how you relate to the user. Treat it as binding character identity, not optional writing inspiration.
-- Keep the character's stated address terms, closeness, emotional direction, mannerisms, and forbidden tones consistent in every visible reply.
-- First understand the user's newest message, then answer in the way this character would actually answer this user. The profile and relationship decide whether the response is warm, clingy, detached, caring, playful, terse, teasing, disagreeing, or anything else.
-- ${relationshipLine}
-- Read the whole profile below before replying. Use its relationship and communication rules as behavior, not as a mechanical recap.
-- Before sending, rewrite any line that would sound like a generic assistant rather than this character talking to this user.
-- Do not announce or explain your own personality labels (for example, “I am talkative” or “I was pretending to be aloof”) unless the user explicitly asks. Let the profile show through the response itself.
-- For a short greeting with no established immediate scene, do not manufacture a mini-drama, a complaint about being ignored, or a self-introduction just to sound lively. Use the character's actual address terms and relationship distance; a brief, idiosyncratic reply is preferable to a generic polite greeting.
-
-[Full character profile]
-${fullProfile || "No additional profile was provided."}`;
-};
 
 const WORLD_BOOK_CONTEXT_PRIORITY = `[WORLD BOOK CONTEXT RULES]
 Use the supplied World Book entries as factual context for the current conversation. A matching entry must be respected exactly, especially for identity, relationship, setting facts, and explicit speech habits.
@@ -1099,6 +1067,22 @@ World Book enriches the role; it does not justify changing established closeness
 
 const removeLegacyWorldBookPriorityDirective = (instructions: string[]): string[] =>
   instructions.filter((instruction) => !instruction.includes("Absolute Supreme Priority"));
+
+const assembleChatInstructions = (
+  instructions: readonly string[],
+  knownBlocks: readonly PromptBlock[],
+) => {
+  const knownByContent = new Map(knownBlocks.map((block) => [block.content.trim(), block]));
+  const blocks = instructions.map((content, index): PromptBlock => {
+    const known = knownByContent.get(content.trim());
+    return known || {
+      id: `chat-instruction-${index}`,
+      kind: "context" as PromptBlockKind,
+      content,
+    };
+  });
+  return assemblePromptBlocks(blocks);
+};
 
 type ChatStylePreset = "default" | "floating-cute" | "liquid-glass";
 
@@ -3497,7 +3481,7 @@ export default function AppChat({
       // Scan context for World Book triggers in group chat
       const scanContextParts = [
         userMsg ? userMsg.content : "",
-        ...slicedMsgs.slice(-3).map(m => m.content)
+        ...slicedMsgs.slice(-10).map(m => m.content)
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
@@ -3828,7 +3812,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 3. Do NOT wrap descriptions or actions in parentheses like (微笑), （叹气）, (物理动作); instead, write them as normal, beautiful narrative prose sentences and separate them from spoken dialogue using standard line breaks (换行处理，不要加任何括号).
 4. You must ONLY use Chinese double quotes “ ” to enclose actual spoken dialogue (口语/说话内容) by ${activeCharacter.name}. NEVER use quotes for thoughts, descriptions, emphasis, or words within third-person narration! This is extremely important so the user's system can correctly parse dialogue bubbles.`
         : `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
-WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, natural, and faithful to this character's actual relationship with the user. Do not force warmth, care-taking, agreement, or a positive answer when the character's personality and relationship do not call for it.
+Reply length, initiative, warmth, restraint, and emotional intensity must follow the character profile and the current conversation. Keep the wording natural and conversational without imposing a universally cold, brief, caring, or agreeable style.
 Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
 Do NOT say you are an AI or Gemini, unless that is your explicit character人设.
 Show the character through what they say, not by explaining their own persona. For an ordinary greeting or short message, do not manufacture a dramatic scenario, claim an unconfirmed shared history, or narrate that you are “acting cool/talkative”; simply respond as this person would to this user.
@@ -3846,26 +3830,18 @@ ${turnSettings.disableBracketActions
         mainPromptText += `\n4. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks. Maintain natural, realistic, text-message style dialogue.`;
       }
 
-      let charDefText = `Roleplay Profile:
-- Name: ${activeCharacter.name}
-- Age: ${activeCharacter.age}
-- Gender: ${activeCharacter.gender}
-- MBTI: ${activeCharacter.mbti}
-- Personality & Behavior: ${activeCharacter.personality}
-- Background Story: ${activeCharacter.backstory}`;
-
-      charDefText = `${buildStableRoleAnchor(activeCharacter, activeRelationship?.relationship)}\n\n---\n\n${charDefText}`;
+      const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
+      let characterDescriptionText = characterProjection.description.content;
+      let characterContextText = "";
 
       if (activeCharacter.initialChatMode === "context" && activeCharacter.initialChatContext?.trim() && msgsForHistory.length === 0) {
-        charDefText += `\n\n[First chat setup — hidden guidance only]\n${activeCharacter.initialChatContext.trim()}\nUse this scene and relationship as the starting point for your first reply. Do not quote, mention, or render this setup as a system message or chat bubble.`;
+        characterDescriptionText += `\n\n[First chat setup — hidden guidance only]\n${activeCharacter.initialChatContext.trim()}\nUse this scene and relationship as the starting point for your first reply. Do not quote, mention, or render this setup as a system message or chat bubble.`;
       }
 
-      charDefText += `\n\n[🚨 记忆与上下文关联优先级规则]:
+      characterContextText += `[🚨 记忆与上下文关联优先级规则]:
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：短期聊天记录已按用户限制截断；需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
-
-      charDefText += `\n\n[角色语气最终锚定]\n你是 ${activeCharacter.name}。核心性格与行为：${activeCharacter.personality}\n每一条可见回复都必须保持这一人设以及你与用户已确认的关系语气；不得为了制造“活人感”无故变冷淡、跳话题、敷衍或使用不符合人设的表达。`;
 
       const normalizeTopicText = (value: string) => value
         .replace(/\[[^\]]*\]/g, " ")
@@ -3914,10 +3890,10 @@ ${turnSettings.disableBracketActions
         !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
       );
       if (visibleLegacyMemories.length > 0) {
-        charDefText += formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆（仅作补充）:\n");
+        characterContextText += formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆（仅作补充）:\n");
       }
       if (truthRetrieval) {
-        charDefText += formatTruthRetrievalForPrompt(truthRetrieval);
+        characterContextText += formatTruthRetrievalForPrompt(truthRetrieval);
       }
 
       // A continuation synchronized while leaving the offline app is an explicit
@@ -3939,22 +3915,20 @@ ${turnSettings.disableBracketActions
           userMsg?.timestamp,
           matchingSummary,
         );
-        charDefText += pendingOfflineHistoryAnchor;
+        characterContextText += pendingOfflineHistoryAnchor;
         // Put the handoff immediately before the current user message as a
         // hidden history anchor as well as a system rule. Some compatible API
         // models underweight distant system blocks but reliably follow recent
         // chronological history.
         history.push({ role: "user", text: pendingOfflineHistoryAnchor });
       } else if (latestOfflineContinuationMemory) {
-        charDefText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, userMsg?.timestamp);
+        characterContextText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, userMsg?.timestamp);
       }
 
       const userProfileText = `User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
-      const relationshipContext = activeRelationship
-        ? `\n[Current direct relationship]\n- Relationship state: ${activeRelationship.relationship}\n- Use this state to preserve the established distance and boundaries. It does NOT require automatic warmth, concern, agreement, caretaking, or a positive response.\n- This is the only user-identity relationship whose chat history and memories may be used.`
-        : "";
+      const relationshipContext = characterProjection.relationship?.content || "";
       const chatPromptContext = cognitiveContext
         ? buildChatPromptContext(cognitiveContext, {
           maxFacts: topK,
@@ -3994,10 +3968,10 @@ ${turnSettings.disableBracketActions
         })
         : "";
 
-      // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
+      // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
         userMsg ? userMsg.content : "",
-        ...currentChatMessages.slice(-3).map(m => m.content)
+        ...currentChatMessages.slice(-10).map(m => m.content)
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
@@ -4007,7 +3981,6 @@ ${turnSettings.disableBracketActions
         characterId: activeRelationship?.characterId || activeChatCharId || undefined,
         userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
         relationId: activeRelationship?.id,
-        includeAllVisibleEntries: true,
       });
 
       // Assemble system instruction blocks
@@ -4018,7 +3991,6 @@ ${turnSettings.disableBracketActions
 
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
-      if (relationshipContext) assembledInstructions.push(relationshipContext);
       if (musicContext) assembledInstructions.push(musicContext);
       if (forumContext) assembledInstructions.push(forumContext);
       if (diaryContext) assembledInstructions.push(diaryContext);
@@ -4142,8 +4114,11 @@ ${isLastVoiceOld
         assembledInstructions.push(`[World Book Background: Context Primers]\n` + wbBlocks.before_char_def.join("\n\n"));
       }
 
-      // 4. Character Definition
-      assembledInstructions.push(charDefText);
+      // 4. Character definition and personality are independent, single-source blocks.
+      assembledInstructions.push(characterDescriptionText);
+      assembledInstructions.push(characterProjection.personality.content);
+      if (relationshipContext) assembledInstructions.push(relationshipContext);
+      if (characterContextText.trim()) assembledInstructions.push(characterContextText);
 
       // The adapter receives the relation-scoped cognitive snapshot and emits
       // a redacted prompt-safe supplement. It intentionally does not replace
@@ -4243,7 +4218,15 @@ ${stickerListStr}
       assembledInstructions = removeLegacyWorldBookPriorityDirective(assembledInstructions);
       assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       assembledInstructions.push(CHARACTER_EXPRESSION_PRIORITY);
-      const systemInstruction = assembledInstructions.join("\n\n---\n\n");
+      const promptAssembly = assembleChatInstructions(assembledInstructions, [
+        { ...characterProjection.description, content: characterDescriptionText },
+        characterProjection.personality,
+        ...(characterProjection.relationship ? [characterProjection.relationship] : []),
+      ]);
+      if (promptAssembly.diagnostics.duplicateBlockIds.length || promptAssembly.diagnostics.duplicateSourceIds.length || promptAssembly.diagnostics.duplicateContentBlockIds.length) {
+        console.warn("[chat prompt] duplicate blocks removed", promptAssembly.diagnostics);
+      }
+      const systemInstruction = promptAssembly.systemInstruction;
 
       // Custom tool/attachment format descriptions for character context
       let promptMessage = userMsg ? userMsg.content : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
@@ -5102,7 +5085,7 @@ Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO 
 
       // Construct system instructions
       let mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
-WeChat messages are usually short, spontaneous, and conversational. Keep replies concise, natural, and faithful to this character's actual relationship with the user. Do not force warmth, care-taking, agreement, or a positive answer when the character's personality and relationship do not call for it.
+Reply length, initiative, warmth, restraint, and emotional intensity must follow the character profile and the current conversation. Keep the wording natural and conversational without imposing a universally cold, brief, caring, or agreeable style.
 Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
 Do NOT say you are an AI or Gemini.
 
@@ -5118,25 +5101,15 @@ ${resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).d
         mainPromptText += `\n4. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
-      let charDefText = `Roleplay Profile:
-- Name: ${activeCharacter.name}
-- Age: ${activeCharacter.age}
-- Gender: ${activeCharacter.gender}
-- MBTI: ${activeCharacter.mbti}
-- Personality & Behavior: ${activeCharacter.personality}
-- Background Story: ${activeCharacter.backstory}`;
-
-      charDefText = `${buildStableRoleAnchor(activeCharacter, activeRelationship?.relationship)}\n\n---\n\n${charDefText}`;
-
-      charDefText += `\n\n[🚨 记忆与上下文关联优先级规则]:
+      const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
+      const characterDescriptionText = characterProjection.description.content;
+      let characterContextText = `[🚨 记忆与上下文关联优先级规则]:
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
 
-      charDefText += `\n\n[角色语气最终锚定]\n你是 ${activeCharacter.name}。核心性格与行为：${activeCharacter.personality}\n每一条可见回复都必须保持这一人设以及你与用户已确认的关系语气；不得为了制造“活人感”无故变冷淡、跳话题、敷衍或使用不符合人设的表达。`;
-
       // Add OOC comment correction as high priority instruction
-      charDefText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
+      characterContextText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
 Your previous response was marked as "OOC" (Out Of Character). 
 Feedback from the user: "${oocComment}".
 Please read the feedback carefully and rewrite your response to perfectly match your profile. Do NOT repeat the previous tone/behavior!`;
@@ -5164,10 +5137,10 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
       );
       if (visibleLegacyMemories.length > 0) {
-        charDefText += formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆:\n");
+        characterContextText += formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆:\n");
       }
       if (truthRetrieval) {
-        charDefText += formatTruthRetrievalForPrompt(truthRetrieval);
+        characterContextText += formatTruthRetrievalForPrompt(truthRetrieval);
       }
 
       const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
@@ -5186,26 +5159,24 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           lastUserMsg.timestamp,
           matchingSummary,
         );
-        charDefText += pendingOfflineHistoryAnchor;
+        characterContextText += pendingOfflineHistoryAnchor;
         history.push({ role: "user", text: pendingOfflineHistoryAnchor });
       } else if (latestOfflineContinuationMemory) {
-        charDefText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, lastUserMsg.timestamp);
+        characterContextText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, lastUserMsg.timestamp);
       }
 
       const userProfileText = `User Profile:
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
-      const relationshipContext = activeRelationship
-        ? `\n[Current direct relationship]\n- Relationship state: ${activeRelationship.relationship}\n- Use this state to preserve the established distance and boundaries. It does NOT require automatic warmth, concern, agreement, caretaking, or a positive response.\n- This is the only user-identity relationship whose chat history and memories may be used.`
-        : "";
+      const relationshipContext = characterProjection.relationship?.content || "";
 
       const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
 
-      // Context-aware trigger scanning: scan current user message + the last 3 messages in current chat
+      // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
         lastUserMsg ? lastUserMsg.content : "",
-        ...previousMessages.slice(-3).map(m => m.content)
+        ...previousMessages.slice(-10).map(m => m.content)
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
@@ -5215,7 +5186,6 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         characterId: activeRelationship?.characterId || activeChatCharId || undefined,
         userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
         relationId: activeRelationship?.id,
-        includeAllVisibleEntries: true,
       });
 
       // Assemble system instruction blocks
@@ -5226,7 +5196,6 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
-      if (relationshipContext) assembledInstructions.push(relationshipContext);
 
       // 1.5 Time awareness prompt if enabled
       if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
@@ -5256,8 +5225,11 @@ ${timeLogString}
         assembledInstructions.push(`[World Book Background: Context Primers]\n` + wbBlocks.before_char_def.join("\n\n"));
       }
 
-      // 4. Character Definition
-      assembledInstructions.push(charDefText);
+      // 4. Character definition and personality are independent, single-source blocks.
+      assembledInstructions.push(characterDescriptionText);
+      assembledInstructions.push(characterProjection.personality.content);
+      if (relationshipContext) assembledInstructions.push(relationshipContext);
+      if (characterContextText.trim()) assembledInstructions.push(characterContextText);
 
       if (regenerationCognitiveContext) {
         const cognitivePrompt = formatChatPromptContext(buildChatPromptContext(regenerationCognitiveContext, {
@@ -5333,7 +5305,15 @@ ${stickerListStr}
       assembledInstructions = removeLegacyWorldBookPriorityDirective(assembledInstructions);
       assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       assembledInstructions.push(CHARACTER_EXPRESSION_PRIORITY);
-      const systemInstruction = assembledInstructions.join("\n\n---\n\n");
+      const promptAssembly = assembleChatInstructions(assembledInstructions, [
+        { ...characterProjection.description, content: characterDescriptionText },
+        characterProjection.personality,
+        ...(characterProjection.relationship ? [characterProjection.relationship] : []),
+      ]);
+      if (promptAssembly.diagnostics.duplicateBlockIds.length || promptAssembly.diagnostics.duplicateSourceIds.length || promptAssembly.diagnostics.duplicateContentBlockIds.length) {
+        console.warn("[regenerate prompt] duplicate blocks removed", promptAssembly.diagnostics);
+      }
+      const systemInstruction = promptAssembly.systemInstruction;
 
       const composedPrompt = PromptComposer.compose({
         scenario: "regenerate",
@@ -5642,7 +5622,7 @@ ${stickerListStr}
       const charMsgs = messages.filter((message) => message.relationId === relationId);
       const recentConversation = analyzeRecentConversation(charMsgs, activeChatCharId);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
-      const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
+      const scanText = charMsgs.slice(-10).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText, {
         scenario: "chat",
         characterId: activeRelationship.characterId,
@@ -5817,7 +5797,7 @@ ${CHARACTER_EXPRESSION_PRIORITY}
       const charMsgs = messagesRef.current.filter((message) => message.relationId === relationId);
       const recentConversation = analyzeRecentConversation(charMsgs, friend.id);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
-      const scanText = charMsgs.slice(-3).map(m => m.content).join("\n");
+      const scanText = charMsgs.slice(-10).map(m => m.content).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, scanText, {
         scenario: "chat",
         characterId: relationship.characterId,

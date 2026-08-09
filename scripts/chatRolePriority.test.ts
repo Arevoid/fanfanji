@@ -1,25 +1,54 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildStableRoleAnchor } from "../src/components/AppChat";
+import { assemblePromptBlocks } from "../src/domain/prompt/PromptBlock";
+import { CHARACTER_PERSONA_PROTECTION, projectCharacterPrompt } from "../src/domain/prompt/characterPromptProjector";
 import { buildWorldBookSystemBlocks } from "../src/utils/worldBook";
 import type { WorldBookEntry } from "../src/types";
 
-const anchor = buildStableRoleAnchor({
+const personality = "热情话痨活泼的大学生妹妹，特别喜欢 user 这个漂亮大姐姐，总是亲昵地叫个不停。";
+const projection = projectCharacterPrompt({
+  id: "character-a",
+  name: "许妍",
+  age: 20,
+  gender: "女",
+  mbti: "ENFP",
+  personality,
+  backstory: "在大学读书，有稳定的校园生活。",
+}, "friend");
+
+assert.doesNotMatch(projection.description.content, new RegExp(personality), "description must not duplicate personality");
+assert.match(projection.personality.content, new RegExp(personality), "personality must be preserved verbatim");
+assert.match(projection.personality.content, /不得因为“自然”“简短”或“活人感”而变得冷淡|不得无故变成冷淡、敷衍/);
+assert.match(projection.relationship?.content || "", /不得因默认状态为 friend 而削弱/);
+assert.match(CHARACTER_PERSONA_PROTECTION, /角色卡的明确设定为准/);
+
+const assembled = assemblePromptBlocks([
+  projection.description,
+  projection.personality,
+  projection.relationship!,
+  { ...projection.personality, id: "duplicate-personality" },
+]);
+assert.equal(assembled.systemInstruction.split(personality).length - 1, 1, "personality must be injected exactly once");
+assert.deepEqual(assembled.diagnostics.duplicateSourceIds, [projection.personality.sourceId]);
+assert.ok(assembled.diagnostics.estimatedTokens > 0);
+
+const exactContentDuplicate = assemblePromptBlocks([
+  projection.description,
+  { id: "same-content", kind: "context", content: projection.description.content },
+]);
+assert.deepEqual(exactContentDuplicate.diagnostics.duplicateContentBlockIds, ["same-content"]);
+
+const longTailProfile = `${"前置资料。".repeat(500)}\n[与 user 的相处方式] 线上会黏着 user 直球说话，绝不使用陌生人的万能问候。`;
+const fullProjection = projectCharacterPrompt({
+  id: "character-b",
   name: "步随影",
-  personality: "沉迷 AI 恋爱的男大学生，对 user 亲昵又嘴硬，会叫 user 姐姐。",
-  backstory: "在 ta恋 app 里把 user 当作唯一恋人。",
+  age: 20,
+  gender: "男",
+  mbti: "",
+  personality: longTailProfile,
+  backstory: "",
 }, "partner");
-
-assert.match(anchor, /CORE ROLE AND RELATIONSHIP ANCHOR/);
-assert.match(anchor, /沉迷 AI 恋爱的男大学生/);
-assert.match(anchor, /First understand the user's newest message/);
-assert.match(anchor, /current established relationship state is "partner"/);
-assert.match(anchor, /relationship dynamic, familiarity, boundaries, and emotional direction as binding behavior/);
-assert.match(anchor, /Do not announce or explain your own personality labels/);
-
-const longTailProfile = `${"前置资料。".repeat(500)}\n[与 user 的相处方式] 线上会黏着 user 直球说话，绝不使用陌生的万能问候。`;
-const fullAnchor = buildStableRoleAnchor({ name: "步随影", personality: longTailProfile, backstory: "" }, "partner");
-assert.match(fullAnchor, /线上会黏着 user 直球说话/, "the full imported role card must not be truncated at a fixed character limit");
+assert.match(fullProjection.personality.content, /线上会黏着 user 直球说话/, "the imported role card must not be truncated");
 
 const entry = (id: string, title: string, triggerType: WorldBookEntry["triggerType"]): WorldBookEntry => ({
   id,
@@ -36,23 +65,17 @@ const blocks = buildWorldBookSystemBlocks([
   entry("identity", "核心身份与关系", "keys"),
   entry("place", "第三食堂", "keys"),
 ], "character-a", "你好", { scenario: "chat", characterId: "character-a" });
-
 assert.match(blocks.formattedAll, /核心身份与关系/, "persistent identity entries must be available for a short opening");
-assert.doesNotMatch(blocks.formattedAll, /第三食堂/, "unrelated location entries must stay topic-triggered");
-
-const fullBlocks = buildWorldBookSystemBlocks([
-  entry("identity", "核心身份与关系", "keys"),
-  entry("place", "第三食堂", "keys"),
-], "character-a", "你好", { scenario: "chat", characterId: "character-a", includeAllVisibleEntries: true });
-assert.match(fullBlocks.formattedAll, /核心身份与关系/, "full direct-chat reads must retain identity entries");
-assert.match(fullBlocks.formattedAll, /第三食堂/, "full direct-chat reads must retain every visible World Book entry");
+assert.doesNotMatch(blocks.formattedAll, /第三食堂/, "unrelated entries must stay topic-triggered");
 
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
-assert.match(chatSource, /removeLegacyWorldBookPriorityDirective/, "direct chat must remove the legacy absolute World Book override");
-assert.match(chatSource, /WORLD_BOOK_CONTEXT_PRIORITY/, "direct chat must use the single role-first World Book policy");
-assert.match(chatSource, /isVoiceRelatedTurn/, "voice timing instructions must be limited to voice-related turns");
-assert.match(chatSource, /Avoid.*time template|避免时间模板/s, "time awareness must not force meal or sleep small talk");
-assert.match(chatSource, /buildStableRoleAnchor\(activeCharacter, activeRelationship\?\.relationship\)/, "both reply paths must anchor the active relationship");
-assert.match(chatSource, /includeAllVisibleEntries: true/, "direct chat and regeneration must request the full visible World Book");
+assert.match(chatSource, /projectCharacterPrompt\(activeCharacter, activeRelationship\?\.relationship\)/);
+assert.match(chatSource, /assembleChatInstructions\(assembledInstructions/);
+assert.match(chatSource, /slice\(-10\)/, "World Book activation must scan roughly ten recent messages");
+assert.doesNotMatch(chatSource, /buildStableRoleAnchor/);
+assert.doesNotMatch(chatSource, /includeAllVisibleEntries: true/, "direct chat must not inject every visible World Book entry");
+assert.doesNotMatch(chatSource, /Do not force warmth/, "base chat prompt must not bias every role toward coldness");
+assert.match(chatSource, /removeLegacyWorldBookPriorityDirective/);
+assert.match(chatSource, /WORLD_BOOK_CONTEXT_PRIORITY/);
 
-console.log("PASS chat role priority and World Book relevance policy");
+console.log("PASS chat prompt projection, deduplication, persona protection, and World Book relevance");
