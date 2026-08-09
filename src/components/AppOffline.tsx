@@ -11,7 +11,7 @@ import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims } from "../cor
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
 import { createPendingOfflineHandoff, filterOfflineExtractedFacts, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
-import { buildWorldBookSystemBlocks, getLatestWorldBookEntries } from "../utils/worldBook";
+import { getLatestWorldBookEntries } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 import "./offline/offlineStory.css";
 import { OfflineGuidancePanel } from "./offline/OfflineGuidancePanel";
@@ -28,6 +28,7 @@ import { captureOfflineStoryCompletedEvent } from "../features/characterLife/ser
 import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../domain/prompt/offlineIdentityBinding";
 import { Button, ConfirmDialog, IconButton, PopoverMenu } from "./ui";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
+import { collectOfflineWorldBookContext, formatOfflineWorldBookEntries } from "../features/offline/prompts/offlineWorldBookContext";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -933,19 +934,8 @@ export default function AppOffline({
       const scopedRelationship = updatedStory.relationId
         ? relationships.find((relation) => relation.id === updatedStory.relationId)
         : undefined;
-      const triggeredWorldBook = new Map<string, WorldBookEntry>();
-      const atDepthWorldBook = new Map<string, ReturnType<typeof buildWorldBookSystemBlocks>["at_depth"][number]>();
       const snapshotEntries = updatedStory.worldBookSnapshot || [];
-      storyCharsList.forEach((character) => {
-        const blocks = buildWorldBookSystemBlocks(snapshotEntries, character.id, worldBookScanText, {
-          scenario: "offline",
-          characterId: character.id,
-          userIdentityId: scopedRelationship?.userIdentityId,
-          relationId: scopedRelationship?.id,
-        });
-        blocks.allTriggered.forEach((entry) => triggeredWorldBook.set(entry.id, entry));
-        blocks.at_depth.forEach((entry) => atDepthWorldBook.set(entry.sourceId, entry));
-      });
+      const { triggeredEntries: triggeredWorldBook, depthInjections: atDepthWorldBook } = collectOfflineWorldBookContext({ entries: snapshotEntries, characters: storyCharsList, scanText: worldBookScanText, relationship: scopedRelationship });
       // Legacy stories stored flattened strings without trigger metadata. Use
       // only entries whose title/content overlaps this turn instead of loading
       // the entire frozen book on every request.
@@ -967,9 +957,7 @@ export default function AppOffline({
           }
         });
       }
-      const wbPrompts = triggeredWorldBook.size > 0
-        ? Array.from(triggeredWorldBook.values()).filter((entry) => entry.position !== "at_depth").map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")
-        : "";
+      const wbPrompts = formatOfflineWorldBookEntries(triggeredWorldBook.values());
 
       // Base Persona
       let sysPrompt = `你现在正在与用户进行“线下故事/小说剧本”的联合创作。本场剧本中共有以下 ${storyCharsList.length} 位角色参与：\n\n`;

@@ -99,6 +99,7 @@ import { prioritizeUserChatCss, scopeUserChatCss } from "../features/chat/styles
 import { sanitizeMomentPublishText } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
 import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
+import { useMomentComposerState } from "../features/moments/hooks/useMomentComposerState";
 import {
   MessageSquare,
   Users,
@@ -1991,16 +1992,13 @@ export default function AppChat({
     }
   };
 
-  // Moments form state
-  const [momentInputText, setMomentInputText] = useState("");
-  const [momentAttachedImage, setMomentAttachedImage] = useState<string | null>(null);
-  const [momentTextImageDescription, setMomentTextImageDescription] = useState("");
-  const [showTextImageInput, setShowTextImageInput] = useState(false);
-  const [viewingImageDescription, setViewingImageDescription] = useState<string | null>(null);
-  const [showMomentPublisher, setShowMomentPublisher] = useState(false);
-  const [inlineCommentsTexts, setInlineCommentsTexts] = useState<Record<string, string>>({});
-  const [showCommentInputMap, setShowCommentInputMap] = useState<Record<string, boolean>>({});
-  const [replyingToCommentMap, setReplyingToCommentMap] = useState<Record<string, MomentComment>>({});
+  const {
+    momentInputText, setMomentInputText, momentAttachedImage, setMomentAttachedImage,
+    momentTextImageDescription, setMomentTextImageDescription, showTextImageInput, setShowTextImageInput,
+    viewingImageDescription, setViewingImageDescription, showMomentPublisher, setShowMomentPublisher,
+    inlineCommentsTexts, setInlineCommentsTexts, showCommentInputMap, setShowCommentInputMap,
+    replyingToCommentMap, setReplyingToCommentMap,
+  } = useMomentComposerState();
   const [lastViewedMomentsTime, setLastViewedMomentsTime] = useState<number>(() => {
     return Number(localStorage.getItem("phone_last_viewed_moments_time") || "0");
   });
