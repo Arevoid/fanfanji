@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, stripInternalDeliveryMarkers, type CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
@@ -48,6 +48,7 @@ import { createChatReplyController } from "../features/chat/controllers/chatRepl
 import { resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
+import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
 import { createChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
 import { attachDirectScope, isMessageInDirectScope, resolveDirectInteractionScope, toDirectChatRuntimeContext, type MessageMutationScope } from "../features/chat/context/directInteractionScope";
 import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
@@ -2012,41 +2013,25 @@ export default function AppChat({
   const [groupNameInput, setGroupNameInput] = useState("");
   const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([]);
 
-  // Settings draft states
-  const [draftRemark, setDraftRemark] = useState("");
-  const [isEditingRemark, setIsEditingRemark] = useState(false);
-  const [draftAvatar, setDraftAvatar] = useState<string | undefined>(undefined);
-  const [isDeleteMemberMode, setIsDeleteMemberMode] = useState(false);
-  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
-  const [selectedAddMemberIds, setSelectedAddMemberIds] = useState<string[]>([]);
-  const [draftIsPinned, setDraftIsPinned] = useState(false);
-  const [draftChatBg, setDraftChatBg] = useState<string | undefined>(undefined);
-  const [draftCustomCss, setDraftCustomCss] = useState("");
-  const [cssTemplateCopied, setCssTemplateCopied] = useState(false);
-  const [draftChatIcons, setDraftChatIcons] = useState<ChatIconOverrides>({});
-  const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
-  const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
-  const [draftEnableProactiveCall, setDraftEnableProactiveCall] = useState(false);
-  const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
-  const [draftProactiveStartTime, setDraftProactiveStartTime] = useState("09:00");
-  const [draftProactiveEndTime, setDraftProactiveEndTime] = useState("22:00");
-  const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
-  const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
-  const [draftContextMemoryLimit, setDraftContextMemoryLimit] = useState(20);
-  const [draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit] = useState(100);
-  const [draftArchiveTemplateType, setDraftArchiveTemplateType] = useState<"refined" | "delicate">("refined");
-  const [draftAutoArchiveInterval, setDraftAutoArchiveInterval] = useState(50);
-  const [draftEnableAutoArchive, setDraftEnableAutoArchive] = useState(false);
-  const [draftEnableTimeAwareness, setDraftEnableTimeAwareness] = useState(false);
-  const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
-  const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
-  const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState<number>(1.0);
-  const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("low");
-  const [draftEnableImageGeneration, setDraftEnableImageGeneration] = useState(false);
-  const [draftImageAppearancePrompt, setDraftImageAppearancePrompt] = useState("");
-  const [draftImageNegativePrompt, setDraftImageNegativePrompt] = useState("");
-  const [draftImageReferenceAssetId, setDraftImageReferenceAssetId] = useState<string | undefined>();
-  const [draftImageReferenceMimeType, setDraftImageReferenceMimeType] = useState<string | undefined>();
+  const {
+    draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
+    isDeleteMemberMode, setIsDeleteMemberMode, showAddMemberModal, setShowAddMemberModal,
+    selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
+    draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss, cssTemplateCopied, setCssTemplateCopied,
+    draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
+    draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveCall, setDraftEnableProactiveCall,
+    draftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
+    draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
+    draftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
+    draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType,
+    draftAutoArchiveInterval, setDraftAutoArchiveInterval, draftEnableAutoArchive, setDraftEnableAutoArchive,
+    draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
+    draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMinimaxSpeed, setDraftMinimaxSpeed,
+    draftVoiceFrequency, draftEnableImageGeneration, setDraftEnableImageGeneration,
+    draftImageAppearancePrompt, setDraftImageAppearancePrompt, draftImageNegativePrompt, setDraftImageNegativePrompt,
+    draftImageReferenceAssetId, setDraftImageReferenceAssetId, draftImageReferenceMimeType, setDraftImageReferenceMimeType,
+    loadCharacterDraft,
+  } = useChatSettingsDraft();
   const [showImageGenerator, setShowImageGenerator] = useState(false);
   const [imageRequestText, setImageRequestText] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -6042,37 +6027,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
               <button
                 onClick={() => {
-                  setDraftRemark(activeCharacter.isGroupChat ? activeCharacter.name : (activeCharacter.remark || ""));
-                  setIsEditingRemark(false);
-                  setDraftAvatar(activeCharacter.avatar);
-                  setIsDeleteMemberMode(false);
-                  setDraftIsPinned(activeCharacter.isPinned || false);
-                  setDraftChatBg(activeCharacter.chatBg);
-                  setDraftCustomCss(activeCharacter.customChatCSS || activeCharacter.customCss || "");
-                  setDraftChatIcons(sanitizeChatIcons(activeCharacter.customChatIcons));
-                  setDraftChatStylePreset(activeCharacter.chatStylePreset || "default");
-                  setDraftEnableProactiveChat(activeCharacter.enableProactiveChat || false);
-                  setDraftEnableProactiveCall(activeCharacter.enableProactiveCall || false);
-                  setDraftProactiveChatInterval(activeCharacter.proactiveChatInterval || 3);
-                  setDraftProactiveStartTime(activeCharacter.proactiveStartTime || "09:00");
-                  setDraftProactiveEndTime(activeCharacter.proactiveEndTime || "22:00");
-                  setDraftDisableBracketActions(activeCharacter.disableBracketActions || false);
-                  setDraftHistoryMemoryLimit(activeCharacter.historyMemoryLimit || 150);
-                  setDraftContextMemoryLimit(activeCharacter.contextMemoryLimit || 20);
-                  setDraftRetrievalHistoryLimit(activeCharacter.retrievalHistoryLimit || 100);
-                  setDraftArchiveTemplateType(activeCharacter.archiveTemplateType || "refined");
-                  setDraftAutoArchiveInterval(activeCharacter.autoArchiveInterval || 50);
-                  setDraftEnableAutoArchive(activeCharacter.enableAutoArchive !== undefined ? activeCharacter.enableAutoArchive : (activeCharacter.enableAutoSummary || false));
-                  setDraftEnableTimeAwareness(activeCharacter.enableTimeAwareness || false);
-                  setDraftEnableAutoTranslate(activeCharacter.enableAutoTranslate || false);
-                  setDraftMinimaxVoiceId(activeCharacter.minimaxVoiceId || "");
-                  setDraftMinimaxSpeed(activeCharacter.minimaxSpeed !== undefined ? activeCharacter.minimaxSpeed : 1.0);
-                  setDraftVoiceFrequency(activeCharacter.voiceFrequency || "low");
-                  setDraftEnableImageGeneration(activeCharacter.enableImageGeneration === true);
-                  setDraftImageAppearancePrompt(activeCharacter.imageAppearancePrompt || "");
-                  setDraftImageNegativePrompt(activeCharacter.imageNegativePrompt || "");
-                  setDraftImageReferenceAssetId(activeCharacter.imageReferenceAssetId);
-                  setDraftImageReferenceMimeType(activeCharacter.imageReferenceMimeType);
+                  loadCharacterDraft(activeCharacter);
                   setAdvancedSettingsSection(null);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
