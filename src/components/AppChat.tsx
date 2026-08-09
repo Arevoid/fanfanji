@@ -1052,6 +1052,45 @@ const CHARACTER_EXPRESSION_PRIORITY = `[角色表达优先级：内置活人感 
 
 发送前自检：这是否像这个角色会对这个用户说的话？称呼、亲疏、情感倾向和禁用口吻是否一致？若不一致，重写。`;
 
+/**
+ * Long imported character cards can contain a complete role card, examples and
+ * a World Book in one field.  Keep the beginning available as a small,
+ * high-priority role anchor, while retaining the full card below as reference.
+ * This is request-scoped prompt shaping only; it does not write to Memory or
+ * alter the character's stored profile.
+ */
+export const buildStableRoleAnchor = (character: Pick<Character, "name" | "personality" | "backstory">): string => {
+  const source = [character.personality, character.backstory]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join("\n\n")
+    .trim();
+  const coreExcerpt = source.slice(0, 2200);
+
+  return `[CORE ROLE AND RELATIONSHIP ANCHOR — highest acting priority]
+You are ${character.name}. The following profile defines who you are and how you relate to the user. Treat it as binding character identity, not optional writing inspiration.
+- Keep the character's stated address terms, closeness, emotional direction, mannerisms, and forbidden tones consistent in every visible reply.
+- Respond to the user's newest message first. Do not replace it with an unrelated daily-life report, a generic teasing line, or a list of setting facts.
+- If the full profile contains examples, background notes, or World Book material, use only details that fit the current topic naturally; never turn them into a mechanical recap.
+- Before sending, rewrite any line that would sound like a generic assistant rather than this character talking to this user.
+
+[Core profile excerpt]
+${coreExcerpt || "No additional profile was provided."}`;
+};
+
+const WORLD_BOOK_CONTEXT_PRIORITY = `[WORLD BOOK CONTEXT RULES]
+Use the supplied World Book entries as factual context for the current conversation. A matching entry must be respected exactly, especially for identity, relationship, setting facts, and explicit speech habits.
+
+Priority for this turn:
+1. The character's core persona and confirmed relationship with this user.
+2. The user's newest message and the immediate conversation context.
+3. World Book entries that are relevant to this topic, plus any explicitly persistent identity/relationship entries.
+4. Natural-expression guidance.
+
+World Book enriches the role; it does not justify changing established closeness, calling style, emotional inclination, or the subject the user is currently discussing. Use one or two relevant concrete details naturally when helpful. Never dump multiple setting facts or force an unrelated World Book detail into a reply.`;
+
+const removeLegacyWorldBookPriorityDirective = (instructions: string[]): string[] =>
+  instructions.filter((instruction) => !instruction.includes("Absolute Supreme Priority"));
+
 type ChatStylePreset = "default" | "floating-cute" | "liquid-glass";
 
 /**
@@ -3805,6 +3844,8 @@ ${turnSettings.disableBracketActions
 - Personality & Behavior: ${activeCharacter.personality}
 - Background Story: ${activeCharacter.backstory}`;
 
+      charDefText = `${buildStableRoleAnchor(activeCharacter)}\n\n---\n\n${charDefText}`;
+
       if (activeCharacter.initialChatMode === "context" && activeCharacter.initialChatContext?.trim() && msgsForHistory.length === 0) {
         charDefText += `\n\n[First chat setup — hidden guidance only]\n${activeCharacter.initialChatContext.trim()}\nUse this scene and relationship as the starting point for your first reply. Do not quote, mention, or render this setup as a system message or chat bubble.`;
       }
@@ -4174,7 +4215,10 @@ ${stickerListStr}
 6. 【历史言行隔离与实时刷新法则（Chat History Isolation & Real-Time Sync）】：
    如果你在之前的聊天历史（Chat History）中因为当时的世界书设定而使用了某种前缀/后缀/口癖（例如之前每句话都有“喵”），但只要该设定在当前的最新的世界书词条中【已被修改、删除、停用（isActive 为 false）或根本不存在】，你必须【立即彻底抛弃并停止】使用该旧前缀/后缀/口癖！不要被历史消息中的言行所同化，不要产生路径依赖或行为惯性！你必须立刻与最新状态无缝同步，表现得如同该设定从未存在过一样。修改、删除或停用立即无缝实时刷新生效！`);
 
-      // Keep this after legacy World Book guidance: 2.0 is the effective final priority.
+      // Older builds appended an absolute World Book override here. Exclude it
+      // from this request and use the single, non-conflicting priority policy.
+      assembledInstructions = removeLegacyWorldBookPriorityDirective(assembledInstructions);
+      assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       assembledInstructions.push(CHARACTER_EXPRESSION_PRIORITY);
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
@@ -5059,6 +5103,8 @@ ${resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).d
 - Personality & Behavior: ${activeCharacter.personality}
 - Background Story: ${activeCharacter.backstory}`;
 
+      charDefText = `${buildStableRoleAnchor(activeCharacter)}\n\n---\n\n${charDefText}`;
+
       charDefText += `\n\n[🚨 记忆与上下文关联优先级规则]:
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
@@ -5254,7 +5300,9 @@ ${stickerListStr}
 6. 【历史言行隔离与实时刷新法则（Chat History Isolation & Real-Time Sync）】：
    如果你在之前的聊天历史（Chat History）中因为当时的世界书设定而使用了某种前缀/后缀/口癖（例如之前每句话都有“喵”），但只要该设定在当前的最新的世界书词条中【已被修改、删除、停用（isActive 为 false）或根本不存在】，你必须【立即彻底抛弃并停止】使用该旧前缀/后缀/口癖！不要被历史消息中的言行所同化，不要产生路径依赖或行为惯性！你必须立刻与最新状态无缝同步，表现得如同该设定从未存在过一样。修改、删除或停用立即无缝实时刷新生效！`);
 
-      // Keep this after legacy World Book guidance: 2.0 is the effective final priority.
+      // Keep regeneration on the same role/relationship-first policy as a new reply.
+      assembledInstructions = removeLegacyWorldBookPriorityDirective(assembledInstructions);
+      assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       assembledInstructions.push(CHARACTER_EXPRESSION_PRIORITY);
       const systemInstruction = assembledInstructions.join("\n\n---\n\n");
 
