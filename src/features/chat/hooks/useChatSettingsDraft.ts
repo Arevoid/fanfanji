@@ -29,6 +29,7 @@ export function useChatSettingsDraft() {
   const [draftEnableTimeAwareness, setDraftEnableTimeAwareness] = useState(false);
   const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
   const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
+  const [draftMosslandVoiceId, setDraftMosslandVoiceId] = useState("");
   const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState(1);
   const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("low");
   const [draftEnableImageGeneration, setDraftEnableImageGeneration] = useState(false);
@@ -62,6 +63,7 @@ export function useChatSettingsDraft() {
     setDraftEnableTimeAwareness(character.enableTimeAwareness || false);
     setDraftEnableAutoTranslate(character.enableAutoTranslate || false);
     setDraftMinimaxVoiceId(character.minimaxVoiceId || "");
+    setDraftMosslandVoiceId(character.mosslandVoiceId || "");
     setDraftMinimaxSpeed(character.minimaxSpeed !== undefined ? character.minimaxSpeed : 1);
     setDraftVoiceFrequency(character.voiceFrequency || "low");
     setDraftEnableImageGeneration(character.enableImageGeneration === true);
@@ -84,7 +86,8 @@ export function useChatSettingsDraft() {
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType, setDraftArchiveTemplateType,
     draftAutoArchiveInterval, setDraftAutoArchiveInterval, draftEnableAutoArchive, setDraftEnableAutoArchive,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
-    draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMinimaxSpeed, setDraftMinimaxSpeed,
+    draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
+    draftMinimaxSpeed, setDraftMinimaxSpeed,
     draftVoiceFrequency, setDraftVoiceFrequency, draftEnableImageGeneration, setDraftEnableImageGeneration,
     draftImageAppearancePrompt, setDraftImageAppearancePrompt, draftImageNegativePrompt, setDraftImageNegativePrompt,
     draftImageReferenceAssetId, setDraftImageReferenceAssetId, draftImageReferenceMimeType, setDraftImageReferenceMimeType,

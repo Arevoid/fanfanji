@@ -238,6 +238,9 @@ const DEFAULT_SETTINGS: UserSettings = {
   apiTemperature: 0.7,
   streamCompatible: false,
   enableTimeAwareness: true,
+  ttsProvider: "minimax",
+  mosslandApiEndpoint: "https://api.mosi.cn/v1/audio/speech",
+  mosslandModel: "moss-tts",
   activeApiPresetId: "preset-gemini",
   apiPresets: [
     {

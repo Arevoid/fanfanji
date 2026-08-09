@@ -78,6 +78,7 @@ export interface Character {
   isContactInstance?: boolean;
   profileSourceId?: string;
   minimaxVoiceId?: string;
+  mosslandVoiceId?: string;
   minimaxSpeed?: number;
   voiceFrequency?: "low" | "medium" | "high" | "none";
   /** Canonical appearance data only. It is intentionally never relation-scoped. */
@@ -708,8 +709,9 @@ export interface UserSettings {
   avatarBorderWidth?: number;
   avatarBorderColor?: string;
 
-  // MiniMax TTS Settings
+  // Voice synthesis settings. The legacy enableMiniMaxTts key remains the global switch.
   enableMiniMaxTts?: boolean;
+  ttsProvider?: "minimax" | "mossland";
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   minimaxModel?: string;
@@ -717,6 +719,9 @@ export interface UserSettings {
   minimaxPitch?: number;
   minimaxVol?: number;
   minimaxProxyUrl?: string;
+  mosslandApiEndpoint?: string;
+  mosslandApiKey?: string;
+  mosslandModel?: string;
 
   // OpenAI Images compatible settings. Disabled by default so no image request
   // can occur until both this and the canonical Character setting are enabled.

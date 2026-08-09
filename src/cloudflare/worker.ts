@@ -1,5 +1,6 @@
 import { assertImageGenerationTrigger } from "../features/chat/services/imageGenerationIntent";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "../server/imageProtocolAdapters";
+import { MosslandTtsError, synthesizeMosslandSpeech } from "../server/mosslandTts";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -28,17 +29,32 @@ function errorResponse(error: unknown, fallbackCode: string, fallbackMessage: st
 }
 
 /**
- * Cloudflare deployment entry point. Only /api/image/* executes in the Worker;
- * all assets stay static and browser clients never contact image providers.
+ * Cloudflare deployment entry point. Provider proxy routes execute in the
+ * Worker; all other requests stay on static assets.
  */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith("/api/image/")) return env.ASSETS.fetch(request);
-    if (request.method !== "POST") return json({ success: false, error: "图片代理只接受 POST 请求。" }, 405);
+    const isImageRoute = url.pathname.startsWith("/api/image/");
+    const isMosslandRoute = url.pathname === "/api/mossland-tts";
+    if (!isImageRoute && !isMosslandRoute) return env.ASSETS.fetch(request);
+    if (request.method !== "POST") return json({ success: false, error: "代理接口只接受 POST 请求。" }, 405);
 
     const body = await requestBody(request);
-    if (!body) return json({ success: false, error: "图片代理请求格式无效。" }, 400);
+    if (!body) return json({ success: false, error: "代理请求格式无效。" }, 400);
+
+    if (isMosslandRoute) {
+      try {
+        const result = await synthesizeMosslandSpeech(body);
+        return new Response(result.audio, {
+          headers: { "Content-Type": result.contentType, "Cache-Control": "no-store" },
+        });
+      } catch (error) {
+        const status = error instanceof MosslandTtsError ? error.status : 500;
+        const message = error instanceof Error ? error.message : "Mossland 语音代理服务异常。";
+        return json({ error: message }, status);
+      }
+    }
 
     if (url.pathname === "/api/image/models") {
       try {

@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
 import { buildKnowledgeExtractionPrompt, parseKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
+import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
 
 dotenv.config();
 
@@ -842,6 +843,20 @@ ${text}
     } catch (error: any) {
       console.error("MiniMax TTS Proxy Error:", error);
       return res.status(500).json({ error: error.message || "MiniMax 语音代理服务异常" });
+    }
+  });
+
+  // API Route: Mossland TTS proxy. The provider blocks browser CORS preflights.
+  app.post("/api/mossland-tts", async (req, res) => {
+    try {
+      const result = await synthesizeMosslandSpeech(req.body);
+      res.setHeader("Content-Type", result.contentType);
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(Buffer.from(result.audio));
+    } catch (error) {
+      const status = error instanceof MosslandTtsError ? error.status : 500;
+      const message = error instanceof Error ? error.message : "Mossland 语音代理服务异常";
+      return res.status(status).json({ error: message });
     }
   });
 

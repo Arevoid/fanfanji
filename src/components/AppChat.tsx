@@ -146,6 +146,7 @@ import {
 } from "lucide-react";
 
 import { getSpeechForText } from "../utils/minimaxTts";
+import { buildCharacterTtsOptions, getTtsProvider } from "../features/voice/ttsConfig";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -932,6 +933,7 @@ export default function AppChat({
 
     setPlayingMessageId(msg.id);
     setAudioLoadingMessageId(msg.id);
+    let ttsProviderName = "MiniMax";
 
     try {
       let userSettings: any = {};
@@ -941,21 +943,10 @@ export default function AppChat({
       } catch (e) {
         console.error(e);
       }
+      ttsProviderName = getTtsProvider(userSettings) === "mossland" ? "Mossland" : "MiniMax";
 
       const msgChar = characters.find(c => c.id === msg.characterId || c.id === msg.senderId);
-      const voiceId = msgChar?.minimaxVoiceId || "female-shaonv";
-      const speed = msgChar?.minimaxSpeed !== undefined ? msgChar.minimaxSpeed : (userSettings.minimaxSpeed !== undefined ? userSettings.minimaxSpeed : 1.0);
-
-      const ttsOptions = {
-        apiKey: userSettings.minimaxApiKey || undefined,
-        groupId: userSettings.minimaxGroupId || undefined,
-        model: userSettings.minimaxModel || "speech-2.8-hd",
-        speed,
-        pitch: userSettings.minimaxPitch !== undefined ? userSettings.minimaxPitch : 0,
-        vol: userSettings.minimaxVol !== undefined ? userSettings.minimaxVol : 1.0,
-        voiceId,
-        proxyUrl: userSettings.minimaxProxyUrl || undefined,
-      };
+      const ttsOptions = buildCharacterTtsOptions(userSettings, msgChar);
 
       let cleanText = msg.content;
       if (cleanText.startsWith("[语音]|")) {
@@ -1000,7 +991,7 @@ export default function AppChat({
       setPlayingMessageId(null);
       setAudioLoadingMessageId(null);
       if (isQueuedCallSpeech) finishQueuedCallSpeech();
-      showToast("语音合成失败，请确认 MiniMax 设置正确！");
+      showToast(`语音合成失败，请确认 ${ttsProviderName} 设置正确！`);
     }
   };
 
@@ -2021,7 +2012,8 @@ export default function AppChat({
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType,
     draftAutoArchiveInterval, setDraftAutoArchiveInterval, draftEnableAutoArchive, setDraftEnableAutoArchive,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
-    draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMinimaxSpeed, setDraftMinimaxSpeed,
+    draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
+    draftMinimaxSpeed, setDraftMinimaxSpeed,
     draftVoiceFrequency, draftEnableImageGeneration, setDraftEnableImageGeneration,
     draftImageAppearancePrompt, setDraftImageAppearancePrompt, draftImageNegativePrompt, setDraftImageNegativePrompt,
     draftImageReferenceAssetId, setDraftImageReferenceAssetId, draftImageReferenceMimeType, setDraftImageReferenceMimeType,
@@ -4343,6 +4335,7 @@ ${stickerListStr}
         enableTimeAwareness: draftEnableTimeAwareness,
         enableAutoTranslate: draftEnableAutoTranslate,
         minimaxVoiceId: draftMinimaxVoiceId.trim() || undefined,
+        mosslandVoiceId: draftMosslandVoiceId.trim() || undefined,
         minimaxSpeed: draftMinimaxSpeed,
         voiceFrequency: draftVoiceFrequency,
         enableImageGeneration: draftEnableImageGeneration,
@@ -6391,7 +6384,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                        </>
                      )}
 
-                     {/* MiniMax Character-specific Voice Settings */}
+                     {/* Character-specific voice settings */}
                       {advancedSettingsSection === "voiceImage" && (
                      <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-xs">
                       <div className="flex items-center justify-between">
@@ -6399,9 +6392,18 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                       </div>
                       
                       <div className="space-y-2">
-                        {/* Manual Text Input */}
                         <div>
-                          <label className="block text-[10px] text-slate-400 font-semibold mb-1">填入 VOICE ID</label>
+                          <label className="block text-[10px] text-slate-400 font-semibold mb-1">Mossland VOICE ID</label>
+                          <input
+                            type="text"
+                            value={draftMosslandVoiceId}
+                            onChange={(e) => setDraftMosslandVoiceId(e.target.value)}
+                            placeholder="请输入 Mossland Voice ID"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-semibold placeholder-slate-400 focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-semibold mb-1">MiniMax VOICE ID</label>
                           <input
                             type="text"
                             value={draftMinimaxVoiceId}
@@ -6411,10 +6413,9 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                           />
                         </div>
 
-                        {/* Speed Tuning Slider */}
                         <div className="space-y-1.5 pt-1">
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] text-slate-400 font-semibold">专属语速调节</span>
+                            <span className="text-[10px] text-slate-400 font-semibold">MiniMax 专属语速调节</span>
                             <span className="text-xs font-bold text-slate-800 font-mono">{draftMinimaxSpeed}x</span>
                           </div>
                           <input
@@ -6432,6 +6433,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                             <span>极快 (2.0)</span>
                           </div>
                       </div>
+                      <p className="text-[9px] leading-relaxed text-slate-400">两个平台的音色 ID 分开保存，实际播放使用全局语音设置中当前选择的平台。</p>
                     </div>
                     </div>
                     )}

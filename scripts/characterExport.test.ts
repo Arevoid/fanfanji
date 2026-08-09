@@ -28,6 +28,7 @@ const character = {
   isContactInstance: true,
   profileSourceId: "private-profile-source",
   minimaxVoiceId: "private-voice",
+  mosslandVoiceId: "private-mossland-voice",
   imageReferenceAssetId: "private-image-asset",
 };
 const entries = [
@@ -66,6 +67,7 @@ for (const privateValue of [
   "private-identity",
   "private-profile-source",
   "private-voice",
+  "private-mossland-voice",
   "private-image-asset",
 ]) {
   assert.equal(serialized.includes(privateValue), false, `export leaked non-persona value: ${privateValue}`);

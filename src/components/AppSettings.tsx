@@ -534,8 +534,9 @@ export default function AppSettings({
   const [isTestingImageApi, setIsTestingImageApi] = useState(false);
   const [imageTestResult, setImageTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // MiniMax TTS configurations states
+  // Voice synthesis configuration. MiniMax fields remain intact for legacy users.
   const [enableMiniMaxTts, setEnableMiniMaxTts] = useState(!!settings.enableMiniMaxTts);
+  const [ttsProvider, setTtsProvider] = useState<"minimax" | "mossland">(settings.ttsProvider === "mossland" ? "mossland" : "minimax");
   const [minimaxApiKey, setMinimaxApiKey] = useState(settings.minimaxApiKey || "");
   const [minimaxGroupId, setMinimaxGroupId] = useState(settings.minimaxGroupId || "");
   const [minimaxModel, setMinimaxModel] = useState(settings.minimaxModel || "speech-2.8-hd");
@@ -543,11 +544,16 @@ export default function AppSettings({
   const [minimaxPitch, setMinimaxPitch] = useState(settings.minimaxPitch !== undefined ? settings.minimaxPitch : 0);
   const [minimaxVol, setMinimaxVol] = useState(settings.minimaxVol !== undefined ? settings.minimaxVol : 1.0);
   const [minimaxProxyUrl] = useState(settings.minimaxProxyUrl || "");
+  const [mosslandApiEndpoint, setMosslandApiEndpoint] = useState(settings.mosslandApiEndpoint || "https://api.mosi.cn/v1/audio/speech");
+  const [mosslandApiKey, setMosslandApiKey] = useState(settings.mosslandApiKey || "");
+  const [mosslandModel, setMosslandModel] = useState(settings.mosslandModel || "moss-tts");
+  const [showMosslandPassword, setShowMosslandPassword] = useState(false);
 
-  const handleSaveMiniMaxSettings = () => {
+  const handleSaveVoiceSettings = () => {
     onSaveSettings((previous) => ({
       ...previous,
       enableMiniMaxTts,
+      ttsProvider,
       minimaxApiKey: minimaxApiKey.trim(),
       minimaxGroupId: minimaxGroupId.trim(),
       minimaxModel: minimaxModel.trim(),
@@ -555,8 +561,11 @@ export default function AppSettings({
       minimaxPitch: Number(minimaxPitch),
       minimaxVol: Number(minimaxVol),
       minimaxProxyUrl: minimaxProxyUrl.trim(),
+      mosslandApiEndpoint: mosslandApiEndpoint.trim(),
+      mosslandApiKey: mosslandApiKey.trim(),
+      mosslandModel: mosslandModel.trim(),
     }));
-    alert("MiniMax 语音设置保存成功！");
+    alert("语音设置保存成功！");
   };
 
   const handleSelectPreset = (presetId: string, currentPresets: ApiPreset[] = apiPresets) => {
@@ -2952,7 +2961,7 @@ export default function AppSettings({
             </div>
           )}
 
-          {/* MINIMAX TTS SETTINGS TAB */}
+          {/* VOICE SYNTHESIS SETTINGS TAB */}
           {activeTab === "minimax" && (
             <div className="space-y-3 text-left pb-[34px] w-full max-w-md mx-auto">
               <div className="settings-section-header">语音设置</div>
@@ -2979,6 +2988,20 @@ export default function AppSettings({
                 </label>
               </div>
 
+              <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm space-y-2">
+                <label className="block text-xs font-bold text-slate-700">语音平台</label>
+                <select
+                  value={ttsProvider}
+                  onChange={(event) => setTtsProvider(event.target.value as "minimax" | "mossland")}
+                  className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-bold"
+                >
+                  <option value="mossland">Mossland</option>
+                  <option value="minimax">MiniMax</option>
+                </select>
+                <p className="text-[10px] leading-relaxed text-slate-400">切换平台不会删除另一平台已经保存的密钥、模型或角色音色 ID。</p>
+              </div>
+
+              {ttsProvider === "minimax" && <>
               {/* API Credentials */}
               <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">MiniMax 开发者密钥</h3>
@@ -3108,14 +3131,54 @@ export default function AppSettings({
                   </div>
                 </div>
               </div>
+              </>}
+
+              {ttsProvider === "mossland" && (
+                <div className="settings-card bg-white p-4 rounded-[16px] border border-slate-100 shadow-sm space-y-4">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Mossland 接口配置</h3>
+                  <div className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">接口地址</label>
+                      <input
+                        type="url"
+                        value={mosslandApiEndpoint}
+                        onChange={(event) => setMosslandApiEndpoint(event.target.value)}
+                        placeholder="https://api.mosi.cn/v1/audio/speech"
+                        className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">API KEY</label>
+                      <div className="relative">
+                        <input
+                          type={showMosslandPassword ? "text" : "password"}
+                          value={mosslandApiKey}
+                          onChange={(event) => setMosslandApiKey(event.target.value)}
+                          placeholder="请输入 Mossland API Key"
+                          className="w-full pl-3 pr-10 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-semibold"
+                        />
+                        <button type="button" onClick={() => setShowMosslandPassword((visible) => !visible)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                          {showMosslandPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">合成模型 (TTS Model)</label>
+                      <select value={mosslandModel} onChange={(event) => setMosslandModel(event.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-bold">
+                        <option value="moss-tts">moss-tts</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Action Save Button */}
               <button
                 type="button"
-                onClick={handleSaveMiniMaxSettings}
+                onClick={handleSaveVoiceSettings}
                 className="settings-wide-action settings-wide-action-primary"
               >
-                保存 MiniMax 语音设置
+                保存设置
               </button>
 
               <div className="settings-section-header pt-1">图片生成设置</div>
