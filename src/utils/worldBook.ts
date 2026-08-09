@@ -30,8 +30,8 @@ export interface WorldBookSystemBlocks {
 /**
  * A small number of character-defining entries need to be available even when
  * the user starts a chat with a short message such as "在吗". They remain
- * subject to the normal scope/visibility checks and are capped below so a
- * World Book cannot turn into an always-on transcript dump.
+ * subject to the normal scope/visibility checks. Direct chat can explicitly
+ * opt into its full visible World Book through the read context.
  */
 const isPersistentRoleEntry = (entry: WorldBookEntry): boolean => {
   if (entry.triggerType === "constant") return true;
@@ -47,6 +47,7 @@ export function buildWorldBookSystemBlocks(
 ): WorldBookSystemBlocks {
   const latestWorldBookEntries = getLatestWorldBookEntries(propEntries);
   const scanTextLower = scanText.toLowerCase();
+  const includeAllVisibleEntries = readContext?.includeAllVisibleEntries === true;
 
   const triggeredEntries: {
     entry: WorldBookEntry;
@@ -93,7 +94,7 @@ export function buildWorldBookSystemBlocks(
       entry,
       text: `【设定 - ${entry.title}】\n${entry.content}`
     };
-    if (isTriggered) {
+    if (includeAllVisibleEntries || isTriggered) {
       triggeredEntries.push(candidate);
     } else if (isPersistentRoleEntry(entry)) {
       persistentRoleEntries.push(candidate);
@@ -102,10 +103,12 @@ export function buildWorldBookSystemBlocks(
 
   // Sort entries by depth ascending (smaller depth is closer / higher priority)
   const triggeredIds = new Set(triggeredEntries.map(({ entry }) => entry.id));
-  const alwaysRelevant = persistentRoleEntries
-    .filter(({ entry }) => !triggeredIds.has(entry.id))
-    .sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5))
-    .slice(0, 3);
+  const alwaysRelevant = includeAllVisibleEntries
+    ? []
+    : persistentRoleEntries
+      .filter(({ entry }) => !triggeredIds.has(entry.id))
+      .sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5))
+      .slice(0, 3);
   const sortedTriggered = [...triggeredEntries, ...alwaysRelevant]
     .sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5));
 

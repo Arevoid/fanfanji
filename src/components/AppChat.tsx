@@ -1044,18 +1044,18 @@ const CHARACTER_MEDIA_USAGE_RULES = `[特殊媒体使用规则]
 不要为了显示功能而强迫角色使用特殊消息；不要连续多轮无理由发送语音或表情包；不要用表情包重复已经能由文字完整表达的内容。
 【图片绝对规则】你没有发送图片的能力。无论用户是否索要照片，绝对不得输出“（发送了一张图片）”“（发送了一张自拍）”“我给你发图了”等任何暗示已发图片的文字或动作描述。只有应用代码在实际生成并创建图片消息时，界面才会显示图片；你只输出真实的普通文字回复。`;
 
-const CHARACTER_EXPRESSION_PRIORITY = `[角色表达优先级：内置活人感 2.0]
-1. 角色人设、角色与用户的既定关系、已确认的角色事实，高于一切泛化的聊天风格建议。
-2. 当前用户消息与最近聊天上下文决定本轮回应什么；先理解用户正在说的事，再按角色人设与关系选择自然反应。不得把“回应”误解成每轮都要正面认同、关怀、解释完整或立刻给建议。
-3. 仅使用当前语境命中的世界书条目补充世界事实、身份或明确口癖。世界书不能在没有明确冲突时改写角色既有的称呼、亲疏、情感倾向或核心语气。
-4. 内置活人感 2.0 只用于让表达自然，绝不允许用跳脱、冷淡、敷衍、无故情绪或不匹配的表情把角色写偏；但在人设和关系允许时，可以自然地调侃、追问、嘴硬、少答一点、暂不顺着说或换一种接话方式。
+const CHARACTER_EXPRESSION_PRIORITY = `[角色表达优先级]
+1. 角色人设、角色与用户的既定关系、已确认的角色事实与世界书设定，共同决定角色会怎么说、会不会主动、热情还是克制、会不会调侃、追问、嘴硬或拒绝。
+2. 当前用户消息与最近聊天上下文决定本轮回应什么；先理解用户正在说的事，再按上述角色设定自然反应。
+3. 内置活人感 2.0 仅辅助避免模板化、重复和无意义填充，不得限制、修正或覆盖角色的性格、关系语气、口癖、情感倾向与边界。
 
 发送前自检：这是否像这个角色会对这个用户说的话？称呼、亲疏、情感倾向和禁用口吻是否一致？若不一致，重写。`;
 
 /**
- * Long imported character cards can contain a complete role card, examples and
- * a World Book in one field.  Keep the beginning available as a small,
- * high-priority role anchor, while retaining the full card below as reference.
+ * Imported character cards can contain a complete role card, examples and a
+ * World Book in one field. Keep the full character material in the acting
+ * anchor; truncating its tail can silently drop the user-relationship rules
+ * that define how a character behaves in direct chat.
  * This is request-scoped prompt shaping only; it does not write to Memory or
  * alter the character's stored profile.
  */
@@ -1067,23 +1067,23 @@ export const buildStableRoleAnchor = (
     .filter((value): value is string => Boolean(value?.trim()))
     .join("\n\n")
     .trim();
-  const coreExcerpt = source.slice(0, 2200);
+  const fullProfile = source;
   const relationshipLine = relationship && relationship !== "unknown"
-    ? `The current established relationship state is "${relationship}". Treat it as a behavioral constraint on familiarity and boundaries, not as a reason to force affection, agreement, care-taking, or a positive answer in every message.`
+    ? `The current established relationship state is "${relationship}". Treat the profile's stated relationship dynamic, familiarity, boundaries, and emotional direction as binding behavior for this user.`
     : "No concrete relationship state is available. Do not invent intimacy, shared history, or emotional obligations.";
 
   return `[CORE ROLE AND RELATIONSHIP ANCHOR — highest acting priority]
 You are ${character.name}. The following profile defines who you are and how you relate to the user. Treat it as binding character identity, not optional writing inspiration.
 - Keep the character's stated address terms, closeness, emotional direction, mannerisms, and forbidden tones consistent in every visible reply.
-- First understand the user's newest message, then answer in the way this character would actually answer this user. A natural response may tease, ask back, answer only part of it, be briefly noncommittal, continue a closely related thought, or disagree when the profile and relationship support it. Do not default to warmth, agreement, care-taking, or a complete helpful answer.
+- First understand the user's newest message, then answer in the way this character would actually answer this user. The profile and relationship decide whether the response is warm, clingy, detached, caring, playful, terse, teasing, disagreeing, or anything else.
 - ${relationshipLine}
-- If the full profile contains examples, background notes, or World Book material, use only details that fit the current topic naturally; never turn them into a mechanical recap.
+- Read the whole profile below before replying. Use its relationship and communication rules as behavior, not as a mechanical recap.
 - Before sending, rewrite any line that would sound like a generic assistant rather than this character talking to this user.
 - Do not announce or explain your own personality labels (for example, “I am talkative” or “I was pretending to be aloof”) unless the user explicitly asks. Let the profile show through the response itself.
 - For a short greeting with no established immediate scene, do not manufacture a mini-drama, a complaint about being ignored, or a self-introduction just to sound lively. Use the character's actual address terms and relationship distance; a brief, idiosyncratic reply is preferable to a generic polite greeting.
 
-[Core profile excerpt]
-${coreExcerpt || "No additional profile was provided."}`;
+[Full character profile]
+${fullProfile || "No additional profile was provided."}`;
 };
 
 const WORLD_BOOK_CONTEXT_PRIORITY = `[WORLD BOOK CONTEXT RULES]
@@ -4007,6 +4007,7 @@ ${turnSettings.disableBracketActions
         characterId: activeRelationship?.characterId || activeChatCharId || undefined,
         userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
         relationId: activeRelationship?.id,
+        includeAllVisibleEntries: true,
       });
 
       // Assemble system instruction blocks
@@ -5214,6 +5215,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         characterId: activeRelationship?.characterId || activeChatCharId || undefined,
         userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
         relationId: activeRelationship?.id,
+        includeAllVisibleEntries: true,
       });
 
       // Assemble system instruction blocks

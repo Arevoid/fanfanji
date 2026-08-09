@@ -14,8 +14,12 @@ assert.match(anchor, /CORE ROLE AND RELATIONSHIP ANCHOR/);
 assert.match(anchor, /沉迷 AI 恋爱的男大学生/);
 assert.match(anchor, /First understand the user's newest message/);
 assert.match(anchor, /current established relationship state is "partner"/);
-assert.match(anchor, /not as a reason to force affection/);
+assert.match(anchor, /relationship dynamic, familiarity, boundaries, and emotional direction as binding behavior/);
 assert.match(anchor, /Do not announce or explain your own personality labels/);
+
+const longTailProfile = `${"前置资料。".repeat(500)}\n[与 user 的相处方式] 线上会黏着 user 直球说话，绝不使用陌生的万能问候。`;
+const fullAnchor = buildStableRoleAnchor({ name: "步随影", personality: longTailProfile, backstory: "" }, "partner");
+assert.match(fullAnchor, /线上会黏着 user 直球说话/, "the full imported role card must not be truncated at a fixed character limit");
 
 const entry = (id: string, title: string, triggerType: WorldBookEntry["triggerType"]): WorldBookEntry => ({
   id,
@@ -36,12 +40,19 @@ const blocks = buildWorldBookSystemBlocks([
 assert.match(blocks.formattedAll, /核心身份与关系/, "persistent identity entries must be available for a short opening");
 assert.doesNotMatch(blocks.formattedAll, /第三食堂/, "unrelated location entries must stay topic-triggered");
 
+const fullBlocks = buildWorldBookSystemBlocks([
+  entry("identity", "核心身份与关系", "keys"),
+  entry("place", "第三食堂", "keys"),
+], "character-a", "你好", { scenario: "chat", characterId: "character-a", includeAllVisibleEntries: true });
+assert.match(fullBlocks.formattedAll, /核心身份与关系/, "full direct-chat reads must retain identity entries");
+assert.match(fullBlocks.formattedAll, /第三食堂/, "full direct-chat reads must retain every visible World Book entry");
+
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 assert.match(chatSource, /removeLegacyWorldBookPriorityDirective/, "direct chat must remove the legacy absolute World Book override");
 assert.match(chatSource, /WORLD_BOOK_CONTEXT_PRIORITY/, "direct chat must use the single role-first World Book policy");
 assert.match(chatSource, /isVoiceRelatedTurn/, "voice timing instructions must be limited to voice-related turns");
 assert.match(chatSource, /Avoid.*time template|避免时间模板/s, "time awareness must not force meal or sleep small talk");
 assert.match(chatSource, /buildStableRoleAnchor\(activeCharacter, activeRelationship\?\.relationship\)/, "both reply paths must anchor the active relationship");
-assert.match(chatSource, /Use this state to preserve the established distance and boundaries/, "regeneration must receive direct relationship guidance");
+assert.match(chatSource, /includeAllVisibleEntries: true/, "direct chat and regeneration must request the full visible World Book");
 
 console.log("PASS chat role priority and World Book relevance policy");
