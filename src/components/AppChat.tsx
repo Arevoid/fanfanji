@@ -146,7 +146,7 @@ import {
 } from "lucide-react";
 
 import { getSpeechForText } from "../utils/minimaxTts";
-import { buildCharacterTtsOptions, getTtsProvider } from "../features/voice/ttsConfig";
+import { buildCharacterTtsOptions, getTtsProvider, resolveTtsCharacter } from "../features/voice/ttsConfig";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -945,7 +945,7 @@ export default function AppChat({
       }
       ttsProviderName = getTtsProvider(userSettings) === "mossland" ? "Mossland" : "MiniMax";
 
-      const msgChar = characters.find(c => c.id === msg.characterId || c.id === msg.senderId);
+      const msgChar = resolveTtsCharacter(characters, msg.characterId, msg.senderId);
       const ttsOptions = buildCharacterTtsOptions(userSettings, msgChar);
 
       let cleanText = msg.content;
@@ -991,7 +991,8 @@ export default function AppChat({
       setPlayingMessageId(null);
       setAudioLoadingMessageId(null);
       if (isQueuedCallSpeech) finishQueuedCallSpeech();
-      showToast(`语音合成失败，请确认 ${ttsProviderName} 设置正确！`);
+      const detail = err instanceof Error ? err.message.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+      showToast(detail || `语音合成失败，请确认 ${ttsProviderName} 设置正确！`);
     }
   };
 

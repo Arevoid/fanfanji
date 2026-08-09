@@ -1,10 +1,35 @@
 import type { Character, UserSettings } from "../../types";
 import type { TtsOptions } from "../../utils/minimaxTts";
+import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 
 export type TtsProvider = "minimax" | "mossland";
+export const MOSSLAND_DEFAULT_SPEECH_ENDPOINT = "https://api.mosi.cn/v1/audio/speech";
+
+export function normalizeMosslandApiEndpoint(value?: string): string {
+  const endpoint = value?.trim() || MOSSLAND_DEFAULT_SPEECH_ENDPOINT;
+  try {
+    const url = new URL(endpoint);
+    const isMarketingHome = ["mossland.mosi.cn", "mossland.studio", "studio.mosi.cn"].includes(url.hostname)
+      && (url.pathname === "/" || url.pathname === "");
+    return isMarketingHome ? MOSSLAND_DEFAULT_SPEECH_ENDPOINT : endpoint;
+  } catch {
+    return endpoint;
+  }
+}
 
 export function getTtsProvider(settings: Pick<UserSettings, "ttsProvider">): TtsProvider {
   return settings.ttsProvider === "mossland" ? "mossland" : "minimax";
+}
+
+export function resolveTtsCharacter(
+  characters: readonly Character[],
+  characterId?: string,
+  senderId?: string,
+): Character | undefined {
+  const rawId = characterId || senderId || "";
+  const canonicalId = resolveCanonicalCharacterId(rawId, characters);
+  return characters.find((character) => character.id === canonicalId && !character.isContactInstance)
+    || characters.find((character) => character.id === rawId);
 }
 
 export function buildCharacterTtsOptions(
@@ -15,7 +40,7 @@ export function buildCharacterTtsOptions(
   if (provider === "mossland") {
     return {
       provider,
-      apiEndpoint: settings.mosslandApiEndpoint || "https://api.mosi.cn/v1/audio/speech",
+      apiEndpoint: normalizeMosslandApiEndpoint(settings.mosslandApiEndpoint),
       apiKey: settings.mosslandApiKey || undefined,
       model: settings.mosslandModel || "moss-tts",
       voiceId: character?.mosslandVoiceId || undefined,

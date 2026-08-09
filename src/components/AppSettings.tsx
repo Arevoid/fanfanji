@@ -42,6 +42,7 @@ import {
   type SettingsTab,
 } from "../features/settings/settingsNavigation";
 import { clearApplicationData } from "../features/settings/clearApplicationData";
+import { normalizeMosslandApiEndpoint } from "../features/voice/ttsConfig";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -561,7 +562,7 @@ export default function AppSettings({
       minimaxPitch: Number(minimaxPitch),
       minimaxVol: Number(minimaxVol),
       minimaxProxyUrl: minimaxProxyUrl.trim(),
-      mosslandApiEndpoint: mosslandApiEndpoint.trim(),
+      mosslandApiEndpoint: normalizeMosslandApiEndpoint(mosslandApiEndpoint),
       mosslandApiKey: mosslandApiKey.trim(),
       mosslandModel: mosslandModel.trim(),
     }));

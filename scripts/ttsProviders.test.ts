@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildCharacterTtsOptions, getTtsProvider } from "../src/features/voice/ttsConfig";
+import { buildCharacterTtsOptions, getTtsProvider, normalizeMosslandApiEndpoint, resolveTtsCharacter } from "../src/features/voice/ttsConfig";
 import { fetchSingleTtsSegment } from "../src/utils/minimaxTts";
 
 const mosslandSettings: any = {
@@ -9,6 +9,16 @@ const mosslandSettings: any = {
   mosslandModel: "moss-tts",
 };
 assert.equal(getTtsProvider({}), "minimax", "legacy settings must remain on MiniMax");
+assert.equal(normalizeMosslandApiEndpoint("https://mossland.mosi.cn"), "https://api.mosi.cn/v1/audio/speech");
+assert.equal(normalizeMosslandApiEndpoint("https://mossland.studio/"), "https://api.mosi.cn/v1/audio/speech");
+assert.equal(normalizeMosslandApiEndpoint("https://proxy.example/custom/speech"), "https://proxy.example/custom/speech");
+const canonicalCharacter: any = { id: "profile", name: "角色", mosslandVoiceId: "canonical-voice" };
+const contactCharacter: any = { id: "contact", name: "联系人", isContactInstance: true, profileSourceId: "profile" };
+assert.equal(
+  resolveTtsCharacter([contactCharacter, canonicalCharacter], "profile", "contact")?.mosslandVoiceId,
+  "canonical-voice",
+  "a contact copy must not shadow the canonical profile voice",
+);
 assert.deepEqual(buildCharacterTtsOptions(mosslandSettings, { mosslandVoiceId: "moss-voice" }), {
   provider: "mossland",
   apiEndpoint: "https://voice.example/v1/audio/speech",
