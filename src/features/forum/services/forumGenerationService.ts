@@ -15,6 +15,7 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import { isWorldBookEntryVisible } from "../../../domain/worldbook/worldBookVisibility";
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
 import { apiChat } from "../../../utils/apiHelper";
+import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import {
   buildForumProtectedNames,
   buildForumPublicSafeContext,
@@ -113,7 +114,7 @@ type ForumReplyAuthor =
   | { kind: "virtual"; profile: ForumVirtualProfile }
   | { kind: "community-npc"; npc: ForumCommunityNpc; profile: ForumVirtualProfile; publicAuthor: ForumPublicAuthor };
 
-const defaultAiCall: ForumAiCall = (params) => apiChat({ ...params, history: [] });
+const defaultAiCall: ForumAiCall = (params) => apiChat({ ...params, ...PromptComposer.compose({ scenario: "forum-thread", message: params.message, history: [], systemInstruction: params.systemInstruction }) });
 
 const id = (prefix: string): string => {
   const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto

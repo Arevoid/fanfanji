@@ -26,6 +26,7 @@ import { buildForumRelationGenerationContext } from "./forumGenerationService";
 import { listForumCommunityNpcsForIdentity } from "../../../core/storage/repositories/forumCommunityNpcRepository";
 import { toForumCommunityNpcAuthor, toForumCommunityNpcProfile } from "../forumCommunityNpcData";
 import { apiChat } from "../../../utils/apiHelper";
+import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import {
   buildPublicForumActivityPromptContext,
   formatPublicForumActivityPromptContext,
@@ -197,7 +198,7 @@ const validateBatch = (input: {
   return { events: valid };
 };
 
-const defaultAiCall = (input: Parameters<NonNullable<ForumActivityPlanInput["aiCall"]>>[0]) => apiChat({ ...input, history: [] });
+const defaultAiCall = (input: Parameters<NonNullable<ForumActivityPlanInput["aiCall"]>>[0]) => apiChat({ ...input, ...PromptComposer.compose({ scenario: "forum-activity", message: input.message, history: [], systemInstruction: input.systemInstruction }) });
 
 const buildPublicActivityPromptSupplements = (
   input: ForumActivityPlanInput,

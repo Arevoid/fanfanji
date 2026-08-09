@@ -607,6 +607,7 @@ export type WorldBookScope =
 
 export type WorldBookVisibility = "public" | "private";
 export type WorldBookPurpose = "world_canon" | "persona_rule" | "relationship_context" | "generation_rule";
+export type WorldBookPosition = "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history" | "at_depth";
 
 export interface WorldBookEntry {
   id: string;
@@ -623,7 +624,7 @@ export interface WorldBookEntry {
   triggerType?: "keys" | "constant" | "vector";
   keywords?: string;
   isActive?: boolean;
-  position?: "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history";
+  position?: WorldBookPosition;
   depth?: number;
 }
 

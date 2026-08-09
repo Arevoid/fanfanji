@@ -6,6 +6,7 @@ import {
   type ExtractedKnowledgeCandidatePayload,
   type KnowledgeExtractionHistoryItem,
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
+import { toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
 
 // Helper to parse different models response formats
 export const parseModels = (data: any): string[] | null => {
@@ -60,10 +61,7 @@ async function directClientChat(params: {
     }
     if (history && Array.isArray(history)) {
       for (const h of history) {
-        messagesPayload.push({
-          role: h.role === "user" ? "user" : "assistant",
-          content: h.text || h.content || ""
-        });
+        messagesPayload.push(toOpenAiHistoryEntry(h));
       }
     }
     messagesPayload.push({ role: "user", content: message });
@@ -133,9 +131,9 @@ async function directClientChat(params: {
     const contents: any[] = [];
     if (history && Array.isArray(history)) {
       for (const h of history) {
-        const role = h.role === "user" ? "user" : "model";
-        const text = (h.text || h.content || "").trim();
-        if (!text) continue; // Skip empty content to avoid API validation errors
+        const normalized = toGeminiHistoryEntry(h);
+        if (!normalized) continue; // Skip empty content to avoid API validation errors
+        const { role, text } = normalized;
         
         if (contents.length > 0 && contents[contents.length - 1].role === role) {
           // Merge consecutive messages with the same role

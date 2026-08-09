@@ -1,4 +1,5 @@
 import { apiChat } from "../../../utils/apiHelper";
+import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import type {
   ForumStory,
   StoryCharacter,
@@ -75,7 +76,7 @@ const requireTextAiConfig = (settings: ForumStoryGenerationSettings): void => {
   }
 };
 
-const defaultAiCall: ForumStoryAiCall = (request) => apiChat({ ...request, history: [] });
+const defaultAiCall: ForumStoryAiCall = (request) => apiChat({ ...request, ...PromptComposer.compose({ scenario: "forum-story-initial", message: request.message, history: [], systemInstruction: request.systemInstruction }) });
 
 const generateInitialCandidate = async (input: {
   prompt: { systemInstruction: string; message: string };

@@ -4,11 +4,9 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import { createDiaryId } from "../../../domain/diary/diaryData";
 import { validateGeneratedDiaryContent } from "../../../domain/diary/diaryValidation";
 import { buildDiaryPrompt } from "../../../domain/prompt/diaryPrompt";
+import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
-import {
-  buildDiaryPromptContext,
-  formatDiaryPromptContext,
-} from "../../characterCognitive/promptAdapters/diaryPromptAdapter";
+import { buildDiaryPromptContext, formatDiaryPromptContext } from "../../characterCognitive/promptAdapters/diaryPromptAdapter";
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 
 export const canGenerateDiary = (entries: readonly DiaryEntry[], relationId: string, now = Date.now()): boolean => {
@@ -18,44 +16,30 @@ export const canGenerateDiary = (entries: readonly DiaryEntry[], relationId: str
 };
 
 export const generateDiaryEntry = async (input: { relation: CharacterRelationship; character: Character; ownerIdentityId: string; messages: readonly Message[]; worldBookEntries?: readonly WorldBookEntry[]; settings: UserSettings; trigger: "lazy" | "manual"; occurredAt?: number; cognitiveContext?: CharacterCognitiveContext; chat?: typeof apiChat }): Promise<{ entry?: DiaryEntry; task: DiaryGenerationTask }> => {
-  const now = Date.now(); const task: DiaryGenerationTask = { id: createDiaryId("diary-task"), ownerIdentityId: input.ownerIdentityId, relationId: input.relation.id, taskKey: `${input.relation.id}:${input.trigger}:${new Date(now).toDateString()}`, trigger: input.trigger, status: "running", startedAt: now, updatedAt: now };
+  const now = Date.now();
+  const task: DiaryGenerationTask = { id: createDiaryId("diary-task"), ownerIdentityId: input.ownerIdentityId, relationId: input.relation.id, taskKey: `${input.relation.id}:${input.trigger}:${new Date(now).toDateString()}`, trigger: input.trigger, status: "running", startedAt: now, updatedAt: now };
   const occurredAt = Math.min(input.occurredAt ?? now, now - 1);
   const context = input.messages.filter((message) => message.relationId === input.relation.id).slice(-12).map((message) => `${message.sender === "user" ? "用户" : input.character.name}: ${message.content}`).join("\n");
   if (!context.trim() && input.trigger === "lazy") return { task: { ...task, status: "completed", updatedAt: Date.now() } };
   const prompt = buildDiaryPrompt({ characterName: input.character.name, occurredAt, characterProfile: `${input.character.personality || ""}\n${input.character.backstory || ""}`, relationshipState: input.relation.relationship, context });
-  const diaryWorldBook = buildWorldBookSystemBlocks(
-    [...(input.worldBookEntries || [])],
-    input.character.id,
-    context,
-    {
-      scenario: "chat",
-      characterId: input.relation.characterId,
-      userIdentityId: input.relation.userIdentityId,
-      relationId: input.relation.id,
-    },
-  ).formattedAll;
-  const cognitiveSupplement = input.cognitiveContext
-    ? formatDiaryPromptContext(buildDiaryPromptContext(input.cognitiveContext))
-    : "";
+  const diaryWorldBook = buildWorldBookSystemBlocks([...(input.worldBookEntries || [])], input.character.id, context, {
+    scenario: "chat", characterId: input.relation.characterId, userIdentityId: input.relation.userIdentityId, relationId: input.relation.id,
+  });
+  const cognitiveSupplement = input.cognitiveContext ? formatDiaryPromptContext(buildDiaryPromptContext(input.cognitiveContext)) : "";
   const call = input.chat || apiChat;
   try {
-    const response = await call({
-      message: [
-        prompt,
-        diaryWorldBook ? `[本篇日记可使用的关系世界书]\n${diaryWorldBook}\n只把这些内容作为角色和世界背景，不要逐条复述。` : "",
-        cognitiveSupplement,
-      ].filter(Boolean).join("\n\n"),
-      apiKey: input.settings.apiKey || "",
-      model: input.settings.selectedModel,
-      apiEndpoint: input.settings.apiEndpoint,
+    const composedPrompt = PromptComposer.compose({
+      scenario: "diary",
+      message: [prompt, diaryWorldBook.formattedAll ? `[本篇日记可使用的关系世界书]\n${diaryWorldBook.formattedAll}\n只把这些内容作为角色和世界背景，不要逐条复述。` : "", cognitiveSupplement].filter(Boolean).join("\n\n"),
       history: [],
       systemInstruction: "只输出符合要求的 JSON。",
-      apiTemperature: input.settings.apiTemperature,
-      streamCompatible: input.settings.streamCompatible,
+      historyInjections: diaryWorldBook.at_depth,
     });
-    const content = response.text;
-    const parsed = validateGeneratedDiaryContent(JSON.parse(content.replace(/^```json\s*|```$/g, "")));
+    const response = await call({ ...composedPrompt, apiKey: input.settings.apiKey || "", model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
+    const parsed = validateGeneratedDiaryContent(JSON.parse(response.text.replace(/^```json\s*|```$/g, "")));
     if (!parsed) return { task: { ...task, status: "failed", updatedAt: Date.now() } };
     return { entry: { id: createDiaryId(), ownerIdentityId: input.ownerIdentityId, authorType: "character", characterId: input.relation.characterId, relationId: input.relation.id, conversationId: input.relation.conversationId, authorNameSnapshot: input.character.remark || input.character.name, ...(input.character.avatar ? { authorAvatarSnapshot: input.character.avatar } : {}), ...parsed, occurredAt, createdAt: now, updatedAt: now, source: input.trigger === "manual" ? "ai-manual" : "ai-auto", isFavorite: false }, task: { ...task, status: "completed", updatedAt: Date.now() } };
-  } catch { return { task: { ...task, status: "failed", updatedAt: Date.now() } }; }
+  } catch {
+    return { task: { ...task, status: "failed", updatedAt: Date.now() } };
+  }
 };

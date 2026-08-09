@@ -27,6 +27,7 @@ import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offli
 import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/offlineStoryEventCaptureService";
 import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../domain/prompt/offlineIdentityBinding";
 import { Button, ConfirmDialog, IconButton, PopoverMenu } from "./ui";
+import { PromptComposer } from "../domain/prompt/PromptComposer";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -933,14 +934,17 @@ export default function AppOffline({
         ? relationships.find((relation) => relation.id === updatedStory.relationId)
         : undefined;
       const triggeredWorldBook = new Map<string, WorldBookEntry>();
+      const atDepthWorldBook = new Map<string, ReturnType<typeof buildWorldBookSystemBlocks>["at_depth"][number]>();
       const snapshotEntries = updatedStory.worldBookSnapshot || [];
       storyCharsList.forEach((character) => {
-        buildWorldBookSystemBlocks(snapshotEntries, character.id, worldBookScanText, {
+        const blocks = buildWorldBookSystemBlocks(snapshotEntries, character.id, worldBookScanText, {
           scenario: "offline",
           characterId: character.id,
           userIdentityId: scopedRelationship?.userIdentityId,
           relationId: scopedRelationship?.id,
-        }).allTriggered.forEach((entry) => triggeredWorldBook.set(entry.id, entry));
+        });
+        blocks.allTriggered.forEach((entry) => triggeredWorldBook.set(entry.id, entry));
+        blocks.at_depth.forEach((entry) => atDepthWorldBook.set(entry.sourceId, entry));
       });
       // Legacy stories stored flattened strings without trigger metadata. Use
       // only entries whose title/content overlaps this turn instead of loading
@@ -964,7 +968,7 @@ export default function AppOffline({
         });
       }
       const wbPrompts = triggeredWorldBook.size > 0
-        ? Array.from(triggeredWorldBook.values()).map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")
+        ? Array.from(triggeredWorldBook.values()).filter((entry) => entry.position !== "at_depth").map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")
         : "";
 
       // Base Persona
@@ -1124,10 +1128,15 @@ Story-time starting point: ${handoffClock}. Advance from this point only through
 This non-imported story starts at the current real-world time: ${currentClock}. Treat it as the story's initial clock, then advance time only through the events and elapsed time established inside this story.`;
       }
 
-      const response = await apiChat({
+      const composedPrompt = PromptComposer.compose({
+        scenario: "offline-story",
         message: lastUserMsgText,
         history: historyContext,
         systemInstruction: sysPrompt,
+        historyInjections: [...atDepthWorldBook.values()],
+      });
+      const response = await apiChat({
+        ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,

@@ -1,4 +1,5 @@
 import { apiChat } from "../../../utils/apiHelper";
+import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import type {
   ForumStory,
   StoryCharacter,
@@ -84,7 +85,7 @@ const makeId = (prefix: string): string => {
   return `${prefix}-${suffix}`;
 };
 
-const defaultAiCall: ForumStoryCommentAiCall = (request) => apiChat({ ...request, history: [] });
+const defaultAiCall: ForumStoryCommentAiCall = (request) => apiChat({ ...request, ...PromptComposer.compose({ scenario: "forum-story-comment", message: request.message, history: [], systemInstruction: request.systemInstruction }) });
 
 const ensureWrite = (result: StorageWriteResult, label: string): void => {
   if (!result.success) throw new Error(`ForumStory ${label} save failed`);

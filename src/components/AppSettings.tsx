@@ -36,6 +36,7 @@ import { notifyAppearanceSettingsChanged } from "../features/theme/appearanceRep
 import { useTheme } from "../features/theme/ThemeProvider";
 import { sanitizeAppearanceSettings, type ThemeMode } from "../features/theme/theme";
 import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
+import { PromptDebugPanel } from "../features/promptDebug/components/PromptDebugPanel";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -355,7 +356,7 @@ export default function AppSettings({
   onDeletePreset,
   onClose,
 }: AppSettingsProps) {
-  const [activeTab, setActiveTab] = useState<"profile" | "api" | "image_api" | "appearance" | "beauty" | "system_config" | "system" | "minimax" | null>(null);
+  const [activeTab, setActiveTab] = useState<"profile" | "api" | "image_api" | "appearance" | "beauty" | "system_config" | "system" | "minimax" | "prompt_debug" | null>(null);
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
 
   // PWA states
@@ -996,12 +997,18 @@ export default function AppSettings({
         return "系统备份";
       case "minimax":
         return "语音设置";
+      case "prompt_debug":
+        return "提示词检查器";
       default:
         return "设置";
     }
   };
 
   const handleBack = () => {
+    if (activeTab === "prompt_debug") {
+      setActiveTab("system_config");
+      return;
+    }
     if (activeTab !== null) {
       setActiveTab(null);
     } else {
@@ -2760,8 +2767,14 @@ export default function AppSettings({
               </div>
                 </>
               )}
+              <button type="button" onClick={() => setActiveTab("prompt_debug")} className="w-full rounded-[16px] border border-dashed border-slate-300 bg-slate-50 p-4 text-left">
+                <div className="text-xs font-bold text-slate-700">高级诊断 · 提示词检查器</div>
+                <div className="mt-1 text-[10px] leading-relaxed text-slate-400">查看当前页面内最近的最终组装结果；刷新即清空，不保存、不备份。</div>
+              </button>
             </div>
           )}
+
+          {activeTab === "prompt_debug" && <PromptDebugPanel />}
 
           {/* SYSTEM SETTINGS & BACKUP TAB */}
           {activeTab === "system" && (

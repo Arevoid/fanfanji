@@ -1,6 +1,7 @@
 import type { Character, InnerVoiceRecord, Message, UserSettings, WorldBookEntry } from "../../../types";
 import { apiChat } from "../../../utils/apiHelper";
 import { buildInnerVoicePrompt } from "../../../domain/prompt/innerVoicePrompt";
+import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
@@ -41,9 +42,15 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
   const relationId = input.relationId ?? input.context?.relationId ?? undefined;
   const groupId = input.groupId ?? input.context?.groupId ?? undefined;
   const conversationId = input.conversationId ?? input.context?.conversationId ?? undefined;
-  // A record is valid only when it has an explicit direct or group boundary.
   if ((!relationId && !groupId) || conversationId === undefined) return null;
-  const response = await apiChat({
+
+  const worldBook = input.relationship ? buildWorldBookSystemBlocks(
+    [...(input.worldBookEntries || [])], input.character.id,
+    input.recentMessages.slice(-10).map((message) => message.content).join("\n"),
+    { scenario: "chat", characterId: input.relationship.characterId, userIdentityId: input.relationship.userIdentityId, relationId: input.relationship.id },
+  ) : undefined;
+  const composedPrompt = PromptComposer.compose({
+    scenario: "inner-voice",
     message: "请根据指令生成这一次的角色心声。",
     history: [],
     systemInstruction: [buildInnerVoicePrompt({
@@ -54,20 +61,11 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
       recentMessages: input.recentMessages,
       userName: input.settings.name,
       offlineContinuityContext: input.offlineContinuityContext,
-    }), input.relationship ? (() => {
-      const worldBook = buildWorldBookSystemBlocks(
-        [...(input.worldBookEntries || [])],
-        input.character.id,
-        input.recentMessages.slice(-10).map((message) => message.content).join("\n"),
-        {
-          scenario: "chat",
-          characterId: input.relationship.characterId,
-          userIdentityId: input.relationship.userIdentityId,
-          relationId: input.relationship.id,
-        },
-      ).formattedAll;
-      return worldBook ? `[本次心声可使用的关系世界书]\n${worldBook}\n只将其作为角色认知背景，不要逐条复述。` : "";
-    })() : ""].filter(Boolean).join("\n\n"),
+    }), worldBook?.formattedAll ? `[本次心声可使用的关系世界书]\n${worldBook.formattedAll}\n只将其作为角色认知背景，不要逐条复述。` : ""].filter(Boolean).join("\n\n"),
+    historyInjections: worldBook?.at_depth,
+  });
+  const response = await apiChat({
+    ...composedPrompt,
     apiKey: input.settings.apiKey,
     model: input.settings.selectedModel || "gemini-3.5-flash",
     apiEndpoint: input.settings.apiEndpoint,
@@ -76,7 +74,6 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
   });
   const parsed = parseInnerVoice(response.text);
   if (!parsed) return null;
-
   return {
     id: `inner-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     characterId: input.character.id,
@@ -86,7 +83,6 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
     conversationId,
     triggerMessageSummary: input.triggerMessage.content.slice(0, 120),
     emotionalState: parsed.emotionalState,
-    // Keep the legacy field populated for old consumers; UI uses emotionalState for new records.
     state: parsed.emotionalState,
     content: parsed.content,
     createdAt: Date.now(),

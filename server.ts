@@ -5,6 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
 import { buildKnowledgeExtractionPrompt, parseKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
+import { toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
 
 dotenv.config();
 
@@ -91,10 +92,7 @@ async function startServer() {
         }
         if (history && Array.isArray(history)) {
           for (const h of history) {
-            messagesPayload.push({
-              role: h.role === "user" ? "user" : "assistant",
-              content: h.text || h.content || ""
-            });
+            messagesPayload.push(toOpenAiHistoryEntry(h));
           }
         }
         messagesPayload.push({ role: "user", content: message });
@@ -169,9 +167,9 @@ async function startServer() {
       const contents = [];
       if (history && Array.isArray(history)) {
         for (const h of history) {
-          const role = h.role === "user" ? "user" : "model";
-          const text = (h.text || h.content || "").trim();
-          if (!text) continue; // Skip empty content to prevent API validation errors
+          const normalized = toGeminiHistoryEntry(h);
+          if (!normalized) continue; // Skip empty content to prevent API validation errors
+          const { role, text } = normalized;
           
           if (contents.length > 0 && contents[contents.length - 1].role === role) {
             // Merge consecutive messages with the same role

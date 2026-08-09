@@ -1,4 +1,5 @@
 import { apiChat } from "../../../utils/apiHelper";
+import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import type {
   ForumStory,
   StoryCharacter,
@@ -74,7 +75,7 @@ const ensureWrite = (result: StorageWriteResult, label: string): void => {
   if (!result.success) throw new Error(`ForumStory ${label} save failed`);
 };
 
-const defaultAiCall: ForumStoryUpdateAiCall = (request) => apiChat({ ...request, history: [] });
+const defaultAiCall: ForumStoryUpdateAiCall = (request) => apiChat({ ...request, ...PromptComposer.compose({ scenario: "forum-story-update", message: request.message, history: [], systemInstruction: request.systemInstruction }) });
 
 const generateCandidate = async (input: {
   prompt: ForumStoryUpdatePrompt;

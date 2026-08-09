@@ -194,7 +194,7 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
     kwString = String(stEntry.keywords);
   }
 
-  let mappedPos: "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history" = "after_char_def";
+  let mappedPos: WorldBookEntry["position"] = "after_char_def";
   const stPos = stEntry.position;
   if (stPos !== undefined && stPos !== null) {
     const pStr = String(stPos).toLowerCase();
@@ -206,7 +206,9 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
       mappedPos = "after_char_def";
     } else if (pStr.includes("chat") || pStr.includes("story") || pStr === "2") {
       mappedPos = "before_chat_history";
-    } else if (pStr.includes("main") || pStr.includes("depth") || pStr === "4") {
+    } else if (pStr.includes("depth") || pStr === "4") {
+      mappedPos = "at_depth";
+    } else if (pStr.includes("main")) {
       mappedPos = "after_main_prompt";
     }
   }

@@ -10,12 +10,28 @@ export type PromptScenario =
   | "regenerate"
   | "moment-post"
   | "moment-comment"
-  | "moment-reply";
+  | "moment-reply"
+  | "offline-story"
+  | "diary"
+  | "inner-voice"
+  | "forum-thread"
+  | "forum-activity"
+  | "forum-story-initial"
+  | "forum-story-comment"
+  | "forum-story-update";
 
 export interface PromptHistoryEntry {
   // apiChat historically accepts the caller's role string without narrowing it.
   role: string;
   text: string;
+}
+
+export interface PromptHistoryInjection {
+  id: string;
+  sourceId?: string;
+  /** 1 = immediately before the latest historical message. */
+  depth: number;
+  content: string;
 }
 
 export interface PromptContext {
@@ -29,6 +45,7 @@ export interface PromptContext {
    * World Book blocks, recalled memories and time-sensitive context.
    */
   systemInstruction: string;
+  historyInjections?: readonly PromptHistoryInjection[];
 }
 
 export interface ComposedPrompt {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
@@ -25,9 +25,10 @@ import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { assembleChatInstructions } from "../features/chat/prompts/chatInstructionAssembler";
 import { CHARACTER_MEDIA_USAGE_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
+import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
+import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
-import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
@@ -63,7 +64,6 @@ import { createDeterministicArtifactClaim } from "../features/characterKnowledge
 import { buildRelationshipCognitiveProjection } from "../features/characterLife/services/relationshipCognitiveProjectionService";
 import { buildCharacterRoutine } from "../domain/characterLife/characterRoutine/characterRoutineBuilder";
 import { createMomentTopicRecord } from "../domain/moments/momentGeneration/momentTopicHistory";
-import type { MomentTopicRecord } from "../domain/moments/momentGeneration/momentTopicTypes";
 import { createProactiveTopicRecord } from "../domain/characterLife/proactive/proactiveTopicHistory";
 import { appendMomentTopicRecord, loadMomentTopicRecords } from "../core/storage/repositories/momentTopicRepository";
 import { appendProactiveTopicRecord, loadProactiveTopicRecords, removeProactiveTopicsForRelations } from "../core/storage/repositories/proactiveTopicRepository";
@@ -86,6 +86,7 @@ import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/componen
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
 import { ChatComposer } from "../features/chat/components/ChatComposer";
 import { ChatTextInput } from "../features/chat/components/ChatTextInput";
+import { BubbleTipPortalLayer } from "../features/chat/components/BubbleTipPortalLayer";
 import { VISUAL_VIEWPORT_CHANGE_EVENT } from "../features/viewport/visualViewport";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
@@ -95,9 +96,11 @@ import { requestAutomaticMomentComment } from "../features/moments/services/mome
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
 import { buildMomentCognitiveContext } from "../features/moments/services/momentCognitiveContext";
 import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
-import { sanitizeMomentPublishText, stripMomentVoiceMarkup } from "../features/moments/services/momentContent";
+import { buildTextAiRuntimeConfig } from "../features/chat/services/textAiRuntimeConfig";
+import { prioritizeUserChatCss, scopeUserChatCss } from "../features/chat/styles/chatCssScope";
+import { sanitizeMomentPublishText } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
-import { buildMomentPublicCognitiveContext } from "../domain/momentCognitive/momentPublicContextBuilder";
+import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
 import {
   MessageSquare,
   Users,
@@ -636,399 +639,6 @@ const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；�
 /* The legacy template remains referenced only to keep old persisted code compatible. */
 void CHARACTER_CSS_EXAMPLE_TEMPLATE;
 
-const CHAT_CSS_NESTED_AT_RULES = /^(?:@media|@supports|@container|@layer|@document|@scope)\b/i;
-const CHAT_CSS_NON_SELECTOR_AT_RULES = /^(?:@(?:-\w+-)?keyframes|@font-face|@page|@property)\b/i;
-// Keep custom chat CSS inside the conversation-surface wrappers. The settings
-// sheet is a sibling inside #api-chat-screen, so it is deliberately excluded.
-const CHAT_USER_CSS_SCOPE_SELECTOR = "#conv-screen.user-custom-chat-css:not([data-chat-settings-open=\"true\"]) #api-chat-screen > .chat-content-scope";
-const CHAT_CSS_ROOT_CLASS_SELECTOR = /^(?:\.chat-page|\.chat-theme|\.style-liquid-glass|\.user-custom-chat-css)(?=[.#:\[\s]|$)/i;
-
-/** Browsers reject declarations containing typographic/non-breaking hyphens. */
-function normalizeChatCssSyntax(css: string): string {
-  return css.replace(/[\u2010-\u2015\u2212]/g, "-");
-}
-
-type BubbleTipAnchor = {
-  key: string;
-  side: "self" | "other";
-  left: number;
-  top: number;
-  height: number;
-};
-
-function BubbleTipPortalLayer({ enabled }: { enabled: boolean }) {
-  const [portalHost, setPortalHost] = useState<HTMLDivElement | null>(null);
-  const [anchors, setAnchors] = useState<BubbleTipAnchor[]>([]);
-
-  useLayoutEffect(() => {
-    if (!enabled) {
-      setAnchors([]);
-      return;
-    }
-
-    const root = document.getElementById("conv-screen");
-    if (!root) return;
-
-    let frame = 0;
-    const updatePositions = () => {
-      frame = 0;
-      const next: BubbleTipAnchor[] = [];
-      root.querySelectorAll<HTMLElement>(
-        ".chat-bubble-self.msg-group-top, .chat-bubble-other.msg-group-top",
-      ).forEach((bubble, index) => {
-        if (bubble.closest(".cv-bubble-tip-portal-layer")) return;
-        const rect = bubble.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return;
-        const side = bubble.classList.contains("chat-bubble-self") ? "self" : "other";
-        next.push({
-          key: `${side}-${index}`,
-          side,
-          left: side === "self" ? rect.right : rect.left,
-          top: rect.top,
-          height: rect.height,
-        });
-      });
-
-      setAnchors((previous) => {
-        if (
-          previous.length === next.length
-          && previous.every((item, index) => {
-            const candidate = next[index];
-            return item.key === candidate.key
-              && item.side === candidate.side
-              && Math.abs(item.left - candidate.left) < 0.5
-              && Math.abs(item.top - candidate.top) < 0.5
-              && Math.abs(item.height - candidate.height) < 0.5;
-          })
-        ) {
-          return previous;
-        }
-        return next;
-      });
-    };
-    const scheduleUpdate = () => {
-      if (!frame) frame = window.requestAnimationFrame(updatePositions);
-    };
-
-    scheduleUpdate();
-    const mutationObserver = new MutationObserver(scheduleUpdate);
-    mutationObserver.observe(root, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["class", "style"],
-    });
-    window.addEventListener("resize", scheduleUpdate);
-    window.addEventListener("scroll", scheduleUpdate, true);
-
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      mutationObserver.disconnect();
-      window.removeEventListener("resize", scheduleUpdate);
-      window.removeEventListener("scroll", scheduleUpdate, true);
-    };
-  }, [enabled]);
-
-  return (
-    <div
-      ref={(node) => {
-        if (node !== portalHost) setPortalHost(node);
-      }}
-      className="cv-bubble-tip-portal-layer"
-      aria-hidden="true"
-    >
-      {portalHost && anchors.map((anchor) => createPortal(
-        <div
-          key={anchor.key}
-          className="cv-bubble-tip-portal"
-          style={{ left: anchor.left, top: anchor.top, width: 0, height: anchor.height }}
-        >
-          <div className={`bubble-tip ${anchor.side}-tip`} />
-        </div>,
-        portalHost,
-        anchor.key,
-      ))}
-    </div>
-  );
-}
-
-function splitLeadingCssTrivia(value: string): { leading: string; body: string } {
-  let index = 0;
-  while (index < value.length) {
-    if (/\s/.test(value[index])) {
-      index += 1;
-      continue;
-    }
-    if (value.startsWith("/*", index)) {
-      const end = value.indexOf("*/", index + 2);
-      if (end < 0) return { leading: value, body: "" };
-      index = end + 2;
-      continue;
-    }
-    break;
-  }
-  return { leading: value.slice(0, index), body: value.slice(index) };
-}
-
-function splitCssSelectorList(value: string): string[] {
-  const selectors: string[] = [];
-  let start = 0;
-  let parentheses = 0;
-  let brackets = 0;
-  let quote = "";
-  let comment = false;
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    const next = value[index + 1];
-    if (comment) {
-      if (char === "*" && next === "/") {
-        comment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (!quote && char === "/" && next === "*") {
-      comment = true;
-      index += 1;
-      continue;
-    }
-    if (quote) {
-      if (char === "\\") index += 1;
-      else if (char === quote) quote = "";
-      continue;
-    }
-    if (char === "\"" || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === "(") parentheses += 1;
-    else if (char === ")") parentheses = Math.max(0, parentheses - 1);
-    else if (char === "[") brackets += 1;
-    else if (char === "]") brackets = Math.max(0, brackets - 1);
-    else if (char === "," && parentheses === 0 && brackets === 0) {
-      selectors.push(value.slice(start, index));
-      start = index + 1;
-    }
-  }
-  selectors.push(value.slice(start));
-  return selectors;
-}
-
-function prefixChatCssSelectors(prelude: string): string {
-  const { leading, body } = splitLeadingCssTrivia(prelude);
-  const trimmed = body.trim();
-  if (!trimmed || trimmed.startsWith("@")) return prelude;
-  const selectorBody = body.trimEnd();
-  const trailing = body.slice(selectorBody.length);
-  const prefixed = splitCssSelectorList(selectorBody).map((selector) => {
-    const trimmedSelector = selector.trim();
-    if (!trimmedSelector) return selector;
-    if (trimmedSelector.startsWith(CHAT_USER_CSS_SCOPE_SELECTOR)) return selector;
-    // Preserve the user's chat-root target while adding the runtime scope class.
-    // The extra class is intentional: built-in voice rules target
-    // `#conv-screen .voice-message-bar.chat-bubble-*`; matching user rules need
-    // equivalent specificity so a generic `.chat-bubble-*` declaration can
-    // still override those settings when custom CSS is active.
-    if (trimmedSelector.startsWith("#conv-screen")) {
-      return selector.replace("#conv-screen", CHAT_USER_CSS_SCOPE_SELECTOR);
-    }
-    // These classes are mounted on the chat content wrappers. Do not insert a
-    // descendant combinator before the class, or root-style selectors would
-    // miss the wrapper itself.
-    if (CHAT_CSS_ROOT_CLASS_SELECTOR.test(trimmedSelector)) {
-      return selector.replace(trimmedSelector, `${CHAT_USER_CSS_SCOPE_SELECTOR}${trimmedSelector}`);
-    }
-    if (trimmedSelector === ":root") return selector.replace(trimmedSelector, CHAT_USER_CSS_SCOPE_SELECTOR);
-    if (trimmedSelector.startsWith(":root")) {
-      return selector.replace(trimmedSelector, `${CHAT_USER_CSS_SCOPE_SELECTOR}${trimmedSelector.slice(5)}`);
-    }
-    if (/^(?:html|body)(?:\b|\s|[.#:\[])/i.test(trimmedSelector)) {
-      return selector.replace(trimmedSelector, `${CHAT_USER_CSS_SCOPE_SELECTOR}${trimmedSelector.slice(trimmedSelector.match(/^(?:html|body)/i)?.[0].length || 0)}`);
-    }
-    return selector.replace(trimmedSelector, `${CHAT_USER_CSS_SCOPE_SELECTOR} ${trimmedSelector}`);
-  }).join(",");
-  return `${leading}${prefixed}${trailing}`;
-}
-
-/** Prefix user CSS selectors without touching declarations, comments or keyframes. */
-function scopeUserChatCss(css: string): string {
-  css = normalizeChatCssSyntax(css);
-  const output: string[] = [];
-  const stack: Array<{ prefixRules: boolean; segmentStart: number }> = [{ prefixRules: true, segmentStart: 0 }];
-  let emittedUntil = 0;
-  let comment = false;
-  let quote = "";
-
-  for (let index = 0; index < css.length; index += 1) {
-    const char = css[index];
-    const next = css[index + 1];
-    if (comment) {
-      if (char === "*" && next === "/") {
-        comment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (!quote && char === "/" && next === "*") {
-      comment = true;
-      index += 1;
-      continue;
-    }
-    if (quote) {
-      if (char === "\\") index += 1;
-      else if (char === quote) quote = "";
-      continue;
-    }
-    if (char === "\"" || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === ";") {
-      stack[stack.length - 1].segmentStart = index + 1;
-      continue;
-    }
-    if (char === "{") {
-      const current = stack[stack.length - 1];
-      const prelude = css.slice(current.segmentStart, index);
-      const { body } = splitLeadingCssTrivia(prelude);
-      const atRule = body.trim();
-      const isNestedAtRule = CHAT_CSS_NESTED_AT_RULES.test(atRule);
-      const isNonSelectorAtRule = CHAT_CSS_NON_SELECTOR_AT_RULES.test(atRule);
-      output.push(css.slice(emittedUntil, current.segmentStart));
-      output.push(current.prefixRules && !atRule.startsWith("@") && !isNonSelectorAtRule
-        ? prefixChatCssSelectors(prelude)
-        : prelude);
-      output.push("{");
-      output.push("");
-      stack.push({
-        prefixRules: current.prefixRules && (isNestedAtRule || !atRule.startsWith("@")) && !isNonSelectorAtRule,
-        segmentStart: index + 1,
-      });
-      emittedUntil = index + 1;
-      continue;
-    }
-    if (char === "}") {
-      const current = stack.pop();
-      if (!current) continue;
-      output.push(css.slice(emittedUntil, index));
-      output.push("}");
-      emittedUntil = index + 1;
-      if (stack.length > 0) stack[stack.length - 1].segmentStart = index + 1;
-    }
-  }
-  output.push(css.slice(emittedUntil));
-  return output.join("");
-}
-
-
-function appendImportantToChatDeclaration(segment: string): string {
-  const withoutTrailingWhitespace = segment.replace(/\s+$/, "");
-  if (!withoutTrailingWhitespace || /!\s*important\s*$/i.test(withoutTrailingWhitespace)) {
-    return segment;
-  }
-  return `${withoutTrailingWhitespace} !important${segment.slice(withoutTrailingWhitespace.length)}`;
-}
-
-/**
- * User CSS is intentionally the last authority.  Built-in character and
- * preset rules still contain !important for backwards compatibility, so make
- * ordinary user declarations important as well.  Keyframes/font-face/page
- * descriptors are left untouched because !important is invalid there.
- */
-function prioritizeUserChatCss(css: string): string {
-  const output: string[] = [];
-  const stack: Array<{ declarationBlock: boolean; skipPriority: boolean; segmentStart: number }> = [{
-    declarationBlock: false,
-    skipPriority: false,
-    segmentStart: 0,
-  }];
-  let emittedUntil = 0;
-  let comment = false;
-  let quote = "";
-  let parentheses = 0;
-
-  for (let index = 0; index < css.length; index += 1) {
-    const char = css[index];
-    const next = css[index + 1];
-    if (comment) {
-      if (char === "*" && next === "/") {
-        comment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (!quote && char === "/" && next === "*") {
-      comment = true;
-      index += 1;
-      continue;
-    }
-    if (quote) {
-      if (char === "\\") index += 1;
-      else if (char === quote) quote = "";
-      continue;
-    }
-    if (char === "\"" || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === "(") {
-      parentheses += 1;
-      continue;
-    }
-    if (char === ")") {
-      parentheses = Math.max(0, parentheses - 1);
-      continue;
-    }
-    if (parentheses > 0) continue;
-
-    if (char === ";") {
-      const current = stack[stack.length - 1];
-      if (current.declarationBlock && !current.skipPriority) {
-        output.push(css.slice(emittedUntil, current.segmentStart));
-        output.push(appendImportantToChatDeclaration(css.slice(current.segmentStart, index)));
-        output.push(";");
-        emittedUntil = index + 1;
-      }
-      current.segmentStart = index + 1;
-      continue;
-    }
-    if (char === "{") {
-      const current = stack[stack.length - 1];
-      const prelude = css.slice(current.segmentStart, index);
-      const { body } = splitLeadingCssTrivia(prelude);
-      const atRule = body.trim();
-      const isNonSelectorAtRule = CHAT_CSS_NON_SELECTOR_AT_RULES.test(atRule);
-      output.push(css.slice(emittedUntil, current.segmentStart));
-      output.push(prelude);
-      output.push("{");
-      emittedUntil = index + 1;
-      stack.push({
-        declarationBlock: !atRule.startsWith("@") && !current.skipPriority,
-        skipPriority: current.skipPriority || isNonSelectorAtRule,
-        segmentStart: index + 1,
-      });
-      continue;
-    }
-    if (char === "}") {
-      const current = stack.pop();
-      if (!current) continue;
-      if (current.declarationBlock && !current.skipPriority) {
-        output.push(css.slice(emittedUntil, current.segmentStart));
-        output.push(appendImportantToChatDeclaration(css.slice(current.segmentStart, index)));
-      } else {
-        output.push(css.slice(emittedUntil, index));
-      }
-      output.push("}");
-      emittedUntil = index + 1;
-      const parent = stack[stack.length - 1];
-      if (parent) parent.segmentStart = index + 1;
-    }
-  }
-
-  output.push(css.slice(emittedUntil));
-  return output.join("");
-}
-
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "image", label: "图片" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },
   { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
@@ -1199,222 +809,8 @@ interface AppChatProps {
 
 const PRESEED_MOMENTS: Moment[] = [];
 
-/**
- * Builds the only context allowed to cross from the Moments UI into a Moment
- * AI request. Callers pass already-public Moment records; no Memory,
- * Relationship, CharacterEvent, or InnerVoice data is accepted here.
- */
-const buildPublicMomentContext = (input: {
-  character: Character;
-  moments: readonly Moment[];
-  comments?: readonly MomentComment[];
-  topicHistory?: readonly MomentTopicRecord[];
-  routine?: Character["routine"];
-  now: number;
-}) => buildMomentPublicCognitiveContext({
-  character: input.character,
-  publicMomentHistory: input.moments.map((moment) => ({
-    characterId: input.character.id,
-    visibility: "public" as const,
-    authorName: moment.authorName,
-    content: moment.content,
-    timestamp: moment.timestamp,
-    ...(moment.imageDescription ? { imageDescription: moment.imageDescription } : {}),
-  })),
-  publicCommentHistory: [
-    ...input.moments.flatMap((moment) => moment.comments),
-    ...(input.comments || []),
-  ].map((comment) => ({
-    characterId: input.character.id,
-    visibility: "public" as const,
-    authorName: comment.authorName,
-    content: comment.content,
-    timestamp: comment.timestamp,
-  })),
-  ...(input.topicHistory ? { topicHistory: input.topicHistory } : {}),
-  ...(input.routine ? { routine: input.routine } : {}),
-  currentTime: { now: input.now },
-});
-
-/**
- * Moments are public-facing. Only explicitly public WorldBook entries may
- * cross this boundary; private relationship entries remain in chat/offline.
- */
-const buildMomentWorldKnowledge = (
-  entries: WorldBookEntry[],
-  character: Character,
-  relationship: CharacterRelationship,
-  scanText: string,
-) => buildWorldBookSystemBlocks(entries, character.id, scanText, {
-  scenario: "public",
-  characterId: relationship.characterId,
-}).allTriggered.map((entry) => ({ title: entry.title, content: entry.content }));
-
-/** Stores only a short diversity hint; topic history is never a fact source. */
-const compactTopicHint = (values: readonly string[]): string => values
-  .map((value) => value.replace(/\[[^\]]+\](?:\|[^\s]*)?/g, "").replace(/\s+/g, " ").trim())
-  .filter(Boolean)
-  .join(" ")
-  .slice(0, 180);
-
 const isOfflineStoryActiveFor = (relationId: string) =>
   localStorage.getItem(getOfflineModeStorageKey(relationId)) === "true";
-
-const cleanAndExtractMoment = (content: string) => {
-  let cleanContent = stripMomentVoiceMarkup(content).trim();
-  const selfComments: string[] = [];
-  let imageDescription: string | undefined;
-
-  // Older generated posts may have placed the image description directly in
-  // the body. Extract it so it is rendered as a tappable text-image card.
-  cleanContent = cleanContent.replace(/(?:^|\n)\s*[（(]\s*配图\s*[：:]\s*([^）)\n]+)\s*[）)]\s*/g, (_match, text) => {
-    if (!imageDescription && text.trim()) imageDescription = text.trim();
-    return "\n";
-  });
-
-  // Keep generated metadata and mock comments out of the post body. Older data can
-  // still contain these forms, so normalize it when rendering as well as generating.
-  cleanContent = cleanContent.replace(/^\s*(?:朋友圈|动态)\s*[：:]\s*/i, "");
-  cleanContent = cleanContent.replace(/(?:^|\n)\s*[（(]\s*评论\s*[：:]\s*([^）)]+)[）)]\s*/g, (_match, text) => {
-    if (text.trim()) selfComments.push(text.trim());
-    return "\n";
-  });
-  cleanContent = cleanContent.replace(/(?:^|\n)\s*评论\s*[：:]\s*([^\n]+)/g, (_match, text) => {
-    if (text.trim()) selfComments.push(text.trim());
-    return "\n";
-  });
-
-  // 1. Remove starting "(xx发了朋友圈)" or "(xx发了条朋友圈)" or similar
-  const startPostRegex = /^[（\(]\s*[^）\)]*?发了[^）\)]*?朋友圈\s*[）\)]\s*\n*/i;
-  cleanContent = cleanContent.replace(startPostRegex, "");
-
-  // 2. Extract and remove self-comments from the content
-  const selfCommentRegex = /[（\(](?:评论区(?:自己)?补了一?条|评论区(?:自己)?补了一?句|评论区自己补了|自己(?:在评论区)?补了一?条|自己(?:在评论区)?补了一?句|自评)\s*[：:]\s*(.*?)[）\)]/g;
-  cleanContent = cleanContent.replace(selfCommentRegex, (fullMatch, commentText) => {
-    if (commentText && commentText.trim()) {
-      selfComments.push(commentText.trim());
-    }
-    return "";
-  });
-
-  const lineCommentRegex = /(?:^|\n)\s*(?:评论|评论区补|自评|评论区自己补了一?条|自己补了一?条)\s*[：:]\s*(.*?)(?=\n|$)/g;
-  cleanContent = cleanContent.replace(lineCommentRegex, (fullMatch, commentText) => {
-    if (commentText && commentText.trim()) {
-      selfComments.push(commentText.trim());
-    }
-    return "";
-  });
-
-  cleanContent = cleanContent.trim();
-  cleanContent = cleanContent.replace(/^\n+|\n+$/g, "").trim();
-
-  return {
-    content: cleanContent,
-    selfComments,
-    imageDescription,
-  };
-};
-
-const renderMomentContent = (content: string) => {
-  const parsed = cleanAndExtractMoment(content);
-  return parsed.content;
-};
-
-const getMomentComments = (mom: Moment) => {
-  const parsed = cleanAndExtractMoment(mom.content);
-  const dynamicComments: typeof mom.comments = [];
-  
-  parsed.selfComments.forEach((text, index) => {
-    const exists = mom.comments.some(c => c.content === text && c.authorName === mom.authorName);
-    if (!exists) {
-      dynamicComments.push({
-        id: `${mom.id}-dynamic-self-${index}`,
-        authorName: mom.authorName,
-        authorAvatar: mom.authorAvatar,
-        content: text,
-        timestamp: mom.timestamp + (index + 1) * 1000,
-      });
-    }
-  });
-
-  const deletedCommentIds = new Set(mom.deletedCommentIds || []);
-  return [...mom.comments, ...dynamicComments]
-    .filter((comment) => !deletedCommentIds.has(comment.id))
-    .map((comment) => ({ ...comment, content: stripMomentVoiceMarkup(comment.content).trim() }));
-};
-
-
-const getKnownMomentsContextString = (
-  allMoments: Moment[],
-  activeChar: Character,
-  activeIdentityId: string,
-  ownerName: string
-) => buildKnownMomentsContext({
-  moments: allMoments,
-  activeCharacterId: activeChar.id,
-  activeIdentityId,
-  userName: ownerName,
-  getPublicBody: (moment) => renderMomentContent(moment.content),
-});
-
-const getOfflineStoriesContextString = (offlineStories: OfflineStory[] | undefined, activeCharId: string, charName: string) => {
-  // Original offline dialogue must never leak into the online context. A user
-  // can explicitly archive a concise summary into the normal memory vault.
-  return "";
-  /*
-  if (!offlineStories || offlineStories.length === 0) return "";
-  const charStories = offlineStories.filter(s => s.characterId === activeCharId);
-  if (charStories.length === 0) return "";
-
-  // Take the last 3 offline stories to avoid token overflow
-  const recentStories = [...charStories].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3);
-  
-  const storyLines = recentStories.map((story) => {
-    // Get last 6 messages to keep context concise but rich
-    const lastMsgs = story.messages.slice(-6);
-    const msgContent = lastMsgs.map(m => {
-      const senderName = m.isNarration ? "[旁白描述]" : (m.sender === "user" ? "我" : charName);
-      return `  - ${senderName}: ${m.content}`;
-    }).join("\n");
-    return `- 线下小说剧本《${story.title}》 (创建于: ${new Date(story.createdAt).toLocaleDateString()}):
-${msgContent || "  (暂无剧情)"}`;
-  });
-
-  return `[🚨 线下剧本走向与平行宇宙记忆 (Offline Stories Memory)]
-以下是你们在线下剧本/平行时空剧情模式（Offline Mode）中共同创造的小说故事线与经历，你对这些线下剧情细节拥有清晰的记忆。
-当线上聊天涉及相关话题时，你可以在不破坏线上微信身份的前提下，极为自然地将这些经历作为你们两人“发生过的默契、回忆、平行宇宙经历”来进行互动：
-${storyLines.join("\n\n")}`;
-  */
-};
-
-
-const getPostIntervalMs = (character: Character) => {
-  const bioAndPersonality = ((character.personality || "") + " " + (character.backstory || "")).toLowerCase();
-  const lovesSharing = /(热爱分享|喜欢分享|热爱生活|发朋友圈|爱分享|活跃|话唠|分享欲)/i.test(bioAndPersonality);
-  
-  if (lovesSharing) {
-    // 1-2 days
-    return (24 + Math.random() * 24) * 60 * 60 * 1000; 
-  } else {
-    // 1-5 days
-    return (24 + Math.random() * 96) * 60 * 60 * 1000;
-  }
-};
-
-const getRelationshipLastMomentTimestamp = (
-  moments: Moment[],
-  relationship: CharacterRelationship,
-  characterId: string,
-) => {
-  const charMoments = moments.filter((moment) =>
-    moment.relationId === relationship.id
-    || (!moment.relationId
-      && moment.characterId === characterId
-      && (moment.ownerIdentityId || "identity-1") === relationship.userIdentityId),
-  );
-  if (charMoments.length === 0) return 0;
-  return Math.max(...charMoments.map(m => m.timestamp));
-};
 
 export default function AppChat({
   characters,
@@ -3272,6 +2668,7 @@ export default function AppChat({
         scenario: "group",
         characterId: activeChatCharId || undefined,
       });
+      const groupAtDepthInjections = new Map(groupWbBlocks.at_depth.map((entry) => [entry.sourceId, entry]));
       const includedWorldBookEntryIds = new Set(groupWbBlocks.allTriggered.map((entry) => entry.id));
       let groupWbText = groupWbBlocks.formattedAll ? `\n\n【微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
       if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
@@ -3285,8 +2682,9 @@ export default function AppChat({
           scenario: "group",
           characterId: member.id,
         });
+        memberWbBlocks.at_depth.forEach((entry) => groupAtDepthInjections.set(entry.sourceId, entry));
         const memberOnlyWorldBook = memberWbBlocks.allTriggered
-          .filter((entry) => !includedWorldBookEntryIds.has(entry.id));
+          .filter((entry) => entry.position !== "at_depth" && !includedWorldBookEntryIds.has(entry.id));
         memberOnlyWorldBook.forEach((entry) => includedWorldBookEntryIds.add(entry.id));
         const memberWbText = memberOnlyWorldBook.length
           ? `\n- 该角色专属世界书背景/日程/时间线设定:\n${memberOnlyWorldBook.map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")}`
@@ -3353,16 +2751,13 @@ ${historyText ? "请根据以上的群聊历史，让合适的一位或多位群
         message: promptMessage,
         history: [],
         systemInstruction,
+        historyInjections: [...groupAtDepthInjections.values()],
       });
       const groupResult = await generateGroupReplyCandidates({
         requestAi: apiChat,
         request: {
         ...composedPrompt,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature,
-        streamCompatible: settings.streamCompatible,
+        ...buildTextAiRuntimeConfig(settings),
         },
         members: groupMembers,
         groupId: activeChatCharId,
@@ -3891,14 +3286,12 @@ ${isLastVoiceOld
       }
 
       // 2. After Main Prompt entries
-      if (wbBlocks.after_main_prompt.length > 0) {
-        assembledInstructions.push(`[World Book Background: Main Prompt Extensions]\n` + wbBlocks.after_main_prompt.join("\n\n"));
-      }
+      const afterMainWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_main_prompt");
+      if (afterMainWorldBook) assembledInstructions.push(afterMainWorldBook);
 
       // 3. Before Character Definition entries
-      if (wbBlocks.before_char_def.length > 0) {
-        assembledInstructions.push(`[World Book Background: Context Primers]\n` + wbBlocks.before_char_def.join("\n\n"));
-      }
+      const beforeCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_char_def");
+      if (beforeCharacterWorldBook) assembledInstructions.push(beforeCharacterWorldBook);
 
       // 4. Character definition and personality are independent, single-source blocks.
       assembledInstructions.push(characterDescriptionText);
@@ -3912,9 +3305,8 @@ ${isLastVoiceOld
       if (cognitivePromptBlock) assembledInstructions.push(cognitivePromptBlock);
 
       // 5. After Character Definition entries
-      if (wbBlocks.after_char_def.length > 0) {
-        assembledInstructions.push(`[World Book Background: Profile Extensions]\n` + wbBlocks.after_char_def.join("\n\n"));
-      }
+      const afterCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_char_def");
+      if (afterCharacterWorldBook) assembledInstructions.push(afterCharacterWorldBook);
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
@@ -3937,9 +3329,8 @@ Recent scene facts:
 ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
 
       // 7. Before Chat History entries
-      if (wbBlocks.before_chat_history.length > 0) {
-        assembledInstructions.push(`[World Book Background: Story Anchor]\n` + wbBlocks.before_chat_history.join("\n\n"));
-      }
+      const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
+      if (beforeHistoryWorldBook) assembledInstructions.push(beforeHistoryWorldBook);
 
       // 8. WeChat Moments Context memory
       const momentsContext = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
@@ -3948,7 +3339,7 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
       }
 
       // 8.5 Offline stories context memory
-      const offlineStoriesContext = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
+      const offlineStoriesContext = getOfflineStoriesContextForOnlineChat();
       if (offlineStoriesContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(offlineStoriesContext);
       }
@@ -4055,14 +3446,11 @@ ${stickerListStr}
         message: promptMessage,
         history,
         systemInstruction,
+        historyInjections: wbBlocks.at_depth,
       });
       const data = await requestAiReply(apiChat, {
         ...composedPrompt,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature,
-        streamCompatible: settings.streamCompatible,
+        ...buildTextAiRuntimeConfig(settings),
       });
 
       if (data && data.text) {
@@ -4876,7 +4264,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const relationshipContext = characterProjection.relationship?.content || "";
 
       const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
-      const offlineStoriesContextRegen = getOfflineStoriesContextString(offlineStories, activeCharacter.id, activeCharacter.name);
+      const offlineStoriesContextRegen = getOfflineStoriesContextForOnlineChat();
 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
@@ -4921,14 +4309,12 @@ ${timeLogString}
       }
 
       // 2. After Main Prompt entries
-      if (wbBlocks.after_main_prompt.length > 0) {
-        assembledInstructions.push(`[World Book Background: Main Prompt Extensions]\n` + wbBlocks.after_main_prompt.join("\n\n"));
-      }
+      const afterMainWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_main_prompt");
+      if (afterMainWorldBook) assembledInstructions.push(afterMainWorldBook);
 
       // 3. Before Character Definition entries
-      if (wbBlocks.before_char_def.length > 0) {
-        assembledInstructions.push(`[World Book Background: Context Primers]\n` + wbBlocks.before_char_def.join("\n\n"));
-      }
+      const beforeCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_char_def");
+      if (beforeCharacterWorldBook) assembledInstructions.push(beforeCharacterWorldBook);
 
       // 4. Character definition and personality are independent, single-source blocks.
       assembledInstructions.push(characterDescriptionText);
@@ -4947,17 +4333,15 @@ ${timeLogString}
       }
 
       // 5. After Character Definition entries
-      if (wbBlocks.after_char_def.length > 0) {
-        assembledInstructions.push(`[World Book Background: Profile Extensions]\n` + wbBlocks.after_char_def.join("\n\n"));
-      }
+      const afterCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_char_def");
+      if (afterCharacterWorldBook) assembledInstructions.push(afterCharacterWorldBook);
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
 
       // 7. Before Chat History entries
-      if (wbBlocks.before_chat_history.length > 0) {
-        assembledInstructions.push(`[World Book Background: Story Anchor]\n` + wbBlocks.before_chat_history.join("\n\n"));
-      }
+      const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
+      if (beforeHistoryWorldBook) assembledInstructions.push(beforeHistoryWorldBook);
 
       // 8. WeChat Moments Context memory
       if (momentsContextRegen) {
@@ -5007,14 +4391,11 @@ ${stickerListStr}
         message: lastUserMsg.content,
         history,
         systemInstruction,
+        historyInjections: wbBlocks.at_depth,
       });
       const data = await requestAiReply(apiChat, {
         ...composedPrompt,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature,
-        streamCompatible: settings.streamCompatible,
+        ...buildTextAiRuntimeConfig(settings),
       });
 
       if (data && data.text) {
@@ -5425,11 +4806,12 @@ ${instructionsPrompt}
           text: message.content,
         })),
         systemInstruction,
+        historyInjections: wbBlocks.at_depth,
       });
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
       const proactiveResult = await generateProactiveReplyCandidates({
         requestAi: apiChat,
-        request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
+        request: { ...composedPrompt, ...buildTextAiRuntimeConfig(settings) },
         characterId: friend.id,
         disableBracketActions: friend.disableBracketActions || false,
         keepPeriods,

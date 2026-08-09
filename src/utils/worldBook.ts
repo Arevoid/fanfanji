@@ -23,8 +23,16 @@ export interface WorldBookSystemBlocks {
   before_char_def: string[];
   after_char_def: string[];
   before_chat_history: string[];
+  at_depth: WorldBookDepthInjection[];
   allTriggered: WorldBookEntry[];
   formattedAll: string;
+}
+
+export interface WorldBookDepthInjection {
+  id: string;
+  sourceId: string;
+  depth: number;
+  content: string;
 }
 
 export function buildWorldBookSystemBlocks(
@@ -90,9 +98,19 @@ export function buildWorldBookSystemBlocks(
     after_char_def: [] as string[],
     before_chat_history: [] as string[]
   };
+  const atDepth: WorldBookDepthInjection[] = [];
 
   sortedTriggered.forEach(({ entry, text }) => {
     const pos = entry.position || "after_char_def";
+    if (pos === "at_depth") {
+      atDepth.push({
+        id: `world-book-at-depth:${entry.id}`,
+        sourceId: `world-book:${entry.id}`,
+        depth: Math.max(1, Math.min(15, entry.depth || 5)),
+        content: text,
+      });
+      return;
+    }
     if (pos in entriesByPos) {
       entriesByPos[pos as keyof typeof entriesByPos].push(text);
     } else {
@@ -100,13 +118,19 @@ export function buildWorldBookSystemBlocks(
     }
   });
 
-  const formattedAll = sortedTriggered.map(t => t.text).join("\n\n");
+  // at_depth entries are injected into the chronological history by
+  // PromptComposer. Excluding them here prevents a second system-level copy.
+  const formattedAll = sortedTriggered
+    .filter(({ entry }) => entry.position !== "at_depth")
+    .map(({ text }) => text)
+    .join("\n\n");
 
   return {
     after_main_prompt: entriesByPos.after_main_prompt,
     before_char_def: entriesByPos.before_char_def,
     after_char_def: entriesByPos.after_char_def,
     before_chat_history: entriesByPos.before_chat_history,
+    at_depth: atDepth,
     allTriggered: sortedTriggered.map(t => t.entry),
     formattedAll
   };

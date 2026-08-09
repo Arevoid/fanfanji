@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { WorldBookEntry, Character } from "../types";
+import { WorldBookEntry, Character, type WorldBookPosition } from "../types";
 import { Plus, Trash2, Edit, Search, ChevronLeft, BookOpen, Layers, Globe, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries, safeParseDocx } from "../utils/pngParser";
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
@@ -48,7 +48,7 @@ export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBo
   }
 
   // Position Mapping (Requirement 4: author notes to approximate after character definition)
-  let position: "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history" = "after_char_def";
+  let position: WorldBookPosition = "after_char_def";
   const rawPos = e.position;
   if (typeof rawPos === "string") {
     const lp = rawPos.toLowerCase();
@@ -60,6 +60,8 @@ export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBo
       position = "after_char_def";
     } else if (lp.includes("an") || lp.includes("author") || lp.includes("note")) {
       position = "after_char_def";
+    } else if (lp === "at_depth" || lp.includes("at-depth") || lp.includes("depth")) {
+      position = "at_depth";
     } else if (lp.includes("history") || lp.includes("chat")) {
       position = "before_chat_history";
     }
@@ -67,7 +69,7 @@ export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBo
     if (rawPos === 0) position = "before_char_def";
     else if (rawPos === 1) position = "after_char_def";
     else if (rawPos === 2 || rawPos === 3) position = "after_char_def";
-    else if (rawPos === 4) position = "before_chat_history";
+    else if (rawPos === 4) position = "at_depth";
     else position = "after_main_prompt";
   } else if (e.position) {
     position = e.position;
@@ -309,7 +311,7 @@ export default function AppWorldBook({
   const [triggerType, setTriggerType] = useState<"keys" | "constant" | "vector">("keys");
   const [keywords, setKeywords] = useState("");
   const [isActive, setIsActive] = useState(true);
-  const [position, setPosition] = useState<"after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history">("after_char_def");
+  const [position, setPosition] = useState<WorldBookPosition>("after_char_def");
   const [depth, setDepth] = useState<number>(5);
   const [formError, setFormError] = useState("");
   const [isCreatingNewCategory, setIsCreatingNewCategory] = useState(false);
@@ -833,13 +835,14 @@ export default function AppWorldBook({
                 <div className="relative">
                   <select
                     value={position}
-                    onChange={(e) => setPosition(e.target.value as any)}
+                    onChange={(e) => setPosition(e.target.value as WorldBookPosition)}
                     className="w-full pl-3 pr-8 py-2 rounded-[8px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-extrabold text-stone-700 appearance-none cursor-pointer"
                   >
                     <option value="after_main_prompt">主提示词后 (System Prompt 之后)</option>
                     <option value="before_char_def">角色定义前 (人设 Profile 之前)</option>
                     <option value="after_char_def">角色定义后 (人设 Profile 之后)</option>
                     <option value="before_chat_history">聊天历史前 (聊天记录之上)</option>
+                    <option value="at_depth">指定深度 (插入聊天历史第 N 层)</option>
                   </select>
                   <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-stone-400">
                     <ChevronDown className="w-3.5 h-3.5" />
@@ -850,7 +853,7 @@ export default function AppWorldBook({
               {/* Depth Slider */}
               <div className="py-3.5 space-y-2 text-left">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-extrabold text-stone-600">拼接深度 (装载优先级)</label>
+                  <label className="text-xs font-extrabold text-stone-600">{position === "at_depth" ? "聊天历史深度" : "拼接深度（装载顺序）"}</label>
                   <span className="text-xs font-extrabold text-stone-700 bg-stone-100 px-2 py-0.5 rounded-md border border-stone-200">
                     深度 {depth}
                   </span>
