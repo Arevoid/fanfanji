@@ -6,7 +6,7 @@ const composer = readFileSync(new URL("../src/features/chat/components/ChatCompo
 
 assert.match(chat, /VISUAL_VIEWPORT_CHANGE_EVENT/);
 assert.match(chat, /scrollHeight - container\.scrollTop - container\.clientHeight > 250/);
-assert.match(chat, /min-h-0 flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list/);
+assert.match(chat, /min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-4 cv-messages-list chat-message-list/);
 assert.doesNotMatch(chat, /window\.visualViewport\.addEventListener\("resize", handleViewportResize\)/);
 assert.match(composer, /return <div className=\{className\}>/);
 

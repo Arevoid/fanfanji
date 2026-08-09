@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-const dm = readFileSync("src/domain/forum/forumDmData.ts", "utf8");
+const forum = readFileSync("src/components/AppForum.tsx", "utf8");
 const backup = readFileSync("src/components/AppSettings.tsx", "utf8");
-assert.match(dm, /isAnonymous/);
-assert.match(dm, /return undefined/);
+assert.doesNotMatch(forum, /ForumDm|发送私信|论坛私信/);
 assert.match(backup, /privateAuthorRelationId/);
 console.log("forum privacy audit tests passed");

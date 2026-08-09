@@ -1,4 +1,4 @@
-import { StickerGroup, Sticker } from "../types";
+import { StickerGroup } from "../types";
 
 class StickerDB {
   private dbName = "StickerAppDB";

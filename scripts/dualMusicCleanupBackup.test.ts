@@ -32,5 +32,5 @@ assert.deepEqual(Object.keys(backup.storage).sort(), [
 ]);
 const settingsSource = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 assert.match(settingsSource, /"phone_dual_music_widget_configs"/);
-assert.match(settingsSource, /音频和本地封面二进制不会写入 JSON/);
+assert.match(settingsSource, /音频和本地封面不会写入\s*JSON/);
 console.log("dual music cleanup and backup tests passed");

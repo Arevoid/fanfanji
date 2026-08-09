@@ -1,4 +1,4 @@
-import type { Character, MemoryItem, MemoryVaultSettings, Message } from "../../types";
+import type { Character, MemoryItem, Message } from "../../types";
 import type { KnowledgeClaim } from "../characterKnowledge/characterKnowledgeTypes";
 import type { ExtractedKnowledgeCandidatePayload } from "../../features/characterKnowledge/services/knowledgeExtractionProtocol";
 

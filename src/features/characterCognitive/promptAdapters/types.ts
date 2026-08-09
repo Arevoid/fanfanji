@@ -161,16 +161,6 @@ export interface DiaryPromptContext {
   time: CognitivePromptTimeContext;
 }
 
-/** A narrow relation-safe projection for a Forum direct-message reply. */
-export interface ForumDirectMessagePromptContext {
-  persona: CognitivePromptPersona;
-  relationship: CognitivePromptRelationship;
-  safeEvents: readonly CognitivePromptEvent[];
-  behaviorConstraints: readonly CognitivePromptBehaviorConstraint[];
-  boundaries: CognitivePromptBoundary;
-  time: CognitivePromptTimeContext;
-}
-
 export type CognitivePromptAdapter<TOutput> = (
   context: CharacterCognitiveContext,
   options?: PromptAdapterOptions,

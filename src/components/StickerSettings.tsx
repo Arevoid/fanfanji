@@ -2,13 +2,10 @@ import React, { useState, useRef, useEffect } from "react";
 import { Sticker, StickerGroup, UserSettings } from "../types";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import {
-  Plus,
   Trash2,
-  Wand2,
   Link,
   FileImage,
   X,
-  Check,
   Loader2,
   Sparkles,
   Smile,
@@ -110,11 +107,6 @@ export default function StickerSettings({
   };
 
   // Start editing group name
-  const startEditingGroupName = () => {
-    if (!activeGroup) return;
-    setEditingGroupNameVal(activeGroup.name);
-    setIsEditingGroupName(true);
-  };
 
   // Save group name
   const saveGroupName = async () => {

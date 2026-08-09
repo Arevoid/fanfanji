@@ -194,6 +194,7 @@ export const createForumStory = async (input: CreateForumStoryInput): Promise<Fo
     updatedAt: now,
     viewCount: 0,
     likeCount: 0,
+    likedByIdentityIds: [],
   };
   const eventInput: StoryEventInput = {
     id: `${storyId}:event:post-created`,

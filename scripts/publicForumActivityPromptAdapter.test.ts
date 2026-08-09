@@ -105,7 +105,7 @@ const pending = await planForumActivity({
   worldBookEntries: [],
   settings,
   now: 12,
-  random: () => 0.9,
+  random: () => 0,
   publicEventCandidates: publicEvents,
   publicWorldSettings,
   aiCall: async (request) => {

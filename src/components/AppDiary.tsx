@@ -7,7 +7,6 @@ import {
   Plus,
   Search,
   Trash2,
-  X,
 } from "lucide-react";
 import type {
   Character,
@@ -15,6 +14,7 @@ import type {
   Message,
   UserIdentity,
   UserSettings,
+  WorldBookEntry,
 } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
@@ -42,6 +42,7 @@ interface AppDiaryProps {
   relationships: CharacterRelationship[];
   messages: Message[];
   settings: UserSettings;
+  worldBookEntries: WorldBookEntry[];
   onClose: () => void;
   onSendMessage: (message: Message) => void;
   onOpenChat: (
@@ -68,6 +69,7 @@ export default function AppDiary({
   relationships,
   messages,
   settings,
+  worldBookEntries,
   onClose,
   onSendMessage,
   onOpenChat,
@@ -260,6 +262,7 @@ export default function AppDiary({
       character,
       ownerIdentityId: activeIdentity.id,
       messages,
+      worldBookEntries,
       settings,
       trigger: "manual",
       occurredAt: now,

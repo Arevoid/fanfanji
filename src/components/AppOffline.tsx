@@ -1,18 +1,17 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   ArrowLeft, Plus, Trash2, Pencil, Send, Sparkles, BookOpen,
-  Link2, Calendar, MessageSquare, ChevronRight, HelpCircle, 
+  Link2, Calendar, MessageSquare, ChevronRight,
   Settings, RefreshCw, Layers, MoreHorizontal
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, UserSettings, WorldBookEntry } from "../types";
 import { apiChat, apiExtractMemories } from "../utils/apiHelper";
-import { appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
-import { splitTextToOfflineSegments } from "../utils/pngParser";
+import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
 import { createPendingOfflineHandoff, filterOfflineExtractedFacts, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
-import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
+import { buildWorldBookSystemBlocks, getLatestWorldBookEntries } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 import "./offline/offlineStory.css";
 import { OfflineGuidancePanel } from "./offline/OfflineGuidancePanel";
@@ -27,7 +26,7 @@ import { countOfflineStoriesForRelation } from "../domain/relationship/offlineSt
 import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
 import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/offlineStoryEventCaptureService";
 import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../domain/prompt/offlineIdentityBinding";
-import { ConfirmDialog, IconButton, PopoverMenu } from "./ui";
+import { Button, ConfirmDialog, IconButton, PopoverMenu } from "./ui";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -262,8 +261,6 @@ export default function AppOffline({
   const [settingsStylePromptContent, setSettingsStylePromptContent] = useState("");
   const [settingsCustomCss, setSettingsCustomCss] = useState("");
 
-  const [newPresetName, setNewPresetName] = useState("");
-  const [newPresetContent, setNewPresetContent] = useState("");
   const hasSelectedCustomPreset = customPresets.some((preset) => preset.id === settingsStylePresetId);
 
   useEffect(() => {
@@ -299,6 +296,19 @@ export default function AppOffline({
     saveActiveStorySnapshot(updatedStory);
     setIsSettingsOpen(false);
     showToast("剧本配置已保存！");
+  };
+
+  const handleRefreshWorldBookSnapshot = () => {
+    if (!activeStory) return;
+    const participantIds = new Set(resolveOfflineStoryCharacterIds(activeStory, characters));
+    const worldBookSnapshot = getLatestWorldBookEntries(worldBookEntries || [])
+      .filter((entry) => !entry.characterId || entry.characterId === "global" || participantIds.has(entry.characterId));
+    saveActiveStorySnapshot({
+      ...activeStory,
+      worldBookSnapshot,
+      updatedAt: Date.now(),
+    });
+    showToast(`世界书快照已刷新（${worldBookSnapshot.length} 条）`);
   };
 
   const handleCreateCustomPreset = () => {
@@ -342,14 +352,14 @@ export default function AppOffline({
       || resolveOfflineStoryCharacterIds(story, characters).includes(selectedCharId))
   );
 
+  // Keep an empty-state-safe actor projection for story views. This is also a
+  // compatibility guard for stories created before characterIds was added.
   const storyChars: Character[] = activeStory
-    ? (activeStory.characterIds && activeStory.characterIds.length > 0 
+    ? (activeStory.characterIds && activeStory.characterIds.length > 0
         ? selectableCharacters.filter(c => resolveOfflineStoryCharacterIds(activeStory, characters).includes(c.id))
         : selectedChar ? [selectedChar] : [])
     : selectedChar ? [selectedChar] : [];
-
-  const storyCharNamesLabel = storyChars.map(c => c.remark || c.name).join("、");
-  const firstActorLabel = storyChars.length > 1 ? "角色们" : selectedChar ? (selectedChar.remark || selectedChar.name) : "角色";
+  void storyChars;
 
   // Online messages are an invisible handoff context, never part of the offline
   // manuscript. The id check also hides snapshots created before this flag existed.
@@ -414,7 +424,7 @@ export default function AppOffline({
       localStorage.setItem(getOfflineStoryStorageKey(story.relationId), story.id);
     }
     if (story.mode === "director" || story.mode === "if") {
-      showToast("当前剧情不会自动同步仅记忆，请手动同步");
+      showToast("当前模式不会在结束时自动同步记忆；如需让线上角色记住，请在剧本设置中手动同步。");
     }
   };
 
@@ -560,6 +570,20 @@ export default function AppOffline({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: newMode,
+      worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
+        .filter((entry) => !entry.characterId || entry.characterId === "global" || selectedCharIds.includes(entry.characterId)),
+      knowledgeSnapshot: Array.from(new Set([
+        ...loadKnowledgeClaims().value
+          .filter((claim) => claim.relationId === relationship.id
+            && claim.characterId === relationship.characterId
+            && claim.userIdentityId === relationship.userIdentityId
+            && claim.status === "active"
+            && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
+          .map((claim) => claim.statement),
+        ...memories
+          .filter((memory) => memory.relationId === relationship.id && memory.isManual === true)
+          .map((memory) => memory.content),
+      ])),
       ifPrompt: newMode === "if" ? newIfPrompt : undefined,
       sourceChatId: newStartFromChat ? selectedCharId : undefined,
       sourceChatMsgCount: newStartFromChat ? importedContext?.messages.length : undefined,
@@ -651,7 +675,7 @@ export default function AppOffline({
       sourceMessages,
     };
     if (!canSyncOfflineStoryToMemory(offlineStoryPolicyInput)) {
-      showToast("当前剧情不会自动同步仅记忆，请手动同步");
+      showToast("当前模式不会自动同步记忆；请在剧本设置中手动确认同步。");
       return story;
     }
 
@@ -823,7 +847,31 @@ export default function AppOffline({
     const text = textToSend !== undefined ? textToSend : inputText.trim();
     if (!text && !forceAIOnly) return;
 
-    let updatedStory = { ...storyAtSend };
+    const storyParticipantIds = new Set(resolveOfflineStoryCharacterIds(storyAtSend, characters));
+    let updatedStory = storyAtSend.worldBookSnapshot
+      ? { ...storyAtSend }
+      : {
+        ...storyAtSend,
+        // One-time compatibility migration for stories created before
+        // structured snapshots existed. The captured data is then frozen.
+        worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
+          .filter((entry) => !entry.characterId || entry.characterId === "global" || storyParticipantIds.has(entry.characterId)),
+      };
+    if (!updatedStory.knowledgeSnapshot && updatedStory.relationId) {
+      const relation = relationships.find((item) => item.id === updatedStory.relationId);
+      updatedStory.knowledgeSnapshot = relation ? Array.from(new Set([
+        ...loadKnowledgeClaims().value
+          .filter((claim) => claim.relationId === relation.id
+            && claim.characterId === relation.characterId
+            && claim.userIdentityId === relation.userIdentityId
+            && claim.status === "active"
+            && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
+          .map((claim) => claim.statement),
+        ...memories
+          .filter((memory) => memory.relationId === relation.id && memory.isManual === true)
+          .map((memory) => memory.content),
+      ])) : [];
+    }
     
     // 1. If we have user text to add
     if (text && !forceAIOnly) {
@@ -839,8 +887,8 @@ export default function AppOffline({
         isNarration: false
       };
       updatedStory = {
-        ...storyAtSend,
-        messages: [...storyAtSend.messages, userMsg],
+        ...updatedStory,
+        messages: [...updatedStory.messages, userMsg],
         updatedAt: Date.now()
       };
       saveActiveStorySnapshot(updatedStory);
@@ -870,13 +918,6 @@ export default function AppOffline({
         }
       });
 
-      // Assemble World Book context-aware trigger scanning
-      const scanContextParts = [
-        text || "",
-        ...(updatedStory.messages || []).slice(-3).map(m => m.content)
-      ];
-      const scanText = scanContextParts.filter(Boolean).join("\n");
-
       // We can collect worldbook blocks for all story characters
       const storyCharsList = updatedStory.characterIds && updatedStory.characterIds.length > 0 
         ? selectableCharacters.filter(c => resolveOfflineStoryCharacterIds(updatedStory, characters).includes(c.id))
@@ -884,8 +925,46 @@ export default function AppOffline({
       const sourceChat = characters.find(c => c.id === (updatedStory.sourceChatId ? resolveCharacterId(updatedStory.sourceChatId) : undefined));
       const isImportedGroupStory = Boolean(sourceChat?.isGroupChat);
 
-      const wbPrompts = updatedStory.importedContext?.worldBook.length
-        ? `【导入时冻结的世界书设定】：\n${updatedStory.importedContext.worldBook.map(item => `- ${item}`).join("\n")}`
+      const worldBookScanText = [
+        text || "",
+        ...updatedStory.messages.slice(-10).map((message) => message.content),
+      ].filter(Boolean).join("\n");
+      const scopedRelationship = updatedStory.relationId
+        ? relationships.find((relation) => relation.id === updatedStory.relationId)
+        : undefined;
+      const triggeredWorldBook = new Map<string, WorldBookEntry>();
+      const snapshotEntries = updatedStory.worldBookSnapshot || [];
+      storyCharsList.forEach((character) => {
+        buildWorldBookSystemBlocks(snapshotEntries, character.id, worldBookScanText, {
+          scenario: "offline",
+          characterId: character.id,
+          userIdentityId: scopedRelationship?.userIdentityId,
+          relationId: scopedRelationship?.id,
+        }).allTriggered.forEach((entry) => triggeredWorldBook.set(entry.id, entry));
+      });
+      // Legacy stories stored flattened strings without trigger metadata. Use
+      // only entries whose title/content overlaps this turn instead of loading
+      // the entire frozen book on every request.
+      if (triggeredWorldBook.size === 0 && snapshotEntries.length === 0) {
+        const normalizedScan = worldBookScanText.toLocaleLowerCase();
+        (updatedStory.importedContext?.worldBook || []).forEach((item, index) => {
+          const title = item.split(":", 1)[0]?.trim() || "";
+          if (title && normalizedScan.includes(title.toLocaleLowerCase())) {
+            triggeredWorldBook.set(`legacy-${index}`, {
+              id: `legacy-${updatedStory.id}-${index}`,
+              title,
+              content: item.slice(title.length + 1).trim(),
+              category: "legacy-snapshot",
+              characterId: "global",
+              triggerType: "keys",
+              isActive: true,
+              timestamp: updatedStory.importedContext?.importedAt || updatedStory.createdAt,
+            });
+          }
+        });
+      }
+      const wbPrompts = triggeredWorldBook.size > 0
+        ? Array.from(triggeredWorldBook.values()).map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")
         : "";
 
       // Base Persona
@@ -923,17 +1002,16 @@ export default function AppOffline({
       }
 
       if (wbPrompts) {
-        sysPrompt += `\n【相关世界书背景设定】：
-${wbPrompts}
-
-🚨 [极其重要：世界书设定绝对最高优先]
-在联合剧本创作中，你必须绝对100%强制遵循上述世界书设定的真实客观逻辑。如果词条要求了任何口癖、前置/后置特殊标志，参与的每一位角色在其说话发言时也必须绝对、无条件带上。
-\n`;
+        sysPrompt += `\n【本轮命中的世界书背景设定】：
+${wbPrompts}\n`;
       }
 
-      sysPrompt += `\n【人设遵循最高优先规则】
-1. 🚨 你扮演这几位角色，在他们参与的每句话、神态动作、心理描写中，必须严密、100%地遵循他们各自的性格特征、说话语气和人设。
-2. 严禁混淆多位角色的口癖、语气或人物关系。
+      sysPrompt += `\n【线下内容遵循顺序】
+1. 主体/客体身份与已确认的人物关系是不可改写的事实边界。
+2. 每个角色的完整人设决定其称呼、语气、主动性、情感与行为方式；不得混淆多位角色的口癖、语气或人物关系。
+3. 用户最新输入和最近剧情决定本轮实际发生什么，并保持当前场景连续。
+4. 本轮命中的世界书补充背景、稳定口癖和世界规则，但不得覆盖前述身份、关系或当前场景。
+5. 写作风格预设只控制文风和输出形式，不改变角色事实与关系。
 
 【人称写作视角限制】
 - 对方人物视角（${storyCharsList.map(c => c.name).join("/")}）：【${(activeStory.partnerPerspective || "third") === "first" ? "第一人称" : (activeStory.partnerPerspective || "third") === "second" ? "第二人称" : "第三人称"}】。`;
@@ -984,12 +1062,13 @@ ${wbPrompts}
       // Only an explicitly imported online story may use its frozen snapshot.
       // Self-directed and IF stories stay fully isolated from the online vault.
       const allMemoriesParts: string[] = [];
-      if (updatedStory.importedContext) storyCharsList.forEach(char => {
-        const snapshotMemories = updatedStory.importedContext!.memories.map((content, index) => ({
+      const knowledgeSnapshot = updatedStory.knowledgeSnapshot || updatedStory.importedContext?.memories || [];
+      if (knowledgeSnapshot.length > 0) storyCharsList.forEach(char => {
+        const snapshotMemories = knowledgeSnapshot.map((content, index) => ({
           id: `snapshot-memory-${index}`,
           characterId: char.id,
           content,
-          timestamp: updatedStory.importedContext!.importedAt,
+          timestamp: updatedStory.importedContext?.importedAt || updatedStory.createdAt,
           importance: 5
         }));
         const relevantMems = MemoryService.retrieveRelevantMemories({
@@ -1009,24 +1088,16 @@ ${wbPrompts}
       }
 
       // Never fetch live online chat while writing offline. Use the import snapshot only.
-      const chatContextParts: string[] = [];
-      if (updatedStory.importedContext) storyCharsList.forEach(char => {
-        const onlineMsgs = updatedStory.importedContext!.messages
-          // Group messages belong to the group container, while senderId identifies
-          // the actual member. Include the user's group messages for every member.
-          .filter(m => m.characterId === char.id || m.senderId === char.id || (
-            m.sender === "user" && isImportedGroupStory && m.characterId === updatedStory.sourceChatId
-          ))
-          .slice(-15);
-        if (onlineMsgs.length > 0) {
-          const lines = onlineMsgs.map(m => `  - ${m.sender === "user" ? "我" : char.remark || char.name}: ${m.content}`).join("\n");
-          chatContextParts.push(`* 【与 ${char.remark || char.name}】的最新线上聊天：\n${lines}`);
-        }
-      });
-      if (chatContextParts.length > 0) {
+      const importedOnlineMessages = updatedStory.importedContext?.messages.slice(-15) || [];
+      if (importedOnlineMessages.length > 0) {
+        const lines = importedOnlineMessages.map((message) => {
+          const senderCharacter = storyCharsList.find((character) =>
+            character.id === message.senderId || character.id === message.characterId);
+          return `- ${message.sender === "user" ? settings.name : (senderCharacter?.remark || senderCharacter?.name || selectedChar?.name || "Character")}: ${message.content}`;
+        }).join("\n");
         sysPrompt += `\n\n【互通的线上最新对话记忆（Online Chat Context）】：
 以下是各位参与角色最近在微信（线上聊天）中的最新真实对话。这些是你们当下关系的最新现状与真实记忆。请确保线下小说剧本的走向与其认知保持连贯和融合，避免发生剧情上的冲突：
-${chatContextParts.join("\n")}`;
+${lines}`;
       }
 
       const lastUserMsgText = text || "请继续编织并续写这幕场景。";
@@ -1038,20 +1109,19 @@ ${chatContextParts.join("\n")}`;
         const handoffClock = handoffTime.toLocaleString("zh-CN", {
           year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
         });
-        sysPrompt += `\n\n【ONLINE-TO-OFFLINE CONTINUITY — ABSOLUTE RULE】
+        sysPrompt += `\n\n【ONLINE-TO-OFFLINE CONTINUITY】
 This scene begins immediately after the imported online conversation, not as a new unrelated scene.
 The last imported message is the current canonical handoff. Continue its topic, location, activity, promises, and emotional momentum. Do not replace it with a new activity (for example, do not switch from eating to bathing) unless the user explicitly asks for a time jump or transition.
-Imported handoff transcript:\n${importedTail.map(m => `- ${m.sender === "user" ? settings.name : (selectedChar?.name || "Character")}: ${m.content}`).join("\n")}
-Canonical handoff time: ${handoffClock}. The first continuation may advance only naturally by a few minutes unless the user explicitly changes the time or scene.`;
+Story-time starting point: ${handoffClock}. Advance from this point only through events and elapsed time established inside the story. The app's current real-world clock does not replace this story timeline.`;
       }
 
-      if (updatedStory.enableTimeAwareness) {
+      if (updatedStory.enableTimeAwareness && !updatedStory.importedContext) {
         const now = new Date();
         const currentClock = now.toLocaleString("zh-CN", {
           year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
         });
         sysPrompt += `\n\n【TIME AWARENESS — REQUIRED】
-Current real-world time is ${currentClock}. Use this as the authoritative present time. Do not state a conflicting clock time, and do not casually jump hours. If this is an imported continuation, its handoff time is authoritative for the scene and the present can only move forward naturally from it.`;
+This non-imported story starts at the current real-world time: ${currentClock}. Treat it as the story's initial clock, then advance time only through the events and elapsed time established inside this story.`;
       }
 
       const response = await apiChat({
@@ -1363,15 +1433,35 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                         ? "续写剧情结束时会自动总结并同步；也可以在此立即同步当前进展。"
                         : "导演和 IF 模式结束时不会自动同步。只有点击下方按钮手动确认后，剧情才会进入角色长期记忆并同步到线上。"}
                     </p>
-                    <button
-                      type="button"
+                    <Button
+                      variant="secondary"
+                      size="lg"
+                      fullWidth
                       onClick={() => void handleSyncMemoryToBrain(activeStory, { userConfirmed: true, syncIntent: "manual_settings" })}
-                      disabled={memorySyncingStoryId === activeStory.id}
-                      aria-busy={memorySyncingStoryId === activeStory.id}
-                      className="w-full rounded-xl border border-[#F0F0F0] bg-[#111111] py-3 text-xs font-semibold text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:bg-[#E5E5EA] disabled:text-[#8E8E93]"
+                      loading={memorySyncingStoryId === activeStory.id}
+                      loadingLabel="同步中，请稍候…"
+                      className="text-xs"
                     >
-                      <span>{memorySyncingStoryId === activeStory.id ? "同步中，请稍候…" : "同步当前进展记忆至角色大脑"}</span>
-                    </button>
+                      同步当前进展记忆至角色大脑
+                    </Button>
+                    </div>
+                  </section>
+
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">世界书快照</h4>
+                    <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-2 text-left">
+                      <span className="text-[15px] font-medium text-[#111111]">当前快照 {activeStory.worldBookSnapshot?.length || 0} 条</span>
+                      <p className="text-xs leading-5 text-[#8E8E93]">
+                        剧情每轮只会从快照中按常驻词条或最近约 10 条剧情关键词激活。刷新后，后续剧情才会使用当前项目中的最新世界书。
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleRefreshWorldBookSnapshot}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#F0F0F0] bg-[#F7F7F9] py-3 text-xs font-semibold text-[#111111] transition-colors hover:bg-[#EFEFF4]"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                        刷新世界书快照
+                      </button>
                     </div>
                   </section>
 

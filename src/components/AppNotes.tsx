@@ -10,9 +10,7 @@ import {
   Clock, 
   X, 
   Save, 
-  Edit3,
   CheckSquare,
-  AlertCircle
 } from "lucide-react";
 
 interface Note {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { WorldBookEntry, Character } from "../types";
-import { Plus, Trash2, Edit, Search, ChevronLeft, BookOpen, Layers, Globe, User, X, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Edit, Search, ChevronLeft, BookOpen, Layers, Globe, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries, safeParseDocx } from "../utils/pngParser";
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
 import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
@@ -797,7 +797,7 @@ export default function AppWorldBook({
                     <div className="space-y-2">
                       <p>
                         <span className="text-neutral-900 font-bold">✨ 常驻设定：</span>
-                        只要角色配对正确，此设定都会100%强制在每次对话时装载，不受聊天内容影响。具有绝对、最高优先级别的逻辑引导。
+                        只要作用域匹配，此设定会在每次相关请求中装载，不依赖关键词；它用于补充角色与世界背景，但不会覆盖角色核心人设、已确认关系或用户当前消息。
                       </p>
                     </div>
                   )}

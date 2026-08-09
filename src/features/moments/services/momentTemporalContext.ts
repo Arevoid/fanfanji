@@ -74,7 +74,7 @@ export function formatMomentTemporalContext(context: MomentTemporalContext, char
     : "Do not claim that today is the character's birthday unless a recorded birthday matches the occurrence date.";
   const occurrenceTime = `${pad(context.generatedAt.getHours())}:${pad(context.generatedAt.getMinutes())}`;
 
-  return `[MOMENT OCCURRENCE-TIME CONTEXT — HIGHEST PRIORITY]
+  return `[MOMENT OCCURRENCE-TIME CONTEXT]
 This Moment occurred and was published at: ${context.currentDate} ${occurrenceTime} (local time).
 Current season: ${context.currentSeason}. Current solar term: ${context.currentSolarTerm}.
 Write the post as if this occurrence time is "today" and "now". Do not use the real app-open time. Use this date and clock time for day-period references, season, solar terms, holidays, and birthdays.

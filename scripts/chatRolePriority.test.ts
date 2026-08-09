@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { assemblePromptBlocks } from "../src/domain/prompt/PromptBlock";
 import { CHARACTER_PERSONA_PROTECTION, projectCharacterPrompt } from "../src/domain/prompt/characterPromptProjector";
+import { assembleChatInstructions } from "../src/features/chat/prompts/chatInstructionAssembler";
+import { WORLD_BOOK_CONTEXT_PRIORITY } from "../src/features/chat/prompts/chatPromptPolicy";
 import { buildWorldBookSystemBlocks } from "../src/utils/worldBook";
 import type { WorldBookEntry } from "../src/types";
 
@@ -37,6 +39,15 @@ const exactContentDuplicate = assemblePromptBlocks([
   { id: "same-content", kind: "context", content: projection.description.content },
 ]);
 assert.deepEqual(exactContentDuplicate.diagnostics.duplicateContentBlockIds, ["same-content"]);
+
+const chatAssembly = assembleChatInstructions([
+  projection.description.content,
+  projection.personality.content,
+  projection.personality.content,
+  WORLD_BOOK_CONTEXT_PRIORITY,
+], [projection.description, projection.personality]);
+assert.equal(chatAssembly.systemInstruction.split(personality).length - 1, 1, "chat assembly must inject personality once");
+assert.match(chatAssembly.systemInstruction, /WORLD BOOK CONTEXT RULES/);
 
 const longTailProfile = `${"前置资料。".repeat(500)}\n[与 user 的相处方式] 线上会黏着 user 直球说话，绝不使用陌生人的万能问候。`;
 const fullProjection = projectCharacterPrompt({
@@ -84,7 +95,7 @@ assert.doesNotMatch(chatSource, /Keep replies concise, warm/, "proactive chat mu
 assert.doesNotMatch(chatSource, /温暖、有爱的微信回复|假设 you 听到了我用温暖/, "media events must not force warmth or invent voice tone");
 assert.match(chatSource, /MEDIA_EVENT_PERSONA_RESPONSE_RULE/);
 assert.match(chatSource, /projectCharacterPrompt\(friend, relationship\.relationship\)/, "proactive chat must use the same character projection");
-assert.match(chatSource, /removeLegacyWorldBookPriorityDirective/);
+assert.doesNotMatch(chatSource, /Absolute Supreme Priority|removeLegacyWorldBookPriorityDirective/);
 assert.match(chatSource, /WORLD_BOOK_CONTEXT_PRIORITY/);
 
 console.log("PASS chat prompt projection, deduplication, persona protection, and World Book relevance");

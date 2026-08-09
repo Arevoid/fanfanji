@@ -11,7 +11,6 @@ import {
   ThumbsUp,
   Trash2,
   User,
-  History,
   Pencil,
   X,
   Download,
@@ -75,7 +74,6 @@ import {
   buildForumGenerationTaskKey,
   beginForumGenerationTask,
   finishForumGenerationTask,
-  getThreadRefreshCooldownRemaining,
   hasEvaluatedLikeEngagement,
   removeForumGenerationTasksByThread,
   releaseForumGenerationTask,
@@ -89,7 +87,7 @@ import {
 import {
   buildForumProtectedNames,
 } from "../domain/forum/forumContentSafety";
-import { appendForumNotification, createForumNotification, createForumProfile, recordForumVisit, resolveForumPublicAuthor, toPublicThreadSnapshot, updateForumLikeHistory } from "../domain/forum/forumProfileData";
+import { appendForumNotification, createForumNotification, createForumProfile, recordForumVisit, resolveForumPublicAuthor, updateForumLikeHistory } from "../domain/forum/forumProfileData";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { compressImage } from "../utils/stickerDb";
 import { createForumCommunityNpc } from "../features/forum/forumCommunityNpcData";
@@ -282,7 +280,7 @@ export default function AppForum({
   );
 
   useEffect(() => {
-    const safe = loadForumDataSafely({
+    loadForumDataSafely({
       validRelationIds: new Set(relationships.map((relationship) => relationship.id)),
       protectedNames: forumProtectedNames,
     });

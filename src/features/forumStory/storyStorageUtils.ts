@@ -46,7 +46,6 @@ export const containsForbiddenStoryScopeKey = (value: unknown): boolean => {
 };
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
-const isNonNegativeNumber = (value: unknown): value is number => isFiniteNumber(value) && value >= 0;
 const isNonNegativeInteger = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
 const isPositiveInteger = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 1;
 const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");

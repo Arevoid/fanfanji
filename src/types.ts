@@ -486,7 +486,7 @@ export interface ForumNotification {
   id: string;
   eventKey: string;
   ownerIdentityId: string;
-  type: "thread-reply" | "reply-reply" | "direct-message";
+  type: "thread-reply" | "reply-reply";
   actorPublicSnapshot: ForumPublicAuthor;
   threadId: string;
   replyId: string;
@@ -494,45 +494,6 @@ export interface ForumNotification {
   preview: string;
   occurredAt: number;
   readAt?: number;
-  conversationId?: string;
-}
-
-export interface ForumDmConversation {
-  id: string;
-  ownerIdentityId: string;
-  participant: ForumActorRef;
-  participantPublicSnapshot: ForumPublicAuthor;
-  originThreadId?: string;
-  originReplyId?: string;
-  lastMessageAt: number;
-  unreadCount: number;
-  createdAt: number;
-  updatedAt: number;
-  /** Changes whenever the conversation is recreated, preventing late replies from reviving it. */
-  revision?: number;
-}
-
-export interface ForumDmMessage {
-  id: string;
-  conversationId: string;
-  ownerIdentityId: string;
-  sender: "user" | "participant";
-  body: string;
-  occurredAt: number;
-  createdAt: number;
-}
-
-export interface ForumDmTask {
-  id: string;
-  taskKey: string;
-  ownerIdentityId: string;
-  conversationId: string;
-  status: "running" | "succeeded" | "failed" | "stale";
-  startedAt: number;
-  completedAt?: number;
-  createdAt: number;
-  updatedAt: number;
-  conversationRevision?: number;
 }
 
 export type ForumGenerationTrigger =
@@ -888,6 +849,10 @@ export interface OfflineStory {
   customCss?: string;
   /** Continue-mode stories inherit this from the source chat; other modes choose it at creation. */
   enableTimeAwareness?: boolean;
+  /** Structured WorldBook snapshot captured at story creation and activated per turn. */
+  worldBookSnapshot?: WorldBookEntry[];
+  /** Confirmed Truth/manual-memory snapshot captured for this isolated story. */
+  knowledgeSnapshot?: string[];
   /** Frozen at the moment an online chat is explicitly imported into this story. */
   importedContext?: {
     messages: Message[];

@@ -57,7 +57,7 @@ const memoryUi = fs.readFileSync(new URL("../src/components/AppMemory.tsx", impo
 assert.match(app, /appendKnowledgeClaims\(result\.acceptedClaims\)/, "immediate summary writes Truth before compatibility Memory");
 assert.match(chat, /appendKnowledgeClaims\(result\.acceptedClaims\)/, "chat extraction writes Truth before compatibility Memory");
 assert.match(offline, /appendKnowledgeClaims\(result\.acceptedClaims\)/, "offline extraction writes Truth before compatibility Memory");
-assert.match(offline, /offlineStoryPolicyInput:/, "offline extraction reuses the existing story Fact Policy");
+assert.match(offline, /const offlineStoryPolicyInput =/, "offline extraction reuses the existing story Fact Policy");
 assert.match(memoryUi, /appendKnowledgeClaim\(claim\)/, "manual add writes a confirmed claim");
 assert.match(memoryUi, /supersedeKnowledgeClaim/, "manual edit preserves the supersession chain");
 assert.match(memoryUi, /retractKnowledgeClaim/, "manual deletion retracts authoritative claims");

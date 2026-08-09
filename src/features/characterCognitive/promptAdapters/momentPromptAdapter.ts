@@ -120,9 +120,9 @@ function projectMomentTopicContext(
 }
 
 /**
- * Builds a deny-by-default public Moment projection. `safe` relation facts
- * are intentionally not public: only the dedicated public context may supply
- * events or world knowledge to a public post.
+ * Builds a public-safe Moment projection. The caller may deliberately supply
+ * confirmed facts/events from this exact relationship, while the dedicated
+ * public context remains the only source for public history and constraints.
  */
 export function buildMomentPromptContext(
   context: CharacterCognitiveContext | undefined,
@@ -160,8 +160,8 @@ export function buildMomentPromptContext(
       occurredAt,
       confidence,
     })) ?? [],
-    // Callers pass only WorldBook entries already filtered for the same
-    // character, identity and relation. The adapter removes all scope IDs.
+    // Callers pass only entries explicitly visible to the public scenario.
+    // The adapter removes all storage/scope metadata.
     publicWorldKnowledge: [...(options?.relationWorldKnowledge || [])]
       .map(({ title, content }) => ({ title, content }))
       .filter(({ title, content }) => Boolean(title.trim() && content.trim())),
@@ -175,9 +175,10 @@ export function buildMomentPromptContext(
 }
 
 /**
- * Public Moment entry point. It accepts only the dedicated public snapshot,
- * so a public generation caller cannot accidentally provide relation-scoped
- * Memory, RelationshipState, CharacterEvent, or InnerVoice.
+ * Public Moment entry point. Public history comes only from the dedicated
+ * snapshot. Callers may additionally provide the deliberately projected,
+ * confirmed facts/events of this exact relationship; raw stores and chat
+ * history are never accepted here.
  */
 export function buildMomentPromptContextFromPublicContext(
   publicContext: MomentPublicCognitiveContext,
@@ -186,7 +187,7 @@ export function buildMomentPromptContextFromPublicContext(
   return buildMomentPromptContext(undefined, { ...options, publicContext });
 }
 
-/** Appends the public projection while preserving the caller's task prompt. */
+/** Appends the public-safe projection while preserving the caller's task prompt. */
 export function appendMomentPublicPromptContext<T extends { systemInstruction?: string }>(
   request: T,
   publicContext: MomentPublicCognitiveContext | undefined,
@@ -206,8 +207,8 @@ export function appendMomentPublicPromptContext<T extends { systemInstruction?: 
 
 /**
  * Formats the deliberately public-safe Moment supplement. The existing Moment
- * prompt remains responsible for the task, history, WorldBook, and UI-facing
- * wording; this block supplies only adapter-projected context.
+ * prompt remains responsible for the task and UI-facing wording; this block
+ * supplies public inputs plus explicitly confirmed same-relation facts.
  */
 export function formatMomentPromptContext(context: MomentPromptContextWithRoutine | undefined): string {
   if (!context) return "";
@@ -256,7 +257,7 @@ export function formatMomentPromptContext(context: MomentPromptContextWithRoutin
   ] : [];
 
   return [
-    "[MOMENT COGNITIVE CONTEXT]",
+    "[PUBLIC-SAFE MOMENT COGNITIVE CONTEXT]",
     "Use only the scoped, confirmed information below when directly relevant. Do not invent shared scenes, locations, actions, or user experiences.",
     "Character focus:",
     ...persona,

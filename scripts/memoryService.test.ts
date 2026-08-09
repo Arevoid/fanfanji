@@ -47,7 +47,7 @@ async function run() {
   assert.deepEqual(extracted.extractedMemories, [{ ...memory("new-memory", "a", "【测试归档】\n- 周末见面", 99), isManual: false }]);
   const manual = await MemoryService.extractMemories(context, extractApi);
   assert.equal(manual.extractedMemories.length, 1);
-  const immediate = await MemoryService.summarizeConversation({ ...context, scenario: "immediate-summary" }, extractApi);
+  const immediate = await MemoryService.extractMemories({ ...context, scenario: "immediate-summary" }, extractApi);
   assert.equal(immediate.extractedMemories[0].content, "【测试归档】\n- 周末见面");
 
   // M-P: duplicate, API failure, save hand-off, and retry all avoid extra candidates.

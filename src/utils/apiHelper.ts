@@ -1,6 +1,5 @@
 // src/utils/apiHelper.ts
 
-import { UserSettings } from "../types";
 import {
   buildKnowledgeExtractionPrompt,
   parseKnowledgeExtractionOutput,

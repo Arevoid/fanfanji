@@ -20,7 +20,7 @@ import { loadCharacterKnowledgeMigrationState, saveCharacterKnowledgeMigrationSt
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
-import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
+import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
@@ -333,7 +333,7 @@ export default function App() {
     return raw ? JSON.parse(raw) : [];
   });
 
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => loadCalendarEvents([]).value);
+  const [calendarEvents] = useState<CalendarEvent[]>(() => loadCalendarEvents([]).value);
 
   const [worldBookEntries, setWorldBookEntries] = useState<WorldBookEntry[]>(() => loadWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES).value);
 
@@ -375,8 +375,15 @@ export default function App() {
   };
 
   const handleDeleteOfflineStory = (storyId: string) => {
+    const deletedStory = offlineStories.find((story) => story.id === storyId);
     retractBySourceStoryIds([storyId]);
     retractByOfflineStoryIds([storyId]);
+    if (deletedStory) {
+      const archivedMemoryIds = new Set(deletedStory.archivedMemoryIds || []);
+      const marker = `offline-story:${deletedStory.id}:`;
+      setMemories((previous) => previous.filter((memory) =>
+        !archivedMemoryIds.has(memory.id) && !memory.content.includes(marker)));
+    }
     setOfflineStories((prev) => {
       const filtered = prev.filter((s) => s.id !== storyId);
       return filtered;
@@ -393,13 +400,7 @@ export default function App() {
   } | null>(null);
 
   // Global Toast warning/success state (P2: alert on save failures)
-  const [globalToast, setGlobalToast] = useState<{ message: string; isError?: boolean } | null>(null);
-  const showGlobalToast = (message: string, isError?: boolean) => {
-    setGlobalToast({ message, isError });
-    setTimeout(() => {
-      setGlobalToast(null);
-    }, 3000);
-  };
+  const [globalToast] = useState<{ message: string; isError?: boolean } | null>(null);
 
   const [isStandaloneMode, setIsStandaloneMode] = useState(isStandalonePwa);
 
@@ -973,7 +974,7 @@ export default function App() {
       // Preserve the original one-item summary format and save it only once.
       const isDelicate = char.archiveTemplateType === "delicate";
       const headerLabel = isDelicate ? `【心境日记一键归档 (细腻版 - 最近 ${rounds} 轮)】` : `【精炼事件日志一键归档 (精炼版 - 最近 ${rounds} 轮)】`;
-      const result = await MemoryService.summarizeConversation({
+      const result = await MemoryService.extractMemories({
         character: char,
         characterId,
         relationId,
@@ -1001,6 +1002,7 @@ export default function App() {
         return;
       }
       const addedCount = result.extractedMemories.length;
+      const processedCount = Math.max(addedCount, result.acceptedClaims.length);
       if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
         setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "长期认知写入失败，未更新兼容记忆" }));
         return;
@@ -1032,7 +1034,7 @@ export default function App() {
         conversationId,
         status: "completed",
         rounds,
-        extractedCount: addedCount,
+        extractedCount: processedCount,
       });
 
       // Direct-chat summary markers belong to the relationship. Character keeps no
@@ -1843,7 +1845,6 @@ export default function App() {
           pendingEvents: task.pendingEvents.filter((event) => event.privateActor?.kind !== "relationship" || !relationIds.includes(event.privateActor.relationId)),
         })),
       });
-      cleanupForumDmForRelations(relationIds);
       const diaryCleanup = cleanupDiaryForRelations({
         relationIds,
         entries: loadDiaryEntries().value,
@@ -1997,13 +1998,41 @@ export default function App() {
       : undefined;
     // Source-linked truth is retained for auditability but cannot remain
     // active after its evidence message is deleted.
+    const affectedClaimIds = new Set(loadKnowledgeClaims().value
+      .filter((claim) => claim.source.messageIds?.includes(id))
+      .map((claim) => claim.id));
     retractBySourceMessageIds([id], sourceScope);
     retractConversationSummariesBySourceMessageIds([id], sourceScope);
     retractBehaviorCorrectionsBySourceMessageIds([id], sourceScope);
+    if (affectedClaimIds.size > 0) {
+      setMemories((previous) => previous.filter((memory) =>
+        !(memory.sourceKnowledgeClaimIds || []).some((claimId) => affectedClaimIds.has(claimId))));
+    }
     setMessages((prev) => prev.filter((m) => m.id !== id || !messageMatchesMutationScope(m, scope)));
   };
 
   const handleUpdateMessage = (id: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => {
+    const original = messages.find((message) => message.id === id && messageMatchesMutationScope(message, scope));
+    if (!original) return;
+    const sourceRelation = original.relationId
+      ? relationships.find((relation) => relation.id === original.relationId)
+      : undefined;
+    const sourceScope = sourceRelation ? {
+      relationId: sourceRelation.id,
+      characterId: sourceRelation.characterId,
+      userIdentityId: sourceRelation.userIdentityId,
+      conversationId: sourceRelation.conversationId,
+    } : undefined;
+    const affectedClaimIds = new Set(loadKnowledgeClaims().value
+      .filter((claim) => claim.source.messageIds?.includes(id))
+      .map((claim) => claim.id));
+    retractBySourceMessageIds([id], sourceScope);
+    retractConversationSummariesBySourceMessageIds([id], sourceScope);
+    retractBehaviorCorrectionsBySourceMessageIds([id], sourceScope);
+    if (affectedClaimIds.size > 0) {
+      setMemories((previous) => previous.filter((memory) =>
+        !(memory.sourceKnowledgeClaimIds || []).some((claimId) => affectedClaimIds.has(claimId))));
+    }
     setMessages((prev) =>
       prev.map((m) => (m.id === id && messageMatchesMutationScope(m, scope) ? { ...m, ...updatedFields } : m))
     );
@@ -2052,8 +2081,13 @@ export default function App() {
   };
 
   const handleDeleteMomentsByRelation = (relationId: string) => {
-    const removedMomentIds = moments.filter((moment) => moment.relationId === relationId).map((moment) => moment.id);
+    const removedMoments = moments.filter((moment) => moment.relationId === relationId);
+    const removedMomentIds = removedMoments.map((moment) => moment.id);
     removeMomentTopicsForMoments(removedMomentIds);
+    setMemories((previous) => removedMoments.reduce(
+      (remaining, moment) => removeMemoriesForMoment(remaining, moment),
+      previous,
+    ));
     setMoments((previous) => previous.filter((moment) => moment.relationId !== relationId));
   };
 
@@ -2120,19 +2154,8 @@ export default function App() {
   };
 
   // Calendar Schedule handlers
-  const handleAddCalendarEvent = (ev: CalendarEvent) => {
-    setCalendarEvents((prev) => [...prev, ev]);
-  };
 
-  const handleToggleCalendarEventDone = (id: string) => {
-    setCalendarEvents((prev) =>
-      prev.map((ev) => (ev.id === id ? { ...ev, isDone: !ev.isDone } : ev))
-    );
-  };
 
-  const handleDeleteCalendarEvent = (id: string) => {
-    setCalendarEvents((prev) => prev.filter((ev) => ev.id !== id));
-  };
 
   // Music Handlers
   const handleAddMusicTrack = (track: MusicTrack) => {
@@ -3567,6 +3590,7 @@ export default function App() {
                     characters={characters}
                     relationships={relationships}
                     messages={messages}
+                    worldBookEntries={worldBookEntries}
                     settings={settings}
                     onSendMessage={handleSendMessage}
                     onOpenChat={(characterId, relationId, sourceMessageId) => {

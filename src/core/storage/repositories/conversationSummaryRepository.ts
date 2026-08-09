@@ -56,12 +56,11 @@ export function normalizeConversationSummary(value: unknown): ConversationSummar
 }
 
 export const normalizeConversationSummaries = (values: readonly unknown[]): ConversationSummaryRecord[] => {
-  const ids = new Set<string>();
-  return values.map(normalizeConversationSummary).filter((item): item is ConversationSummaryRecord => {
-    if (!item || ids.has(item.id)) return false;
-    ids.add(item.id);
-    return true;
+  const records = new Map<string, ConversationSummaryRecord>();
+  values.map(normalizeConversationSummary).forEach((item) => {
+    if (item) records.set(item.id, item);
   });
+  return Array.from(records.values());
 };
 
 export const loadConversationSummaries = (): StorageResult<ConversationSummaryRecord[]> => {
@@ -77,7 +76,11 @@ export const listConversationSummariesByRelation = (
 export const appendConversationSummaries = (
   current: readonly ConversationSummaryRecord[],
   incoming: readonly ConversationSummaryRecord[],
-): ConversationSummaryRecord[] => normalizeConversationSummaries([...current, ...incoming]);
+): ConversationSummaryRecord[] => {
+  const records = new Map(normalizeConversationSummaries(current).map((record) => [record.id, record]));
+  normalizeConversationSummaries(incoming).forEach((record) => records.set(record.id, record));
+  return Array.from(records.values());
+};
 export const removeConversationSummariesByRelations = (
   records: readonly ConversationSummaryRecord[], relationIds: readonly string[],
 ): ConversationSummaryRecord[] => {

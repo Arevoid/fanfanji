@@ -4,7 +4,6 @@ import { apiFetchModels, apiTestKey, apiFetchImageModels, apiTestImageConnection
 import {
   ChevronLeft,
   ChevronRight,
-  User,
   Key,
   Palette,
   Sparkles,
@@ -19,7 +18,6 @@ import {
   Download,
   Upload,
   Volume2,
-  VolumeX,
   Monitor,
   Moon,
   Sun
@@ -30,7 +28,6 @@ import {
   compressImagePreservingTransparency,
   isTransparencyPreservedImage,
 } from "../utils/pngParser";
-import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
 import { inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "../features/chat/services/imageProtocol";
 import { applyDesktopModuleBackup, buildDesktopModuleBackup, parseDesktopModuleBackup } from "../features/home/desktopModuleBackup";
 import { normalizeHomeScreenLayout } from "../features/home/homeGrid";
@@ -122,9 +119,6 @@ const BACKUP_KEYS = [
   "phone_forum_visit_history",
   "phone_forum_like_history",
   "phone_forum_notifications",
-  "phone_forum_dm_conversations",
-  "phone_forum_dm_messages",
-  "phone_forum_dm_tasks",
   "phone_diary_entries",
   "phone_diary_shares",
   "phone_diary_generation_tasks",
@@ -181,8 +175,6 @@ const LIGHT_BACKUP_KEYS = [
   "phone_forum_replies",
   "phone_forum_shares",
   "phone_forum_profiles",
-  "phone_forum_dm_conversations",
-  "phone_forum_dm_messages",
   "phone_offline_stories",
 ] as const;
 
@@ -340,17 +332,6 @@ export function sanitizeSystemBackupValue(
       return "[]";
     }
   }
-  if (["phone_forum_dm_conversations", "phone_forum_dm_messages", "phone_forum_dm_tasks"].includes(key)) {
-    try {
-      const parsed = JSON.parse(value);
-      if (!Array.isArray(parsed)) return "[]";
-      return JSON.stringify(parsed.map((item) => {
-        if (!item || typeof item !== "object") return item;
-        const { privateActor: _actor, ...safe } = item as Record<string, unknown>;
-        return safe;
-      }));
-    } catch { return "[]"; }
-  }
   return value;
 }
 
@@ -438,7 +419,6 @@ export default function AppSettings({
   const [showHomeButton, setShowHomeButton] = useState(!!settings.showHomeButton);
   const [hideStatusBar, setHideStatusBar] = useState(!!settings.hideStatusBar);
   const [showBackupExportOptions, setShowBackupExportOptions] = useState(false);
-  const [dockColor, setDockColor] = useState(settings.dockColor || "#ffffff");
   const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
   const [widgetOpacity, setWidgetOpacity] = useState(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70);
   const [iconBorderRadius, setIconBorderRadius] = useState(settings.iconBorderRadius !== undefined ? settings.iconBorderRadius : 35);
@@ -555,70 +535,7 @@ export default function AppSettings({
   const [minimaxSpeed, setMinimaxSpeed] = useState(settings.minimaxSpeed !== undefined ? settings.minimaxSpeed : 1.0);
   const [minimaxPitch, setMinimaxPitch] = useState(settings.minimaxPitch !== undefined ? settings.minimaxPitch : 0);
   const [minimaxVol, setMinimaxVol] = useState(settings.minimaxVol !== undefined ? settings.minimaxVol : 1.0);
-  const [minimaxProxyUrl, setMinimaxProxyUrl] = useState(settings.minimaxProxyUrl || "");
-
-  // MiniMax Audition Trial States
-  const [previewVoiceId, setPreviewVoiceId] = useState("female-shaonv");
-  const [isAuditioning, setIsAuditioning] = useState(false);
-  const [auditionAudio, setAuditionAudio] = useState<HTMLAudioElement | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (auditionAudio) {
-        try {
-          auditionAudio.pause();
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    };
-  }, [activeTab, auditionAudio]);
-
-  const handleAuditionTrial = async () => {
-    if (isAuditioning) {
-      if (auditionAudio) {
-        auditionAudio.pause();
-        setAuditionAudio(null);
-      }
-      setIsAuditioning(false);
-      return;
-    }
-
-    try {
-      setIsAuditioning(true);
-      const ttsOptions = {
-        apiKey: minimaxApiKey.trim() || undefined,
-        groupId: minimaxGroupId.trim() || undefined,
-        model: minimaxModel.trim(),
-        speed: Number(minimaxSpeed),
-        pitch: Number(minimaxPitch),
-        vol: Number(minimaxVol),
-        voiceId: previewVoiceId,
-        proxyUrl: minimaxProxyUrl.trim() || undefined,
-      };
-
-      const trialText = "你好！我是您的 MiniMax 语音伴侣。今天天气真好，我们一起去散步吧！";
-      const blob = await getSpeechForText(trialText, ttsOptions);
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      setAuditionAudio(audio);
-      audio.onended = () => {
-        setIsAuditioning(false);
-        setAuditionAudio(null);
-      };
-      audio.onerror = (e) => {
-        console.error("Trial playback failed:", e);
-        alert("试听播放失败，请检查您的 API Key、Group ID 或网络是否正常。");
-        setIsAuditioning(false);
-        setAuditionAudio(null);
-      };
-      audio.play();
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || "试听生成失败，请确认 Key、Group ID、或反向代理是否填写正确。");
-      setIsAuditioning(false);
-    }
-  };
+  const [minimaxProxyUrl] = useState(settings.minimaxProxyUrl || "");
 
   const handleSaveMiniMaxSettings = () => {
     onSaveSettings((previous) => ({

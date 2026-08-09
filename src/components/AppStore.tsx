@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Download, Star, ChevronLeft, Search, TrendingUp, ShieldAlert, BadgeInfo, Trash2 } from "lucide-react";
+import { Download, Star, ChevronLeft, Search, TrendingUp, Trash2 } from "lucide-react";
 
 interface AppItem {
   id: string;

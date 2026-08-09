@@ -77,7 +77,7 @@ assert.match(prompt, /Confirmed facts/);
 assert.match(prompt, /尚未发生的计划/);
 assert.match(prompt, /不得改写成已经发生的事实/);
 assert.match(prompt, /旧数据待核验/);
-assert.match(prompt, /派生缓存，非权威事实/);
+assert.doesNotMatch(prompt, /派生缓存|只属于 A 的派生摘要/, "derived summary cache must not duplicate Truth in prompts");
 assert.match(prompt, /保持克制/);
 assert.doesNotMatch(prompt, /identity B/);
 

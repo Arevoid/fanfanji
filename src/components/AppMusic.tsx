@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { MusicTrack, MusicPlaylist } from "../types";
 import { audioDb } from "../utils/audioDb";
 import {
@@ -6,16 +6,12 @@ import {
   Pause,
   SkipForward,
   SkipBack,
-  Volume2,
   Plus,
   Trash2,
   ChevronLeft,
   Music,
   ListMusic,
-  FolderPlus,
-  Radio,
   FileAudio,
-  Disc,
   X,
   Upload,
   Link,
@@ -55,29 +51,18 @@ const WAVE_BARS = [
 
 export default function AppMusic({
   tracks,
-  playlists,
   onAddTrack,
   onDeleteTrack,
-  onAddPlaylist,
-  onDeletePlaylist,
   onClose,
   currentTrack,
   setCurrentTrack,
   isPlaying,
-  setIsPlaying,
   audioRef,
   playMode,
   setPlayMode,
   volume,
-  setVolume,
   onPlayTrack,
 }: AppMusicProps) {
-  const [activeTab, setActiveTab] = useState<"library" | "playlists">("library");
-  
-  // Custom Playlist Creator State
-  const [playlistName, setPlaylistName] = useState("");
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
-
   // New track form state
   const [newTitle, setNewTitle] = useState("");
   const [newArtist, setNewArtist] = useState("");
@@ -203,7 +188,6 @@ export default function AppMusic({
         onPlayTrack(newTrack);
         setPendingCoverFile(null);
         setIsShowingImportModal(false);
-        setActiveTab("library");
       } catch (err) {
         console.error("Failed to save local track to IndexedDB:", err);
         alert("本地音频保存失败，未加入音乐库。请检查浏览器存储空间后重试。");
@@ -230,43 +214,9 @@ export default function AppMusic({
     setNewCoverUrl("");
     onPlayTrack(newTrack);
     setIsShowingImportModal(false);
-    setActiveTab("library");
   };
 
-  const handleCreatePlaylist = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!playlistName.trim()) return;
 
-    const newPl: MusicPlaylist = {
-      id: Date.now().toString(),
-      name: playlistName.trim(),
-      tracks: []
-    };
-    onAddPlaylist(newPl);
-    setPlaylistName("");
-  };
-
-  const toggleTrackInPlaylist = (playlistId: string, trackId: string) => {
-    const pl = playlists.find((p) => p.id === playlistId);
-    if (!pl) return;
-    
-    let updatedTracks = [...pl.tracks];
-    if (updatedTracks.includes(trackId)) {
-      updatedTracks = updatedTracks.filter((tid) => tid !== trackId);
-    } else {
-      updatedTracks.push(trackId);
-    }
-
-    onAddPlaylist({
-      ...pl,
-      tracks: updatedTracks
-    });
-  };
-
-  const activePlaylist = playlists.find((p) => p.id === selectedPlaylistId);
-  const playlistTracks = activePlaylist
-    ? allTracks.filter((t) => activePlaylist.tracks.includes(t.id))
-    : [];
 
   const progressPercent = duration > 0 ? currentTime / duration : 0;
 

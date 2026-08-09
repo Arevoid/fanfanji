@@ -16,14 +16,17 @@ export const MemoryService = {
   extractMemories(context: MemoryExtractionContext, extractApi: MemoryExtractionApi) {
     return extractMemories(context, extractApi);
   },
-  summarizeConversation(context: MemoryExtractionContext, extractApi: MemoryExtractionApi) {
-    return extractMemories(context, extractApi);
-  },
   deduplicateMemories(existingMemories: readonly MemoryItem[], candidate: Pick<MemoryItem, "characterId" | "relationId" | "content">): boolean {
     return isDuplicateMemory(existingMemories, candidate);
   },
   mergeMemories(existingMemories: readonly MemoryItem[], additions: readonly MemoryItem[]): MemoryItem[] {
-    return additions.reduce<MemoryItem[]>((merged, addition) => [addition, ...merged], [...existingMemories]);
+    return additions.reduce<MemoryItem[]>((merged, addition) => {
+      const sourceClaimKey = [...(addition.sourceKnowledgeClaimIds || [])].sort().join("\u0000");
+      const repeatsClaimMirror = Boolean(sourceClaimKey) && merged.some((memory) =>
+        [...(memory.sourceKnowledgeClaimIds || [])].sort().join("\u0000") === sourceClaimKey);
+      if (merged.some((memory) => memory.id === addition.id) || repeatsClaimMirror || isDuplicateMemory(merged, addition)) return merged;
+      return [addition, ...merged];
+    }, [...existingMemories]);
   },
   prepareMemoriesForScenario(context: MemoryRetrievalContext): MemoryItem[] {
     return this.retrieveRelevantMemories(context);

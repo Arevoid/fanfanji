@@ -3,7 +3,6 @@ import { DEFAULT_IDENTITY_ID, type CharacterRelationship } from "../../../domain
 import {
   BEHAVIOR_CORRECTION_SCHEMA_VERSION,
   CONVERSATION_SUMMARY_SCHEMA_VERSION,
-  KNOWLEDGE_CLAIM_SCHEMA_VERSION,
   type BehaviorCorrectionRecord,
   type ConversationSummaryRecord,
   type KnowledgeClaim,

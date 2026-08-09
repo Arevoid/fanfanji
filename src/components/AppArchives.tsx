@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import { Character, WorldBookEntry } from "../types";
 import { apiSummarizePersonality } from "../utils/apiHelper";
-import { Plus, Trash2, Edit2, User, ChevronLeft, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
+import { Plus, Trash2, User, ChevronLeft, AlertCircle, X, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
-import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
+import { getSpeechForText } from "../utils/minimaxTts";
 import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile } from "../features/archives/characterExport";
 import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
 
@@ -109,7 +109,7 @@ export default function AppArchives({
   const [mbti, setMbti] = useState("");
   const [avatar, setAvatar] = useState("");
   const [personality, setPersonality] = useState("");
-  const [backstory, setBackstory] = useState("");
+  const [, setBackstory] = useState("");
   const [greeting, setGreeting] = useState("");
   const [initialChatMode, setInitialChatMode] = useState<"greeting" | "context">("greeting");
   const [album, setAlbum] = useState<string[]>([]);
@@ -462,17 +462,6 @@ export default function AppArchives({
     }
   };
 
-  const handleRandomizeCover = (char: Character) => {
-    const album = char.album || [];
-    if (album.length === 0) return;
-    const randomIndex = Math.floor(Math.random() * album.length);
-    const selectedCover = album[randomIndex];
-    const updatedChar = {
-      ...char,
-      momentsCover: selectedCover,
-    };
-    onSaveCharacter(updatedChar);
-  };
 
   const handleDeleteAlbumImage = (char: Character, indexToDelete: number) => {
     const currentAlbum = char.album || [];

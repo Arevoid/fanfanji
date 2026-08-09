@@ -23,10 +23,6 @@ import {
   formatDiaryPromptContext,
 } from "../src/features/characterCognitive/promptAdapters/diaryPromptAdapter";
 import {
-  buildForumDirectMessagePromptContext,
-  formatForumDirectMessagePromptContext,
-} from "../src/features/characterCognitive/promptAdapters/forumDirectMessagePromptAdapter";
-import {
   buildMomentPromptContext,
   formatMomentPromptContext,
 } from "../src/features/characterCognitive/promptAdapters/momentPromptAdapter";
@@ -237,11 +233,8 @@ function testRelationshipIsolation(): void {
   assert.doesNotMatch(chatPromptB, /花生过敏|归还了借阅的书/);
 
   const diaryA = formatDiaryPromptContext(buildDiaryPromptContext(contextA));
-  const forumDmA = formatForumDirectMessagePromptContext(buildForumDirectMessagePromptContext(contextA));
-  for (const privateOutput of [diaryA, forumDmA]) {
-    assert.doesNotMatch(privateOutput, /用户B|松露|周五不加班/);
-    assert.doesNotMatch(privateOutput, /未公开的家庭争执/);
-  }
+  assert.doesNotMatch(diaryA, /用户B|松露|周五不加班/);
+  assert.doesNotMatch(diaryA, /未公开的家庭争执/);
 }
 
 function offlineStory(mode: OfflineStory["mode"], sourceMessages: Message[]): OfflineStory {

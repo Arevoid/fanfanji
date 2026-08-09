@@ -1,8 +1,5 @@
 import type {
   ForumActivityTask,
-  ForumDmConversation,
-  ForumDmMessage,
-  ForumDmTask,
   ForumActorRef,
   ForumActorState,
   ForumGenerationTask,
@@ -35,9 +32,6 @@ export interface ForumStateSnapshot {
   visitHistory: ForumVisitHistory[];
   likeHistory: ForumLikeHistoryRecord[];
   notifications: ForumNotification[];
-  dmConversations: ForumDmConversation[];
-  dmMessages: ForumDmMessage[];
-  dmTasks: ForumDmTask[];
 }
 
 export interface ForumIdentitySnapshot extends ForumStateSnapshot {
@@ -45,7 +39,7 @@ export interface ForumIdentitySnapshot extends ForumStateSnapshot {
 }
 
 export type ForumStateMutation = Partial<Pick<ForumStateSnapshot,
-  "threads" | "replies" | "shares" | "generationTasks" | "actorStates" | "activityTasks" | "profiles" | "visitHistory" | "likeHistory" | "notifications" | "dmConversations" | "dmMessages" | "dmTasks">>;
+  "threads" | "replies" | "shares" | "generationTasks" | "actorStates" | "activityTasks" | "profiles" | "visitHistory" | "likeHistory" | "notifications">>;
 
 export interface ForumMutationOptions {
   /** Explicit destructive/full-state writes may replace the reply collection. */
@@ -70,9 +64,6 @@ const forumStorageKeyValues: readonly string[] = [
   storageKeys.forumVisitHistory,
   storageKeys.forumLikeHistory,
   storageKeys.forumNotifications,
-  storageKeys.forumDmConversations,
-  storageKeys.forumDmMessages,
-  storageKeys.forumDmTasks,
 ];
 
 const getRawForumFingerprint = (): string => {
@@ -88,9 +79,6 @@ const getRawForumFingerprint = (): string => {
     storageKeys.forumVisitHistory,
     storageKeys.forumLikeHistory,
     storageKeys.forumNotifications,
-    storageKeys.forumDmConversations,
-    storageKeys.forumDmMessages,
-    storageKeys.forumDmTasks,
   ].map((key) => localStorage.getItem(key) || "").join("\u0001");
 };
 
@@ -295,23 +283,13 @@ const isForumNotification = (value: unknown): value is ForumNotification => {
   const notification = value as Record<string, unknown>;
   return typeof notification.id === "string" && typeof notification.eventKey === "string"
     && typeof notification.ownerIdentityId === "string"
-    && (notification.type === "thread-reply" || notification.type === "reply-reply" || notification.type === "direct-message")
+    && (notification.type === "thread-reply" || notification.type === "reply-reply")
     && isPublicAuthor(notification.actorPublicSnapshot)
     && typeof notification.threadId === "string" && typeof notification.replyId === "string"
     && (notification.targetReplyId === undefined || typeof notification.targetReplyId === "string")
     && typeof notification.preview === "string" && typeof notification.occurredAt === "number"
-    && (notification.readAt === undefined || typeof notification.readAt === "number")
-    && (notification.conversationId === undefined || typeof notification.conversationId === "string");
+    && (notification.readAt === undefined || typeof notification.readAt === "number");
 };
-
-const isForumDmActor = (value: unknown): boolean => Boolean(value && typeof value === "object" && ((value as Record<string, unknown>).kind === "virtual" && typeof (value as Record<string, unknown>).virtualProfileId === "string" || (value as Record<string, unknown>).kind === "relationship" && typeof (value as Record<string, unknown>).relationId === "string" && typeof (value as Record<string, unknown>).characterId === "string"));
-const isForumDmConversation = (value: unknown): value is ForumDmConversation => {
-  if (!value || typeof value !== "object") return false;
-  const item = value as Record<string, unknown>;
-  return typeof item.id === "string" && typeof item.ownerIdentityId === "string" && isForumDmActor(item.participant) && isPublicAuthor(item.participantPublicSnapshot) && typeof item.lastMessageAt === "number" && typeof item.unreadCount === "number" && typeof item.createdAt === "number" && typeof item.updatedAt === "number";
-};
-const isForumDmMessage = (value: unknown): value is ForumDmMessage => Boolean(value && typeof value === "object" && typeof (value as Record<string, unknown>).id === "string" && typeof (value as Record<string, unknown>).conversationId === "string" && typeof (value as Record<string, unknown>).ownerIdentityId === "string" && ["user", "participant"].includes(String((value as Record<string, unknown>).sender)) && typeof (value as Record<string, unknown>).body === "string" && typeof (value as Record<string, unknown>).occurredAt === "number" && typeof (value as Record<string, unknown>).createdAt === "number");
-const isForumDmTask = (value: unknown): value is ForumDmTask => Boolean(value && typeof value === "object" && typeof (value as Record<string, unknown>).id === "string" && typeof (value as Record<string, unknown>).taskKey === "string" && typeof (value as Record<string, unknown>).ownerIdentityId === "string" && typeof (value as Record<string, unknown>).conversationId === "string" && ["running", "succeeded", "failed", "stale"].includes(String((value as Record<string, unknown>).status)) && typeof (value as Record<string, unknown>).startedAt === "number");
 
 const filterLoaded = <T>(
   loaded: StorageResult<unknown[]>,
@@ -367,10 +345,6 @@ export const loadForumLikeHistory = (): StorageResult<ForumLikeHistoryRecord[]> 
 
 export const loadForumNotifications = (): StorageResult<ForumNotification[]> =>
   filterLoaded(readArray<unknown>(storageKeys.forumNotifications, []), isForumNotification);
-export const loadForumDmConversations = (): StorageResult<ForumDmConversation[]> => filterLoaded(readArray<unknown>(storageKeys.forumDmConversations, []), isForumDmConversation);
-export const loadForumDmMessages = (): StorageResult<ForumDmMessage[]> => filterLoaded(readArray<unknown>(storageKeys.forumDmMessages, []), isForumDmMessage);
-export const loadForumDmTasks = (): StorageResult<ForumDmTask[]> => filterLoaded(readArray<unknown>(storageKeys.forumDmTasks, []), isForumDmTask);
-
 const isForumShare = (value: unknown): value is ForumShare => {
   if (!value || typeof value !== "object") return false;
   const share = value as Record<string, unknown>;
@@ -512,9 +486,6 @@ const buildForumSnapshot = (): ForumStateSnapshot => {
   visitHistory: loadForumVisitHistory().value,
   likeHistory: loadForumLikeHistory().value,
   notifications: loadForumNotifications().value,
-  dmConversations: loadForumDmConversations().value,
-  dmMessages: loadForumDmMessages().value,
-  dmTasks: loadForumDmTasks().value,
   };
 };
 
@@ -547,9 +518,6 @@ export const getForumSnapshotForIdentity = (ownerIdentityId: string): ForumIdent
     visitHistory: snapshot.visitHistory.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
     likeHistory: snapshot.likeHistory.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
     notifications: snapshot.notifications.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
-    dmConversations: snapshot.dmConversations.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
-    dmMessages: snapshot.dmMessages.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
-    dmTasks: snapshot.dmTasks.filter((entry) => entry.ownerIdentityId === ownerIdentityId),
   };
   identitySnapshotCache.set(ownerIdentityId, { revision: snapshot.revision, snapshot: identitySnapshot });
   return identitySnapshot;
@@ -614,9 +582,6 @@ export const commitForumMutation = (mutation: ForumStateMutation, events: readon
     ...(mutation.visitHistory ? { visitHistory: mutation.visitHistory } : {}),
     ...(mutation.likeHistory ? { likeHistory: mutation.likeHistory } : {}),
     ...(mutation.notifications ? { notifications: mutation.notifications } : {}),
-    ...(mutation.dmConversations ? { dmConversations: mutation.dmConversations } : {}),
-    ...(mutation.dmMessages ? { dmMessages: mutation.dmMessages } : {}),
-    ...(mutation.dmTasks ? { dmTasks: mutation.dmTasks } : {}),
   };
   const previous: ForumStateMutation = {
     ...(next.threads ? { threads: current.threads } : {}),
@@ -629,9 +594,6 @@ export const commitForumMutation = (mutation: ForumStateMutation, events: readon
     ...(next.visitHistory ? { visitHistory: current.visitHistory } : {}),
     ...(next.likeHistory ? { likeHistory: current.likeHistory } : {}),
     ...(next.notifications ? { notifications: current.notifications } : {}),
-    ...(next.dmConversations ? { dmConversations: current.dmConversations } : {}),
-    ...(next.dmMessages ? { dmMessages: current.dmMessages } : {}),
-    ...(next.dmTasks ? { dmTasks: current.dmTasks } : {}),
   };
   const writers: Array<() => StorageWriteResult> = [];
   if (next.threads) writers.push(() => writeArray(storageKeys.forumThreads, next.threads!));
@@ -644,9 +606,6 @@ export const commitForumMutation = (mutation: ForumStateMutation, events: readon
   if (next.visitHistory) writers.push(() => writeArray(storageKeys.forumVisitHistory, next.visitHistory!));
   if (next.likeHistory) writers.push(() => writeArray(storageKeys.forumLikeHistory, next.likeHistory!));
   if (next.notifications) writers.push(() => writeArray(storageKeys.forumNotifications, next.notifications!));
-  if (next.dmConversations) writers.push(() => writeArray(storageKeys.forumDmConversations, next.dmConversations!));
-  if (next.dmMessages) writers.push(() => writeArray(storageKeys.forumDmMessages, next.dmMessages!));
-  if (next.dmTasks) writers.push(() => writeArray(storageKeys.forumDmTasks, next.dmTasks!));
   for (const write of writers) {
     const result = write();
     if (!result.success) {
@@ -660,9 +619,6 @@ export const commitForumMutation = (mutation: ForumStateMutation, events: readon
       if (previous.visitHistory) writeArray(storageKeys.forumVisitHistory, previous.visitHistory);
       if (previous.likeHistory) writeArray(storageKeys.forumLikeHistory, previous.likeHistory);
       if (previous.notifications) writeArray(storageKeys.forumNotifications, previous.notifications);
-      if (previous.dmConversations) writeArray(storageKeys.forumDmConversations, previous.dmConversations);
-      if (previous.dmMessages) writeArray(storageKeys.forumDmMessages, previous.dmMessages);
-      if (previous.dmTasks) writeArray(storageKeys.forumDmTasks, previous.dmTasks);
       return { success: false, ...(result.error ? { error: result.error } : {}) };
     }
   }
@@ -680,9 +636,6 @@ export const commitForumMutation = (mutation: ForumStateMutation, events: readon
     visitHistory: next.visitHistory || current.visitHistory,
     likeHistory: next.likeHistory || current.likeHistory,
     notifications: next.notifications || current.notifications,
-    dmConversations: next.dmConversations || current.dmConversations,
-    dmMessages: next.dmMessages || current.dmMessages,
-    dmTasks: next.dmTasks || current.dmTasks,
   };
   emitForumStateChanged();
   events.forEach((event) => forumMutationListeners.forEach((listener) => listener(event)));
@@ -718,23 +671,7 @@ export const cleanupForumIdentityData = (ownerIdentityId: string): StorageWriteR
     visitHistory: current.visitHistory.filter((item) => item.ownerIdentityId !== ownerIdentityId),
     likeHistory: current.likeHistory.filter((item) => item.ownerIdentityId !== ownerIdentityId),
     notifications: current.notifications.filter((item) => item.ownerIdentityId !== ownerIdentityId),
-    dmConversations: current.dmConversations.filter((item) => item.ownerIdentityId !== ownerIdentityId),
-    dmMessages: current.dmMessages.filter((item) => item.ownerIdentityId !== ownerIdentityId),
-    dmTasks: current.dmTasks.filter((item) => item.ownerIdentityId !== ownerIdentityId),
   }, [], { replaceReplies: true });
-  return { success: result.success, ...(result.error ? { error: result.error } : {}) };
-};
-
-/** Relation-scoped DM cleanup; public forum content and virtual/NPC conversations remain intact. */
-export const cleanupForumDmForRelations = (relationIds: readonly string[]): StorageWriteResult => {
-  const removed = new Set(relationIds); const current = getForumStateSnapshot();
-  const ids = new Set(current.dmConversations.filter((item) => item.participant.kind === "relationship" && removed.has(item.participant.relationId)).map((item) => item.id));
-  const result = commitForumMutation({
-    dmConversations: current.dmConversations.filter((item) => !ids.has(item.id)),
-    dmMessages: current.dmMessages.filter((item) => !ids.has(item.conversationId)),
-    dmTasks: current.dmTasks.filter((item) => !ids.has(item.conversationId)),
-    notifications: current.notifications.filter((item) => !item.conversationId || !ids.has(item.conversationId)),
-  });
   return { success: result.success, ...(result.error ? { error: result.error } : {}) };
 };
 
@@ -754,7 +691,6 @@ export const repairForumState = (): StorageWriteResult => {
   const threads = unique(current.threads, (item) => item.id);
   const threadIds = new Set(threads.map((item) => item.id));
   const replies = unique(current.replies, (item) => item.id).filter((item) => threadIds.has(item.threadId)).sort((a, b) => a.floor - b.floor);
-  const conversationIds = new Set(unique(current.dmConversations, (item) => item.id).map((item) => item.id));
   const result = commitForumMutation({
     threads,
     replies,
@@ -766,9 +702,6 @@ export const repairForumState = (): StorageWriteResult => {
     visitHistory: unique(current.visitHistory, (item) => item.id),
     likeHistory: unique(current.likeHistory, (item) => item.id),
     notifications: unique(current.notifications, (item) => item.eventKey),
-    dmConversations: unique(current.dmConversations, (item) => item.id),
-    dmMessages: unique(current.dmMessages, (item) => item.id).filter((item) => conversationIds.has(item.conversationId)),
-    dmTasks: unique(current.dmTasks, (item) => item.id).filter((item) => conversationIds.has(item.conversationId)),
   }, [], { replaceReplies: true });
   return { success: result.success, ...(result.error ? { error: result.error } : {}) };
 };

@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const widgets = readFileSync(new URL("../src/components/HomeScreenWidgets.tsx", import.meta.url), "utf8");
 assert.match(app, /settings\.dockColor/);
 assert.match(app, /settings\.desktopAppTextColor/);
-assert.match(app, /settings\.bubbleCss/);
+assert.match(chat, /settings\.bubbleCss/);
 assert.match(widgets, /calendar_album_font_color_/);
 assert.match(widgets, /anniversary_color_/);
 assert.match(widgets, /backgroundImage/);

@@ -135,11 +135,12 @@ export function formatTruthRetrievalForPrompt(result: TruthRetrievalResult): str
     formatClaims("Disputed claims / 有争议内容", projection.disputed, { caution: "存在冲突，只能谨慎提及，不可擅自裁决。" }),
     formatClaims("Legacy unverified / 旧数据待核验 / source=legacy-unverified", projection.legacyUnverified, { caution: "仅作线索，未经用户确认不得当作真实事实。" }),
   ].filter(Boolean).join("");
-  const summaryBlock = result.summaries.length > 0
-    ? `\n[Derived summaries / 对话摘要（派生缓存，非权威事实；source=derived-summary；低于已确认事实）]\n${result.summaries.map((summary) => `- ${summary.summary}`).join("\n")}`
-    : "";
+  // ConversationSummary is a rebuildable cache of the same KnowledgeClaims
+  // formatted above. Feeding both representations repeats and amplifies the
+  // same fact. Keep summaries available to UI/diagnostics, but make Truth the
+  // single prompt authority.
   const correctionBlock = result.corrections.length > 0
     ? `\n[Behavior corrections / 人设修正]\n${result.corrections.map((correction) => `- ${correction.instruction}`).join("\n")}`
     : "";
-  return `${blocks}${summaryBlock}${correctionBlock}`;
+  return `${blocks}${correctionBlock}`;
 }

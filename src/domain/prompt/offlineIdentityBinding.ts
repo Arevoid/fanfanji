@@ -13,7 +13,7 @@ export function buildOfflineIdentityBinding(input: OfflineIdentityBindingInput):
   const characterLabel = characterNames.length > 0 ? characterNames.join("、") : "当前角色";
   const hasNameCollision = characterNames.includes(userName);
 
-  return `【线下剧情主体/客体身份绑定 — 最高优先】
+  return `【线下剧情主体/客体身份边界】
 - 你负责扮演的角色是：${characterLabel}。这些姓名只代表角色本人。
 - 与角色互动的用户/故事主角是：${userName}。用户不是上述任何角色，也不能被写成上述角色本人。
 1. 角色身份与用户身份永远不可互换。叙述中的“${characterNames[0] || "角色"}”指角色本人；叙述中的“用户”“你”${hasNameCollision ? "（本场显示名与角色重名时必须优先使用“你”）" : `或“${userName}”`}指用户。

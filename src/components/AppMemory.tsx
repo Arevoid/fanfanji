@@ -7,7 +7,6 @@ import { append as appendKnowledgeClaim, retract as retractKnowledgeClaim, super
 import { createManualKnowledgeClaim } from "../features/characterKnowledge/services/manualKnowledgeService";
 import { getMemoryDisplayContent } from "../domain/memory/offlineMemorySync";
 import { 
-  ArrowLeft, 
   ChevronLeft,
   Search, 
   Plus, 

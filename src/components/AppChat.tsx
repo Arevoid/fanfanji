@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
-import { apiChat, apiExtractMemories, apiTranslate, estimateTokenCount } from "../utils/apiHelper";
+import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
-import { splitTextToOfflineSegments, compressImage } from "../utils/pngParser";
-import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, getChatMessageVisualType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles as splitIntoWeChatBubbles, stripInternalDeliveryMarkers, type CallTranscriptItem } from "../features/chat/services/messageParser";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
+import { compressImage } from "../utils/pngParser";
+import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, stripInternalDeliveryMarkers, type CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { requestAiReply } from "../features/chat/services/aiReplyService";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
@@ -17,13 +17,14 @@ import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoi
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
 import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
-import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
+import { stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
-import { assemblePromptBlocks, type PromptBlock, type PromptBlockKind } from "../domain/prompt/PromptBlock";
 import { projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
+import { assembleChatInstructions } from "../features/chat/prompts/chatInstructionAssembler";
+import { CHARACTER_MEDIA_USAGE_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
 import { buildKnownMomentsContext } from "../domain/prompt/momentContext";
@@ -68,7 +69,7 @@ import { appendMomentTopicRecord, loadMomentTopicRecords } from "../core/storage
 import { appendProactiveTopicRecord, loadProactiveTopicRecords, removeProactiveTopicsForRelations } from "../core/storage/repositories/proactiveTopicRepository";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
-import { cleanupForumDmForRelations, commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "../core/storage/repositories/forumRepository";
+import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "../core/storage/repositories/forumRepository";
 import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from "../domain/forum/forumShare";
 import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
 import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryTranslations, saveDiaryEntries, saveDiaryGenerationTasks, saveDiaryShares, saveDiaryTranslations } from "../core/storage/repositories/diaryRepository";
@@ -118,12 +119,10 @@ import {
   Sliders,
   Camera,
   Music,
-  Video,
   Phone,
   FileText,
   MapPin,
   Gift,
-  DollarSign,
   Trash2,
   AlertCircle,
   Quote,
@@ -134,11 +133,9 @@ import {
   BookOpen,
   RefreshCw,
   Languages,
-  Search,
   Wallet,
   ChevronRight,
   CreditCard,
-  Play,
   Pause,
   Loader2,
   Database,
@@ -146,7 +143,7 @@ import {
   Edit3
 } from "lucide-react";
 
-import { getSpeechForText, MINIMAX_DEFAULT_VOICES } from "../utils/minimaxTts";
+import { getSpeechForText } from "../utils/minimaxTts";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -1038,54 +1035,6 @@ const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "location", label: "位置" }, { key: "call", label: "通话" }, { key: "plus", label: "加号" }, { key: "send", label: "发送" },
 ];
 
-const CHARACTER_MEDIA_USAGE_RULES = `[特殊媒体使用规则]
-日常聊天默认优先使用普通文字。语音和表情包是具有额外表达作用的特殊消息，不要把它们当作普通文字的随机替代品或每次回复的固定装饰。
-【表情频率硬限制】默认本轮不要使用 Unicode emoji、单独表情消息或表情包。仅当用户刚刚明确使用表情、角色最近 10 条消息没有使用过表情，且该表情能准确表达当前文字的同一情绪时，才最多使用一次。无法确认语义一致时绝对不要用；不得用 😏 等暧昧表情替代语言，也不得单独发送一个 emoji。
-只有在人设或世界书明确说明角色爱发语音/表情包、当前语境确实需要声音或即时情绪反应、或用户明确要求发送语音或表情包时，才自然使用。
-角色的性格和聊天习惯优先；沉稳、严谨、克制、冷淡或不习惯使用表情包的角色可以完全不自发表情包。
-不要为了显示功能而强迫角色使用特殊消息；不要连续多轮无理由发送语音或表情包；不要用表情包重复已经能由文字完整表达的内容。
-【图片绝对规则】你没有发送图片的能力。无论用户是否索要照片，绝对不得输出“（发送了一张图片）”“（发送了一张自拍）”“我给你发图了”等任何暗示已发图片的文字或动作描述。只有应用代码在实际生成并创建图片消息时，界面才会显示图片；你只输出真实的普通文字回复。`;
-
-const MEDIA_EVENT_PERSONA_RESPONSE_RULE = `只把上述媒体事件当作本轮已发生的事实。回复的称呼、冷暖、亲疏、主动性、情绪强度、长度与气泡数量必须由角色卡、既定关系和当前语境决定；不要预设温暖、冷淡、亲密、可爱、感激或简短。`;
-
-const CHARACTER_EXPRESSION_PRIORITY = `[角色表达优先级]
-1. 角色人设首先决定角色会怎么说、会不会主动、热情还是克制、会不会调侃、追问、嘴硬或拒绝。角色卡中明确写出的亲疏、称呼和情感方向不得被默认关系状态削弱。
-2. 当前用户消息与最近聊天上下文决定本轮回应什么；先理解用户正在说的事，再按上述角色设定自然反应。
-3. 已确认事实与当前命中的世界书补充角色和世界背景，但不得用无关设定淹没当前对话。
-4. 内置活人感 2.0 仅辅助避免模板化、重复和无意义填充，不得限制、修正或覆盖角色的性格、关系语气、口癖、情感倾向与边界。
-
-发送前自检：这是否像这个角色会对这个用户说的话？称呼、亲疏、情感倾向和禁用口吻是否一致？若不一致，重写。`;
-
-const WORLD_BOOK_CONTEXT_PRIORITY = `[WORLD BOOK CONTEXT RULES]
-Use the supplied World Book entries as factual context for the current conversation. A matching entry must be respected exactly, especially for identity, relationship, setting facts, and explicit speech habits.
-
-Priority for this turn:
-1. The character's core persona and confirmed relationship with this user.
-2. The user's newest message and the immediate conversation context.
-3. World Book entries that are relevant to this topic, plus any explicitly persistent identity/relationship entries.
-4. Natural-expression guidance.
-
-World Book enriches the role; it does not justify changing established closeness, calling style, emotional inclination, or the subject the user is currently discussing. Use one or two relevant concrete details naturally when helpful. Never dump multiple setting facts or force an unrelated World Book detail into a reply.`;
-
-const removeLegacyWorldBookPriorityDirective = (instructions: string[]): string[] =>
-  instructions.filter((instruction) => !instruction.includes("Absolute Supreme Priority"));
-
-const assembleChatInstructions = (
-  instructions: readonly string[],
-  knownBlocks: readonly PromptBlock[],
-) => {
-  const knownByContent = new Map(knownBlocks.map((block) => [block.content.trim(), block]));
-  const blocks = instructions.map((content, index): PromptBlock => {
-    const known = knownByContent.get(content.trim());
-    return known || {
-      id: `chat-instruction-${index}`,
-      kind: "context" as PromptBlockKind,
-      content,
-    };
-  });
-  return assemblePromptBlocks(blocks);
-};
-
 type ChatStylePreset = "default" | "floating-cute" | "liquid-glass";
 
 /**
@@ -1127,120 +1076,6 @@ const SettingsSwitch = ({
     />
   </button>
 );
-
-// Parse recent messages to detect if an agreed proactive contact time exists
-const getScheduledContactTime = (charMsgs: any[], settingsName: string) => {
-  if (!charMsgs || charMsgs.length === 0) return null;
-
-  // Scan recent messages from the end (last 15 messages)
-  const recentMsgs = charMsgs.slice(-15);
-  for (let i = recentMsgs.length - 1; i >= 0; i--) {
-    const msg = recentMsgs[i];
-    if (msg.isOffline || msg.isNarration) continue;
-
-    const content = msg.content || "";
-    
-    // Check various patterns
-    const generalSoonRegex = /(等会|待会|等一下|稍后|稍後|等会儿|待會|一会儿|一會儿|待会儿|待會兒)/;
-    const halfHourRegex = /(半小时|半個小时|半个小时|半h|半小時)/;
-    const oneHourRegex = /(一小时|一个小时|一個小時|一小時)/;
-    const twoHoursRegex = /(两小时|两个小时|兩個小時|兩小時)/;
-    
-    // Check for "20分后", "20分後", "20分钟后" etc.
-    const numericRegex = /(\d+(?:\.\d+)?)\s*(分钟|分|小时|h|m|mins?|hours?|分|後|后|小時)(后|後|之后|之內|内)?/i;
-
-    let minutes = 0;
-    let found = false;
-    let matchedText = "";
-
-    if (numericRegex.test(content)) {
-      const match = content.match(numericRegex);
-      if (match) {
-        const num = parseFloat(match[1]);
-        const unit = match[2].toLowerCase();
-        
-        // Ensure there is some indicator that it's a future relative time
-        const hasFutureIndicator = content.includes("后") || content.includes("後") || content.includes("内") || content.includes("內") || /后|後|内|內|after|in/i.test(match[3] || "") || /联系|联络|聊|见|说|来|找/i.test(content);
-        
-        if (hasFutureIndicator) {
-          if (unit.includes("小时") || unit.includes("小时") || unit.includes("hour") || unit === "h") {
-            minutes = num * 60;
-          } else {
-            minutes = num;
-          }
-          found = true;
-          matchedText = match[0];
-        }
-      }
-    }
-
-    if (!found && halfHourRegex.test(content)) {
-      minutes = 30;
-      found = true;
-      matchedText = content.match(halfHourRegex)?.[0] || "";
-    } else if (!found && oneHourRegex.test(content)) {
-      minutes = 60;
-      found = true;
-      matchedText = content.match(oneHourRegex)?.[0] || "";
-    } else if (!found && twoHoursRegex.test(content)) {
-      minutes = 120;
-      found = true;
-      matchedText = content.match(twoHoursRegex)?.[0] || "";
-    } else if (!found && generalSoonRegex.test(content)) {
-      minutes = 15;
-      found = true;
-      matchedText = content.match(generalSoonRegex)?.[0] || "";
-    }
-
-    if (found && minutes > 0) {
-      return {
-        msgId: msg.id,
-        timestamp: msg.timestamp,
-        triggerTime: msg.timestamp + minutes * 60 * 1000,
-        durationMinutes: minutes,
-        text: matchedText,
-      };
-    }
-  }
-  return null;
-};
-
-const formatWeChatTimestamp = (timestamp: number): string => {
-  const now = new Date();
-  const date = new Date(timestamp);
-  
-  const currentYear = now.getFullYear();
-  const msgYear = date.getFullYear();
-  
-  // Hours and minutes formatted with leading zero
-  const hours = date.getHours().toString().padStart(2, '0');
-  const minutes = date.getMinutes().toString().padStart(2, '0');
-  const timeStr = `${hours}:${minutes}`;
-  
-  // Calculate midnights for today and yesterday
-  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const yesterdayMidnight = todayMidnight - 24 * 60 * 60 * 1000;
-  const sevenDaysAgoMidnight = todayMidnight - 7 * 24 * 60 * 60 * 1000;
-  
-  if (timestamp >= todayMidnight) {
-    // Today: only HH:mm
-    return timeStr;
-  } else if (timestamp >= yesterdayMidnight) {
-    // Yesterday: 昨天 HH:mm
-    return `昨天 ${timeStr}`;
-  } else if (timestamp >= sevenDaysAgoMidnight) {
-    // 1~7 days: 星期X HH:mm
-    const days = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-    const dayOfWeek = days[date.getDay()];
-    return `${dayOfWeek} ${timeStr}`;
-  } else if (msgYear === currentYear) {
-    // Same year, more than 7 days: X月X日 HH:mm
-    return `${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`;
-  } else {
-    // Cross year: YYYY年X月X日 HH:mm
-    return `${msgYear}年${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`;
-  }
-};
 
 const RenderAvatar = ({ 
   src, 
@@ -1402,8 +1237,8 @@ const buildPublicMomentContext = (input: {
 });
 
 /**
- * Resolve WorldBook entries only inside the same direct relationship.  The
- * formatted strings never contain relationship or identity identifiers.
+ * Moments are public-facing. Only explicitly public WorldBook entries may
+ * cross this boundary; private relationship entries remain in chat/offline.
  */
 const buildMomentWorldKnowledge = (
   entries: WorldBookEntry[],
@@ -1411,10 +1246,8 @@ const buildMomentWorldKnowledge = (
   relationship: CharacterRelationship,
   scanText: string,
 ) => buildWorldBookSystemBlocks(entries, character.id, scanText, {
-  scenario: "chat",
+  scenario: "public",
   characterId: relationship.characterId,
-  userIdentityId: relationship.userIdentityId,
-  relationId: relationship.id,
 }).allTriggered.map((entry) => ({ title: entry.title, content: entry.content }));
 
 /** Stores only a short diversity hint; topic history is never a fact source. */
@@ -1510,24 +1343,6 @@ const getMomentComments = (mom: Moment) => {
     .map((comment) => ({ ...comment, content: stripMomentVoiceMarkup(comment.content).trim() }));
 };
 
-const getMomentsContextString = (allMoments: Moment[], activeChar: Character, ownerName: string) => {
-  if (!allMoments || allMoments.length === 0) return "";
-  
-  // Take last 8 moments
-  const sortedMoments = [...allMoments].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
-  
-  const momentLines = sortedMoments.map((m) => {
-    const author = m.characterId === activeChar.id ? "你(发布人)" : (m.characterId ? m.authorName : `${ownerName}(机主)`);
-    const dateStr = new Date(m.timestamp).toLocaleDateString("zh-CN");
-    const likesStr = m.likes.length > 0 ? ` [点赞人: ${m.likes.join(", ")}]` : "";
-    const commentsStr = m.comments.length > 0 ? ` [评论: ${m.comments.map(c => `${c.authorName}: ${c.content}`).join("; ")}]` : "";
-    return `- ${dateStr} | ${author} 发表朋友圈: "${m.content}"${likesStr}${commentsStr}`;
-  });
-
-  return `[🚨 微信朋友圈记忆 (Moments Memory)]
-以下是最近微信朋友圈里的动态，你对这些内容拥有清晰的记忆。你不一定要主动提起它们，但它们是你们共享的日常生活背景。在交流中，你可以根据你们的亲疏关系极度自然地参考这些生活点滴，例如偶尔作为话题，或对对方最近的状态有所了解。
-${momentLines.join("\n")}`;
-};
 
 const getKnownMomentsContextString = (
   allMoments: Moment[],
@@ -1572,47 +1387,6 @@ ${storyLines.join("\n\n")}`;
   */
 };
 
-const getGroupChatMemories = (
-  activeCharacter: Character,
-  characters: Character[],
-  messages: Message[],
-  ownerName: string
-): string => {
-  const groupsWithChar = characters.filter(c => c.isGroupChat && c.memberIds?.includes(activeCharacter.id));
-  if (groupsWithChar.length === 0) return "";
-
-  const groupLines: string[] = [];
-  groupsWithChar.forEach(group => {
-    // Get last 15 messages of this group chat to provide real-time memory
-    const msgsInGroup = messages.filter(m => m.characterId === group.id).sort((a, b) => a.timestamp - b.timestamp).slice(-15);
-    if (msgsInGroup.length > 0) {
-      const formattedGroupMsgs = msgsInGroup.map(m => {
-        let senderLabel = "";
-        if (m.sender === "user") {
-          senderLabel = `${ownerName} (机主)`;
-        } else {
-          const charObj = characters.find(c => c.id === m.senderId);
-          senderLabel = charObj ? (charObj.remark || charObj.name) : (m.senderId || "未知成员");
-        }
-        const timeStr = new Date(m.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-        return `  [${timeStr}] ${senderLabel}: ${m.content}`;
-      }).join("\n");
-      groupLines.push(`- 在群聊【${group.name}】中的最近聊天记录：\n${formattedGroupMsgs}`);
-    }
-  });
-
-  if (groupLines.length === 0) return "";
-
-  return `[🚨 实时微信群聊共同记忆与近期话题 (Real-time Group Chat Shared Memory)]
-你和机主 ${ownerName} 共同身处以下微信群聊中。你对这些群聊里最近发生的所有对话、吐槽、爆料和八卦有着【100%实时的清晰记忆】。
-由于你和机主刚刚或最近在这些群里有过互动，现在在单聊中，你：
-1. **有几率会主动聊到刚才群聊的内容**：如果在群聊中刚刚讨论了某个有趣/尴尬/争议性的话题，你可以非常自然地在私聊中以此为话题切入点，单独向机主吐槽、发表情包、追问、或者表达你刚才在群里不方便说的真实想法。
-2. **支持话题承接**：如果机主主动在单聊里向你提起群聊的事，你必须立刻完美承接，了解前因后果，并给出符合人设的吐槽或回应。
-3. **展现真实熟人关系**：无需每次单聊都强行提起群聊，但若群聊刚活跃过或你们刚在群里聊完，有较大概率（例如 30%-50%）你可以以此开启私聊。
-
-以下是群聊的最近记录：
-${groupLines.join("\n\n")}`;
-};
 
 const getPostIntervalMs = (character: Character) => {
   const bioAndPersonality = ((character.personality || "") + " " + (character.backstory || "")).toLowerCase();
@@ -1884,12 +1658,6 @@ export default function AppChat({
 
   // Intercepting Wrapper for onSendMessage
   const onSendMessage = (msg: Message) => {
-    let userSettings: any = {};
-    try {
-      const saved = localStorage.getItem("phone_settings");
-      if (saved) userSettings = JSON.parse(saved);
-    } catch (e) {}
-
     let content = msg.content || "";
     // Normalize [语音: "text" (X秒)] or [语音: text] to standard [语音]|secs|text
     if (content.startsWith("[语音") && !content.startsWith("[语音]|")) {
@@ -1974,7 +1742,6 @@ export default function AppChat({
   const triggerCreateStickerGroupRef = useRef<(() => void) | null>(null);
   const [activeStickerGroupIndex, setActiveStickerGroupIndex] = useState<number>(0);
   const [showStickerSelector, setShowStickerSelector] = useState<boolean>(false);
-  const [isManagingStickers, setIsManagingStickers] = useState<boolean>(false);
 
   // Load sticker groups on mount
   useEffect(() => {
@@ -2090,7 +1857,10 @@ export default function AppChat({
   const activeRelationship = activeChatRelationId ? relationships.find((relation) => relation.id === activeChatRelationId) : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
   const characterCustomChatCss = activeCharacter?.customChatCSS || activeCharacter?.customCss || "";
-  const userCustomChatCss = [settings.chatGlobalCSS, characterCustomChatCss]
+  // bubbleCss is the legacy preset field. Keep it as a scoped compatibility
+  // source so existing user presets still work without leaking styles outside
+  // the chat screen.
+  const userCustomChatCss = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss]
     .filter((css): css is string => Boolean(css && css.trim()))
     .join("\n");
   const hasUserCustomChatCss = userCustomChatCss.trim().length > 0;
@@ -2351,6 +2121,7 @@ export default function AppChat({
         groupId,
         settings,
         offlineContinuityContext,
+        worldBookEntries,
       });
       if (!generated) {
         setInnerVoiceError("心声生成结果无效，请稍后重试。");
@@ -2390,14 +2161,12 @@ export default function AppChat({
     relation.userIdentityId === activeIdentityId
     && availableCharacterIds.has(resolveCanonicalCharacterId(relation.characterId, characters)),
   );
-  const friendIds = activeRelationships.map((relation) => relation.id);
   const relationForCharacter = (characterId: string) => findRelationshipForCanonicalCharacter(
     relationships,
     activeIdentityId,
     characterId,
     characters,
   );
-  const isFriendCharacter = (character: Character) => !character.isGroupChat && !character.isContactInstance && Boolean(relationForCharacter(character.id));
   const friends = activeRelationships.map((relation) =>
     characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters)),
   ).filter((character): character is Character => Boolean(character));
@@ -2490,7 +2259,6 @@ export default function AppChat({
         event.privateActor?.kind !== "relationship" || event.privateActor.relationId !== relationId),
     }));
     commitForumMutation(forumMutation);
-    cleanupForumDmForRelations([relationId]);
     offlineStories
       .filter((story) => story.relationId === relationId)
       .forEach((story) => onDeleteOfflineStory?.(story.id));
@@ -2682,7 +2450,7 @@ export default function AppChat({
   const [isTyping, setIsTyping] = useState(false);
   const [typingCharacterOverride, setTypingCharacterOverride] = useState<Character | null>(null);
   const [manualLocationText, setManualLocationText] = useState("");
-  const [emptyGreetingCheckedCharIds, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
+  const [, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
   const [sentGreetings, setSentGreetings] = useState<string[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
@@ -2738,6 +2506,20 @@ export default function AppChat({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: "continue",
+      worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
+        .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId)),
+      knowledgeSnapshot: activeRelationship ? Array.from(new Set([
+        ...loadKnowledgeClaims().value
+          .filter((claim) => claim.relationId === activeRelationship.id
+            && claim.characterId === activeRelationship.characterId
+            && claim.userIdentityId === activeRelationship.userIdentityId
+            && claim.status === "active"
+            && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
+          .map((claim) => claim.statement),
+        ...memories
+          .filter((memory) => memory.relationId === activeRelationship.id && memory.isManual === true)
+          .map((memory) => memory.content),
+      ])) : [],
       sourceChatId: activeChatCharId,
       sourceChatMsgCount: importedMessages.length,
       importedContext,
@@ -2877,12 +2659,11 @@ export default function AppChat({
   // Rich Attachment states
   const [showAttachPanel, setShowAttachPanel] = useState(false);
   const [activeAttachModal, setActiveAttachModal] = useState<"redpacket" | "music" | "location" | "file" | "calling" | "voice" | null>(null);
-  const [voiceDuration, setVoiceDuration] = useState("5");
   const [voiceText, setVoiceText] = useState("");
   const [callingStatus, setCallingStatus] = useState<"ringing" | "connected" | "ended">("ringing");
   const [callingDuration, setCallingDuration] = useState(0);
   const [isIncomingCall, setIsIncomingCall] = useState(false);
-  const [callStartTime, setCallStartTime] = useState<number>(0);
+  const [, setCallStartTime] = useState<number>(0);
   const [callingInputText, setCallingInputText] = useState("");
   const [callTranscript, setCallTranscript] = useState<CallTranscriptItem[]>([]);
   const [voiceCallRelationId, setVoiceCallRelationId] = useState<string | null>(null);
@@ -3018,18 +2799,17 @@ export default function AppChat({
     }
   }, [messages, redPacketStatuses]);
 
-  const [openTransferDetail, setOpenTransferDetail] = useState<{ amount: string; memo: string; isConfirmed: boolean } | null>(null);
-  const [showTransferDetailModal, setShowTransferDetailModal] = useState<boolean>(false);
-  const [openVoiceId, setOpenVoiceId] = useState<string | null>(null);
+  const [, setOpenTransferDetail] = useState<{ amount: string; memo: string; isConfirmed: boolean } | null>(null);
+  const [, setShowTransferDetailModal] = useState<boolean>(false);
+  const [, setOpenVoiceId] = useState<string | null>(null);
   const [voiceTimer, setVoiceTimer] = useState<any>(null);
 
   // Memory Compression and Proactive Chat states
   const [isCompressingMemory, setIsCompressingMemory] = useState(false);
-  const [isTriggeringProactive, setIsTriggeringProactive] = useState(false);
   const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
   const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
   const [showDisbandGroupModal, setShowDisbandGroupModal] = useState(false);
-  const [editingMemoryText, setEditingMemoryText] = useState("");
+  const [, setEditingMemoryText] = useState("");
 
   // New features: Notes attachment, Quoting, Bubble Menu, Note Reader, OOC Annotation
   const [memoNotes, setMemoNotes] = useState<any[]>([]);
@@ -3492,7 +3272,8 @@ export default function AppChat({
         scenario: "group",
         characterId: activeChatCharId || undefined,
       });
-      let groupWbText = groupWbBlocks.formattedAll ? `\n\n【🚨 微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
+      const includedWorldBookEntryIds = new Set(groupWbBlocks.allTriggered.map((entry) => entry.id));
+      let groupWbText = groupWbBlocks.formattedAll ? `\n\n【微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
       if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
         groupWbText += `\n【当前现实时间】\n${formatLocalTimeContext()}\n`;
       }
@@ -3504,8 +3285,11 @@ export default function AppChat({
           scenario: "group",
           characterId: member.id,
         });
-        const memberWbText = memberWbBlocks.formattedAll 
-          ? `\n- 【重要】该角色专属世界书背景/日程/时间线设定:\n${memberWbBlocks.formattedAll}` 
+        const memberOnlyWorldBook = memberWbBlocks.allTriggered
+          .filter((entry) => !includedWorldBookEntryIds.has(entry.id));
+        memberOnlyWorldBook.forEach((entry) => includedWorldBookEntryIds.add(entry.id));
+        const memberWbText = memberOnlyWorldBook.length
+          ? `\n- 该角色专属世界书背景/日程/时间线设定:\n${memberOnlyWorldBook.map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")}`
           : "";
         return `[群聊成员 ${idx + 1}: ${member.name}]
 - 角色人设/性格: ${member.personality}
@@ -3522,7 +3306,7 @@ ${membersDefText}
 
 【群聊互动核心原则】：
 0. [CURRENT-SCENE CONTINUITY — CRITICAL]: Messages in the recent group history establish the current scene facts. Do not silently replace a member's just-stated activity, location, physical condition, possession, or relationship fact with a contradictory one. If a member changes from one activity to another, explicitly establish a believable transition and time passage first; otherwise continue the existing situation or avoid inventing a new concrete activity.
-1. 【人设绝对统一与高恢复度】：每个群成员发言必须 100% 贴合其人设、性格、背景故事以及各自的专属世界书设定/日常日程/时间线。对于那些设置了特殊语气词、口癖（如每句话都加“喵”等）的角色，他们在群里发言时也必须【绝对强制、无一例外地完全忠实执行该句式/口癖设定】。
+1. 【角色表达顺序】：先按每个成员自己的核心人设、明确关系与说话习惯决定是否发言和如何表达，再结合最新消息与当前场景，最后使用本轮实际命中的世界书补充背景。世界书不得把一个成员的口癖、称呼或关系转移给另一成员；明确规定为稳定口癖的内容应持续遵守。
 2. 🚨【回复概率与不回复机制】：并非每个成员在每次互动时都必须发言！在真实的微信群聊中，人物是否回复信息要参考对方人设、自己的世界书日常时间线和日程、当前话题的兴趣度以及与发言人的关系等。
    - 例如：高冷、傲娇、忙碌、或正在执行专属世界书日程时间线上其他任务的角色（比如世界书设定某个角色此时应该在睡觉、在上班、或生病等），应该保持沉默，不返回任何回复，或者仅在极度契合的话题下简单插一句；而热情、空闲、爱凑热闹、或与发言人关系特别亲密的角色，则应该高频且积极地在群里接话。
    - 在生成的单次互动中，你应该让 1 到 3 位在此时、该话题、该状态下最契合、最有可能说话的成员进行回复（视话题和人设状态而定）。如果大家都觉得没有需要发言的内容，甚至可以只有 0~1 个人回复。不要强求每个人都说话！
@@ -3549,8 +3333,6 @@ ${membersDefText}
 微信回复内容二...
 
 确保 [SENDER_NAME: xxx] 中的“xxx”必须与你在群成员设定中被赋予的 name 完全一致！`;
-
-      const latestMsgText = userMsg ? userMsg.content : (slicedMsgs.length > 0 ? slicedMsgs[slicedMsgs.length - 1].content : "大家在吗？");
 
       const promptMessage = userMsg 
         ? `当前群聊最新历史消息记录：
@@ -3934,7 +3716,9 @@ ${turnSettings.disableBracketActions
       const chatPromptContext = cognitiveContext
         ? buildChatPromptContext(cognitiveContext, {
           maxFacts: topK,
-          relevantMemoryIds: relevantMemories.map((memory) => memory.id),
+          // Truth-derived compatibility mirrors remain visible in the Memory
+          // UI, but must not become a third prompt representation of one fact.
+          relevantMemoryIds: visibleLegacyMemories.map((memory) => memory.id),
           hasConfirmedClaim: Boolean(truthRetrieval?.projection.confirmedFacts.length),
           hasDerivedSummary: Boolean(truthRetrieval?.summaries.length),
         })
@@ -4014,7 +3798,7 @@ ${turnSettings.disableBracketActions
       }
 
       if (isCrossDayNewSession) {
-        assembledInstructions.push(`[NEW-DAY CONVERSATION BOUNDARY — HIGHEST PRIORITY]
+        assembledInstructions.push(`[NEW-DAY CONVERSATION BOUNDARY]
 The user's newest message starts a fresh conversation on a different calendar day. Yesterday's unfinished exchange is closed historical context, not the topic currently being continued.
 Answer only the user's newest message as today's opening. Do not resume, answer, or elaborate on yesterday's last topic unless the user explicitly mentions it again.`);
       }
@@ -4180,7 +3964,7 @@ ${sceneAnchorTranscript || "(No prior scene facts.)"}`);
 你正在和用户进行实时语音电话。只输出适合直接说出口的纯文字台词。
 禁止发送表情包、贴图、图片、红包、转账、文件、位置或任何方括号附件标记；不要输出“[表情]”“[图片]”等描述。`);
         assembledInstructions.push(`[VOICE CALL MEMORY ROUTING]
-1. Highest priority: the current call transcript and the short online-chat lead-in. Answer the user's newest sentence and continue the topic already in progress.
+1. Routing order: answer the user's newest sentence using the current call transcript and short online-chat lead-in before consulting older context.
 2. Do not repeat, paraphrase, or restart an answer already spoken during this call. Compare against your recent call lines and add only new information or a natural follow-up.
 3. Long-term archived memory is ${callTopicShiftDetected ? "available because the user shifted to a different topic; use only directly relevant facts" : "not loaded for this turn; stay with short-term live context"}.
 4. Never force an old memory into the conversation merely because it exists. If the user's meaning is unclear, ask a brief natural question instead of replaying an earlier answer.`);
@@ -4200,26 +3984,7 @@ ${stickerListStr}
 3. 不要为了显示功能或凑热闹而发送表情包；不适合时只发送普通文字即可。`);
       }
 
-      // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
-      assembledInstructions.push(`[🚨🚨🚨 极其重要：世界书设定绝对最高优先 🚨🚨🚨]
-1. 【最高绝对优先权（Absolute Supreme Priority）】：
-   以上提供的“世界书背景设定（World Book Background）”（即形如“【设定 - xxx】”的词条内容）拥有最高优先级。它在所有扮演、叙事和风格规则中具有【至高无上、超越一切】的地位。世界书词条中的设定必须被100%毫无遗漏、绝对忠实地遵循。
-2. 【冲突解决准则（Conflict Resolution）】：
-   如果“活人感提示词（LIVING_HUMAN_PROMPT）”（如身份锚定、表达从简、微信消息连续发送/断句、情绪化、跳脱思维等）的风格要求与“世界书背景设定”中的设定、世界观、历史事实、事件逻辑或角色特定语言习惯产生任何冲突或不一致，你必须**立即无条件完全无视/抛弃活人感提示词中的相应格式或语气限制**，并无条件以世界书设定的真实客观逻辑为唯一的最高扮演和叙事准则。
-3. 【设定遵循深度（Strict Conformity）】：
-   绝对不容许为了迎合“微信简短聊天”或“不拘小节”等风格，而对世界书背景词条中提及的任何专业知识、身份禁忌、专属回忆、世界设定或情感偏好进行淡化、遗漏、敷衍或歪曲解释。世界书的内容坚不可摧，请将其深度、丰满地融入你的发言。
-4. 【句首前缀、句尾后缀与口癖绝对强制】：
-   如果世界书设定了任何句首前缀字（例如：“每句话开头都必须加一个“喵”字”）、句尾后缀字（例如：“每句话结束最后都必须带一个“喵”字”）、特殊语气词、标点或特征，你必须在【你发出的每一句回复、每一个被拆分的消息气泡、甚至是单个汉字/语气助词的最前面或最后面】都绝对强制、无一例外、100%忠实地执行该设定！内置活人感提示词中的任何“句式复用规避（句型模板限制）”或“消息拆分规则”在此设定面前均自动且彻底失效。
-5. 【引号内包裹法则（Inside Quotes Rule）】：
-   如果你的回复包含双引号（如 “xxx” ）或直角引号（如 「xxx」），你必须将世界书要求的所有口癖、前置/后置词（如“喵”）放入引号【内部】（即写成 “喵xxx喵” 而绝不能是 喵“xxx” ），确保作为台词整体输出，绝对不可被丢弃。
-6. 【历史言行隔离与实时刷新法则（Chat History Isolation & Real-Time Sync）】：
-   如果你在之前的聊天历史（Chat History）中因为当时的世界书设定而使用了某种前缀/后缀/口癖（例如之前每句话都有“喵”），但只要该设定在当前的最新的世界书词条中【已被修改、删除、停用（isActive 为 false）或根本不存在】，你必须【立即彻底抛弃并停止】使用该旧前缀/后缀/口癖！不要被历史消息中的言行所同化，不要产生路径依赖或行为惯性！你必须立刻与最新状态无缝同步，表现得如同该设定从未存在过一样。修改、删除或停用立即无缝实时刷新生效！`);
-
-      // Older builds appended an absolute World Book override here. Exclude it
-      // from this request and use the single, non-conflicting priority policy.
-      assembledInstructions = removeLegacyWorldBookPriorityDirective(assembledInstructions);
-      assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
-      assembledInstructions.push(CHARACTER_EXPRESSION_PRIORITY);
+      if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       const promptAssembly = assembleChatInstructions(assembledInstructions, [
         { ...characterProjection.description, content: characterDescriptionText },
         characterProjection.personality,
@@ -4690,68 +4455,6 @@ ${stickerListStr}
     onClearMessages?.(characterId, undefined, relationId);
   };
 
-  const sendPartnerRedPacket = async (amount: string, greeting: string) => {
-    if (!activeChatCharId || !activeCharacter) return;
-    const capturedCharacter = activeCharacter;
-    const capturedDirectScope = activeDirectScope;
-    const createCapturedCharacterMessage = (id: string, content: string, timestamp: number): Message =>
-      capturedDirectScope
-        ? createCharacterTextMessage({ id, context: toDirectChatRuntimeContext(capturedDirectScope), content, timestamp })
-        : createGroupCharacterMessage({ id, characterId: capturedCharacter.id, content, timestamp });
-    
-    // 1. Send the red packet message as "character"
-    const charRedPacketMsg = createCapturedCharacterMessage(`char-rp-${Date.now()}`, `[红包]|${amount}|${greeting}`, Date.now());
-    onSendMessageRaw(charRedPacketMsg);
-    if (capturedDirectScope) {
-      const claim = createDeterministicArtifactClaim({ message: charRedPacketMsg, scope: capturedDirectScope });
-      if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture partner red-packet knowledge claim.");
-    }
-
-    // 2. Trigger a conversational dialogue follow-up from the character in-character
-    setIsTyping(true);
-    try {
-      const history = messages
-        .filter((message) => !message.isOffline && (capturedDirectScope
-          ? message.relationId === capturedDirectScope.relationId
-          : message.characterId === capturedCharacter.id && capturedCharacter.isGroupChat))
-        .slice(-15)
-        .map((m) => ({
-          role: m.sender === "user" ? "user" as const : "model" as const,
-          parts: [{ text: m.content }],
-        }));
-
-      const assembledInstructions = [];
-      assembledInstructions.push(`You are roleplaying as "${capturedCharacter.name}". You just sent the user a WeChat red packet with the greeting "${greeting}" for amount ¥${amount}. Now, output a single very brief, sweet, realistic chat message following the red packet (e.g., telling them to buy themselves a treat or expressing your affection).
-Keep it under 20 words, extremely realistic, natural, and WeChat-style, with NO action/ambient descriptions in brackets.`);
-      
-      const systemInstruction = assembledInstructions.join("\n\n");
-      const data = await apiChat({
-        message: `[System action: You just sent a red packet for ¥${amount} with greeting "${greeting}". Respond with a short, sweet conversational message in-character.]`,
-        history,
-        systemInstruction,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature,
-        streamCompatible: settings.streamCompatible,
-      });
-
-      if (data && data.text) {
-        const relationshipStillExists = !capturedDirectScope || relationships.some((relationship) =>
-          relationship.id === capturedDirectScope.relationId
-          && relationship.userIdentityId === capturedDirectScope.userIdentityId
-          && relationship.characterId === capturedDirectScope.characterId);
-        if (!relationshipStillExists) return;
-        const cleanedText = cleanOnlineMessage(data.text, resolveChatTurnSettings(latestActiveCharacterRef.current || capturedCharacter).disableBracketActions);
-        const textMsg = createCapturedCharacterMessage(`char-rp-text-${Date.now()}`, cleanedText || data.text, Date.now() + 100);
-        onSendMessageRaw(textMsg);
-      }
-    } catch (e) {
-      console.error("Partner red packet message generation failed", e);
-    } finally {
-      setIsTyping(false);
-    }
-  };
 
   const longPressTimerRef = useRef<any>(null);
 
@@ -5288,25 +4991,7 @@ ${stickerListStr}
 3. 不要为了显示功能或凑热闹而发送表情包；不适合时只发送普通文字即可。`);
       }
 
-      // 9. Ultimate World Book priority override rule (Ensures World Book entries strictly override living human/roleplay instructions)
-      assembledInstructions.push(`[🚨🚨🚨 极其重要：世界书设定绝对最高优先 🚨🚨🚨]
-1. 【最高绝对优先权（Absolute Supreme Priority）】：
-   以上提供的“世界书背景设定（World Book Background）”（即形如“【设定 - xxx】”的词条内容）拥有最高优先级。它在所有扮演、叙事和风格规则中具有【至高无上、超越一切】的地位。世界书词条中的设定必须被100%毫无遗漏、绝对忠实地遵循。
-2. 【冲突解决准则（Conflict Resolution）】：
-   如果“活人感提示词（LIVING_HUMAN_PROMPT）”（如身份锚定、表达从简、微信消息连续发送/断句、情绪化、跳脱思维等）的风格要求与“世界书背景设定”中的设定、世界观、历史事件、事件逻辑或角色特定语言习惯产生任何冲突或不一致，你必须**立即无条件完全无视/抛弃活人感提示词中的相应格式或语气限制**，并无条件以世界书设定的真实客观逻辑为唯一的最高扮演和叙事准则。
-3. 【设定遵循深度（Strict Conformity）】：
-   绝对不容许为了迎合“微信简短聊天”或“不拘小节”等风格，而对世界书背景词条中提及的任何专业知识、身份禁忌、专属回忆、世界设定 or 情感偏好进行淡化、遗漏、敷衍或歪曲解释。世界书的内容坚不可摧，请将其深度、丰满地融入你的发言。
-4. 【句首前缀、句尾后缀与口癖绝对强制】：
-   如果世界书设定了任何句首前缀字（例如：“每句话开头都必须加一个“喵”字”）、句尾后缀字（例如：“每句话结束最后都必须带一个“喵”字”）、特殊语气词、标点或特征，你必须在【你发出的每一句回复、每一个被拆分的消息气泡、甚至是单个汉字/语气助词的最前面或最后面】都绝对强制、无一例外、100%忠实地执行该设定！内置活人感提示词中的任何“句式复用规避（句型模板限制）”或“消息拆分规则”在此设定面前均自动且彻底失效。
-5. 【引号内包裹法则（Inside Quotes Rule）】：
-   如果你的回复包含双引号（如 “xxx” ）或直角引号（如 「xxx」），你必须将世界书要求的所有口癖、前置/后置词（如“喵”）放入引号【内部】（即写成 “喵xxx喵” 而绝不能是 喵“xxx” ），确保作为台词整体输出，绝对不可被丢弃。
-6. 【历史言行隔离与实时刷新法则（Chat History Isolation & Real-Time Sync）】：
-   如果你在之前的聊天历史（Chat History）中因为当时的世界书设定而使用了某种前缀/后缀/口癖（例如之前每句话都有“喵”），但只要该设定在当前的最新的世界书词条中【已被修改、删除、停用（isActive 为 false）或根本不存在】，你必须【立即彻底抛弃并停止】使用该旧前缀/后缀/口癖！不要被历史消息中的言行所同化，不要产生路径依赖或行为惯性！你必须立刻与最新状态无缝同步，表现得如同该设定从未存在过一样。修改、删除或停用立即无缝实时刷新生效！`);
-
-      // Keep regeneration on the same role/relationship-first policy as a new reply.
-      assembledInstructions = removeLegacyWorldBookPriorityDirective(assembledInstructions);
-      assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
-      assembledInstructions.push(CHARACTER_EXPRESSION_PRIORITY);
+      if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       const promptAssembly = assembleChatInstructions(assembledInstructions, [
         { ...characterProjection.description, content: characterDescriptionText },
         characterProjection.personality,
@@ -5572,10 +5257,13 @@ ${stickerListStr}
           ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
           : formatExtractedMemorySummary(headerLabel, items),
       }, apiExtractMemories);
-      if (result.apiError) console.error("Extract memory API error:", result.apiError);
+      if (result.apiError) {
+        console.error("Extract memory API error:", result.apiError);
+        return -1;
+      }
       if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
         console.error("Knowledge claims could not be persisted; compatibility Memory was not updated.");
-        return 0;
+        return -1;
       }
       const extractedSummary = createConversationSummaryRecord({
         scope: extractionScope,
@@ -5591,146 +5279,19 @@ ${stickerListStr}
       }
       if (result.extractedMemories.length > 0) {
         onSaveMemories(MemoryService.mergeMemories(memories || [], result.extractedMemories));
-        return result.extractedMemories.length;
       }
-      return 0;
+      // Advance automatic-summary progress when Truth accepted claims even if
+      // no display-only compatibility Memory was created.
+      return Math.max(result.extractedMemories.length, result.acceptedClaims.length);
     } catch (err: any) {
       console.error("Memory extraction error:", err);
     } finally {
       setIsCompressingMemory(false);
     }
-    return 0;
+    return -1;
   };
 
   // Manual Trigger Proactive Message simulation
-  const handleTriggerProactiveMessage = async () => {
-    if (!activeChatCharId || !activeRelationship || !activeCharacter || activeCharacter.isGroupChat || proactiveMessageInFlightRef.current.has(activeRelationship.id)) return;
-
-    const relationId = activeRelationship.id;
-    proactiveMessageInFlightRef.current.add(relationId);
-    setIsTriggeringProactive(true);
-    setIsTyping(true);
-    try {
-      let proactivePrompt = `Instructions:
-1. Speak in Chinese. Maintain character role-play thoroughly.
-2. Use a natural WeChat style. Reply length, warmth, initiative, and emotional intensity must follow the character profile and relationship.
-3. This is an initiator message. Let the character decide whether to share, ask, tease, express affection, stay restrained, or use another natural opening; do not default to caretaking or a generic check-in.
-4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
-
-      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions) {
-        proactivePrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
-      }
-
-      const charMsgs = messages.filter((message) => message.relationId === relationId);
-      const recentConversation = analyzeRecentConversation(charMsgs, activeChatCharId);
-      const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
-      const scanText = charMsgs.slice(-10).map(m => m.content).join("\n");
-      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId, scanText, {
-        scenario: "chat",
-        characterId: activeRelationship.characterId,
-        userIdentityId: activeRelationship.userIdentityId,
-        relationId: activeRelationship.id,
-      });
-      const wbPrompt = wbBlocks.formattedAll;
-      const timeContext = resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness
-        ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
-        : "";
-      const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id });
-      const truthPrompt = formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt({
-        scope: {
-          relationId: activeRelationship.id,
-          characterId: activeRelationship.characterId,
-          userIdentityId: activeRelationship.userIdentityId,
-          conversationId: activeRelationship.conversationId,
-        },
-        queryText: recentConversation.recentMessages.slice(-2).map((message) => message.content).join(" "),
-        limit: recallSettings?.recallCount || 5,
-        claims: loadKnowledgeClaims().value,
-        summaries: loadConversationSummaries().value,
-        corrections: loadBehaviorCorrections().value,
-      }));
-      const cognitiveContext = buildProactiveCognitiveContext({
-        character: activeCharacter,
-        relationship: activeRelationship,
-        memories: memories || [],
-        events: listCharacterEventsByRelation(relationId),
-        occurredAt: Date.now(),
-        routine: buildCharacterRoutine(activeCharacter.routine),
-        topicHistory: loadProactiveTopicRecords().value,
-      });
-      const proactiveCharacterProjection = projectCharacterPrompt(activeCharacter, activeRelationship.relationship);
-
-      const systemInstruction = `${LIVING_HUMAN_PROMPT}
-
----
-
-You are playing the role of "${activeCharacter.name}" in a WeChat chat.
-${proactiveCharacterProjection.description.content}
-
-${proactiveCharacterProjection.personality.content}
-
-${proactiveCharacterProjection.relationship?.content || ""}
-
-User Profile (interacting with you):
-- Nickname: ${settings.name}
-- Personality/Bio: ${settings.bio}
-
-${wbPrompt ? `[相关世界书背景设定]\n${wbPrompt}\n\n${WORLD_BOOK_CONTEXT_PRIORITY}\n\n` : ""}${timeContext}${knowledgeBoundary}${truthPrompt}\n\n${conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
-It has been 3 hours since the last conversation. Start a message in the way this character would naturally initiate contact with this user. Do not impose concern, warmth, brevity, or a generic check-in.
-
-${proactivePrompt}
-
-${CHARACTER_EXPRESSION_PRIORITY}`;
-
-      const composedPrompt = PromptComposer.compose({
-        scenario: "proactive-message",
-        message: "(用户失联3小时，你主动给其发送了一条信息)",
-        history: recentConversation.recentMessages.map((message) => ({
-          role: message.sender === "user" ? "user" : "model",
-          text: message.content,
-        })),
-        systemInstruction,
-      });
-      const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
-      const proactiveResult = await generateProactiveReplyCandidates({
-        requestAi: apiChat,
-        request: { ...composedPrompt, apiKey: settings.apiKey, model: settings.selectedModel || "gemini-3.5-flash", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible },
-        characterId: activeChatCharId,
-        disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
-        keepPeriods,
-        createId: (idx) => `${Date.now()}-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-        currentTime: (idx) => Date.now() + idx,
-        cognitiveContext,
-      });
-
-      if (proactiveResult.data && proactiveResult.data.text) {
-        proactiveResult.messages.forEach((message) => onSendMessage({
-          ...message,
-          relationId,
-          conversationId: activeRelationship.conversationId || getConversationId(relationId),
-        }));
-        const topic = compactTopicHint(proactiveResult.messages.map((message) => message.content));
-        const topicRecord = topic
-          ? createProactiveTopicRecord({
-            topic,
-            category: "daily_share",
-            createdAt: Date.now(),
-            characterId: activeCharacter.id,
-            relationId: activeRelationship.id,
-          })
-          : undefined;
-        if (topicRecord) appendProactiveTopicRecord(topicRecord);
-      } else {
-        alert(`主动联络失败: ${(proactiveResult.data as any).error || "智能体无响应"}`);
-      }
-    } catch (err: any) {
-      alert(`主动联络错误: ${err.message || err}`);
-    } finally {
-      proactiveMessageInFlightRef.current.delete(relationId);
-      setIsTriggeringProactive(false);
-      setIsTyping(false);
-    }
-  };
 
   const scheduleNextProactiveMessage = (friend: Character): number => {
     const startTime = friend.proactiveStartTime || "09:00";
@@ -5854,7 +5415,7 @@ ${taskPrompt}
 
 ${instructionsPrompt}
 
-${CHARACTER_EXPRESSION_PRIORITY}`;
+发送前确认：回复内容、称呼、主动程度、话量和情感方向都与上方唯一的人设块一致。`;
 
       const composedPrompt = PromptComposer.compose({
         scenario: "proactive-message",
@@ -5908,19 +5469,43 @@ ${CHARACTER_EXPRESSION_PRIORITY}`;
     }
   };
 
-  /** Build a private-but-scope-locked source snapshot for a character's own Moments. */
+  /**
+   * Build the explicitly authorized relationship projection for Moments.
+   * Confirmed/asserted Truth and user-authored manual memories may be used;
+   * inferred claims and automatic compatibility mirrors may not be published.
+   */
   const buildRelationMomentContext = (
     character: Character,
     relationship: CharacterRelationship,
     occurredAt: number,
-  ) => buildMomentCognitiveContext({
-    character,
-    relationship,
-    memories: memories || [],
-    events: listCharacterEventsByRelation(relationship.id),
-    occurredAt,
-    routine: buildCharacterRoutine(character.routine),
-  });
+  ) => {
+    const confirmedClaimMemories: MemoryItem[] = loadKnowledgeClaims().value
+      .filter((claim) => claim.relationId === relationship.id
+        && claim.characterId === relationship.characterId
+        && claim.userIdentityId === relationship.userIdentityId
+        && claim.status === "active"
+        && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
+      .map((claim) => ({
+        id: `moment-claim:${claim.id}`,
+        characterId: claim.characterId,
+        relationId: claim.relationId,
+        content: claim.statement,
+        timestamp: claim.recordedAt,
+        importance: 5,
+      }));
+    const explicitManualMemories = (memories || []).filter((memory) =>
+      memory.characterId === character.id
+      && memory.relationId === relationship.id
+      && memory.isManual === true);
+    return buildMomentCognitiveContext({
+      character,
+      relationship,
+      memories: [...confirmedClaimMemories, ...explicitManualMemories],
+      events: listCharacterEventsByRelation(relationship.id),
+      occurredAt,
+      routine: buildCharacterRoutine(character.routine),
+    });
+  };
 
   const momentSourceText = (context: CharacterCognitiveContext) => [
     context.persona.personality,
@@ -6411,11 +5996,6 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
     ? allMoments.filter((m) => m.characterId === momentsFilterCharId)
     : allMoments;
 
-  const navigateToMomentsOf = (charId: string) => {
-    setMomentsFilterCharId(charId);
-    setActiveTab("moments");
-    setActiveChatCharId(null);
-  };
 
   // Keep the settings sheet outside #conv-screen so user-authored chat CSS
   // can never reach it, even if a legacy stylesheet or an overly broad
@@ -11763,3 +11343,4 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
     </div>
   );
 }
+import { formatWeChatTimestamp, getScheduledContactTime } from "../features/chat/services/chatTime";

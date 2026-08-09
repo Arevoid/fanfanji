@@ -6,7 +6,6 @@ import type {
   MomentPublicHistoryCandidate,
   MomentPublicVisibility,
 } from "./momentPublicCognitiveTypes";
-import type { CharacterEvent } from "../characterLife/characterEventTypes";
 import {
   evaluatePublicShareAuthorization,
   type PublicShareAuthorization,

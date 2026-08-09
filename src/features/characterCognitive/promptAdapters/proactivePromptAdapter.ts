@@ -119,9 +119,6 @@ export const buildProactivePromptContext = (
 export function formatProactivePromptContext(context: ProactivePromptContextWithRoutine | undefined): string {
   if (!context) return "";
 
-  const relationship = [
-    `- Current relationship: ${context.relationship.stage}`,
-  ];
   const events = context.recentMeaningfulEvents.map((event) => `- ${event.summary}`);
   const relationshipState = context.relationshipState
     ? [`- Current relationship stage: ${context.relationshipState.stage}`, `- Current relationship tone: ${context.relationshipState.tone}`]
@@ -148,12 +145,9 @@ export function formatProactivePromptContext(context: ProactivePromptContextWith
   return [
     "[RELATION-SAFE PROACTIVE COGNITIVE CONTEXT]",
     "Use only the verified information below when directly relevant. Do not infer shared scenes, locations, actions, user experiences, or an unconfirmed relationship change.",
-    "Character focus:",
-    `- Name: ${context.persona.name}`,
-    ...(context.persona.personality ? [`- Personality: ${context.persona.personality}`] : []),
-    ...(context.persona.backstory ? [`- Background: ${context.persona.backstory}`] : []),
-    "Relationship context:",
-    ...relationship,
+    // Persona, backstory and the base relationship are already supplied by
+    // projectCharacterPrompt. This adapter adds request-scoped state only.
+    "Request-scoped relationship context:",
     ...relationshipState,
     ...(events.length > 0 ? ["Verified recent events:", ...events] : []),
     ...(relationshipEvents.length > 0 ? ["Recent safe relationship events:", ...relationshipEvents] : []),

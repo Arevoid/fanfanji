@@ -1,8 +1,9 @@
-import type { Character, InnerVoiceRecord, Message, UserSettings } from "../../../types";
+import type { Character, InnerVoiceRecord, Message, UserSettings, WorldBookEntry } from "../../../types";
 import { apiChat } from "../../../utils/apiHelper";
 import { buildInnerVoicePrompt } from "../../../domain/prompt/innerVoicePrompt";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
+import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 
 export interface GenerateInnerVoiceInput {
   character: Character;
@@ -15,6 +16,7 @@ export interface GenerateInnerVoiceInput {
   context?: ChatRuntimeContext;
   settings: UserSettings;
   offlineContinuityContext?: string;
+  worldBookEntries?: readonly WorldBookEntry[];
 }
 
 function parseInnerVoice(text: string): { content: string; emotionalState: string } | null {
@@ -44,7 +46,7 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
   const response = await apiChat({
     message: "请根据指令生成这一次的角色心声。",
     history: [],
-    systemInstruction: buildInnerVoicePrompt({
+    systemInstruction: [buildInnerVoicePrompt({
       character: input.character,
       relationship: input.relationship,
       relationId,
@@ -52,7 +54,20 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
       recentMessages: input.recentMessages,
       userName: input.settings.name,
       offlineContinuityContext: input.offlineContinuityContext,
-    }),
+    }), input.relationship ? (() => {
+      const worldBook = buildWorldBookSystemBlocks(
+        [...(input.worldBookEntries || [])],
+        input.character.id,
+        input.recentMessages.slice(-10).map((message) => message.content).join("\n"),
+        {
+          scenario: "chat",
+          characterId: input.relationship.characterId,
+          userIdentityId: input.relationship.userIdentityId,
+          relationId: input.relationship.id,
+        },
+      ).formattedAll;
+      return worldBook ? `[本次心声可使用的关系世界书]\n${worldBook}\n只将其作为角色认知背景，不要逐条复述。` : "";
+    })() : ""].filter(Boolean).join("\n\n"),
     apiKey: input.settings.apiKey,
     model: input.settings.selectedModel || "gemini-3.5-flash",
     apiEndpoint: input.settings.apiEndpoint,

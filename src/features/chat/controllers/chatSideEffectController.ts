@@ -76,7 +76,10 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
         if (eligibleMessages.length >= triggerCount) {
           schedule(async () => {
             const count = await dependencies.extractMemories(eligibleMessages);
-            if (count > 0) {
+            // A successful extraction with no durable facts is still a
+            // completed archive pass. Advance the marker so the same range is
+            // not sent to the model again after every subsequent reply.
+            if (count >= 0) {
               const lastMessage = eligibleMessages[eligibleMessages.length - 1];
               if (lastMessage && input.activeRelationship) {
                 dependencies.onSaveRelationships(input.relationships.map((relation) => relation.id === input.activeRelationship?.id
