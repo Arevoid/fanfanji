@@ -84,6 +84,18 @@ class AudioDB {
       request.onerror = () => reject(request.error);
     });
   }
+
+  async clearAll(): Promise<void> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([this.storeName, this.coverStoreName], "readwrite");
+      transaction.objectStore(this.storeName).clear();
+      transaction.objectStore(this.coverStoreName).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
 }
 
 export const getTrackAudioAssetId = (track: { id: string; audioAssetId?: string }) =>

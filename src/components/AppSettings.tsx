@@ -41,6 +41,7 @@ import {
   getSettingsHeaderTitle,
   type SettingsTab,
 } from "../features/settings/settingsNavigation";
+import { clearApplicationData } from "../features/settings/clearApplicationData";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -424,6 +425,7 @@ export default function AppSettings({
   const [showHomeButton, setShowHomeButton] = useState(!!settings.showHomeButton);
   const [hideStatusBar, setHideStatusBar] = useState(!!settings.hideStatusBar);
   const [showBackupExportOptions, setShowBackupExportOptions] = useState(false);
+  const [isClearingApplicationData, setIsClearingApplicationData] = useState(false);
   const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
   const [widgetOpacity, setWidgetOpacity] = useState(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70);
   const [iconBorderRadius, setIconBorderRadius] = useState(settings.iconBorderRadius !== undefined ? settings.iconBorderRadius : 35);
@@ -839,6 +841,22 @@ export default function AppSettings({
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleClearApplicationData = async () => {
+    if (isClearingApplicationData) return;
+    if (!confirm("⚠️ 确定要清除所有缓存并恢复为默认设置吗？这会清空全部对话和角色数据且无法恢复！")) return;
+
+    setIsClearingApplicationData(true);
+    try {
+      await clearApplicationData();
+      // Reload immediately so mounted effects cannot restore the old in-memory state.
+      window.location.reload();
+    } catch (error) {
+      console.error("Failed to clear application data:", error);
+      setIsClearingApplicationData(false);
+      alert("清除失败，数据未被完整重置，请稍后重试。");
+    }
   };
 
   const handleSwitchIdentity = (id: string) => {
@@ -2923,17 +2941,12 @@ export default function AppSettings({
                 </p>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm("⚠️ 确定要清除所有缓存并恢复为默认设置吗？这会清空全部对话和角色数据且无法恢复！")) {
-                      localStorage.clear();
-                      alert("所有数据 and 缓存已成功清除，应用将刷新重置为出厂状态。");
-                      window.location.reload();
-                    }
-                  }}
-                  className="w-full py-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 text-rose-600 rounded-[16px] font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                  onClick={handleClearApplicationData}
+                  disabled={isClearingApplicationData}
+                  className="w-full py-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 text-rose-600 rounded-[16px] font-bold text-xs transition-all flex items-center justify-center gap-1.5 disabled:cursor-wait disabled:opacity-60"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>清除缓存并恢复为默认</span>
+                  <RefreshCw className={`w-3.5 h-3.5 ${isClearingApplicationData ? "animate-spin" : ""}`} />
+                  <span>{isClearingApplicationData ? "正在清除…" : "清除缓存并恢复为默认"}</span>
                 </button>
               </div>
             </div>

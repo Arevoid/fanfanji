@@ -29,6 +29,7 @@ class ImageAssetDB {
   async saveImage(id: string, image: Blob): Promise<void> { await this.run("readwrite", (store) => store.put(image, id)); }
   async getImage(id: string): Promise<Blob | null> { return (await this.run("readonly", (store) => store.get(id))) || null; }
   async deleteImage(id: string): Promise<void> { await this.run("readwrite", (store) => store.delete(id)); }
+  async clearAll(): Promise<void> { await this.run("readwrite", (store) => store.clear()); }
 }
 
 export const imageAssetDb = new ImageAssetDB();

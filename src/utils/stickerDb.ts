@@ -125,6 +125,18 @@ class StickerDB {
       request.onerror = () => reject(request.error);
     });
   }
+
+  async clearAll(): Promise<void> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([this.storeGroups, this.storeImages], "readwrite");
+      transaction.objectStore(this.storeGroups).clear();
+      transaction.objectStore(this.storeImages).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
 }
 
 export const stickerDb = new StickerDB();
