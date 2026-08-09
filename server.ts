@@ -5,7 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
 import { buildKnowledgeExtractionPrompt, parseKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
-import { toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
+import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
 
 dotenv.config();
 
@@ -165,8 +165,9 @@ async function startServer() {
 
       // Format message history for Gemini:
       const contents = [];
-      if (history && Array.isArray(history)) {
-        for (const h of history) {
+      const geminiPrompt = prepareGeminiPromptTransport(history, systemInstruction);
+      if (geminiPrompt.history.length > 0) {
+        for (const h of geminiPrompt.history) {
           const normalized = toGeminiHistoryEntry(h);
           if (!normalized) continue; // Skip empty content to prevent API validation errors
           const { role, text } = normalized;
@@ -207,7 +208,7 @@ async function startServer() {
         model: model || "gemini-3.5-flash",
         contents,
         config: {
-          systemInstruction,
+          systemInstruction: geminiPrompt.systemInstruction,
           temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
         },
       });

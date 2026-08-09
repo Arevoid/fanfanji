@@ -16,6 +16,22 @@ const directAi = (async (input) => { capturedMessage = input.message; return { t
 assert.equal((await requestDirectChatTurn({ prompt, settings, requestAi: directAi })).text, "回复");
 assert.equal(capturedMessage, "当前");
 
+let echoAttempts = 0;
+let retryInstruction = "";
+const echoAi = (async (input) => {
+  echoAttempts += 1;
+  retryInstruction = input.systemInstruction || "";
+  return { text: echoAttempts === 1 ? "我错了" : "没怪你，过来抱一下" };
+}) as typeof apiChat;
+const corrected = await requestDirectChatTurn({
+  prompt: { ...prompt, message: "老公我错了嘛" },
+  settings,
+  requestAi: echoAi,
+});
+assert.equal(echoAttempts, 2);
+assert.equal(corrected.text, "没怪你，过来抱一下");
+assert.match(retryInstruction, /previous draft merely copied/);
+
 const member = { id: "a", name: "甲", avatar: "", personality: "", backstory: "" } as Character;
 const groupAi = (async () => ({ text: "[SENDER_NAME: 甲]\n你好" })) as typeof apiChat;
 const group = await generateGroupChatTurn({ prompt: { ...prompt, scenario: "group-chat" }, settings, members: [member], groupId: "g", disableBracketActions: false, createId: () => "gm", currentTime: () => 1, requestAi: groupAi });
@@ -30,4 +46,4 @@ const proactiveAi = (async () => ({ text: "主动消息" })) as typeof apiChat;
 const proactive = await generateProactiveChatTurn({ prompt: { ...prompt, scenario: "proactive-message" }, settings, characterId: "a", disableBracketActions: false, keepPeriods: true, createId: () => "p", currentTime: () => 1, requestAi: proactiveAi });
 assert.deepEqual(proactive.messages.map((message) => message.content), ["主动消息"]);
 
-console.log("Chat generation controller: 11 acceptance checks passed");
+console.log("Chat generation controller: 14 acceptance checks passed");

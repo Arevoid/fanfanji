@@ -6,7 +6,7 @@ import {
   type ExtractedKnowledgeCandidatePayload,
   type KnowledgeExtractionHistoryItem,
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
-import { toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
+import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
 
 // Helper to parse different models response formats
 export const parseModels = (data: any): string[] | null => {
@@ -129,8 +129,9 @@ async function directClientChat(params: {
     const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
 
     const contents: any[] = [];
-    if (history && Array.isArray(history)) {
-      for (const h of history) {
+    const geminiPrompt = prepareGeminiPromptTransport(history, systemInstruction);
+    if (geminiPrompt.history.length > 0) {
+      for (const h of geminiPrompt.history) {
         const normalized = toGeminiHistoryEntry(h);
         if (!normalized) continue; // Skip empty content to avoid API validation errors
         const { role, text } = normalized;
@@ -177,9 +178,9 @@ async function directClientChat(params: {
         generationConfig: {
           temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7
         },
-        ...(systemInstruction ? {
+        ...(geminiPrompt.systemInstruction ? {
           systemInstruction: {
-            parts: [{ text: systemInstruction }]
+            parts: [{ text: geminiPrompt.systemInstruction }]
           }
         } : {})
       })

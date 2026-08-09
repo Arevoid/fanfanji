@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { PromptComposer } from "../src/domain/prompt/PromptComposer";
 import { clearPromptDebugSnapshots, listPromptDebugSnapshots } from "../src/domain/prompt/promptDebugRegistry";
-import { toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../src/domain/prompt/promptTransport";
+import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../src/domain/prompt/promptTransport";
 import { mapSillyTavernEntry } from "../src/utils/pngParser";
 import { buildWorldBookSystemBlocks } from "../src/utils/worldBook";
 import type { WorldBookEntry } from "../src/types";
@@ -29,7 +29,11 @@ assert.equal(composed.history[4].text.includes("近"), true);
 assert.equal(listPromptDebugSnapshots().length, 1);
 assert.deepEqual(listPromptDebugSnapshots()[0].historyInjections.map((item) => item.insertionIndex), [0, 4]);
 assert.deepEqual(toOpenAiHistoryEntry({ role: "system", text: "规则" }), { role: "system", content: "规则" });
-assert.equal(toGeminiHistoryEntry({ role: "system", text: "规则" })?.role, "user");
-assert.equal(toGeminiHistoryEntry({ role: "system", text: "规则" })?.text.includes("规则"), true);
+assert.equal(toGeminiHistoryEntry({ role: "system", text: "规则" }), null);
+const geminiPrompt = prepareGeminiPromptTransport(composed.history, composed.systemInstruction);
+assert.equal(geminiPrompt.history.some((entry) => entry.role === "system"), false);
+assert.equal(geminiPrompt.systemInstruction?.includes("规则"), false);
+assert.equal(geminiPrompt.systemInstruction?.includes("近"), true);
+assert.equal(geminiPrompt.systemInstruction?.includes("远"), true);
 
-console.log("World Book at_depth: 16 acceptance checks passed");
+console.log("World Book at_depth: 18 acceptance checks passed");

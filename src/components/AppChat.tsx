@@ -3211,22 +3211,15 @@ ${isLastVoiceOld
       // 6. User Profile
       assembledInstructions.push(userProfileText);
 
-      // Treat the immediate chat state as a continuity anchor, not merely optional style context.
-      // This prevents the model from casually replacing a just-established activity (such as
-      // running) with an unrelated one (such as cycling) in the next reply.
-      const sceneAnchorTranscript = finalMsgs.slice(-8).map((message) => {
-        const sender = message.sender === "user" ? settings.name : activeCharacter.name;
-        return `- ${sender}: ${message.content}`;
-      }).join("\n");
-      assembledInstructions.push(`[CRITICAL CURRENT-SCENE CONTINUITY]
-The recent conversation below contains the current, established facts of the scene. Treat a recently stated activity, location, physical condition, possession, promise, or relationship fact as true and still in effect.
+      // Recent dialogue is already present in the role-correct history. Do not
+      // copy it into a system block: duplicate user wording encourages parroting
+      // and can swap first-person ownership on short replies.
+      assembledInstructions.push(`[CURRENT-SCENE CONTINUITY]
+Treat recently established activities, locations, physical conditions, possessions, promises, and relationship facts in the conversation history as true and still in effect.
 - Never silently replace one activity with another. For example, if you just said you were sweaty from running, do not later say you just returned from cycling.
 - If the activity, location, or situation really changes, first make the transition explicit and plausible (including time passing where needed). Do not call the new activity "just now" unless the transition has been established.
 - When the history is unclear, avoid inventing a new concrete activity. Continue the existing topic or ask naturally instead.
-- This continuity rule applies to every message in a multi-bubble reply as well.
-
-Recent scene facts:
-${sceneAnchorTranscript || "(No prior scene facts.)"}`);
+- This continuity rule applies to every message in a multi-bubble reply as well.`);
 
       // 7. Before Chat History entries
       const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
@@ -5555,6 +5548,15 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   color: ${settings.otherBubbleColor};
                 }
               ` : ''}
+
+              /* Persisted colour controls feed the semantic theme variables.
+                 Global theme rules use these variables with !important, so
+                 setting only a normal color declaration cannot override
+                 them reliably. */
+              #conv-screen {
+                ${settings.selfBubbleColor ? `--chat-user-text: ${settings.selfBubbleColor};` : ""}
+                ${settings.otherBubbleColor ? `--chat-ai-text: ${settings.otherBubbleColor};` : ""}
+              }
 
               ${settings.selfBubbleBg ? `
                 #conv-screen .chat-bubble-self,

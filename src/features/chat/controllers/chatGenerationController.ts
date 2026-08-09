@@ -9,6 +9,7 @@ import { generateProactiveReplyCandidates } from "../services/proactiveMessageSe
 import { createRegeneratedReplyCandidates } from "../services/regenerateService";
 import type { AiChatRequest, ReplyCandidateContext } from "../services/chatServiceTypes";
 import { buildTextAiRuntimeConfig } from "../services/textAiRuntimeConfig";
+import { CHAT_ECHO_RETRY_INSTRUCTION, isLowInformationUserEcho } from "../services/chatEchoGuard";
 
 type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "historyInjections">;
 type RequestAi = typeof apiChat;
@@ -17,8 +18,16 @@ export function buildComposedAiChatRequest(prompt: PromptInput, settings: UserSe
   return { ...PromptComposer.compose(prompt), ...buildTextAiRuntimeConfig(settings) };
 }
 
-export function requestDirectChatTurn(input: { prompt: PromptInput; settings: UserSettings; requestAi?: RequestAi }) {
-  return requestAiReply(input.requestAi || apiChat, buildComposedAiChatRequest(input.prompt, input.settings));
+export async function requestDirectChatTurn(input: { prompt: PromptInput; settings: UserSettings; requestAi?: RequestAi }) {
+  const requestAi = input.requestAi || apiChat;
+  const request = buildComposedAiChatRequest(input.prompt, input.settings);
+  const first = await requestAiReply(requestAi, request);
+  if (!isLowInformationUserEcho(input.prompt.message, first.text)) return first;
+  const retry = await requestAiReply(requestAi, {
+    ...request,
+    systemInstruction: [request.systemInstruction, CHAT_ECHO_RETRY_INSTRUCTION].filter(Boolean).join("\n\n"),
+  });
+  return retry.text.trim() ? retry : first;
 }
 
 export function generateGroupChatTurn(input: {
