@@ -108,6 +108,7 @@ import { prioritizeUserChatCss, scopeUserChatCss } from "../features/chat/styles
 import {
   LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
   LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
+  LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS,
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../features/chat/styles/liquidGlassDefaults";
 import { sanitizeMomentPublishText } from "../features/moments/services/momentContent";
@@ -1424,6 +1425,13 @@ export default function AppChat({
     settings.globalChatStylePreset,
   );
   const isFloatingCute = activeStylePreset === "floating-cute";
+  const isLiquidGlass = activeStylePreset === "liquid-glass";
+  const activeBubblePosition = isLiquidGlass
+    ? settings.liquidGlassBubblePosition || "side"
+    : settings.bubblePosition || "side";
+  const activeBubbleTailEnabled = isLiquidGlass
+    ? settings.liquidGlassBubbleTailEnabled === true
+    : settings.bubbleTailEnabled === true;
   const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
   const globalChatIcons = sanitizeChatIcons(settings.chatIcons);
   const getChatIcon = (key: ChatIconKey): string | undefined => characterChatIcons[key] || globalChatIcons[key];
@@ -5694,7 +5702,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 }
               `}
 
-              ${settings.bubbleBorderEnabled ? `
+              ${!isLiquidGlass ? (settings.bubbleBorderEnabled ? `
                 #conv-screen .chat-bubble-self,
                 #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self {
@@ -5714,21 +5722,21 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 #conv-screen .voice-message-bar.chat-bubble-other {
                   border: none !important;
                 }
-              `}
+              `) : ""}
 
               /* The persisted chat controls are the default visual authority
                  whenever no user stylesheet is active.  This deliberately
                  overrides only the historical built-in bubble CSS, while
                  user-authored chat CSS still wins through its later scoped
                  stylesheet. */
-              ${!hasUserCustomChatCss && settings.selfBubbleRadius !== undefined ? `
+              ${!isLiquidGlass && !hasUserCustomChatCss && settings.selfBubbleRadius !== undefined ? `
                 #conv-screen .chat-bubble-self,
                 #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self {
                   border-radius: ${settings.selfBubbleRadius}px !important;
                 }
               ` : ""}
-              ${!hasUserCustomChatCss && settings.otherBubbleRadius !== undefined ? `
+              ${!isLiquidGlass && !hasUserCustomChatCss && settings.otherBubbleRadius !== undefined ? `
                 #conv-screen .chat-bubble-other,
                 #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
@@ -5736,7 +5744,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 }
               ` : ""}
 
-              ${settings.otherBubbleBg ? `
+              ${!isLiquidGlass && settings.otherBubbleBg ? `
                 #conv-screen .chat-bubble-other,
                 #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
@@ -5745,7 +5753,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 }
               ` : ''}
 
-              ${settings.otherBubbleColor ? `
+              ${!isLiquidGlass && settings.otherBubbleColor ? `
                 #conv-screen .chat-bubble-other,
                 #conv-screen .chat-bubble-other *,
                 #conv-screen .received-transfer-card,
@@ -5761,11 +5769,15 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                  setting only a normal color declaration cannot override
                  them reliably. */
               #conv-screen {
-                ${settings.selfBubbleColor ? `--chat-user-text: ${settings.selfBubbleColor};` : ""}
-                ${settings.otherBubbleColor ? `--chat-ai-text: ${settings.otherBubbleColor};` : ""}
+                --chat-user-text: ${isLiquidGlass
+                  ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
+                  : settings.selfBubbleColor || "var(--button-primary-text)"};
+                --chat-ai-text: ${isLiquidGlass
+                  ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
+                  : settings.otherBubbleColor || "var(--text-primary)"};
               }
 
-              ${settings.selfBubbleBg ? `
+              ${!isLiquidGlass && settings.selfBubbleBg ? `
                 #conv-screen .chat-bubble-self,
                 #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self {
@@ -5774,7 +5786,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 }
               ` : ''}
 
-              ${settings.selfBubbleColor ? `
+              ${!isLiquidGlass && settings.selfBubbleColor ? `
                 #conv-screen .chat-bubble-self,
                 #conv-screen .chat-bubble-self *,
                 #conv-screen .transfer-card,
@@ -5945,9 +5957,10 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   )} !important;
                   backdrop-filter: blur(20px) saturate(190%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: ${settings.bubbleBorderEnabled
-                    ? `${settings.bubbleBorderWidth ?? 1}px solid ${settings.selfBubbleBorderColor || "#ffffff"}`
+                  border: ${settings.liquidGlassBubbleBorderEnabled
+                    ? `${settings.liquidGlassBubbleBorderWidth ?? 1}px solid ${settings.liquidGlassSelfBubbleBorderColor || "#ffffff"}`
                     : "1.5px solid rgba(255, 255, 255, 0.55)"} !important;
+                  border-radius: ${settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS}px !important;
                   color: ${settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                   padding: 11px 16px !important;
                   font-size: 12px !important;
@@ -5974,9 +5987,10 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   )} !important;
                   backdrop-filter: blur(20px) saturate(190%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: ${settings.bubbleBorderEnabled
-                    ? `${settings.bubbleBorderWidth ?? 1}px solid ${settings.otherBubbleBorderColor || "#ffffff"}`
+                  border: ${settings.liquidGlassBubbleBorderEnabled
+                    ? `${settings.liquidGlassBubbleBorderWidth ?? 1}px solid ${settings.liquidGlassOtherBubbleBorderColor || "#ffffff"}`
                     : "1.5px solid rgba(255, 255, 255, 0.55)"} !important;
+                  border-radius: ${settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS}px !important;
                   color: ${settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                   padding: 11px 16px !important;
                   font-size: 12px !important;
@@ -7517,7 +7531,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 );
               };
 
-              if (settings.bubblePosition === "above" || settings.bubblePosition === "below") {
+              if (activeBubblePosition === "above" || activeBubblePosition === "below") {
                 return wrapMessageWithDivider(
                   <div
                     key={msg.id}
@@ -7656,7 +7670,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
            <div ref={chatEndRef} />
           </MessageList>
 
-          <BubbleTipPortalLayer enabled={!isShowingCardModal && settings.bubbleTailEnabled} />
+          <BubbleTipPortalLayer enabled={!isShowingCardModal && activeBubbleTailEnabled} />
 
           {showImageGenerator && (
             <div className="absolute inset-0 z-[90] flex items-end bg-black/35 p-4" onClick={() => setShowImageGenerator(false)}>

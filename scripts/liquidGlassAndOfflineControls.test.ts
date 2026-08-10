@@ -4,6 +4,7 @@ import {
   applyLiquidGlassTextDefaults,
   LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
   LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
+  LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS,
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../src/features/chat/styles/liquidGlassDefaults";
 import type { UserSettings } from "../src/types";
@@ -22,6 +23,10 @@ assert.equal(firstUse.liquidGlassSelfBubbleBg, LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
 assert.equal(firstUse.liquidGlassOtherBubbleBg, LIQUID_GLASS_DEFAULT_BUBBLE_COLOR);
 assert.equal(firstUse.liquidGlassSelfBubbleOpacity, LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY);
 assert.equal(firstUse.liquidGlassOtherBubbleOpacity, LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY);
+assert.equal(firstUse.liquidGlassSelfBubbleRadius, LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS);
+assert.equal(firstUse.liquidGlassOtherBubbleRadius, LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS);
+assert.equal(firstUse.liquidGlassBubbleTailEnabled, false);
+assert.equal(firstUse.liquidGlassBubbleBorderEnabled, false);
 assert.equal(firstUse.liquidGlassTextDefaultsApplied, true);
 assert.equal(firstUse.liquidGlassVisualDefaultsApplied, true);
 
@@ -65,9 +70,17 @@ assert.match(chat, /settings\.liquidGlassSelfBubbleBg \|\| LIQUID_GLASS_DEFAULT_
 assert.match(chat, /settings\.liquidGlassOtherBubbleBg \|\| LIQUID_GLASS_DEFAULT_BUBBLE_COLOR/);
 assert.match(chat, /settings\.liquidGlassSelfBubbleColor \|\| LIQUID_GLASS_DEFAULT_TEXT_COLOR/);
 assert.match(chat, /settings\.liquidGlassOtherBubbleColor \|\| LIQUID_GLASS_DEFAULT_TEXT_COLOR/);
+assert.match(chat, /!isLiquidGlass && settings\.selfBubbleBg/);
+assert.match(chat, /!isLiquidGlass && settings\.otherBubbleBg/);
+assert.match(chat, /settings\.liquidGlassSelfBubbleRadius \?\? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS/);
+assert.match(chat, /settings\.liquidGlassOtherBubbleRadius \?\? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("self"\)/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("other"\)/);
 assert.match(settings, /液态玻璃气泡设置/);
+assert.match(settings, /\{ liquidGlassSelfBubbleRadius: val \}/);
+assert.match(settings, /\{ selfBubbleRadius: val \}/);
+assert.match(settings, /\{ liquidGlassBubbleBorderEnabled: nextVal \}/);
+assert.match(settings, /\{ bubbleBorderEnabled: nextVal \}/);
 assert.match(offline, /absolute left-0\.5 top-0\.5/);
 assert.match(offline, /translate-x-5/);
 assert.match(settings, /全局聊天样式 CSS/);

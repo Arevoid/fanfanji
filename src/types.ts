@@ -662,9 +662,18 @@ export interface UserSettings {
   liquidGlassOtherBubbleBg?: string;
   liquidGlassOtherBubbleColor?: string;
   liquidGlassOtherBubbleOpacity?: number;
+  liquidGlassOtherBubbleRadius?: number;
   liquidGlassSelfBubbleBg?: string;
   liquidGlassSelfBubbleColor?: string;
   liquidGlassSelfBubbleOpacity?: number;
+  liquidGlassSelfBubbleRadius?: number;
+  liquidGlassBubbleTailEnabled?: boolean;
+  liquidGlassBubbleTailVertical?: "top" | "center" | "bottom";
+  liquidGlassBubblePosition?: "side" | "above" | "below";
+  liquidGlassBubbleBorderEnabled?: boolean;
+  liquidGlassBubbleBorderWidth?: number;
+  liquidGlassOtherBubbleBorderColor?: string;
+  liquidGlassSelfBubbleBorderColor?: string;
   activePreset: string; // Preset name
   momentsCover?: string; // Moments cover image URL or base64
   apiEndpoint?: string;

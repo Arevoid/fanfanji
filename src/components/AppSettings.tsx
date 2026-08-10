@@ -53,6 +53,7 @@ import {
 import {
   LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
   LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
+  LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS,
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../features/chat/styles/liquidGlassDefaults";
 
@@ -495,7 +496,9 @@ export default function AppSettings({
   const [otherBubbleColor, setOtherBubbleColor] = useState(settings.globalChatStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
     : settings.otherBubbleColor || "#18181b");
-  const [otherBubbleRadius, setOtherBubbleRadius] = useState(settings.otherBubbleRadius !== undefined ? settings.otherBubbleRadius : 6);
+  const [otherBubbleRadius, setOtherBubbleRadius] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
+    : settings.otherBubbleRadius ?? 6);
   const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(settings.globalChatStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
     : settings.otherBubbleOpacity ?? 100);
@@ -505,7 +508,9 @@ export default function AppSettings({
   const [selfBubbleColor, setSelfBubbleColor] = useState(settings.globalChatStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
     : settings.selfBubbleColor || "#ffffff");
-  const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.selfBubbleRadius !== undefined ? settings.selfBubbleRadius : 6);
+  const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
+    : settings.selfBubbleRadius ?? 6);
   const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(settings.globalChatStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
     : settings.selfBubbleOpacity ?? 100);
@@ -516,15 +521,29 @@ export default function AppSettings({
   const [dockBorderRadius, setDockBorderRadius] = useState(settings.dockBorderRadius !== undefined ? settings.dockBorderRadius : 26);
   const [widgetBorderRadius, setWidgetBorderRadius] = useState(settings.widgetBorderRadius !== undefined ? settings.widgetBorderRadius : 22);
   const [iconBorderEnabled, setIconBorderEnabled] = useState(settings.iconBorderEnabled !== false);
-  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(settings.bubbleTailEnabled === true);
-  const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(settings.bubbleTailVertical || "top");
-  const [bubblePosition, setBubblePosition] = useState<"side" | "above">(settings.bubblePosition === "above" ? "above" : "side");
+  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassBubbleTailEnabled === true
+    : settings.bubbleTailEnabled === true);
+  const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassBubbleTailVertical || "top"
+    : settings.bubbleTailVertical || "top");
+  const [bubblePosition, setBubblePosition] = useState<"side" | "above">((settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassBubblePosition
+    : settings.bubblePosition) === "above" ? "above" : "side");
   
   // Bubble border states
-  const [bubbleBorderEnabled, setBubbleBorderEnabled] = useState(!!settings.bubbleBorderEnabled);
-  const [bubbleBorderWidth, setBubbleBorderWidth] = useState(settings.bubbleBorderWidth !== undefined ? settings.bubbleBorderWidth : 1);
-  const [otherBubbleBorderColor, setOtherBubbleBorderColor] = useState(settings.otherBubbleBorderColor || "#e4e4e7");
-  const [selfBubbleBorderColor, setSelfBubbleBorderColor] = useState(settings.selfBubbleBorderColor || "#27272a");
+  const [bubbleBorderEnabled, setBubbleBorderEnabled] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassBubbleBorderEnabled === true
+    : !!settings.bubbleBorderEnabled);
+  const [bubbleBorderWidth, setBubbleBorderWidth] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassBubbleBorderWidth ?? 1
+    : settings.bubbleBorderWidth ?? 1);
+  const [otherBubbleBorderColor, setOtherBubbleBorderColor] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassOtherBubbleBorderColor || "#ffffff"
+    : settings.otherBubbleBorderColor || "#e4e4e7");
+  const [selfBubbleBorderColor, setSelfBubbleBorderColor] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassSelfBubbleBorderColor || "#ffffff"
+    : settings.selfBubbleBorderColor || "#27272a");
 
   // Avatar border states
   const [avatarBorderEnabled, setAvatarBorderEnabled] = useState(!!settings.avatarBorderEnabled);
@@ -553,20 +572,65 @@ export default function AppSettings({
     setSelfBubbleOpacity(isLiquidGlassChatStyle
       ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
       : settings.selfBubbleOpacity ?? 100);
+    setOtherBubbleRadius(isLiquidGlassChatStyle
+      ? settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
+      : settings.otherBubbleRadius ?? 6);
+    setSelfBubbleRadius(isLiquidGlassChatStyle
+      ? settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
+      : settings.selfBubbleRadius ?? 6);
+    setBubbleTailEnabled(isLiquidGlassChatStyle
+      ? settings.liquidGlassBubbleTailEnabled === true
+      : settings.bubbleTailEnabled === true);
+    setBubbleTailVertical(isLiquidGlassChatStyle
+      ? settings.liquidGlassBubbleTailVertical || "top"
+      : settings.bubbleTailVertical || "top");
+    setBubblePosition(((isLiquidGlassChatStyle
+      ? settings.liquidGlassBubblePosition
+      : settings.bubblePosition) === "above") ? "above" : "side");
+    setBubbleBorderEnabled(isLiquidGlassChatStyle
+      ? settings.liquidGlassBubbleBorderEnabled === true
+      : settings.bubbleBorderEnabled === true);
+    setBubbleBorderWidth(isLiquidGlassChatStyle
+      ? settings.liquidGlassBubbleBorderWidth ?? 1
+      : settings.bubbleBorderWidth ?? 1);
+    setOtherBubbleBorderColor(isLiquidGlassChatStyle
+      ? settings.liquidGlassOtherBubbleBorderColor || "#ffffff"
+      : settings.otherBubbleBorderColor || "#e4e4e7");
+    setSelfBubbleBorderColor(isLiquidGlassChatStyle
+      ? settings.liquidGlassSelfBubbleBorderColor || "#ffffff"
+      : settings.selfBubbleBorderColor || "#27272a");
   }, [
     isLiquidGlassChatStyle,
     settings.liquidGlassOtherBubbleBg,
     settings.liquidGlassOtherBubbleColor,
     settings.liquidGlassOtherBubbleOpacity,
+    settings.liquidGlassOtherBubbleRadius,
     settings.liquidGlassSelfBubbleBg,
     settings.liquidGlassSelfBubbleColor,
     settings.liquidGlassSelfBubbleOpacity,
+    settings.liquidGlassSelfBubbleRadius,
+    settings.liquidGlassBubbleTailEnabled,
+    settings.liquidGlassBubbleTailVertical,
+    settings.liquidGlassBubblePosition,
+    settings.liquidGlassBubbleBorderEnabled,
+    settings.liquidGlassBubbleBorderWidth,
+    settings.liquidGlassOtherBubbleBorderColor,
+    settings.liquidGlassSelfBubbleBorderColor,
     settings.otherBubbleBg,
     settings.otherBubbleColor,
     settings.otherBubbleOpacity,
+    settings.otherBubbleRadius,
     settings.selfBubbleBg,
     settings.selfBubbleColor,
     settings.selfBubbleOpacity,
+    settings.selfBubbleRadius,
+    settings.bubbleTailEnabled,
+    settings.bubbleTailVertical,
+    settings.bubblePosition,
+    settings.bubbleBorderEnabled,
+    settings.bubbleBorderWidth,
+    settings.otherBubbleBorderColor,
+    settings.selfBubbleBorderColor,
   ]);
 
   const getPreviewBubbleVisualStyle = (sender: "self" | "other"): React.CSSProperties => {
@@ -2383,7 +2447,9 @@ export default function AppSettings({
                           onChange={(e) => {
                             const val = parseInt(e.target.value, 10);
                             setSelfBubbleRadius(val);
-                            handleSave({ selfBubbleRadius: val });
+                            handleSave(isLiquidGlassChatStyle
+                              ? { liquidGlassSelfBubbleRadius: val }
+                              : { selfBubbleRadius: val });
                           }}
                           className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                         />
@@ -2402,7 +2468,9 @@ export default function AppSettings({
                           onChange={(e) => {
                             const val = parseInt(e.target.value, 10);
                             setOtherBubbleRadius(val);
-                            handleSave({ otherBubbleRadius: val });
+                            handleSave(isLiquidGlassChatStyle
+                              ? { liquidGlassOtherBubbleRadius: val }
+                              : { otherBubbleRadius: val });
                           }}
                           className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                         />
@@ -2417,7 +2485,9 @@ export default function AppSettings({
                         onClick={() => {
                           const nextVal = !bubbleTailEnabled;
                           setBubbleTailEnabled(nextVal);
-                          handleSave({ bubbleTailEnabled: nextVal });
+                          handleSave(isLiquidGlassChatStyle
+                            ? { liquidGlassBubbleTailEnabled: nextVal }
+                            : { bubbleTailEnabled: nextVal });
                         }}
                         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                           bubbleTailEnabled ? "bg-neutral-950" : "bg-slate-200"
@@ -2442,7 +2512,9 @@ export default function AppSettings({
                                 type="button"
                                 onClick={() => {
                                   setBubbleTailVertical(pos);
-                                  handleSave({ bubbleTailVertical: pos });
+                                  handleSave(isLiquidGlassChatStyle
+                                    ? { liquidGlassBubbleTailVertical: pos }
+                                    : { bubbleTailVertical: pos });
                                 }}
                                 className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
                                   bubbleTailVertical === pos
@@ -2467,7 +2539,9 @@ export default function AppSettings({
                              type="button"
                              onClick={() => {
                                setBubblePosition(pos);
-                               handleSave({ bubblePosition: pos });
+                               handleSave(isLiquidGlassChatStyle
+                                 ? { liquidGlassBubblePosition: pos }
+                                 : { bubblePosition: pos });
                              }}
                              className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
                                bubblePosition === pos
@@ -2489,7 +2563,9 @@ export default function AppSettings({
                          onClick={() => {
                            const nextVal = !bubbleBorderEnabled;
                            setBubbleBorderEnabled(nextVal);
-                           handleSave({ bubbleBorderEnabled: nextVal });
+                           handleSave(isLiquidGlassChatStyle
+                             ? { liquidGlassBubbleBorderEnabled: nextVal }
+                             : { bubbleBorderEnabled: nextVal });
                          }}
                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                            bubbleBorderEnabled ? "bg-neutral-950" : "bg-slate-200"
@@ -2516,7 +2592,9 @@ export default function AppSettings({
                                onChange={(e) => {
                                  const val = parseInt(e.target.value, 10);
                                  setBubbleBorderWidth(val);
-                                 handleSave({ bubbleBorderWidth: val });
+                                 handleSave(isLiquidGlassChatStyle
+                                   ? { liquidGlassBubbleBorderWidth: val }
+                                   : { bubbleBorderWidth: val });
                                }}
                                className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                              />
@@ -2533,7 +2611,9 @@ export default function AppSettings({
                                  value={otherBubbleBorderColor}
                                  onChange={(e) => {
                                    setOtherBubbleBorderColor(e.target.value);
-                                   handleSave({ otherBubbleBorderColor: e.target.value });
+                                   handleSave(isLiquidGlassChatStyle
+                                     ? { liquidGlassOtherBubbleBorderColor: e.target.value }
+                                     : { otherBubbleBorderColor: e.target.value });
                                  }}
                                  className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                                />
@@ -2548,7 +2628,9 @@ export default function AppSettings({
                                  value={selfBubbleBorderColor}
                                  onChange={(e) => {
                                    setSelfBubbleBorderColor(e.target.value);
-                                   handleSave({ selfBubbleBorderColor: e.target.value });
+                                   handleSave(isLiquidGlassChatStyle
+                                     ? { liquidGlassSelfBubbleBorderColor: e.target.value }
+                                     : { selfBubbleBorderColor: e.target.value });
                                  }}
                                  className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                                />
