@@ -27,6 +27,7 @@ export async function generateGroupReplyCandidates(input: {
     members: valid.map((item) => item.member),
     messages: valid.map((item) => createGroupCharacterMessage({
       id: input.createId(item.index), characterId: input.groupId, senderId: item.member.id,
+      conversationId: `group:${input.groupId}`,
       content: item.content, timestamp: input.currentTime(),
     })),
   };

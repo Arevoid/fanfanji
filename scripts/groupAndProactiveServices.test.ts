@@ -23,6 +23,7 @@ assert.equal(matchGroupReplyMembers(parseGroupReplies("[SENDER_NAME: X]\nx"), [m
 assert.deepEqual(group.messages.map((message) => message.content), ["你好。", "收到！"]);
 assert.deepEqual(group.messages.map((message) => message.senderId), ["a", "b"]);
 assert.deepEqual(group.messages.map((message) => message.characterId), ["group", "group"]);
+assert.deepEqual(group.messages.map((message) => message.conversationId), ["group:group", "group:group"]);
 assert.equal(group.messages.length, 2);
 assert.equal(group.members.includes(outsider), false);
 

@@ -15,6 +15,11 @@ export function getOfflineStoryMarkerPrefix(story: OfflineStory): string {
 }
 
 export function isOfflineStoryHandoffMemory(memory: MemoryItem, story: OfflineStory): boolean {
+  const participantIds = Array.from(new Set((story.characterIds || []).filter(Boolean)));
+  if (!story.relationId && participantIds.length > 0 && !participantIds.includes(story.characterId)) {
+    return participantIds.includes(memory.characterId)
+      && memory.content.includes(getOfflineStoryMarkerPrefix(story));
+  }
   return memory.characterId === story.characterId
     && memory.relationId === story.relationId
     && memory.content.includes(getOfflineStoryMarkerPrefix(story));
@@ -22,6 +27,12 @@ export function isOfflineStoryHandoffMemory(memory: MemoryItem, story: OfflineSt
 
 export function hasOfflineStorySummary(story: OfflineStory, memories: readonly MemoryItem[]): boolean {
   const summaryMarker = getOfflineStorySummaryMarker(story);
+  const participantIds = Array.from(new Set((story.characterIds || []).filter(Boolean)));
+  if (!story.relationId && participantIds.length > 0 && !participantIds.includes(story.characterId)) {
+    return participantIds.every((characterId) => memories.some((memory) =>
+      memory.characterId === characterId && memory.content.includes(summaryMarker),
+    ));
+  }
   return memories.some((memory) =>
     isOfflineStoryHandoffMemory(memory, story) && memory.content.includes(summaryMarker),
   );

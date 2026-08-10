@@ -19,7 +19,7 @@ import { OfflineReadingPreferences, OfflineReadingSettings } from "./offline/Off
 import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
-import { getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { applyConfirmedOfflineRelationshipTransition } from "../domain/relationship/offlineRelationshipTransition";
 import type { KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
 import { countOfflineStoriesForRelation } from "../domain/relationship/offlineStoryScope";
@@ -30,6 +30,7 @@ import { Button, ConfirmDialog, IconButton, PopoverMenu } from "./ui";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { collectOfflineWorldBookContext, formatOfflineWorldBookEntries } from "../features/offline/prompts/offlineWorldBookContext";
 import { applyOfflineStoryRegeneration, prepareOfflineStoryRegeneration } from "../domain/offlineStory/offlineStoryRegeneration";
+import { createOfflineGroupParticipantMemories } from "../features/offline/services/offlineGroupMemorySync";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -690,21 +691,29 @@ export default function AppOffline({
     // later incremental sync from discarding facts saved by an earlier one.
     const sourceMessages = getOfflineMemorySourceMessages(story, { includeSynced: true });
 
+    const participantCharacters = resolveOfflineStoryCharacterIds(story, characters)
+      .map((characterId) => characters.find((item) => item.id === characterId))
+      .filter((item): item is Character => Boolean(item && !item.isGroupChat));
+    const participantRelationships = participantCharacters.map((participant) =>
+      findRelationshipForCanonicalCharacter(relationships, activeIdentityId, participant.id, characters),
+    ).filter((relationship): relationship is CharacterRelationship => Boolean(relationship));
     const offlineStoryPolicyInput = {
       story,
       userConfirmed: options.userConfirmed === true,
       syncIntent: options.syncIntent,
       sourceMessages,
+      participantRelationIds: participantRelationships.map((relationship) => relationship.id),
     };
     if (!canSyncOfflineStoryToMemory(offlineStoryPolicyInput)) {
       return story;
     }
 
     const character = characters.find((item) => item.id === story.characterId);
-    if (!character || character.isGroupChat) {
-      showToast("当前线下故事没有可同步的单聊角色记忆");
+    if (!character) {
+      showToast("当前线下故事没有可同步的角色资料");
       return story;
     }
+    const isGroupStory = Boolean(character.isGroupChat && participantCharacters.length > 0);
 
     const now = Date.now();
     const syncMarker = getOfflineStorySummaryMarker(story);
@@ -739,6 +748,34 @@ export default function AppOffline({
         showToast("没有可提取的线下新增剧情，已保留故事内容");
         return syncedStory;
       }
+
+      if (isGroupStory) {
+        const groupMemories = createOfflineGroupParticipantMemories({
+          story,
+          participants: participantCharacters,
+          characters,
+          relationships,
+          activeIdentityId,
+          sourceMessages,
+          userName: settings.name,
+          now,
+        });
+        if (groupMemories.length !== participantCharacters.length) {
+          throw new Error("Offline group story is missing one or more participant relationship scopes");
+        }
+        const retainedMemories = memories.filter((memory) => !isOfflineStoryHandoffMemory(memory, story));
+        const mergedMemories = MemoryService.mergeMemories(retainedMemories, groupMemories);
+        const persisted = onPersistMemories
+          ? await onPersistMemories(mergedMemories)
+          : (onSaveMemories(mergedMemories), true);
+        if (!persisted) throw new Error("Offline group story memory persistence failed");
+        const syncedStory = markSynced(groupMemories.map((memory) => memory.id));
+        if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
+        else onSaveOfflineStory(syncedStory);
+        showToast("多人线下剧情已分别同步到每位参与成员");
+        return syncedStory;
+      }
+      if (character.isGroupChat) throw new Error("Offline group story participant scope is invalid");
 
       const historyLimit = character.retrievalHistoryLimit || 100;
       const relationship = relationships.find((relation) =>
@@ -1094,10 +1131,15 @@ ${wbPrompts}\n`;
       // Only an explicitly imported online story may use its frozen snapshot.
       // Self-directed and IF stories stay fully isolated from the online vault.
       const allMemoriesParts: string[] = [];
-      const knowledgeSnapshot = updatedStory.knowledgeSnapshot || updatedStory.importedContext?.memories || [];
-      if (knowledgeSnapshot.length > 0) storyCharsList.forEach(char => {
+      const memberKnowledgeSnapshots = updatedStory.importedContext?.memberMemories;
+      storyCharsList.forEach(char => {
+        // New group stories use per-member snapshots. Legacy group stories
+        // with one flattened list omit it instead of leaking it to all.
+        const knowledgeSnapshot = memberKnowledgeSnapshots?.[char.id]
+          || (!isImportedGroupStory ? (updatedStory.knowledgeSnapshot || updatedStory.importedContext?.memories || []) : []);
+        if (knowledgeSnapshot.length === 0) return;
         const snapshotMemories = knowledgeSnapshot.map((content, index) => ({
-          id: `snapshot-memory-${index}`,
+          id: `snapshot-memory-${char.id}-${index}`,
           characterId: char.id,
           content,
           timestamp: updatedStory.importedContext?.importedAt || updatedStory.createdAt,
@@ -1116,6 +1158,9 @@ ${wbPrompts}\n`;
         }
       });
       if (allMemoriesParts.length > 0) {
+        if (isImportedGroupStory) {
+          sysPrompt += `\n\n【多人记忆访问边界】下方每个以角色姓名标记的线上记忆区只属于该角色自身。其他角色不能知道、引用或回应其中的私聊事实；只有导入的公开群消息或本线下故事中明确公开发生的内容才可成为所有在场角色的共同认知。`;
+        }
         sysPrompt += `\n\n【互通的线上记忆库】：以下是各个参与角色的线上对话中发生并提取的核心事实，请将其有机融入作为故事的背景事实支撑：\n${allMemoriesParts.join("\n")}`;
       }
 

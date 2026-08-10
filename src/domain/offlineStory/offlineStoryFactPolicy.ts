@@ -33,6 +33,19 @@ const hasConfirmedUserContribution = (sourceMessages: readonly Message[] | undef
     && Boolean(message.content?.trim()),
   ));
 
+const hasSafeConfirmedGroupScope = (input: OfflineStoryFactPolicyInput): boolean => {
+  const participantIds = Array.from(new Set((input.story.characterIds || []).filter(Boolean)));
+  const relationIds = Array.from(new Set((input.participantRelationIds || []).filter(Boolean)));
+  return Boolean(
+    input.userConfirmed
+    && !input.story.relationId
+    && participantIds.length > 0
+    && !participantIds.includes(input.story.characterId)
+    && relationIds.length === participantIds.length
+    && hasConfirmedUserContribution(input.sourceMessages),
+  );
+};
+
 const hasSafeConfirmedScope = (input: OfflineStoryFactPolicyInput): boolean => {
   const { story } = input;
   return Boolean(
@@ -49,7 +62,7 @@ const hasSafeConfirmedScope = (input: OfflineStoryFactPolicyInput): boolean => {
  * no user-authored evidence to persist.
  */
 export const canSyncOfflineStoryToMemory = (input: OfflineStoryFactPolicyInput): boolean => {
-  if (!hasSafeConfirmedScope(input)) return false;
+  if (!hasSafeConfirmedScope(input) && !hasSafeConfirmedGroupScope(input)) return false;
   if (input.story.mode === "continue") return true;
   return input.syncIntent === "manual_settings";
 };

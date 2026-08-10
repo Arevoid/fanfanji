@@ -867,6 +867,8 @@ export interface OfflineStory {
   importedContext?: {
     messages: Message[];
     memories: string[];
+    /** Group imports keep each member's relationship-private memory separate. */
+    memberMemories?: Record<string, string[]>;
     worldBook: string[];
     importedAt: number;
   };

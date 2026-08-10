@@ -7,6 +7,7 @@ import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry
 import { compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
+import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDistribution";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
@@ -23,8 +24,10 @@ import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { CHARACTER_MEDIA_USAGE_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
+import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
 import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage, buildProactiveChatSystemInstruction, finalizeCharacterChatSystemInstruction } from "../features/chat/prompts/chatPromptBuilders";
+import { buildGroupMemberPrivateContext, buildIsolatedGroupMemberDefinitions } from "../features/chat/prompts/groupMemberPrivateContext";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
@@ -1124,7 +1127,11 @@ export default function AppChat({
       }
       onSendMessageRaw(scopedMessage);
     } else {
-      onSendMessageRaw(msg);
+      const { relationId: _relationId, ...groupMessage } = msg;
+      onSendMessageRaw({
+        ...groupMessage,
+        conversationId: `group:${activeCharacter.id}`,
+      });
     }
 
     // Normal chat remains manual-play only.
@@ -1286,8 +1293,12 @@ export default function AppChat({
   // Keep the latest character/settings available at the actual send boundary.
   const latestActiveCharacterRef = useRef<Character | undefined>(activeCharacter);
   const latestActiveRelationshipRef = useRef<CharacterRelationship | undefined>(activeRelationship);
+  const latestMemoriesRef = useRef<MemoryItem[]>(memories || []);
+  const pendingGroupWelcomeIdRef = useRef<string | null>(null);
+  const consumedGroupWelcomeIdsRef = useRef(new Set<string>());
   latestActiveCharacterRef.current = activeCharacter;
   latestActiveRelationshipRef.current = activeRelationship;
+  latestMemoriesRef.current = memories || [];
   const currentChatMessages = messages.filter((m) => !m.isOffline && (activeRelationship
     ? m.relationId === activeRelationship.id
     : m.characterId === activeChatCharId && activeCharacter?.isGroupChat));
@@ -1695,6 +1706,7 @@ export default function AppChat({
   useEffect(() => {
     if (!activeChatCharId) return;
     if (!activeCharacter) {
+      if (pendingGroupWelcomeIdRef.current === activeChatCharId) return;
       setActiveChatCharId(null);
       return;
     }
@@ -1879,13 +1891,22 @@ export default function AppChat({
       isOffline: true,
       isImportedContext: true,
     }));
+    const memberMemories = activeCharacter.isGroupChat
+      ? buildOfflineMemberKnowledgeSnapshots({
+          memberIds: offlineParticipantIds,
+          characters,
+          relationships,
+          activeIdentityId,
+          memories,
+          claims: loadKnowledgeClaims().value,
+        })
+      : undefined;
     const importedContext: OfflineStory["importedContext"] = {
       messages: importedMessages,
-      memories: memories
-        .filter((memory) => activeRelationship
-          ? memory.relationId === activeRelationship.id
-          : offlineParticipantSet.has(memory.characterId))
-        .map((memory) => memory.content),
+      memories: activeRelationship
+        ? memories.filter((memory) => memory.relationId === activeRelationship.id).map((memory) => memory.content)
+        : [],
+      ...(memberMemories ? { memberMemories } : {}),
       worldBook: getLatestWorldBookEntries(worldBookEntries || [])
         .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId))
         .map((entry) => `${entry.title}: ${entry.content}`),
@@ -2009,6 +2030,7 @@ export default function AppChat({
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [groupNameInput, setGroupNameInput] = useState("");
   const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([]);
+  const [pendingGroupWelcome, setPendingGroupWelcome] = useState<{ groupId: string; narration: Message } | null>(null);
 
   const {
     draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
@@ -2661,6 +2683,7 @@ export default function AppChat({
         characterId: activeChatCharId || undefined,
       });
       const groupAtDepthInjections = new Map(groupWbBlocks.at_depth.map((entry) => [entry.sourceId, entry]));
+      const memberAtDepthInjections = new Map<string, typeof groupWbBlocks.at_depth>();
       const includedWorldBookEntryIds = new Set(groupWbBlocks.allTriggered.map((entry) => entry.id));
       let groupWbText = groupWbBlocks.formattedAll ? `\n\n【微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
       if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
@@ -2668,16 +2691,38 @@ export default function AppChat({
       }
       groupWbText += `\n${formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id, groupMemberIds: groupMembers.map((member) => member.id) })}\n`;
 
-      // Construct a system instruction that contains details about all members and how they should reply
-      const membersDefText = groupMembers.map((member, idx) => {
+      // Relation-private data is selected independently for each member and is
+      // never promoted into the group-wide context.
+      const groupKnowledgeClaims = loadKnowledgeClaims().value;
+      const groupConversationSummaries = loadConversationSummaries().value;
+      const groupBehaviorCorrections = loadBehaviorCorrections().value;
+
+      const privateContextByMemberId = new Map<string, string>();
+      // Public definitions are safe for the speaker router. Relation-private
+      // blocks are retained separately and enter only that member's request.
+      const publicMemberDefinitions = groupMembers.map((member, idx) => {
         const memberWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], member.id, scanText, {
           scenario: "group",
           characterId: member.id,
         });
         memberWbBlocks.at_depth.forEach((entry) => groupAtDepthInjections.set(entry.sourceId, entry));
+        memberAtDepthInjections.set(member.id, memberWbBlocks.at_depth);
         const memberOnlyWorldBook = memberWbBlocks.allTriggered
           .filter((entry) => entry.position !== "at_depth" && !includedWorldBookEntryIds.has(entry.id));
         memberOnlyWorldBook.forEach((entry) => includedWorldBookEntryIds.add(entry.id));
+        const privateContext = buildGroupMemberPrivateContext({
+          member,
+          characters,
+          relationships,
+          activeIdentityId,
+          memories: memories || [],
+          claims: groupKnowledgeClaims,
+          summaries: groupConversationSummaries,
+          corrections: groupBehaviorCorrections,
+          queryText: scanText,
+          limit: recallSettings?.recallCount || 5,
+        });
+        if (privateContext) privateContextByMemberId.set(member.id, privateContext);
         const memberWbText = memberOnlyWorldBook.length
           ? `\n- 该角色专属世界书背景/日程/时间线设定:\n${memberOnlyWorldBook.map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")}`
           : "";
@@ -2686,22 +2731,92 @@ export default function AppChat({
 - 背景设定: ${member.backstory}
 - 与机主(${settings.name})的关系: 根据人设及世界观设定
 ${memberWbText}`;
-      }).join("\n\n");
+      });
+      const publicMembersDefText = publicMemberDefinitions.join("\n\n");
 
-      // Generate a comprehensive system prompt
-      const systemInstruction = buildGroupChatSystemInstruction({ userName: settings.name, groupName: activeCharacter.name, worldContext: groupWbText, memberDefinitions: membersDefText });
+      // The first request is a public router only. Its generated text is never
+      // displayed; only the selected, verified member identities are used.
+      const routerSystemInstruction = buildGroupChatSystemInstruction({ userName: settings.name, groupName: activeCharacter.name, worldContext: groupWbText, memberDefinitions: publicMembersDefText });
       const promptMessage = buildGroupChatTaskMessage(historyText, Boolean(userMsg));
-
-      // Call apiChat to generate responses
-      const groupResult = await generateGroupChatTurn({
-        prompt: { scenario: "group-chat", message: promptMessage, history: [], systemInstruction, historyInjections: [...groupAtDepthInjections.values()] },
+      const routerResult = await generateGroupChatTurn({
+        prompt: {
+          scenario: "group-chat",
+          message: `${promptMessage}\n\n【本轮仅选择发言人】不要撰写正式回复。请选择本轮最自然会发言的 0—3 位成员，每位只输出占位内容“SELECT”，格式仍为 [SENDER_NAME: 角色原名]。`,
+          history: [],
+          systemInstruction: routerSystemInstruction,
+          historyInjections: [...groupAtDepthInjections.values()],
+        },
         settings,
         members: groupMembers,
         groupId: activeChatCharId,
         disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
-        createId: (index) => `group-reply-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`,
+        createId: (index) => `group-route-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`,
         currentTime: () => Date.now(),
       });
+      const selectedMembers = Array.from(new Map(routerResult.members.map((member) => [member.id, member])).values()).slice(0, 3);
+      const isolatedMessages: Message[] = [];
+      const isolatedMembers: Character[] = [];
+      let sameTurnPublicHistory = historyText;
+      for (const member of selectedMembers) {
+        const memberPrivateContext = privateContextByMemberId.get(member.id) || "";
+        const publicDefinition = publicMemberDefinitions[groupMembers.findIndex((candidate) => candidate.id === member.id)] || "";
+        const memberDefinitions = buildIsolatedGroupMemberDefinitions({
+          publicDefinition,
+          publicRoster: groupMembers.map((candidate) => candidate.name),
+          privateContext: memberPrivateContext,
+        });
+        const memberSystemInstruction = buildGroupChatSystemInstruction({
+          userName: settings.name,
+          groupName: activeCharacter.name,
+          worldContext: groupWbText,
+          memberDefinitions,
+        });
+        const memberPrompt = `${buildGroupChatTaskMessage(sameTurnPublicHistory, Boolean(userMsg))}\n\n【单成员生成】本次请求只允许 ${member.name} 发言。可以保持沉默；若发言，每一条都必须使用 [SENDER_NAME: ${member.name}]，不得代替其他成员输出。`;
+        const isolatedDepthInjections = new Map(groupWbBlocks.at_depth.map((entry) => [entry.sourceId, entry]));
+        (memberAtDepthInjections.get(member.id) || []).forEach((entry) => isolatedDepthInjections.set(entry.sourceId, entry));
+        const memberResult = await generateGroupChatTurn({
+          prompt: {
+            scenario: "group-chat",
+            message: memberPrompt,
+            history: [],
+            systemInstruction: memberSystemInstruction,
+            historyInjections: [...isolatedDepthInjections.values()],
+          },
+          settings,
+          members: [member],
+          groupId: activeChatCharId,
+          disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
+          createId: (index) => `group-reply-${Date.now()}-${member.id}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+          currentTime: () => Date.now(),
+        });
+        isolatedMessages.push(...memberResult.messages);
+        isolatedMembers.push(...memberResult.members);
+        if (memberResult.messages.length > 0) {
+          sameTurnPublicHistory = [
+            sameTurnPublicHistory,
+            ...memberResult.messages.map((message) => `${member.remark || member.name}: ${message.content}`),
+          ].filter(Boolean).join("\n");
+        }
+      }
+      const groupResult = { messages: isolatedMessages, members: isolatedMembers };
+      const persistPublicGroupTurn = (deliveredReplies: readonly Message[]) => {
+        const additions = createGroupTurnMemories({
+          group: activeCharacter,
+          members: groupMembers,
+          characters,
+          relationships,
+          activeIdentityId,
+          userName: settings.name,
+          userMessage: userMsg,
+          replies: deliveredReplies,
+          timestamp: Date.now(),
+        });
+        if (additions.length === 0) return;
+        const merged = MemoryService.mergeMemories(latestMemoriesRef.current, additions);
+        if (merged.length === latestMemoriesRef.current.length) return;
+        latestMemoriesRef.current = merged;
+        onSaveMemories(merged);
+      };
 
       if (groupResult.messages.length > 0) {
         repliesScheduled = false;
@@ -2744,6 +2859,7 @@ ${memberWbText}`;
               } else {
                 setIsTyping(false);
                 setTypingCharacterOverride(null);
+                persistPublicGroupTurn(groupResult.messages);
               }
             }, 1500);
           };
@@ -2753,6 +2869,8 @@ ${memberWbText}`;
             sendNext();
           }, 500);
         }
+      } else {
+        persistPublicGroupTurn([]);
       }
     } catch (err) {
       console.error("Group chat response generation failed:", err);
@@ -2763,6 +2881,20 @@ ${memberWbText}`;
       }
     }
   };
+
+  useEffect(() => {
+    if (!pendingGroupWelcome
+      || !activeCharacter?.isGroupChat
+      || activeCharacter.id !== pendingGroupWelcome.groupId
+      || activeChatCharId !== pendingGroupWelcome.groupId) return;
+    const pending = pendingGroupWelcome;
+    if (consumedGroupWelcomeIdsRef.current.has(pending.groupId)) return;
+    consumedGroupWelcomeIdsRef.current.add(pending.groupId);
+    pendingGroupWelcomeIdRef.current = null;
+    setPendingGroupWelcome(null);
+    onSendMessage(pending.narration);
+    void generateResponseForGroupChat(null, [pending.narration]);
+  }, [pendingGroupWelcome, activeCharacter?.id, activeCharacter?.isGroupChat, activeChatCharId]);
 
   const shouldConvertBubbleToVoice = (
     character: Character,
@@ -4382,11 +4514,13 @@ ${stickerListStr}
         customChatCSS: draftCustomCss,
         customChatIcons: draftChatIcons,
         chatStylePreset: draftChatStylePreset,
-        enableProactiveChat: draftEnableProactiveChat,
-        enableProactiveCall: draftEnableProactiveCall,
-        proactiveChatInterval: draftProactiveChatInterval,
-        proactiveStartTime: draftProactiveStartTime,
-        proactiveEndTime: draftProactiveEndTime,
+        ...(activeCharacter.isGroupChat ? {} : {
+          enableProactiveChat: draftEnableProactiveChat,
+          enableProactiveCall: draftEnableProactiveCall,
+          proactiveChatInterval: draftProactiveChatInterval,
+          proactiveStartTime: draftProactiveStartTime,
+          proactiveEndTime: draftProactiveEndTime,
+        }),
         disableBracketActions: draftDisableBracketActions,
         historyMemoryLimit: draftHistoryMemoryLimit,
         contextMemoryLimit: draftContextMemoryLimit,
@@ -6248,7 +6382,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                       <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
 
-                    <div className={draftEnableProactiveChat ? "min-h-[52px]" : "contents"}>
+                    {!activeCharacter.isGroupChat && <div className={draftEnableProactiveChat ? "min-h-[52px]" : "contents"}>
                       <div className="flex h-[52px] px-4 items-center justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <span className="text-slate-800 font-medium text-[16px] block">主动联络</span>
@@ -6272,14 +6406,14 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                           </div>
                         </div>
                       )}
-                    </div>
+                    </div>}
 
-                    <div className={`flex h-[52px] px-4 items-center justify-between gap-3 ${draftEnableProactiveChat ? "" : "border-t border-slate-100"}`}>
+                    {!activeCharacter.isGroupChat && <div className={`flex h-[52px] px-4 items-center justify-between gap-3 ${draftEnableProactiveChat ? "" : "border-t border-slate-100"}`}>
                       <div className="min-w-0 flex-1">
                         <span className="text-slate-800 font-medium text-[16px] block">主动来电</span>
                       </div>
                       <SettingsSwitch checked={draftEnableProactiveCall} onChange={setDraftEnableProactiveCall} label="主动来电" />
-                    </div>
+                    </div>}
                   </div>
                 </div>
 
@@ -10240,21 +10374,19 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   const initialNarration: Message = {
                     id: `group-narrate-${Date.now()}`,
                     characterId: newGroupId,
+                    conversationId: `group:${newGroupId}`,
                     sender: "character",
                     isNarration: true,
                     content: `您邀请了 ${invitedNames} 加入了群聊`,
                     timestamp: Date.now() - 1000,
                   };
-                  onSendMessage(initialNarration);
-
                   // Close and switch to the new group chat
                   setShowCreateGroupModal(false);
-                  startChatWith(newGroupId);
-
-                  // Automatically trigger welcoming greetings after a short delay
-                  setTimeout(() => {
-                    generateResponseForGroupChat(null, [initialNarration]);
-                  }, 800);
+                  setActiveChatRelationId(null);
+                  pendingGroupWelcomeIdRef.current = newGroupId;
+                  setActiveChatCharId(newGroupId);
+                  setInitiatedChatIds((previous) => previous.includes(newGroupId) ? previous : [...previous, newGroupId]);
+                  setPendingGroupWelcome({ groupId: newGroupId, narration: initialNarration });
                 }}
                 disabled={selectedGroupMemberIds.length < 1}
                 className="flex-1 py-2 bg-neutral-950 hover:bg-neutral-900 text-white disabled:bg-slate-200 disabled:text-slate-400 rounded-xl text-xs font-bold transition-all text-center"

@@ -27,6 +27,7 @@ export function buildGroupChatSystemInstruction(input: { userName: string; group
 ${input.memberDefinitions}
 
 【群聊互动核心原则】：
+【成员私密认知访问规则】每个 [MEMBER_PRIVATE_CONTEXT] 只属于标签中指定的 speaker。生成其他成员的发言时，把该区块视为不存在；其他成员不能提及或回应其中的私聊事实。只有已经出现在“群聊最近历史消息”里的公开内容才是全员可见事实。
 0. [CURRENT-SCENE CONTINUITY — CRITICAL]: Messages in the recent group history establish the current scene facts. Do not silently replace a member's just-stated activity, location, physical condition, possession, or relationship fact with a contradictory one. If a member changes from one activity to another, explicitly establish a believable transition and time passage first; otherwise continue the existing situation or avoid inventing a new concrete activity.
 1. 【角色表达顺序】：先按每个成员自己的核心人设、明确关系与说话习惯决定是否发言和如何表达，再结合最新消息与当前场景，最后使用本轮实际命中的世界书补充背景。世界书不得把一个成员的口癖、称呼或关系转移给另一成员；明确规定为稳定口癖的内容应持续遵守。
 2. 🚨【回复概率与不回复机制】：并非每个成员在每次互动时都必须发言！在真实的微信群聊中，人物是否回复信息要参考对方人设、自己的世界书日常时间线和日程、当前话题的兴趣度以及与发言人的关系等。
