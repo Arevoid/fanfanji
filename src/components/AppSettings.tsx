@@ -78,6 +78,8 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
 
 interface AppSettingsProps {
   settings: UserSettings;
+  /** The style actually used by the last/current chat, including character overrides. */
+  bubbleStylePreset?: "default" | "floating-cute" | "liquid-glass";
   presets: StylePreset[];
   onSaveSettings: (update: UserSettingsUpdate) => void;
   onSavePreset: (preset: StylePreset) => void;
@@ -406,6 +408,7 @@ function snapshotLocalStorage(): Map<string, string> {
 
 export default function AppSettings({
   settings,
+  bubbleStylePreset,
   presets,
   onSaveSettings,
   onSavePreset,
@@ -414,6 +417,7 @@ export default function AppSettings({
 }: AppSettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(null);
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
+  const effectiveBubbleStylePreset = bubbleStylePreset || settings.globalChatStylePreset || "default";
 
   // PWA states
   const [isPwaInstallable, setIsPwaInstallable] = useState(false);
@@ -490,28 +494,28 @@ export default function AppSettings({
 
   // Beginner-friendly manual styling states
   const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
-  const [otherBubbleBg, setOtherBubbleBg] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [otherBubbleBg, setOtherBubbleBg] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
     : settings.otherBubbleBg || "#f4f4f5");
-  const [otherBubbleColor, setOtherBubbleColor] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [otherBubbleColor, setOtherBubbleColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
     : settings.otherBubbleColor || "#18181b");
-  const [otherBubbleRadius, setOtherBubbleRadius] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [otherBubbleRadius, setOtherBubbleRadius] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
     : settings.otherBubbleRadius ?? 6);
-  const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
     : settings.otherBubbleOpacity ?? 100);
-  const [selfBubbleBg, setSelfBubbleBg] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [selfBubbleBg, setSelfBubbleBg] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
     : settings.selfBubbleBg || "#18181b");
-  const [selfBubbleColor, setSelfBubbleColor] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [selfBubbleColor, setSelfBubbleColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
     : settings.selfBubbleColor || "#ffffff");
-  const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [selfBubbleRadius, setSelfBubbleRadius] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
     : settings.selfBubbleRadius ?? 6);
-  const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
     : settings.selfBubbleOpacity ?? 100);
   const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
@@ -521,27 +525,27 @@ export default function AppSettings({
   const [dockBorderRadius, setDockBorderRadius] = useState(settings.dockBorderRadius !== undefined ? settings.dockBorderRadius : 26);
   const [widgetBorderRadius, setWidgetBorderRadius] = useState(settings.widgetBorderRadius !== undefined ? settings.widgetBorderRadius : 22);
   const [iconBorderEnabled, setIconBorderEnabled] = useState(settings.iconBorderEnabled !== false);
-  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassBubbleTailEnabled === true
     : settings.bubbleTailEnabled === true);
-  const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(settings.globalChatStylePreset === "liquid-glass"
+  const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassBubbleTailVertical || "top"
     : settings.bubbleTailVertical || "top");
-  const [bubblePosition, setBubblePosition] = useState<"side" | "above">((settings.globalChatStylePreset === "liquid-glass"
+  const [bubblePosition, setBubblePosition] = useState<"side" | "above">((effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassBubblePosition
     : settings.bubblePosition) === "above" ? "above" : "side");
   
   // Bubble border states
-  const [bubbleBorderEnabled, setBubbleBorderEnabled] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [bubbleBorderEnabled, setBubbleBorderEnabled] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassBubbleBorderEnabled === true
     : !!settings.bubbleBorderEnabled);
-  const [bubbleBorderWidth, setBubbleBorderWidth] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [bubbleBorderWidth, setBubbleBorderWidth] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassBubbleBorderWidth ?? 1
     : settings.bubbleBorderWidth ?? 1);
-  const [otherBubbleBorderColor, setOtherBubbleBorderColor] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [otherBubbleBorderColor, setOtherBubbleBorderColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleBorderColor || "#ffffff"
     : settings.otherBubbleBorderColor || "#e4e4e7");
-  const [selfBubbleBorderColor, setSelfBubbleBorderColor] = useState(settings.globalChatStylePreset === "liquid-glass"
+  const [selfBubbleBorderColor, setSelfBubbleBorderColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleBorderColor || "#ffffff"
     : settings.selfBubbleBorderColor || "#27272a");
 
@@ -551,7 +555,7 @@ export default function AppSettings({
   const [avatarBorderColor, setAvatarBorderColor] = useState(settings.avatarBorderColor || "#e4e4e7");
 
   const [beautySubTab, setBeautySubTab] = useState<"desktop" | "chat" | "preset">("chat");
-  const isLiquidGlassChatStyle = settings.globalChatStylePreset === "liquid-glass";
+  const isLiquidGlassChatStyle = effectiveBubbleStylePreset === "liquid-glass";
 
   useEffect(() => {
     setOtherBubbleBg(isLiquidGlassChatStyle
@@ -600,6 +604,7 @@ export default function AppSettings({
       ? settings.liquidGlassSelfBubbleBorderColor || "#ffffff"
       : settings.selfBubbleBorderColor || "#27272a");
   }, [
+    effectiveBubbleStylePreset,
     isLiquidGlassChatStyle,
     settings.liquidGlassOtherBubbleBg,
     settings.liquidGlassOtherBubbleColor,

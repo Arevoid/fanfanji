@@ -92,7 +92,7 @@ import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRA
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
 import { migrateLegacyClassicBubblePreset } from "./features/chat/styles/classicBubblePreset";
 import StatusBar from "./components/StatusBar";
-import AppChat from "./components/AppChat";
+import AppChat, { resolveActiveChatStylePreset } from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
 import AppMusic from "./components/AppMusic";
 import AppStore from "./components/AppStore";
@@ -3738,6 +3738,10 @@ export default function App() {
                   <LazyAppBoundary>
                     <AppSettings
                       settings={settings}
+                      bubbleStylePreset={resolveActiveChatStylePreset(
+                        characters.find((character) => character.id === activeChatCharId)?.chatStylePreset,
+                        settings.globalChatStylePreset,
+                      )}
                       presets={presets}
                       onSaveSettings={setSettings}
                       onSavePreset={handleSavePreset}

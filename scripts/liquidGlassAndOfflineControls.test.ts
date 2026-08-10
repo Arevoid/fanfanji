@@ -79,6 +79,8 @@ assert.match(chat, /#conv-screen\.style-liquid-glass \.chat-composer--liquid/);
 assert.match(chat, /#conv-screen\.style-liquid-glass \.chat-composer__attachment-panel/);
 assert.match(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-self/);
 assert.match(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-other/);
+assert.match(app, /bubbleStylePreset=\{resolveActiveChatStylePreset/);
+assert.match(settings, /effectiveBubbleStylePreset/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("self"\)/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("other"\)/);
 assert.match(settings, /液态玻璃气泡设置/);
