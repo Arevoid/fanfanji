@@ -86,7 +86,11 @@ import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
 import { ChatComposer } from "../features/chat/components/ChatComposer";
 import { ChatTextInput } from "../features/chat/components/ChatTextInput";
 import { BubbleTipPortalLayer } from "../features/chat/components/BubbleTipPortalLayer";
-import { VISUAL_VIEWPORT_CHANGE_EVENT } from "../features/viewport/visualViewport";
+import {
+  VISUAL_VIEWPORT_CHANGE_EVENT,
+  type VisualViewportMetrics,
+} from "../features/viewport/visualViewport";
+import { scrollContainerToBottom } from "../features/viewport/scrollContainer";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
 import { MomentsApp } from "../features/moments/MomentsApp";
@@ -3923,8 +3927,9 @@ ${stickerListStr}
 
     if (isFreshOpen || isUserSent || isNearBottom || isTyping) {
       setTimeout(() => {
-        if (chatEndRef.current) {
-          chatEndRef.current.scrollIntoView({ behavior: isFreshOpen ? "auto" : "smooth" });
+        const currentContainer = scrollContainerRef.current;
+        if (currentContainer) {
+          scrollContainerToBottom(currentContainer, isFreshOpen ? "auto" : "smooth");
         }
       }, 50);
     }
@@ -3936,11 +3941,21 @@ ${stickerListStr}
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const handleViewportChange = () => {
+    const handleViewportChange = (event: Event) => {
       if (!activeChatCharId) return;
       const container = scrollContainerRef.current;
-      if (!container || container.scrollHeight - container.scrollTop - container.clientHeight > 250) return;
-      requestAnimationFrame(() => chatEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" }));
+      if (!container) return;
+      const metrics = (event as CustomEvent<VisualViewportMetrics>).detail;
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      // Keyboard shrink increases this distance by roughly the keyboard inset.
+      // Compensate for it without dragging a reader away from older history.
+      const nearBottomThreshold = 250 + Math.max(0, metrics?.keyboardInset ?? 0);
+      if (distanceFromBottom > nearBottomThreshold) return;
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current === container) {
+          scrollContainerToBottom(container);
+        }
+      });
     };
 
     window.addEventListener(VISUAL_VIEWPORT_CHANGE_EVENT, handleViewportChange);

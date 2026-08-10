@@ -2451,7 +2451,7 @@ export default function App() {
       data-pwa-standalone={isStandaloneMode ? "true" : "false"}
       style={{
         position: (typeof window !== "undefined" && window.innerWidth < 768) ? "fixed" : "relative",
-        top: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
+        top: (typeof window !== "undefined" && window.innerWidth < 768) ? "var(--app-viewport-offset-top, 0px)" : undefined,
         left: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
         width: "100%",
         height: (typeof window !== "undefined" && window.innerWidth < 768) ? "var(--app-viewport-height, 100dvh)" : "100dvh",

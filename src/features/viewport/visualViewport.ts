@@ -47,7 +47,7 @@ export interface VisualViewportControllerEnvironment {
 export function createVisualViewportController(environment: VisualViewportControllerEnvironment) {
   const { window, document, requestAnimationFrame, cancelAnimationFrame } = environment;
   let frame: number | null = null;
-  let focusedElement: HTMLElement | null = null;
+  let lastMetrics: VisualViewportMetrics | null = null;
 
   const readMetrics = () => getVisualViewportMetrics({
     innerHeight: window.innerHeight,
@@ -55,21 +55,17 @@ export function createVisualViewportController(environment: VisualViewportContro
     visualViewport: window.visualViewport,
   });
 
-  const keepFocusedElementVisible = () => {
-    const target = focusedElement;
-    if (!target || !target.isConnected) return;
-    const metrics = readMetrics();
-    const rect = target.getBoundingClientRect();
-    const visibleTop = metrics.appViewportOffsetTop;
-    const visibleBottom = visibleTop + metrics.appViewportHeight;
-    if (rect.top < visibleTop || rect.bottom > visibleBottom) {
-      target.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }
-  };
+  const metricsEqual = (left: VisualViewportMetrics, right: VisualViewportMetrics) => (
+    left.appViewportHeight === right.appViewportHeight
+    && left.appViewportOffsetTop === right.appViewportOffsetTop
+    && left.keyboardInset === right.keyboardInset
+  );
 
   const applyMetrics = () => {
     frame = null;
     const metrics = readMetrics();
+    if (lastMetrics && metricsEqual(lastMetrics, metrics)) return;
+    lastMetrics = metrics;
     const rootStyle = document.documentElement.style;
     rootStyle.setProperty("--app-viewport-height", `${metrics.appViewportHeight}px`);
     rootStyle.setProperty("--app-viewport-offset-top", `${metrics.appViewportOffsetTop}px`);
@@ -78,7 +74,6 @@ export function createVisualViewportController(environment: VisualViewportContro
     // shared viewport contract.
     rootStyle.setProperty("--app-height", `${metrics.appViewportHeight}px`);
     window.dispatchEvent(new CustomEvent(VISUAL_VIEWPORT_CHANGE_EVENT, { detail: metrics }));
-    keepFocusedElementVisible();
   };
 
   const scheduleUpdate = () => {
@@ -86,27 +81,13 @@ export function createVisualViewportController(environment: VisualViewportContro
     frame = requestAnimationFrame(applyMetrics);
   };
 
-  const handleFocusIn = (event: FocusEvent) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    if (!target.matches("input, textarea, select, [contenteditable='true']")) return;
-    focusedElement = target;
-    scheduleUpdate();
-    requestAnimationFrame(() => requestAnimationFrame(keepFocusedElementVisible));
-  };
-
-  const handleFocusOut = () => {
-    focusedElement = null;
-  };
-
   const start = () => {
+    lastMetrics = null;
     scheduleUpdate();
     window.addEventListener("resize", scheduleUpdate);
     window.addEventListener("orientationchange", scheduleUpdate);
     window.visualViewport?.addEventListener("resize", scheduleUpdate);
     window.visualViewport?.addEventListener("scroll", scheduleUpdate);
-    document.addEventListener("focusin", handleFocusIn);
-    document.addEventListener("focusout", handleFocusOut);
   };
 
   const stop = () => {
@@ -114,11 +95,9 @@ export function createVisualViewportController(environment: VisualViewportContro
     window.removeEventListener("orientationchange", scheduleUpdate);
     window.visualViewport?.removeEventListener("resize", scheduleUpdate);
     window.visualViewport?.removeEventListener("scroll", scheduleUpdate);
-    document.removeEventListener("focusin", handleFocusIn);
-    document.removeEventListener("focusout", handleFocusOut);
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
-    focusedElement = null;
+    lastMetrics = null;
   };
 
   return { start, stop, scheduleUpdate, readMetrics };

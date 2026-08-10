@@ -15,6 +15,17 @@ const keyboardOpen = getVisualViewportMetrics({
 });
 assert.deepEqual(keyboardOpen, { appViewportHeight: 480, appViewportOffsetTop: 0, keyboardInset: 320 });
 
+const keyboardOpenWithOffset = getVisualViewportMetrics({
+  innerHeight: 800,
+  clientHeight: 800,
+  visualViewport: { height: 450, offsetTop: 30 },
+});
+assert.deepEqual(keyboardOpenWithOffset, {
+  appViewportHeight: 450,
+  appViewportOffsetTop: 30,
+  keyboardInset: 320,
+});
+
 const browserChromeOnly = getVisualViewportMetrics({
   innerHeight: 800,
   clientHeight: 800,
@@ -26,4 +37,4 @@ assert.equal(browserChromeOnly.keyboardInset, 0);
 const fallback = getVisualViewportMetrics({ innerHeight: 760, clientHeight: 740 });
 assert.deepEqual(fallback, { appViewportHeight: 760, appViewportOffsetTop: 0, keyboardInset: 0 });
 
-console.log("PASS VisualViewport metrics shrink the app for IME, avoid toolbar false positives, and fall back to innerHeight");
+console.log("PASS VisualViewport metrics handle keyboard offsets, avoid toolbar false positives, and fall back to innerHeight");
