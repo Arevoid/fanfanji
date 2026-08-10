@@ -2,6 +2,12 @@ const RECIPROCAL_SHORT_REPLIES = new Set([
   "早", "早安", "晚安", "拜拜", "再见", "谢谢", "谢谢你", "哈哈", "哈哈哈", "嘿嘿", "嗯", "嗯嗯", "好", "好的", "收到",
 ]);
 
+type ChatHistoryEntry = {
+  role?: string;
+  text?: string;
+  content?: string;
+};
+
 export function normalizeChatEchoText(value: string): string {
   return value
     .replace(/\[(?:发送时间|SENDER_NAME)[^\]]*\]/gi, "")
@@ -17,5 +23,36 @@ export function isLowInformationUserEcho(userText: string, replyText: string): b
   return reply.length >= 2 && reply.length < user.length && user.includes(reply);
 }
 
-export const CHAT_ECHO_RETRY_INSTRUCTION = `[Current-turn response correction]
-The previous draft merely copied all or part of the user's newest wording. Respond to what the user means from the character's own perspective. Add a genuine reaction, answer, or next conversational move; do not repeat the user's first-person statement as the character's own words. Do not mention this correction or the previous draft.`;
+function getHistoryText(entry: ChatHistoryEntry): string {
+  return typeof entry.text === "string" ? entry.text : typeof entry.content === "string" ? entry.content : "";
+}
+
+export function isDegenerateDirectReply(
+  userText: string,
+  replyText: string,
+  history: readonly ChatHistoryEntry[] = [],
+): boolean {
+  if (isLowInformationUserEcho(userText, replyText)) return true;
+
+  const reply = normalizeChatEchoText(replyText);
+  if (reply.length !== 1 || RECIPROCAL_SHORT_REPLIES.has(reply)) return false;
+
+  return history.slice(-12).some((entry) => (
+    entry.role === "model" && normalizeChatEchoText(getHistoryText(entry)) === reply
+  ));
+}
+
+export function removeDegenerateReplyPattern(
+  history: readonly ChatHistoryEntry[],
+  replyText: string,
+): ChatHistoryEntry[] {
+  const reply = normalizeChatEchoText(replyText);
+  if (reply.length !== 1 || RECIPROCAL_SHORT_REPLIES.has(reply)) return [...history];
+
+  return history.filter((entry) => !(
+    entry.role === "model" && normalizeChatEchoText(getHistoryText(entry)) === reply
+  ));
+}
+
+export const CHAT_DEGENERATE_RETRY_INSTRUCTION = `[Current-turn degenerate-response correction]
+The previous draft was rejected because it copied the user or repeated a meaningless one-character response from recent history. Generate a fresh reply from the character's own perspective and according to the character profile. The corrected reply must contain a genuine reaction, answer, or conversational move and must not be only one character. Do not mention this correction or the rejected draft.`;

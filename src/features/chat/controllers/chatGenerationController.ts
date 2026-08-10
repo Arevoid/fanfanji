@@ -9,7 +9,7 @@ import { generateProactiveReplyCandidates } from "../services/proactiveMessageSe
 import { createRegeneratedReplyCandidates } from "../services/regenerateService";
 import type { AiChatRequest, ReplyCandidateContext } from "../services/chatServiceTypes";
 import { buildTextAiRuntimeConfig } from "../services/textAiRuntimeConfig";
-import { CHAT_ECHO_RETRY_INSTRUCTION, isLowInformationUserEcho } from "../services/chatEchoGuard";
+import { CHAT_DEGENERATE_RETRY_INSTRUCTION, isDegenerateDirectReply, removeDegenerateReplyPattern } from "../services/chatEchoGuard";
 
 type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "historyInjections">;
 type RequestAi = typeof apiChat;
@@ -22,12 +22,17 @@ export async function requestDirectChatTurn(input: { prompt: PromptInput; settin
   const requestAi = input.requestAi || apiChat;
   const request = buildComposedAiChatRequest(input.prompt, input.settings);
   const first = await requestAiReply(requestAi, request);
-  if (!isLowInformationUserEcho(input.prompt.message, first.text)) return first;
+  if (!isDegenerateDirectReply(input.prompt.message, first.text, request.history)) return first;
+  const retryHistory = removeDegenerateReplyPattern(request.history, first.text);
   const retry = await requestAiReply(requestAi, {
     ...request,
-    systemInstruction: [request.systemInstruction, CHAT_ECHO_RETRY_INSTRUCTION].filter(Boolean).join("\n\n"),
+    history: retryHistory,
+    systemInstruction: [request.systemInstruction, CHAT_DEGENERATE_RETRY_INSTRUCTION].filter(Boolean).join("\n\n"),
   });
-  return retry.text.trim() ? retry : first;
+  if (!retry.text.trim() || isDegenerateDirectReply(input.prompt.message, retry.text, request.history)) {
+    throw new Error("模型连续返回重复或无意义的单字回复，本次回复已停止写入，请重试。");
+  }
+  return retry;
 }
 
 export function generateGroupChatTurn(input: {
