@@ -2621,11 +2621,11 @@ export default function App() {
         .phone-screen-container [class*="rounded-"]:not(img):not(.avatar-img):not(.avatar-icon):not(input):not(select):not(textarea):not(.chat-header-control--plain),
         .phone-screen-container .back-btn:not(.chat-header-control--plain),
         .phone-screen-container #schedule_back_btn,
-        .phone-screen-container .chat-bubble-self,
-        .phone-screen-container .chat-bubble-other,
-        .phone-screen-container div[class*="bg-indigo-600"],
-        .phone-screen-container div[class*="bg-slate-200"],
-        .phone-screen-container div[class*="bg-stone-100"] {
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self,
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-other,
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"],
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-slate-200"],
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-stone-100"] {
           border-radius: 32px !important;
         }
 
@@ -2893,22 +2893,22 @@ export default function App() {
 
         /* 8. Specific Chat Bubble Alignment */
         /* Self bubble: Solid charcoal black, crisp white text, 32px round */
-        .phone-screen-container .chat-bubble-self,
-        .phone-screen-container div[class*="bg-indigo-600"] {
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self,
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"] {
           background-color: var(--chat-user-bg) !important;
           color: var(--chat-user-text) !important;
           border-radius: 32px !important;
           border: none !important;
         }
-        .phone-screen-container .chat-bubble-self *,
-        .phone-screen-container div[class*="bg-indigo-600"] * {
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self *,
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"] * {
           color: var(--chat-user-text) !important;
         }
 
         /* Other bubble: Soft light gray, charcoal text, 32px round */
-        .phone-screen-container .chat-bubble-other,
-        .phone-screen-container div[class*="bg-slate-200"],
-        .phone-screen-container div[class*="bg-stone-100"] {
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-other,
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-slate-200"],
+        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-stone-100"] {
           background-color: var(--chat-ai-bg) !important;
           color: var(--chat-ai-text) !important;
           border-radius: 32px !important;

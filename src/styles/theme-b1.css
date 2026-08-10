@@ -65,12 +65,12 @@
   opacity: 1 !important;
 }
 
-:root[data-theme="dark"] .phone-screen-container .chat-bubble-self {
+:root[data-theme="dark"] .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self {
   background-color: var(--chat-user-bg) !important;
   color: var(--chat-user-text) !important;
 }
 
-:root[data-theme="dark"] .phone-screen-container .chat-bubble-other {
+:root[data-theme="dark"] .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-other {
   background-color: var(--chat-ai-bg) !important;
   color: var(--chat-ai-text) !important;
   border-color: var(--border) !important;

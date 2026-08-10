@@ -64,6 +64,7 @@ const preservedLegacyCustomization = applyLiquidGlassTextDefaults({
 assert.equal(preservedLegacyCustomization.liquidGlassSelfBubbleBg, "#fde68a", "existing customized glass colours must be preserved during repair");
 
 const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const offline = readFileSync(new URL("../src/components/AppOffline.tsx", import.meta.url), "utf8");
 const settings = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 assert.match(chat, /settings\.liquidGlassSelfBubbleBg \|\| LIQUID_GLASS_DEFAULT_BUBBLE_COLOR/);
@@ -74,6 +75,10 @@ assert.match(chat, /!isLiquidGlass && settings\.selfBubbleBg/);
 assert.match(chat, /!isLiquidGlass && settings\.otherBubbleBg/);
 assert.match(chat, /settings\.liquidGlassSelfBubbleRadius \?\? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS/);
 assert.match(chat, /settings\.liquidGlassOtherBubbleRadius \?\? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS/);
+assert.match(chat, /#conv-screen\.style-liquid-glass \.chat-composer--liquid/);
+assert.match(chat, /#conv-screen\.style-liquid-glass \.chat-composer__attachment-panel/);
+assert.match(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-self/);
+assert.match(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-other/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("self"\)/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("other"\)/);
 assert.match(settings, /液态玻璃气泡设置/);
