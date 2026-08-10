@@ -105,6 +105,11 @@ import { requestMomentCommentReply } from "../features/moments/services/momentRe
 import { buildMomentCognitiveContext } from "../features/moments/services/momentCognitiveContext";
 import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
 import { prioritizeUserChatCss, scopeUserChatCss } from "../features/chat/styles/chatCssScope";
+import {
+  LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
+  LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
+  LIQUID_GLASS_DEFAULT_TEXT_COLOR,
+} from "../features/chat/styles/liquidGlassDefaults";
 import { sanitizeMomentPublishText } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
 import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
@@ -5934,11 +5939,16 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self,
                 .phone-screen-container .style-liquid-glass .chat-bubble-self,
                 .style-liquid-glass .chat-bubble-self {
-                  background: rgba(255, 255, 255, 0.68) !important;
+                  background: ${getBubbleBackgroundStyle(
+                    settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
+                    settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
+                  )} !important;
                   backdrop-filter: blur(20px) saturate(190%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
-                  color: #1c1917 !important;
+                  border: ${settings.bubbleBorderEnabled
+                    ? `${settings.bubbleBorderWidth ?? 1}px solid ${settings.selfBubbleBorderColor || "#ffffff"}`
+                    : "1.5px solid rgba(255, 255, 255, 0.55)"} !important;
+                  color: ${settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                   padding: 11px 16px !important;
                   font-size: 12px !important;
                   font-weight: 600 !important;
@@ -5950,7 +5960,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self *,
                 .phone-screen-container .style-liquid-glass .chat-bubble-self *,
                 .style-liquid-glass .chat-bubble-self * {
-                  color: #1c1917 !important;
+                  color: ${settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                 }
 
                 #conv-screen.style-liquid-glass .chat-bubble-other,
@@ -5958,11 +5968,16 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other,
                 .phone-screen-container .style-liquid-glass .chat-bubble-other,
                 .style-liquid-glass .chat-bubble-other {
-                  background: rgba(255, 255, 255, 0.68) !important;
+                  background: ${getBubbleBackgroundStyle(
+                    settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
+                    settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
+                  )} !important;
                   backdrop-filter: blur(20px) saturate(190%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  border: 1.5px solid rgba(255, 255, 255, 0.55) !important;
-                  color: #1c1917 !important;
+                  border: ${settings.bubbleBorderEnabled
+                    ? `${settings.bubbleBorderWidth ?? 1}px solid ${settings.otherBubbleBorderColor || "#ffffff"}`
+                    : "1.5px solid rgba(255, 255, 255, 0.55)"} !important;
+                  color: ${settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                   padding: 11px 16px !important;
                   font-size: 12px !important;
                   font-weight: 600 !important;
@@ -5974,7 +5989,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other *,
                 .phone-screen-container .style-liquid-glass .chat-bubble-other *,
                 .style-liquid-glass .chat-bubble-other * {
-                  color: #1c1917 !important;
+                  color: ${settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                 }
  
                 /* 气泡元数据 */

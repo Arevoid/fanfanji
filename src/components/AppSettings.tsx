@@ -50,6 +50,11 @@ import {
   CLASSIC_BUBBLE_PRESET_NAME,
   CLASSIC_BUBBLE_STRUCTURED_STYLE,
 } from "../features/chat/styles/classicBubblePreset";
+import {
+  LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
+  LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
+  LIQUID_GLASS_DEFAULT_TEXT_COLOR,
+} from "../features/chat/styles/liquidGlassDefaults";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -484,14 +489,26 @@ export default function AppSettings({
 
   // Beginner-friendly manual styling states
   const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
-  const [otherBubbleBg, setOtherBubbleBg] = useState(settings.otherBubbleBg || "#f4f4f5");
-  const [otherBubbleColor, setOtherBubbleColor] = useState(settings.otherBubbleColor || "#18181b");
+  const [otherBubbleBg, setOtherBubbleBg] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
+    : settings.otherBubbleBg || "#f4f4f5");
+  const [otherBubbleColor, setOtherBubbleColor] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
+    : settings.otherBubbleColor || "#18181b");
   const [otherBubbleRadius, setOtherBubbleRadius] = useState(settings.otherBubbleRadius !== undefined ? settings.otherBubbleRadius : 6);
-  const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100);
-  const [selfBubbleBg, setSelfBubbleBg] = useState(settings.selfBubbleBg || "#18181b");
-  const [selfBubbleColor, setSelfBubbleColor] = useState(settings.selfBubbleColor || "#ffffff");
+  const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
+    : settings.otherBubbleOpacity ?? 100);
+  const [selfBubbleBg, setSelfBubbleBg] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
+    : settings.selfBubbleBg || "#18181b");
+  const [selfBubbleColor, setSelfBubbleColor] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
+    : settings.selfBubbleColor || "#ffffff");
   const [selfBubbleRadius, setSelfBubbleRadius] = useState(settings.selfBubbleRadius !== undefined ? settings.selfBubbleRadius : 6);
-  const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100);
+  const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(settings.globalChatStylePreset === "liquid-glass"
+    ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
+    : settings.selfBubbleOpacity ?? 100);
   const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
   const [hideNicknames, setHideNicknames] = useState(!!settings.hideNicknames);
 
@@ -515,6 +532,68 @@ export default function AppSettings({
   const [avatarBorderColor, setAvatarBorderColor] = useState(settings.avatarBorderColor || "#e4e4e7");
 
   const [beautySubTab, setBeautySubTab] = useState<"desktop" | "chat" | "preset">("chat");
+  const isLiquidGlassChatStyle = settings.globalChatStylePreset === "liquid-glass";
+
+  useEffect(() => {
+    setOtherBubbleBg(isLiquidGlassChatStyle
+      ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
+      : settings.otherBubbleBg || "#f4f4f5");
+    setOtherBubbleColor(isLiquidGlassChatStyle
+      ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
+      : settings.otherBubbleColor || "#18181b");
+    setOtherBubbleOpacity(isLiquidGlassChatStyle
+      ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
+      : settings.otherBubbleOpacity ?? 100);
+    setSelfBubbleBg(isLiquidGlassChatStyle
+      ? settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
+      : settings.selfBubbleBg || "#18181b");
+    setSelfBubbleColor(isLiquidGlassChatStyle
+      ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
+      : settings.selfBubbleColor || "#ffffff");
+    setSelfBubbleOpacity(isLiquidGlassChatStyle
+      ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
+      : settings.selfBubbleOpacity ?? 100);
+  }, [
+    isLiquidGlassChatStyle,
+    settings.liquidGlassOtherBubbleBg,
+    settings.liquidGlassOtherBubbleColor,
+    settings.liquidGlassOtherBubbleOpacity,
+    settings.liquidGlassSelfBubbleBg,
+    settings.liquidGlassSelfBubbleColor,
+    settings.liquidGlassSelfBubbleOpacity,
+    settings.otherBubbleBg,
+    settings.otherBubbleColor,
+    settings.otherBubbleOpacity,
+    settings.selfBubbleBg,
+    settings.selfBubbleColor,
+    settings.selfBubbleOpacity,
+  ]);
+
+  const getPreviewBubbleVisualStyle = (sender: "self" | "other"): React.CSSProperties => {
+    const isSelf = sender === "self";
+    const background = getBubbleBackgroundStyle(
+      isSelf ? selfBubbleBg : otherBubbleBg,
+      isSelf ? selfBubbleOpacity : otherBubbleOpacity,
+    );
+    const text = isSelf ? selfBubbleColor : otherBubbleColor;
+    const radius = isSelf ? selfBubbleRadius : otherBubbleRadius;
+    const borderColor = isSelf ? selfBubbleBorderColor : otherBubbleBorderColor;
+    return {
+      background,
+      color: text,
+      borderRadius: `${radius}px`,
+      border: bubbleBorderEnabled
+        ? `${bubbleBorderWidth}px solid ${borderColor}`
+        : isLiquidGlassChatStyle
+          ? "1.5px solid rgba(255, 255, 255, 0.55)"
+          : "none",
+      ...(isLiquidGlassChatStyle ? {
+        backdropFilter: "blur(20px) saturate(190%)",
+        WebkitBackdropFilter: "blur(20px) saturate(190%)",
+        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.04)",
+      } : {}),
+    };
+  };
 
   // Connection testing state
   const [isTesting, setIsTesting] = useState(false);
@@ -1907,9 +1986,19 @@ export default function AppSettings({
                 <div className="space-y-4 animate-fade-in">
                   {/* 实时预览窗口 */}
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
-                    <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">实时预览效果</div>
+                    <div className="flex items-center justify-between gap-2 pb-1 border-b border-slate-50">
+                      <span className="text-xs font-bold text-slate-700">实时预览效果</span>
+                      {isLiquidGlassChatStyle && (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-500">液态玻璃</span>
+                      )}
+                    </div>
                     
-                     <div className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 space-y-4 relative overflow-hidden">
+                     <div
+                       className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 space-y-4 relative overflow-hidden"
+                       style={isLiquidGlassChatStyle ? {
+                         background: "linear-gradient(135deg, #dbeafe 0%, #fdf2f8 48%, #ecfeff 100%)",
+                       } : undefined}
+                     >
                       {/* Message 1: Other Speaker (Always has avatar) */}
                       {bubblePosition === "above" ? (
                         /* Stacked layout for above */
@@ -1931,12 +2020,7 @@ export default function AppSettings({
                           <div className="max-w-[75%] relative">
                             <div
                               className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200"
-                              style={{
-                                backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
-                                color: otherBubbleColor,
-                                borderRadius: `${otherBubbleRadius}px`,
-                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${otherBubbleBorderColor}` : 'none',
-                              }}
+                              style={getPreviewBubbleVisualStyle("other")}
                             >
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
                               {bubbleTailEnabled && (
@@ -1971,12 +2055,7 @@ export default function AppSettings({
                             {!hideNicknames && (<span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>)}
                             <div
                               className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
-                              style={{
-                                backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
-                                color: otherBubbleColor,
-                                borderRadius: `${otherBubbleRadius}px`,
-                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${otherBubbleBorderColor}` : 'none',
-                              }}
+                              style={getPreviewBubbleVisualStyle("other")}
                             >
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
                               {bubbleTailEnabled && (
@@ -2020,12 +2099,7 @@ export default function AppSettings({
                           <div className="max-w-[75%] relative">
                             <div
                               className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200"
-                              style={{
-                                backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
-                                color: otherBubbleColor,
-                                borderRadius: `${otherBubbleRadius}px`,
-                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${otherBubbleBorderColor}` : 'none',
-                              }}
+                              style={getPreviewBubbleVisualStyle("other")}
                             >
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
                               {bubbleTailEnabled && (
@@ -2067,12 +2141,7 @@ export default function AppSettings({
                             )}
                             <div
                               className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
-                              style={{
-                                backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
-                                color: otherBubbleColor,
-                                borderRadius: `${otherBubbleRadius}px`,
-                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${otherBubbleBorderColor}` : 'none',
-                              }}
+                              style={getPreviewBubbleVisualStyle("other")}
                             >
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
                               {bubbleTailEnabled && (
@@ -2114,12 +2183,7 @@ export default function AppSettings({
                           <div className="max-w-[75%] relative">
                             <div
                               className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200"
-                              style={{
-                                backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
-                                color: selfBubbleColor,
-                                borderRadius: `${selfBubbleRadius}px`,
-                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${selfBubbleBorderColor}` : 'none',
-                              }}
+                              style={getPreviewBubbleVisualStyle("self")}
                             >
                               我的专属气泡！效果完全同步 ✨
                               {bubbleTailEnabled && (
@@ -2154,12 +2218,7 @@ export default function AppSettings({
                             {!hideNicknames && (<span className="text-[9px] font-bold text-slate-400 mb-0.5">{settings.name || "我"}</span>)}
                             <div
                               className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
-                              style={{
-                                backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
-                                color: selfBubbleColor,
-                                borderRadius: `${selfBubbleRadius}px`,
-                                border: bubbleBorderEnabled ? `${bubbleBorderWidth}px solid ${selfBubbleBorderColor}` : 'none',
-                              }}
+                              style={getPreviewBubbleVisualStyle("self")}
                             >
                               我的专属气泡！效果完全同步 ✨
                               {bubbleTailEnabled && (
@@ -2502,7 +2561,14 @@ export default function AppSettings({
 
                   {/* 极简视觉调色盘 */}
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
-                    <div className="text-xs font-bold text-slate-700 pb-1 border-b border-slate-50">极简视觉调色盘</div>
+                    <div className="pb-1 border-b border-slate-50">
+                      <div className="text-xs font-bold text-slate-700">
+                        {isLiquidGlassChatStyle ? "液态玻璃气泡设置" : "极简视觉调色盘"}
+                      </div>
+                      {isLiquidGlassChatStyle && (
+                        <p className="mt-1 text-[10px] leading-relaxed text-slate-400">底色、文字和透明度会同时用于聊天页与上方实时预览。</p>
+                      )}
+                    </div>
 
                     {/* 对方气泡 */}
                     <div className="space-y-3 p-3 bg-slate-50/50 rounded-[24px] border border-slate-100">
@@ -2516,7 +2582,9 @@ export default function AppSettings({
                             value={otherBubbleBg}
                             onChange={(e) => {
                               setOtherBubbleBg(e.target.value);
-                              handleSave({ otherBubbleBg: e.target.value });
+                              handleSave(isLiquidGlassChatStyle
+                                ? { liquidGlassOtherBubbleBg: e.target.value }
+                                : { otherBubbleBg: e.target.value });
                             }}
                             className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                           />
@@ -2528,7 +2596,9 @@ export default function AppSettings({
                             value={otherBubbleColor}
                             onChange={(e) => {
                               setOtherBubbleColor(e.target.value);
-                              handleSave({ otherBubbleColor: e.target.value });
+                              handleSave(isLiquidGlassChatStyle
+                                ? { liquidGlassOtherBubbleColor: e.target.value }
+                                : { otherBubbleColor: e.target.value });
                             }}
                             className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                           />
@@ -2546,7 +2616,9 @@ export default function AppSettings({
                             onChange={(e) => {
                               const val = parseInt(e.target.value, 10);
                               setOtherBubbleOpacity(val);
-                              handleSave({ otherBubbleOpacity: val });
+                              handleSave(isLiquidGlassChatStyle
+                                ? { liquidGlassOtherBubbleOpacity: val }
+                                : { otherBubbleOpacity: val });
                             }}
                             className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                           />
@@ -2567,7 +2639,9 @@ export default function AppSettings({
                             value={selfBubbleBg}
                             onChange={(e) => {
                               setSelfBubbleBg(e.target.value);
-                              handleSave({ selfBubbleBg: e.target.value });
+                              handleSave(isLiquidGlassChatStyle
+                                ? { liquidGlassSelfBubbleBg: e.target.value }
+                                : { selfBubbleBg: e.target.value });
                             }}
                             className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                           />
@@ -2579,7 +2653,9 @@ export default function AppSettings({
                             value={selfBubbleColor}
                             onChange={(e) => {
                               setSelfBubbleColor(e.target.value);
-                              handleSave({ selfBubbleColor: e.target.value });
+                              handleSave(isLiquidGlassChatStyle
+                                ? { liquidGlassSelfBubbleColor: e.target.value }
+                                : { selfBubbleColor: e.target.value });
                             }}
                             className="w-6 h-6 rounded-[8px] cursor-pointer border border-slate-200 p-0"
                           />
@@ -2597,7 +2673,9 @@ export default function AppSettings({
                             onChange={(e) => {
                               const val = parseInt(e.target.value, 10);
                               setSelfBubbleOpacity(val);
-                              handleSave({ selfBubbleOpacity: val });
+                              handleSave(isLiquidGlassChatStyle
+                                ? { liquidGlassSelfBubbleOpacity: val }
+                                : { selfBubbleOpacity: val });
                             }}
                             className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                           />

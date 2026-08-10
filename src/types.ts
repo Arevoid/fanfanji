@@ -657,6 +657,14 @@ export interface UserSettings {
   globalChatStylePreset?: "default" | "floating-cute" | "liquid-glass";
   /** Prevents the first-use liquid-glass defaults from overwriting later user colour choices. */
   liquidGlassTextDefaultsApplied?: boolean;
+  /** Marks the complete liquid-glass bubble/background defaults as initialized. */
+  liquidGlassVisualDefaultsApplied?: boolean;
+  liquidGlassOtherBubbleBg?: string;
+  liquidGlassOtherBubbleColor?: string;
+  liquidGlassOtherBubbleOpacity?: number;
+  liquidGlassSelfBubbleBg?: string;
+  liquidGlassSelfBubbleColor?: string;
+  liquidGlassSelfBubbleOpacity?: number;
   activePreset: string; // Preset name
   momentsCover?: string; // Moments cover image URL or base64
   apiEndpoint?: string;
