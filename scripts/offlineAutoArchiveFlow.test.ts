@@ -19,15 +19,10 @@ assert.match(
   /handleSyncMemoryToBrain\(activeStory, \{ userConfirmed: true, syncIntent: "manual_settings" \}\)/,
   "settings sync carries an explicit manual intent for Director and IF",
 );
-assert.match(
+assert.doesNotMatch(
   source,
-  /当前模式结束时不会自动总结或同步记忆。如需让线上角色记住本剧情，请进入“剧本设置”并手动同步。/,
-  "Director and IF creation shows a persistent warning",
-);
-assert.match(
-  source,
-  /当前模式不会在结束时自动同步记忆；如需让线上角色记住，请在剧本设置中手动同步。/,
-  "opening a Director or IF story shows a reminder",
+  /showToast\("当前模式不会在结束时自动同步记忆；如需让线上角色记住，请在剧本设置中手动同步。"\)/,
+  "opening a Director or IF story no longer shows the sync reminder toast",
 );
 assert.match(source, /setMemorySyncingStoryId\(story\.id\)/, "sync starts a visible processing state");
 assert.match(source, /同步中，请稍候…/, "manual sync button reports progress");

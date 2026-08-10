@@ -388,13 +388,13 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
       >
         <span
           ref={(element) => { textRefs.current[0] = element; }}
-          className="w-full whitespace-nowrap text-center text-[15px] font-bold leading-none tracking-[-0.02em]"
+          className="w-full whitespace-nowrap text-center text-[17px] font-bold leading-none tracking-[-0.02em]"
         >
           {display.heading}
         </span>
         <span
           ref={(element) => { textRefs.current[1] = element; }}
-          className="mt-2 whitespace-nowrap text-[clamp(78px,24vw,94px)] font-normal leading-[0.74] tracking-[-0.045em]"
+          className="mt-4 whitespace-nowrap text-[clamp(92px,28vw,118px)] font-normal leading-[0.74] tracking-[-0.045em]"
         >
           {display.time}
         </span>
@@ -425,8 +425,8 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
             </div>
             <div className="space-y-4 px-5 py-4">
               <div className="flex h-28 flex-col items-center justify-center rounded-2xl bg-slate-500 px-2 text-center text-white">
-                <span ref={(element) => { previewTextRefs.current[0] = element; }} className="w-full whitespace-nowrap text-center text-[13px] font-bold leading-none">{display.heading}</span>
-                <span ref={(element) => { previewTextRefs.current[1] = element; }} className="mt-2 whitespace-nowrap text-[68px] font-normal leading-[0.74] tracking-[-0.045em]">{display.time}</span>
+                <span ref={(element) => { previewTextRefs.current[0] = element; }} className="w-full whitespace-nowrap text-center text-[15px] font-bold leading-none">{display.heading}</span>
+                <span ref={(element) => { previewTextRefs.current[1] = element; }} className="mt-4 whitespace-nowrap text-[80px] font-normal leading-[0.74] tracking-[-0.045em]">{display.time}</span>
               </div>
               <label className="flex items-center justify-between text-xs font-bold">
                 字体颜色

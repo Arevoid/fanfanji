@@ -442,9 +442,6 @@ export default function AppOffline({
       localStorage.setItem(getOfflineModeStorageKey(story.relationId), "true");
       localStorage.setItem(getOfflineStoryStorageKey(story.relationId), story.id);
     }
-    if (story.mode === "director" || story.mode === "if") {
-      showToast("当前模式不会在结束时自动同步记忆；如需让线上角色记住，请在剧本设置中手动同步。");
-    }
   };
 
   const clearOfflineSession = (story: OfflineStory) => {
