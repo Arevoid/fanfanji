@@ -21,6 +21,7 @@ assert.match(widgets, /export function TimeWidget/);
 assert.match(widgets, /time_widget_font_color_/);
 assert.match(widgets, /time_widget_font_color_\$\{id\}`\), "#1c1917"/);
 assert.match(widgets, /bg-transparent/);
+assert.match(widgets, /items-center justify-center[\s\S]*text-\[clamp\(78px,24vw,94px\)\] font-normal/);
 assert.match(widgets, /onAdd\("time"\)/);
 assert.match(app, /case "time": return TimeWidget/);
 assert.match(app, /widgetType === "time"[\s\S]*size = "2x4"/);

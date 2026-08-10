@@ -346,7 +346,7 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
     textRefs.current.forEach((element) => {
       if (!element) return;
       element.style.setProperty("color", fontColor, "important");
-      element.style.setProperty("font-family", '"Helvetica Neue", Arial, system-ui, sans-serif', "important");
+      element.style.setProperty("font-family", '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif', "important");
     });
   }, [fontColor, isSettingsOpen]);
 
@@ -355,7 +355,7 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
     previewTextRefs.current.forEach((element) => {
       if (!element) return;
       element.style.setProperty("color", previewColor, "important");
-      element.style.setProperty("font-family", '"Helvetica Neue", Arial, system-ui, sans-serif', "important");
+      element.style.setProperty("font-family", '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif', "important");
     });
   }, [draftFontColor, fontColor, isSettingsOpen]);
 
@@ -376,7 +376,7 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
     <div className="time-widget relative h-full w-full select-none group">
       <button
         type="button"
-        className="flex h-full w-full flex-col items-start justify-center overflow-hidden bg-transparent px-[13%] text-left"
+        className="flex h-full w-full flex-col items-center justify-center overflow-hidden bg-transparent px-2 text-center"
         onClick={(event) => {
           event.stopPropagation();
           if (!isEditing) {
@@ -388,13 +388,13 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
       >
         <span
           ref={(element) => { textRefs.current[0] = element; }}
-          className="w-full whitespace-nowrap text-[15px] font-bold leading-none tracking-[-0.02em]"
+          className="w-full whitespace-nowrap text-center text-[15px] font-bold leading-none tracking-[-0.02em]"
         >
           {display.heading}
         </span>
         <span
           ref={(element) => { textRefs.current[1] = element; }}
-          className="mt-2 whitespace-nowrap text-[65px] font-light leading-[0.78] tracking-[-0.065em]"
+          className="mt-2 whitespace-nowrap text-[clamp(78px,24vw,94px)] font-normal leading-[0.74] tracking-[-0.045em]"
         >
           {display.time}
         </span>
@@ -424,9 +424,9 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
               <button type="button" onClick={cancelSettings} className="rounded-full p-1 text-lg font-bold text-[var(--text-tertiary)]" aria-label="关闭">×</button>
             </div>
             <div className="space-y-4 px-5 py-4">
-              <div className="flex h-28 flex-col items-start justify-center rounded-2xl bg-slate-500 px-[13%] text-white">
-                <span ref={(element) => { previewTextRefs.current[0] = element; }} className="whitespace-nowrap text-[13px] font-bold leading-none">{display.heading}</span>
-                <span ref={(element) => { previewTextRefs.current[1] = element; }} className="mt-2 whitespace-nowrap text-[52px] font-light leading-[0.78] tracking-[-0.065em]">{display.time}</span>
+              <div className="flex h-28 flex-col items-center justify-center rounded-2xl bg-slate-500 px-2 text-center text-white">
+                <span ref={(element) => { previewTextRefs.current[0] = element; }} className="w-full whitespace-nowrap text-center text-[13px] font-bold leading-none">{display.heading}</span>
+                <span ref={(element) => { previewTextRefs.current[1] = element; }} className="mt-2 whitespace-nowrap text-[68px] font-normal leading-[0.74] tracking-[-0.045em]">{display.time}</span>
               </div>
               <label className="flex items-center justify-between text-xs font-bold">
                 字体颜色
