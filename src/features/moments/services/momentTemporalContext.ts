@@ -39,6 +39,36 @@ const FIXED_HOLIDAYS: Record<string, { month: number; day: number }> = {
 const HISTORICAL_REFERENCE = /(?:去年|前年|曾经|那年|回忆|小时候|过去|当时|以前)/;
 const pad = (value: number) => value.toString().padStart(2, "0");
 
+const CHINESE_CLOCK_VALUES: Record<string, number> = {
+  零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5,
+  六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12,
+};
+
+const parseClockNumber = (value: string): number | undefined => {
+  if (/^\d{1,2}$/.test(value)) return Number(value);
+  return CHINESE_CLOCK_VALUES[value];
+};
+
+function findCurrentClockReferences(content: string): Array<{ index: number; minutes: number }> {
+  const references: Array<{ index: number; minutes: number }> = [];
+  const clockPattern = /(?:凌晨|早上|上午|中午|下午|傍晚|晚上|夜里|深夜)\s*([零〇一二两三四五六七八九十]{1,2}|\d{1,2})\s*(?:点|时)(半|(?:[零〇一二两三四五六七八九十]{1,2}|\d{1,2})分?)?/g;
+  for (const match of content.matchAll(clockPattern)) {
+    const index = match.index || 0;
+    if (isExplicitHistoricalReference(content, index)) continue;
+    const period = match[0].match(/^(凌晨|早上|上午|中午|下午|傍晚|晚上|夜里|深夜)/)?.[1] || "";
+    const rawHour = parseClockNumber(match[1]);
+    if (rawHour === undefined || rawHour > 23) continue;
+    let hour = rawHour;
+    if (["下午", "傍晚", "晚上", "夜里", "深夜"].includes(period) && hour < 12) hour += 12;
+    if (period === "中午" && hour < 11) hour += 12;
+    if (period === "凌晨" && hour === 12) hour = 0;
+    const minuteToken = match[2] || "";
+    const minute = minuteToken === "半" ? 30 : (parseClockNumber(minuteToken.replace(/分$/, "")) || 0);
+    if (minute <= 59) references.push({ index, minutes: hour * 60 + minute });
+  }
+  return references;
+}
+
 export function getMomentSeason(date: Date): MomentSeason {
   const month = date.getMonth() + 1;
   if (month >= 3 && month <= 5) return "春季";
@@ -78,6 +108,7 @@ export function formatMomentTemporalContext(context: MomentTemporalContext, char
 This Moment occurred and was published at: ${context.currentDate} ${occurrenceTime} (local time).
 Current season: ${context.currentSeason}. Current solar term: ${context.currentSolarTerm}.
 Write the post as if this occurrence time is "today" and "now". Do not use the real app-open time. Use this date and clock time for day-period references, season, solar terms, holidays, and birthdays.
+If the post states an explicit current clock time such as “凌晨两点半” or “下午三点”, it must match the occurrence clock above. Prefer omitting an exact clock time unless it is necessary.
 Do not refer to a later part of the same day as if it has already happened: for example, do not write "今晚" or "今天晚上" before evening, and do not write "今天下午" before afternoon.
 Historical chat and memory are dated past events only; they must not replace this occurrence time. Offline-story time is fictional and is valid only inside that story.
 Do not describe a season, solar term, holiday, or weather scene that conflicts with this occurrence time unless explicitly referring to a clearly marked historical memory.
@@ -117,6 +148,13 @@ export function findMomentTemporalConflicts(
   const conflicts: string[] = [];
   const allowedSeasonWords = new Set(SEASONAL_WORDS[context.currentSeason]);
   const occurrenceHour = context.generatedAt.getHours();
+  const occurrenceMinutes = occurrenceHour * 60 + context.generatedAt.getMinutes();
+
+  for (const reference of findCurrentClockReferences(content)) {
+    if (Math.abs(reference.minutes - occurrenceMinutes) > 45) {
+      conflicts.push("explicit clock time conflicts with the Moment occurrence time");
+    }
+  }
 
   if (occurrenceHour < 17 && /(?:今晚|今天晚上|今夜)/.test(content)) {
     conflicts.push("evening reference is later than the Moment occurrence time");

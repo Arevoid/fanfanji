@@ -1552,7 +1552,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                           onClick={() => setSettingsAllowCharacterToSpeakForUser((current) => !current)}
                           className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${settingsAllowCharacterToSpeakForUser ? "bg-[#111111]" : "bg-[#E5E5EA]"}`}
                         >
-                          <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${settingsAllowCharacterToSpeakForUser ? "translate-x-[22px]" : "translate-x-0.5"}`} />
+                          <span className={`absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${settingsAllowCharacterToSpeakForUser ? "translate-x-5" : "translate-x-0"}`} />
                         </button>
                       </div>
                     </div>

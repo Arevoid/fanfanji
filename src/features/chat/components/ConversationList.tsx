@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { MessageSquare, Pin } from "lucide-react";
 import type { Character, Message } from "../../../types";
+import { parseTextImageDescription } from "../services/messageParser";
 
 export interface ConversationThread {
   id: string;
@@ -43,6 +44,9 @@ export function ConversationList({
       ) : (
         threads.map(({ id, character, lastMessage, isPinned, subtitle }) => {
           const unreadCount = getUnreadCount(id);
+          const directMessageSummary = lastMessage && parseTextImageDescription(lastMessage.content)
+            ? "[文字图]"
+            : lastMessage?.content || "";
           return (
             <div
               key={id}
@@ -70,7 +74,7 @@ export function ConversationList({
                   {lastMessage && <span className="text-[9px] text-[var(--text-tertiary)] font-medium">{new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
                 </div>
                 <p className="text-[11px] text-[var(--text-secondary)] truncate mt-0.5 leading-normal">
-                  {lastMessage ? (character.isGroupChat ? getGroupMessageSummary(lastMessage) : lastMessage.content) : ""}
+                  {lastMessage ? (character.isGroupChat ? getGroupMessageSummary(lastMessage) : directMessageSummary) : ""}
                 </p>
               </div>
             </div>

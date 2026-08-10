@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../src/features/chat/services/messageFactory";
-import { cleanAiReplyText, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
+import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
 
 const clean = (text: string) => cleanAiReplyText(text, false);
 
@@ -15,6 +15,9 @@ assert.deepEqual(splitAiReplyBubbles("[转账]|8.88|转账", false), ["[转账]|
 assert.equal(getChatMessageVisualType("[文件]|note|body"), "file");
 assert.equal(getChatMessageVisualType("[位置]|上海"), "location");
 assert.equal(getChatMessageVisualType("[语音]|3|你好"), "voice");
+const textImage = createTextImageMarkup("窗边的猫 | 晚霞");
+assert.equal(getChatMessageVisualType(textImage), "text-image");
+assert.equal(parseTextImageDescription(textImage), "窗边的猫 | 晚霞");
 assert.equal(isCallRecordMarkup("[通话记录]|语音通话|00:02|%5B%5D"), true);
 
 // J-L: group content, empty input, and mixed markup keep legacy ordering/fallbacks.
@@ -43,6 +46,8 @@ assert.deepEqual(createUserTextMessage({ id: "q1", characterId: "c1", content: "
 assert.equal(normalizePaymentMarkup("[微信红包]|1|x"), "[红包]|1|x");
 assert.equal(isRedPacketMarkup("[微信红包]|1|x"), true);
 assert.equal(isTransferMarkup("[微信转账]|1|x"), true);
-assert.deepEqual(parseCallRecord("[通话记录]|语音通话|00:02|%5B%5D"), { callType: "语音通话", duration: "00:02", transcript: [] });
+assert.deepEqual(parseCallRecord("[通话记录]|语音通话|00:02|%5B%5D"), { callType: "语音通话", status: "completed", direction: "outgoing", duration: "00:02", transcript: [] });
+const cancelledCall = createCallRecordMarkup({ callType: "语音通话", status: "cancelled", direction: "incoming", duration: "00:00", transcript: [] });
+assert.deepEqual(parseCallRecord(cancelledCall), { callType: "语音通话", status: "cancelled", direction: "incoming", duration: "00:00", transcript: [] });
 
-console.log("Chat message services: 21 fixed acceptance checks passed");
+console.log("Chat message services: status-aware call records and fixed acceptance checks passed");

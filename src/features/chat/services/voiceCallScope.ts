@@ -34,13 +34,14 @@ export function createVoiceCallRecordMessage(input: {
   scope: DirectVoiceCallScope;
   content: string;
   timestamp: number;
+  sender?: "user" | "character";
 }): Message {
   return {
     id: input.id,
     characterId: input.characterId,
     relationId: input.scope.relationId,
     conversationId: input.scope.conversationId,
-    sender: "user",
+    sender: input.sender || "user",
     content: input.content,
     timestamp: input.timestamp,
   };

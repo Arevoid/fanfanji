@@ -102,6 +102,40 @@ const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "plus", label: "加号" }, { key: "send", label: "发送" },
 ];
 
+const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置页和其他应用不会应用本样式。 */
+#conv-screen {
+  --chat-page-bg: var(--app-bg);
+  --chat-header-bg: var(--surface);
+  --chat-message-list-bg: var(--app-bg);
+  --chat-user-bg: var(--button-primary-bg);
+  --chat-user-text: var(--button-primary-text);
+  --chat-ai-bg: var(--surface-raised);
+  --chat-ai-text: var(--text-primary);
+  --chat-bubble-border: var(--border);
+  --chat-composer-bg: var(--surface);
+  --chat-input-bg: var(--input-bg);
+  --chat-send-bg: var(--button-primary-bg);
+  --chat-send-text: var(--button-primary-text);
+}
+
+.chat-page {
+  background: var(--chat-page-bg);
+  background-size: cover;
+  background-position: center;
+}
+.cv-header { background: var(--chat-header-bg); }
+.cv-messages-list { background: var(--chat-message-list-bg); }
+.chat-bubble-self { background: var(--chat-user-bg); color: var(--chat-user-text); border: 1px solid var(--chat-bubble-border); border-radius: 14px; }
+.chat-bubble-self * { color: var(--chat-user-text); }
+.chat-bubble-other { background: var(--chat-ai-bg); color: var(--chat-ai-text); border: 1px solid var(--chat-bubble-border); border-radius: 14px; }
+.chat-bubble-other * { color: var(--chat-ai-text); }
+.chat-composer--default,
+.chat-composer--floating,
+.chat-composer--liquid { background: var(--chat-composer-bg); }
+.chat-input { background: var(--chat-input-bg); }
+.send-button { background: var(--chat-send-bg); color: var(--chat-send-text); }
+`;
+
 const BACKUP_KEYS = [
   "phone_calendar_events",
   "phone_characters",
@@ -432,6 +466,7 @@ export default function AppSettings({
   const [bubbleCss, setBubbleCss] = useState(settings.bubbleCss);
   const [globalCss, setGlobalCss] = useState(settings.globalCss);
   const [chatGlobalCSS, setChatGlobalCSS] = useState(settings.chatGlobalCSS || "");
+  const [globalChatCssTemplateCopied, setGlobalChatCssTemplateCopied] = useState(false);
   const [chatIcons, setChatIcons] = useState<ChatIconOverrides>(() => sanitizeChatIcons(settings.chatIcons));
   const [showHomeButton, setShowHomeButton] = useState(!!settings.showHomeButton);
   const [hideStatusBar, setHideStatusBar] = useState(!!settings.hideStatusBar);
@@ -861,6 +896,25 @@ export default function AppSettings({
       }
     };
     reader.readAsText(file);
+  };
+
+  const copyGlobalChatCssTemplate = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setGlobalChatCssTemplateCopied(true);
+      window.setTimeout(() => setGlobalChatCssTemplateCopied(false), 1500);
+    } catch {
+      alert("复制失败，请手动复制输入框中的模板。");
+    }
   };
 
   const handleClearApplicationData = async () => {
@@ -2554,9 +2608,14 @@ export default function AppSettings({
                   </div>
 
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <span className="text-xs font-bold text-slate-700">全局聊天样式 CSS</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-bold text-slate-700">全局聊天样式 CSS</span>
+                      <button type="button" onClick={copyGlobalChatCssTemplate} className="shrink-0 rounded-[8px] bg-slate-100 px-2 py-1 text-[9px] font-medium text-slate-500 transition-colors hover:bg-slate-200">
+                        {globalChatCssTemplateCopied ? "已复制" : "复制模板"}
+                      </button>
+                    </div>
                     <p className="text-[10px] text-slate-400 leading-relaxed">用于修改所有聊天页面视觉效果，包括背景、导航、气泡、消息、输入区域等。</p>
-                    <textarea rows={5} value={chatGlobalCSS} onChange={(e) => { setChatGlobalCSS(e.target.value); handleSave({ chatGlobalCSS: e.target.value }); }} placeholder={`.chat-theme {\n  --chat-accent: #07c160;\n}`} className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed" />
+                    <textarea rows={5} value={chatGlobalCSS} onChange={(e) => { setChatGlobalCSS(e.target.value); handleSave({ chatGlobalCSS: e.target.value }); }} placeholder={GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE} className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed" />
                   </div>
 
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">

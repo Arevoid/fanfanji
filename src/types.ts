@@ -655,6 +655,8 @@ export interface UserSettings {
   /** Globally configured chat function icon resources. */
   chatIcons?: ChatIconOverrides;
   globalChatStylePreset?: "default" | "floating-cute" | "liquid-glass";
+  /** Prevents the first-use liquid-glass defaults from overwriting later user colour choices. */
+  liquidGlassTextDefaultsApplied?: boolean;
   activePreset: string; // Preset name
   momentsCover?: string; // Moments cover image URL or base64
   apiEndpoint?: string;

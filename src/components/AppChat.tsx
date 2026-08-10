@@ -5,11 +5,13 @@ import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { compressImage } from "../utils/pngParser";
-import { cleanAiReplyText as cleanOnlineMessage, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
+import { canTriggerProactiveVoiceCall, createProactiveCallRejectionPatch, createProactiveCallTriggerPatch, resolveOutgoingCallResolution } from "../features/chat/services/proactiveVoiceCallPolicy";
+import type { VoiceCallStatus } from "../features/chat/services/messageTypes";
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
 import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
@@ -1662,7 +1664,6 @@ export default function AppChat({
 
     localStorage.removeItem(getOfflineModeStorageKey(relationId));
     localStorage.removeItem(getOfflineStoryStorageKey(relationId));
-    proactiveCallCooldownRef.current[relationId] = 0;
     proactiveMessageInFlightRef.current.delete(relationId);
     setInitiatedChatIds((previous) => previous.filter((id) => id !== relationId));
     setLastReadTimestamps((previous) => {
@@ -1805,6 +1806,11 @@ export default function AppChat({
   // User profile edit states
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [meActiveSubView, setMeActiveSubView] = useState<"none" | "identities" | "wallet" | "stickers" | "favorites">("none");
+  const mainTabsViewportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (activeTab === "me") mainTabsViewportRef.current?.scrollTo({ top: 0 });
+  }, [activeTab, meActiveSubView]);
   const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState("");
   const [walletBalances, setWalletBalances] = useState<IdentityWalletBalances>(() =>
@@ -2479,20 +2485,6 @@ export default function AppChat({
     });
   }, [callTranscript.length, activeAttachModal, callingStatus]);
 
-  // Auto connect timer for user-initiated call
-  useEffect(() => {
-    let autoConnectTimer: any = null;
-    if (activeAttachModal === "calling" && callingStatus === "ringing" && !isIncomingCall) {
-      autoConnectTimer = setTimeout(() => {
-        setCallingStatus("connected");
-        setCallStartTime(Date.now());
-      }, 3000);
-    }
-    return () => {
-      if (autoConnectTimer) clearTimeout(autoConnectTimer);
-    };
-  }, [activeAttachModal, callingStatus, isIncomingCall]);
-
   const beginVoiceCall = (incoming: boolean) => {
     if (!activeCharacter || activeCharacter.isGroupChat || !activeVoiceCallScope) return;
     setIsIncomingCall(incoming);
@@ -2506,25 +2498,39 @@ export default function AppChat({
     setShowAttachPanel(false);
   };
 
-  const endVoiceCall = () => {
-    if (!activeChatCharId || callingStatus !== "connected" || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
+  const finishVoiceCall = (requestedStatus: VoiceCallStatus) => {
+    if (!activeChatCharId || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
       setActiveAttachModal(null);
       setVoiceCallRelationId(null);
       return;
     }
+    const meaningfulTranscript = callTranscript.filter((item) => getCallTranscriptText(item.content || "").trim());
+    const status: VoiceCallStatus = requestedStatus === "completed" && meaningfulTranscript.length === 0
+      ? "cancelled"
+      : requestedStatus;
     const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
     const secs = (callingDuration % 60).toString().padStart(2, "0");
     const callRecord = createVoiceCallRecordMessage({
       id: `call-record-${Date.now()}`,
       characterId: activeChatCharId,
       scope: activeVoiceCallScope,
-      content: `[通话记录]|语音通话|${mins}:${secs}|${encodeURIComponent(JSON.stringify(callTranscript))}`,
+      sender: isIncomingCall ? "character" : "user",
+      content: createCallRecordMarkup({
+        callType: "语音通话",
+        status,
+        direction: isIncomingCall ? "incoming" : "outgoing",
+        duration: `${mins}:${secs}`,
+        transcript: meaningfulTranscript,
+      }),
       timestamp: Date.now(),
     });
     onSendMessageRaw(callRecord);
-    if (activeDirectScope) {
+    if (status === "completed" && activeDirectScope) {
       const claim = createDeterministicArtifactClaim({ message: callRecord, scope: activeDirectScope });
       if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture voice-call knowledge claim.");
+    }
+    if (isIncomingCall && status !== "completed") {
+      updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallRejectionPatch(Date.now()));
     }
     if (activeTtsAudio) activeTtsAudio.pause();
     callSpeechQueueRef.current = [];
@@ -2534,6 +2540,30 @@ export default function AppChat({
     setActiveAttachModal(null);
     setVoiceCallRelationId(null);
   };
+
+  const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled");
+
+  // Resolve an outgoing invitation instead of making every character answer automatically.
+  useEffect(() => {
+    if (activeAttachModal !== "calling" || callingStatus !== "ringing" || isIncomingCall) return;
+    const timer = window.setTimeout(() => {
+      const resolution = resolveOutgoingCallResolution(Math.random());
+      if (resolution === "connected") {
+        setCallingStatus("connected");
+        setCallStartTime(Date.now());
+      } else {
+        finishVoiceCall(resolution);
+      }
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [activeAttachModal, callingStatus, isIncomingCall, voiceCallRelationId]);
+
+  // An unanswered incoming call must end as a visible cancelled record.
+  useEffect(() => {
+    if (activeAttachModal !== "calling" || callingStatus !== "ringing" || !isIncomingCall) return;
+    const timer = window.setTimeout(() => finishVoiceCall("cancelled"), 30 * 1000);
+    return () => window.clearTimeout(timer);
+  }, [activeAttachModal, callingStatus, isIncomingCall, voiceCallRelationId]);
 
   const sendVoiceCallMessage = () => {
     const text = callingInputText.trim();
@@ -2553,21 +2583,29 @@ export default function AppChat({
     setCallingInputText("");
   };
 
-  // Enabled contacts occasionally call the user while their chat is open.
-  // The cooldown keeps this feeling spontaneous rather than intrusive.
-  const proactiveCallCooldownRef = useRef<Record<string, number>>({});
+  // Enabled contacts may call while their chat is open, with relationship-scoped
+  // persistence, quiet-hours checks, daily limits and rejection backoff.
   useEffect(() => {
-    if (!activeChatCharId || !activeCharacter || !activeVoiceCallScope || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
+    if (!activeChatCharId || !activeCharacter || !activeRelationship || !activeVoiceCallScope || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
     const timer = setInterval(() => {
       if (activeAttachModal || isOfflineStoryActiveFor(activeVoiceCallScope.relationId)) return;
-      const callCooldownKey = activeVoiceCallScope.relationId;
-      const lastCallAt = proactiveCallCooldownRef.current[callCooldownKey] || 0;
-      if (Date.now() - lastCallAt < 5 * 60 * 1000 || Math.random() >= 0.18) return;
-      proactiveCallCooldownRef.current[callCooldownKey] = Date.now();
+      const now = Date.now();
+      const latestMessageAt = messagesRef.current
+        .filter((message) => message.relationId === activeVoiceCallScope.relationId && !message.isOffline)
+        .reduce((latest, message) => Math.max(latest, message.timestamp), 0) || undefined;
+      if (!canTriggerProactiveVoiceCall({
+        now,
+        relation: activeRelationship,
+        latestMessageAt,
+        startTime: activeCharacter.proactiveStartTime,
+        endTime: activeCharacter.proactiveEndTime,
+        randomValue: Math.random(),
+      })) return;
+      updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallTriggerPatch(activeRelationship, now));
       beginVoiceCall(true);
     }, 60 * 1000);
     return () => clearInterval(timer);
-  }, [activeChatCharId, activeCharacter?.enableProactiveCall, activeCharacter?.isGroupChat, activeAttachModal, activeIdentityId, activeVoiceCallScope?.relationId]);
+  }, [activeChatCharId, activeCharacter?.enableProactiveCall, activeCharacter?.isGroupChat, activeCharacter?.proactiveStartTime, activeCharacter?.proactiveEndTime, activeAttachModal, activeIdentityId, activeVoiceCallScope?.relationId, activeRelationship?.lastProactiveCallAt, activeRelationship?.proactiveCallBackoffUntil, activeRelationship?.proactiveCallCount, activeRelationship?.proactiveCallDayKey]);
 
   const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return;
@@ -2599,12 +2637,14 @@ export default function AppChat({
 
       // Create a readable history for the AI, showing the user's name or character names as senders
       const historyText = slicedMsgs.map((m) => {
+        const textImageDescription = parseTextImageDescription(m.content);
+        const content = textImageDescription ? `[文字图：${textImageDescription}]` : m.content;
         if (m.sender === "user") {
-          return `${settings.name} (机主): ${m.content}`;
+          return `${settings.name} (机主): ${content}`;
         } else {
           const senderChar = groupMembers.find(c => c.id === m.senderId);
           const senderName = senderChar ? (senderChar.remark || senderChar.name) : (m.senderId || "成员");
-          return `${senderName}: ${m.content}`;
+          return `${senderName}: ${content}`;
         }
       }).join("\n");
 
@@ -2826,7 +2866,10 @@ ${memberWbText}`;
 
       const history = slicedMsgs.map((m) => {
         let contentText = m.content;
-        if (contentText.startsWith("[语音]|")) {
+        const textImageDescription = parseTextImageDescription(contentText);
+        if (textImageDescription) {
+          contentText = `[文字图：${textImageDescription}]`;
+        } else if (contentText.startsWith("[语音]|")) {
           const parts = contentText.split("|");
           const secs = parts[1] || "5";
           const voiceText = parts.slice(2).join("|") || "";
@@ -3272,6 +3315,9 @@ ${stickerListStr}
       let promptMessage = userMsg ? userMsg.content : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
       if (promptMessage.startsWith("data:image/")) {
         promptMessage = `[发送图片/照片] 我给你发送了一张照片。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
+      } else if (parseTextImageDescription(promptMessage)) {
+        const description = parseTextImageDescription(promptMessage)!;
+        promptMessage = `[发送文字图] 我发送了一张不含真实图片、仅用文字描述画面的文字图，描述内容是：“${description}”。请把它当作我主动分享的画面描述来回应，不要声称看到了真实照片。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
       } else if (promptMessage.startsWith("[红包]")) {
         const parts = promptMessage.split("|");
         const amount = parts[1] || "8.88";
@@ -4038,11 +4084,13 @@ ${stickerListStr}
       // Map history with timestamps for time awareness
       const requestTime = new Date();
       const history = slicedMsgs.map((m) => {
+        const textImageDescription = parseTextImageDescription(m.content);
+        const content = textImageDescription ? `[文字图：${textImageDescription}]` : m.content;
         return {
           role: m.sender === "user" ? "user" : "model",
           text: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness
-            ? formatHistoricalMessageForPrompt(m.content, m.timestamp, requestTime)
-            : m.content,
+            ? formatHistoricalMessageForPrompt(content, m.timestamp, requestTime)
+            : content,
         };
       });
 
@@ -4748,6 +4796,17 @@ ${stickerListStr}
       occurredAt,
       routine: buildCharacterRoutine(character.routine),
     });
+  };
+
+  const sendTextImage = () => {
+    const description = imageRequestText.trim();
+    if (!description) {
+      showToast("请填写图片描述");
+      return;
+    }
+    sendCustomMessage(createTextImageMarkup(description), activeRuntimeContext);
+    setImageRequestText("");
+    setShowImageGenerator(false);
   };
 
   const momentSourceText = (context: CharacterCognitiveContext) => [
@@ -5757,7 +5816,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self *,
                 .phone-screen-container .style-liquid-glass .chat-bubble-self *,
                 .style-liquid-glass .chat-bubble-self * {
-                  color: #1c1917;
+                  color: #1c1917 !important;
                 }
 
                 #conv-screen.style-liquid-glass .chat-bubble-other,
@@ -5781,7 +5840,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other *,
                 .phone-screen-container .style-liquid-glass .chat-bubble-other *,
                 .style-liquid-glass .chat-bubble-other * {
-                  color: #1c1917;
+                  color: #1c1917 !important;
                 }
  
                 /* 气泡元数据 */
@@ -7048,7 +7107,20 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                           alt="chat-pic"
                           className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
                         />
-                      ) : msg.content.startsWith("[表情]|") ? (() => {
+                      ) : parseTextImageDescription(msg.content) ? (() => {
+                        const description = parseTextImageDescription(msg.content)!;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setViewingImageDescription(description)}
+                            className="w-[210px] min-h-32 rounded-2xl border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-sm"
+                          >
+                            <ImageIcon className="mb-4 h-4 w-4 text-[var(--media-placeholder-text)]" />
+                            <p className="line-clamp-3 text-xs leading-relaxed text-[var(--text-primary)]">{description}</p>
+                            <span className="mt-2 block text-[10px] text-[var(--media-placeholder-text)]">文字图 · 点击查看</span>
+                          </button>
+                        );
+                      })() : msg.content.startsWith("[表情]|") ? (() => {
                         const [_, stickerName, stickerUrl] = msg.content.split("|");
                         // Resolve fresh hydrated URL from local sticker groups
                         const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s => s.name === stickerName);
@@ -7065,20 +7137,23 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                           </div>
                         );
                       })() : isCallRecordMarkup(msg.content) ? (() => {
-                        const { callType, duration } = parseCallRecord(msg.content);
+                        const callRecord = parseCallRecord(msg.content);
+                        const { status, duration } = callRecord;
+                        const resultLabel = status === "rejected" ? "已拒绝" : status === "cancelled" ? "已取消" : `通话时长 ${duration}`;
+                        const canOpenDetail = status === "completed" && callRecord.transcript.length > 0;
                         const bubbleStyle = isSelf
                           ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-[#95ec69] text-[#191919] chat-bubble-self")
                           : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100");
                         return (
                           <button
                             type="button"
-                            onClick={() => setCallRecordDetail(parseCallRecord(msg.content))}
-                            className={`inline-flex items-center gap-1.5 px-3 py-2 shadow-sm transition-transform active:scale-[0.98] cv-bubble message-bubble relative ${bubbleStyle} ${messageGroupClass}`}
-                            title="查看通话内容"
+                            onClick={() => { if (canOpenDetail) setCallRecordDetail(callRecord); }}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 shadow-sm cv-bubble message-bubble relative ${bubbleStyle} ${messageGroupClass} ${canOpenDetail ? "transition-transform active:scale-[0.98]" : "cursor-default"}`}
+                            title={canOpenDetail ? "查看通话内容" : resultLabel}
                           >
                             <Phone className="w-3.5 h-3.5 shrink-0" />
-                            <span className="text-xs font-medium whitespace-nowrap">通话时长 {duration}</span>
-                            <span className="sr-only">{callType}</span>
+                            <span className="text-xs font-medium whitespace-nowrap">{resultLabel}</span>
+                            <span className="sr-only">{callRecord.callType}</span>
                           </button>
                         );
                       })() : isRedPacketMarkup(msg.content) ? (() => {
@@ -7435,12 +7510,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
           <BubbleTipPortalLayer enabled={!isShowingCardModal && settings.bubbleTailEnabled} />
 
           {showImageGenerator && (
-            <div className="absolute inset-0 z-[90] flex items-end bg-black/35 p-4" onClick={() => !isGeneratingImage && setShowImageGenerator(false)}>
+            <div className="absolute inset-0 z-[90] flex items-end bg-black/35 p-4" onClick={() => setShowImageGenerator(false)}>
               <div className="w-full rounded-[28px] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-                <div className="mb-3 flex items-start justify-between"><div><h3 className="text-sm font-bold text-slate-900">生成角色图片</h3><p className="mt-1 text-[10px] leading-relaxed text-slate-400">仅在你点击“生成并发送”后调用图片 API。普通聊天不会自动生成图片。</p></div><button type="button" onClick={() => setShowImageGenerator(false)} className="text-lg text-slate-400">×</button></div>
-                <textarea value={imageRequestText} onChange={(event) => setImageRequestText(event.target.value)} rows={3} placeholder="描述想让角色发来的照片场景" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs outline-none" />
-                <p className="mt-2 text-[10px] text-slate-400">需要先在全局“图片 API 设置”和角色设置中分别开启图片生成。</p>
-                <div className="mt-4 flex gap-2"><button type="button" onClick={() => setShowImageGenerator(false)} disabled={isGeneratingImage} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-slate-600">取消</button><button type="button" onClick={() => generateAndSendCharacterImage("manual", imageRequestText || "请生成一张符合当前聊天情境的角色照片")} disabled={isGeneratingImage} className="flex-1 rounded-xl bg-neutral-950 py-2.5 text-xs font-bold text-white">{isGeneratingImage ? "生成中…" : "生成并发送"}</button></div>
+                <div className="mb-3 flex items-start justify-between"><div><h3 className="text-sm font-bold text-slate-900">发送文字图</h3><p className="mt-1 text-[10px] leading-relaxed text-slate-400">填写画面描述后，将以文字图卡片发送，不会调用图片 API。</p></div><button type="button" onClick={() => setShowImageGenerator(false)} className="text-lg text-slate-400">×</button></div>
+                <textarea value={imageRequestText} onChange={(event) => setImageRequestText(event.target.value)} rows={3} placeholder="描述这张文字图里的画面" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs outline-none" />
+                <p className="mt-2 text-[10px] text-slate-400">发送后可点击卡片查看完整描述。</p>
+                <div className="mt-4 flex gap-2"><button type="button" onClick={() => setShowImageGenerator(false)} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-slate-600">取消</button><button type="button" onClick={sendTextImage} disabled={!imageRequestText.trim()} className="flex-1 rounded-xl bg-neutral-950 py-2.5 text-xs font-bold text-white disabled:opacity-40">发送</button></div>
               </div>
             </div>
           )}
@@ -7566,9 +7641,9 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   />
                 </label>
 
-                <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="flex-1 flex flex-col items-center justify-center group min-w-10" title="生成角色图片">
+                <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="flex-1 flex flex-col items-center justify-center group min-w-10" title="发送文字图">
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><Camera className="w-4 h-4 text-slate-700" /></div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">生成图片</span>
+                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">文字图</span>
                 </button>
 
                 {/* 2. 红包 (Red Packet) */}
@@ -7684,41 +7759,6 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                             onClick={() => {
                               sendCustomMessage(`[表情]|${sticker.name}|${sticker.url}`, activeRuntimeContext, { triggerReply: false });
                               setShowStickerSelector(false);
-                            }}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              if (confirm(`确认要在分组中删除表情“${sticker.name}”吗？`)) {
-                                stickerDb.deleteStickerImage(sticker.id).then(() => {
-                                  const updatedStickers = currentGroup.stickers.filter(s => s.id !== sticker.id);
-                                  const updatedGroup = { ...currentGroup, stickers: updatedStickers };
-                                  stickerDb.saveGroup(updatedGroup).then(() => {
-                                    const updated = [...stickerGroups];
-                                    updated[activeStickerGroupIndex] = updatedGroup;
-                                    setStickerGroups(updated);
-                                  });
-                                });
-                              }
-                            }}
-                            onTouchStart={(e) => {
-                              const target = e.currentTarget;
-                              const timer = setTimeout(() => {
-                                if (confirm(`确认要在分组中删除表情“${sticker.name}”吗？`)) {
-                                  stickerDb.deleteStickerImage(sticker.id).then(() => {
-                                    const updatedStickers = currentGroup.stickers.filter(s => s.id !== sticker.id);
-                                    const updatedGroup = { ...currentGroup, stickers: updatedStickers };
-                                    stickerDb.saveGroup(updatedGroup).then(() => {
-                                      const updated = [...stickerGroups];
-                                      updated[activeStickerGroupIndex] = updatedGroup;
-                                      setStickerGroups(updated);
-                                    });
-                                  });
-                                }
-                              }, 800);
-                              target.dataset.longPressTimer = String(timer);
-                            }}
-                            onTouchEnd={(e) => {
-                              const timer = e.currentTarget.dataset.longPressTimer;
-                              if (timer) clearTimeout(Number(timer));
                             }}
                             className="flex flex-col items-center bg-white border border-slate-200/40 hover:border-slate-300 rounded-xl p-1 shadow-sm hover:shadow active:scale-95 transition-all select-none relative"
                           >
@@ -8343,10 +8383,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                     <div className="flex justify-between items-center px-2">
                       {/* Decline (Incoming Call) */}
                       <button
-                        onClick={() => {
-                          setActiveAttachModal(null);
-                          setVoiceCallRelationId(null);
-                        }}
+                        onClick={() => finishVoiceCall("rejected")}
                         className="flex flex-col items-center gap-2"
                       >
                         <div className="w-14 h-14 bg-[#ef4b50] hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
@@ -8373,10 +8410,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                     <div className="flex justify-center">
                       {/* Cancel (User Outgoing Call) */}
                       <button
-                        onClick={() => {
-                          setActiveAttachModal(null);
-                          setVoiceCallRelationId(null);
-                        }}
+                        onClick={() => finishVoiceCall("cancelled")}
                         className="flex flex-col items-center gap-2"
                       >
                         <div className="w-14 h-14 bg-[#ef4b50] hover:bg-red-600 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
@@ -8397,7 +8431,9 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
                   <div>
                     <h3 className="text-sm font-bold">{callRecordDetail.callType}</h3>
-                    <p className="mt-0.5 text-[11px] text-slate-400">通话时长 {callRecordDetail.duration}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      {callRecordDetail.status === "rejected" ? "已拒绝" : callRecordDetail.status === "cancelled" ? "已取消" : `通话时长 ${callRecordDetail.duration}`}
+                    </p>
                   </div>
                   <button type="button" onClick={() => setCallRecordDetail(null)} className="rounded-full bg-slate-100 p-1.5 text-slate-500 hover:bg-slate-200">
                     <X className="w-4 h-4" />
@@ -8429,7 +8465,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
       <div className="flex-1 overflow-hidden flex flex-col h-full bg-white">
         
         {/* Main tabs viewports */}
-        <div className="flex-1 overflow-y-auto">
+        <div ref={mainTabsViewportRef} className="flex-1 overflow-y-auto">
           
           {/* TABS: CHATS LIST (聊天首页) */}
           {activeTab === "chats" && (
@@ -8439,9 +8475,10 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
               getUnreadCount={getUnreadCount}
               renderAvatar={(character) => <RenderAvatar src={character.avatar || (character.isGroupChat ? "👥" : "")} alt={character.name} name={character.remark || character.name} className="w-11 h-11 rounded-full object-cover bg-slate-100 border border-slate-100 aspect-square flex items-center justify-center text-xl select-none" />}
               getGroupMessageSummary={(message) => {
-                if (message.sender === "user") return `我: ${message.content}`;
+                const content = parseTextImageDescription(message.content) ? "[文字图]" : message.content;
+                if (message.sender === "user") return `我: ${content}`;
                 const senderChar = characters.find((character) => character.id === message.senderId);
-                return `${senderChar ? (senderChar.remark || senderChar.name) : "成员"}: ${message.content}`;
+                return `${senderChar ? (senderChar.remark || senderChar.name) : "成员"}: ${content}`;
               }}
               header={<ChatTopBar title={<>聊天 ({chatThreads.length})</>} leftAction={<button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => { setGroupNameInput(""); setSelectedGroupMemberIds([]); setShowCreateGroupModal(true); }} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10" title="发起群聊"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
             />
@@ -9285,7 +9322,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
               ) : meActiveSubView === "stickers" ? (
                 // SUB-VIEW: STICKER PACK SETTINGS (表情包设置)
                 <div className="animate-fade-in text-left">
-                  <div className="px-4 py-1.5 bg-white sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 shrink-0">
+                  <div className="px-4 py-1.5 bg-white sticky top-0 z-30 flex items-center justify-between border-b border-slate-100 shrink-0">
                     <button
                       onClick={() => setMeActiveSubView("none")}
                       className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"

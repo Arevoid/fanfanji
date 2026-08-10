@@ -31,6 +31,7 @@ import { cleanupDiaryForRelations } from "./domain/diary/diaryCleanup";
 import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryTranslations, saveDiaryEntries, saveDiaryGenerationTasks, saveDiaryShares, saveDiaryTranslations } from "./core/storage/repositories/diaryRepository";
 import { removeForumGenerationTasksByRelations } from "./domain/forum/forumGenerationGuard";
 import { loadImageGenerationRecords, removeImageGenerationRecordsByCharacter, saveImageGenerationRecords } from "./core/storage/repositories/imageGenerationRepository";
+import { applyLiquidGlassTextDefaults } from "./features/chat/styles/liquidGlassDefaults";
 import {
   bindDualMusicWidget,
   loadDualMusicWidgetConfigs,
@@ -335,16 +336,17 @@ export default function App() {
   const [settings, setSettingsState] = useState<UserSettings>(() => {
     const loadedSettings = loadSettings(DEFAULT_SETTINGS).value;
     const migration = migrateLegacyClassicBubblePreset(loadedSettings);
-    if (migration.migrated) {
-      const saved = saveSettings(migration.settings);
+    const migratedSettings = applyLiquidGlassTextDefaults(migration.settings);
+    if (migration.migrated || migratedSettings !== migration.settings) {
+      const saved = saveSettings(migratedSettings);
       if (!saved.success) console.warn("[settings] Could not persist the legacy bubble preset migration.");
     }
-    return migration.settings;
+    return migratedSettings;
   });
   const settingsRef = useRef<UserSettings>(settings);
   const settingsChangedByUser = useRef(false);
   const setSettings = (update: UserSettingsUpdate): void => {
-    const nextSettings = resolveSettingsUpdate(settingsRef.current, update);
+    const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(settingsRef.current, update));
     settingsRef.current = nextSettings;
     settingsChangedByUser.current = true;
     setSettingsState(nextSettings);

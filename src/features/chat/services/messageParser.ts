@@ -1,5 +1,5 @@
 import { cleanOnlineMessage, splitIntoWeChatBubbles } from "../../../utils/pngParser";
-import type { ChatMessageVisualType, CallTranscriptItem } from "./messageTypes";
+import type { ChatMessageVisualType, CallTranscriptItem, VoiceCallDirection, VoiceCallRecord, VoiceCallStatus } from "./messageTypes";
 
 export type { CallTranscriptItem } from "./messageTypes";
 
@@ -63,8 +63,24 @@ export const isRedPacketMarkup = (content: string): boolean => /^\[(?:红包|微
 export const isTransferMarkup = (content: string): boolean => /^\[(?:转账|微信转账)\]/.test(content);
 export const isCallRecordMarkup = (content: string): boolean => /^\[通话记录\]\|/.test(content);
 
+const TEXT_IMAGE_PREFIX = "[文字图]|";
+
+export const createTextImageMarkup = (description: string): string =>
+  `${TEXT_IMAGE_PREFIX}${encodeURIComponent(description.trim())}`;
+
+export const parseTextImageDescription = (content: string): string | null => {
+  if (!content.startsWith(TEXT_IMAGE_PREFIX)) return null;
+  const encoded = content.slice(TEXT_IMAGE_PREFIX.length);
+  try {
+    return decodeURIComponent(encoded).trim();
+  } catch {
+    return encoded.trim();
+  }
+};
+
 export function getChatMessageVisualType(content: string): ChatMessageVisualType {
   if (content.startsWith("data:image/")) return "image";
+  if (content.startsWith(TEXT_IMAGE_PREFIX)) return "text-image";
   if (content.startsWith("[表情]|")) return "sticker";
   if (content.startsWith("[红包]")) return "red-packet";
   if (content.startsWith("[转账]")) return "transfer";
@@ -78,12 +94,34 @@ export function getChatMessageVisualType(content: string): ChatMessageVisualType
 export const getCallTranscriptText = (content: string): string =>
   content.startsWith("[语音]|") ? content.split("|").slice(2).join("|") : content;
 
-export function parseCallRecord(content: string): { callType: string; duration: string; transcript: CallTranscriptItem[] } {
-  const [, callType = "语音通话", duration = "00:00", encodedTranscript = ""] = content.split("|");
+const CALL_STATUSES = new Set<VoiceCallStatus>(["completed", "rejected", "cancelled"]);
+const CALL_DIRECTIONS = new Set<VoiceCallDirection>(["incoming", "outgoing"]);
+
+export function createCallRecordMarkup(input: VoiceCallRecord): string {
+  return [
+    "[通话记录]",
+    input.callType,
+    input.status,
+    input.direction,
+    input.duration,
+    encodeURIComponent(JSON.stringify(input.transcript)),
+  ].join("|");
+}
+
+/** Parses the status-aware format while retaining every existing duration-only record. */
+export function parseCallRecord(content: string): VoiceCallRecord {
+  const parts = content.split("|");
+  const callType = parts[1] || "语音通话";
+  const hasStructuredResult = CALL_STATUSES.has(parts[2] as VoiceCallStatus)
+    && CALL_DIRECTIONS.has(parts[3] as VoiceCallDirection);
+  const status = hasStructuredResult ? parts[2] as VoiceCallStatus : "completed";
+  const direction = hasStructuredResult ? parts[3] as VoiceCallDirection : "outgoing";
+  const duration = (hasStructuredResult ? parts[4] : parts[2]) || "00:00";
+  const encodedTranscript = (hasStructuredResult ? parts[5] : parts[3]) || "";
   try {
     const transcript = JSON.parse(decodeURIComponent(encodedTranscript));
-    return { callType, duration, transcript: Array.isArray(transcript) ? transcript as CallTranscriptItem[] : [] };
+    return { callType, status, direction, duration, transcript: Array.isArray(transcript) ? transcript as CallTranscriptItem[] : [] };
   } catch {
-    return { callType, duration, transcript: [] };
+    return { callType, status, direction, duration, transcript: [] };
   }
 }

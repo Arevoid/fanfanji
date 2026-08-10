@@ -39,6 +39,18 @@ assert.deepEqual(findMomentTemporalConflicts("盛夏的雨停了，出去买杯�
 assert.ok(findMomentTemporalConflicts("发现一张今晚的月亮。", julyContext, character).length > 0);
 assert.deepEqual(findMomentTemporalConflicts("去年立冬时拍的照片，今天翻出来了。", julyContext, character), []);
 assert.ok(findMomentTemporalConflicts("今天是我的生日。", julyContext, character).length > 0);
+assert.deepEqual(
+  findMomentTemporalConflicts("凌晨两点半 刚训练完", createMomentTemporalContext(new Date(2026, 6, 15, 10, 43))),
+  ["explicit clock time conflicts with the Moment occurrence time"],
+);
+assert.deepEqual(
+  findMomentTemporalConflicts("凌晨三点了还在翻旧物料", createMomentTemporalContext(new Date(2026, 6, 20, 0, 46))),
+  ["explicit clock time conflicts with the Moment occurrence time"],
+);
+assert.deepEqual(
+  findMomentTemporalConflicts("凌晨两点半 刚训练完", createMomentTemporalContext(new Date(2026, 6, 15, 2, 35))),
+  [],
+);
 
 const birthdayContext = createMomentTemporalContext(new Date(2026, 10, 7, 12, 0));
 

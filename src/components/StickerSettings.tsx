@@ -561,7 +561,7 @@ export default function StickerSettings({
                               e.preventDefault();
                               handleDeleteSticker(sticker.id);
                             }}
-                            className="flex flex-col items-center bg-slate-50/50 hover:bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-1.5 hover:shadow-sm transition-all relative group select-none"
+                            className="flex flex-col items-center bg-slate-50/50 hover:bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-1.5 hover:shadow-sm transition-all relative group select-none overflow-hidden"
                             title="修改底部输入框可自定义命名，双击或长按可删除"
                           >
                             {/* Sticker image thumbnail */}
@@ -581,7 +581,7 @@ export default function StickerSettings({
                                 e.preventDefault();
                                 handleDeleteSticker(sticker.id);
                               }}
-                              className="absolute -top-1 -right-1 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white rounded-full w-5 h-5 shadow-md flex items-center justify-center transition-all z-20 md:opacity-0 md:group-hover:opacity-100 opacity-100 cursor-pointer"
+                              className="absolute top-1 right-1 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white rounded-full w-5 h-5 shadow-md flex items-center justify-center transition-all z-10 md:opacity-0 md:group-hover:opacity-100 opacity-100 cursor-pointer"
                               title="删除表情"
                             >
                               <X className="w-3 h-3 text-white" />

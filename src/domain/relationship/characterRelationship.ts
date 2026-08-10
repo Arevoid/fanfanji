@@ -14,6 +14,11 @@ export interface CharacterRelationship {
   updatedAt: number;
   lastActiveTime?: number;
   scheduledProactiveTime?: number;
+  /** Persisted per relationship so reopening the app cannot reset call throttling. */
+  lastProactiveCallAt?: number;
+  proactiveCallDayKey?: string;
+  proactiveCallCount?: number;
+  proactiveCallBackoffUntil?: number;
   lastImmediateSummaryMsgId?: string;
   compressedMemory?: string;
 }
