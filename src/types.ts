@@ -848,6 +848,8 @@ export interface OfflineStory {
   wordLimit?: number;
   partnerPerspective?: string;
   userPerspective?: string;
+  /** Defaults to true for legacy stories. When false, AI cannot speak or decide for the user. */
+  allowCharacterToSpeakForUser?: boolean;
   stylePresetId?: string;
   stylePromptName?: string;
   stylePromptContent?: string;

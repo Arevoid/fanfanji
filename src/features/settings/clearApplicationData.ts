@@ -1,6 +1,7 @@
 import { audioDb } from "../../utils/audioDb";
 import { imageAssetDb } from "../../utils/imageAssetDb";
 import { stickerDb } from "../../utils/stickerDb";
+import { offlineStoryDb } from "../../core/storage/offlineStoryDb";
 
 type ClearableStorage = Pick<Storage, "clear">;
 type ClearableCacheStorage = Pick<CacheStorage, "keys" | "delete">;
@@ -21,6 +22,7 @@ function getDefaultDependencies(): ClearApplicationDataDependencies {
       () => audioDb.clearAll(),
       () => imageAssetDb.clearAll(),
       () => stickerDb.clearAll(),
+      () => offlineStoryDb.clearAll(),
     ],
   };
 }

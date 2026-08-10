@@ -11,7 +11,8 @@ import { removeMemoriesForMoment } from "./features/moments/services/momentMemor
 import { sanitizeMomentPublishText } from "./features/moments/services/momentContent";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
-import { loadOfflineStories, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
+import { loadOfflineStories, mergeOfflineStoryCollections, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
+import { offlineStoryDb } from "./core/storage/offlineStoryDb";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, saveConversationSummaries, retractConversationSummariesBySourceMessageIds } from "./core/storage/repositories/conversationSummaryRepository";
@@ -404,6 +405,9 @@ export default function App() {
 
   // Offline Stories State & Handlers
   const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => loadOfflineStories([]).value);
+  const offlineStoriesRef = useRef(offlineStories);
+  const offlineStoriesHydratedRef = useRef(false);
+  const deletedOfflineStoryIdsRef = useRef(new Set<string>());
   const charactersPersistenceReady = useRef(false);
   const messagesPersistenceReady = useRef(false);
   const momentsPersistenceReady = useRef(false);
@@ -414,24 +418,75 @@ export default function App() {
   const skipNextMemoriesPersistenceRef = useRef(false);
   const characterIdentityMigrationLogRef = useRef(new Set<string>());
   const memorySettingsPersistenceReady = useRef(false);
-  const offlineStoriesPersistenceReady = useRef(false);
   const relationshipsPersistenceReady = useRef(false);
 
-  const handleSaveOfflineStory = (story: OfflineStory) => {
-    setOfflineStories((prev) => {
-      const idx = prev.findIndex((s) => s.id === story.id);
-      let updated;
-      if (idx !== -1) {
-        updated = [...prev];
-        updated[idx] = story;
-      } else {
-        updated = [story, ...prev];
-      }
-      return updated;
-    });
+  const persistOfflineStories = async (stories: OfflineStory[], changedStory?: OfflineStory): Promise<boolean> => {
+    const localResult = saveOfflineStories(stories);
+    let durableSuccess = false;
+    try {
+      if (changedStory) await offlineStoryDb.save(changedStory);
+      else await offlineStoryDb.replaceAll(stories);
+      durableSuccess = true;
+    } catch (error) {
+      console.error("Failed to save offline stories to IndexedDB:", error);
+    }
+    if (!localResult.success) console.error("Failed to save offline stories to localStorage:", localResult.error);
+    return localResult.success || durableSuccess;
   };
 
+  const replaceOfflineStories = (stories: readonly OfflineStory[]): void => {
+    const nextStories = [...stories];
+    const nextIds = new Set(nextStories.map((story) => story.id));
+    offlineStoriesRef.current.forEach((story) => {
+      if (!nextIds.has(story.id)) deletedOfflineStoryIdsRef.current.add(story.id);
+    });
+    offlineStoriesRef.current = nextStories;
+    setOfflineStories(nextStories);
+    const localResult = saveOfflineStories(nextStories);
+    if (!localResult.success) console.error("Failed to save offline stories to localStorage:", localResult.error);
+    if (offlineStoriesHydratedRef.current) {
+      void offlineStoryDb.replaceAll(nextStories).catch((error) => {
+        console.error("Failed to replace offline stories in IndexedDB:", error);
+      });
+    }
+  };
+
+  const handleSaveOfflineStory = (story: OfflineStory): Promise<boolean> => {
+    deletedOfflineStoryIdsRef.current.delete(story.id);
+    const previous = offlineStoriesRef.current;
+    const index = previous.findIndex((item) => item.id === story.id);
+    const updated = index >= 0
+      ? previous.map((item, itemIndex) => itemIndex === index ? story : item)
+      : [story, ...previous];
+    offlineStoriesRef.current = updated;
+    setOfflineStories(updated);
+    return persistOfflineStories(updated, story);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    void offlineStoryDb.loadAll().then(async (durableStories) => {
+      if (cancelled) return;
+      const merged = mergeOfflineStoryCollections(
+        offlineStoriesRef.current,
+        durableStories.filter((story) => !deletedOfflineStoryIdsRef.current.has(story.id)),
+      );
+      offlineStoriesHydratedRef.current = true;
+      offlineStoriesRef.current = merged;
+      setOfflineStories(merged);
+      const localResult = saveOfflineStories(merged);
+      if (!localResult.success) console.warn("Offline stories exceed localStorage capacity; IndexedDB remains authoritative.");
+      await offlineStoryDb.replaceAll(merged);
+    }).catch((error) => {
+      offlineStoriesHydratedRef.current = true;
+      console.warn("Unable to hydrate the durable offline-story store; using localStorage only.", error);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   const handleDeleteOfflineStory = (storyId: string) => {
+    deletedOfflineStoryIdsRef.current.add(storyId);
+    void offlineStoryDb.delete(storyId).catch((error) => console.warn("Unable to delete the durable offline story.", error));
     const deletedStory = offlineStories.find((story) => story.id === storyId);
     retractBySourceStoryIds([storyId]);
     retractByOfflineStoryIds([storyId]);
@@ -441,10 +496,7 @@ export default function App() {
       setMemories((previous) => previous.filter((memory) =>
         !archivedMemoryIds.has(memory.id) && !memory.content.includes(marker)));
     }
-    setOfflineStories((prev) => {
-      const filtered = prev.filter((s) => s.id !== storyId);
-      return filtered;
-    });
+    replaceOfflineStories(offlineStoriesRef.current.filter((story) => story.id !== storyId));
   };
 
   // Global message notification banner state
@@ -844,7 +896,7 @@ export default function App() {
     if (relationshipsChanged) setRelationships(result.relationships);
     if (result.migratedMessageCount || result.deduplicatedRelationshipCount) setMessages(result.messages);
     if (result.migratedMemoryCount || result.deduplicatedRelationshipCount) setMemories(result.memories);
-    if (result.migratedStoryCount || result.deduplicatedRelationshipCount) setOfflineStories(result.offlineStories);
+    if (result.migratedStoryCount || result.deduplicatedRelationshipCount) replaceOfflineStories(result.offlineStories);
     Object.entries(result.relationIdRemaps).forEach(([fromRelationId, toRelationId]) => {
       const sourceStoryId = localStorage.getItem(getOfflineStoryStorageKey(fromRelationId));
       if (sourceStoryId && !localStorage.getItem(getOfflineStoryStorageKey(toRelationId))) {
@@ -1772,15 +1824,6 @@ export default function App() {
   }, [recallSettings]);
 
   useEffect(() => {
-    if (!offlineStoriesPersistenceReady.current) {
-      offlineStoriesPersistenceReady.current = true;
-      return;
-    }
-    const result = saveOfflineStories(offlineStories);
-    if (!result.success) console.error("Failed to save offline stories to localStorage:", result.error);
-  }, [offlineStories]);
-
-  useEffect(() => {
     if (!relationshipsPersistenceReady.current) {
       relationshipsPersistenceReady.current = true;
       return;
@@ -1874,7 +1917,7 @@ export default function App() {
       setRelationships(cleaned.relationships);
       setMessages(cleaned.messages);
       setMemories(cleaned.memories);
-      setOfflineStories(cleaned.offlineStories);
+      replaceOfflineStories(cleaned.offlineStories);
       const musicCleanup = removeMusicDataByRelations(dualMusicConfigs, relationshipMusicStates, relationIds);
       setDualMusicConfigs(musicCleanup.configs);
       setRelationshipMusicStates(musicCleanup.states);

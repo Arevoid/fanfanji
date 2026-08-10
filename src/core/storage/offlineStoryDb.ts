@@ -1,0 +1,83 @@
+import type { OfflineStory } from "../../types";
+
+class OfflineStoryDB {
+  private readonly dbName = "FanfanjiOfflineStoryDB";
+  private readonly storeName = "stories";
+  private db: IDBDatabase | null = null;
+
+  private async init(): Promise<IDBDatabase> {
+    if (this.db) return this.db;
+    if (typeof indexedDB === "undefined") throw new Error("IndexedDB is unavailable");
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName, { keyPath: "id" });
+        }
+      };
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve(request.result);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async loadAll(): Promise<OfflineStory[]> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const request = db.transaction(this.storeName, "readonly").objectStore(this.storeName).getAll();
+      request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result as OfflineStory[] : []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async save(story: OfflineStory): Promise<void> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, "readwrite");
+      transaction.objectStore(this.storeName).put(story);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
+  async replaceAll(stories: readonly OfflineStory[]): Promise<void> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, "readwrite");
+      const store = transaction.objectStore(this.storeName);
+      store.clear();
+      stories.forEach((story) => store.put(story));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
+  async delete(storyId: string): Promise<void> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, "readwrite");
+      transaction.objectStore(this.storeName).delete(storyId);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
+  async clearAll(): Promise<void> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, "readwrite");
+      transaction.objectStore(this.storeName).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+}
+
+export const offlineStoryDb = new OfflineStoryDB();

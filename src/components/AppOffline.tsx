@@ -29,13 +29,14 @@ import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../d
 import { Button, ConfirmDialog, IconButton, PopoverMenu } from "./ui";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { collectOfflineWorldBookContext, formatOfflineWorldBookEntries } from "../features/offline/prompts/offlineWorldBookContext";
+import { applyOfflineStoryRegeneration, prepareOfflineStoryRegeneration } from "../domain/offlineStory/offlineStoryRegeneration";
 
 interface AppOfflineProps {
   characters: Character[];
   relationships: CharacterRelationship[];
   settings: UserSettings;
   offlineStories: OfflineStory[];
-  onSaveOfflineStory: (story: OfflineStory) => void;
+  onSaveOfflineStory: (story: OfflineStory) => boolean | Promise<boolean>;
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
   onDeleteOfflineStory: (storyId: string) => void;
   onClose: () => void;
@@ -158,11 +159,23 @@ export default function AppOffline({
   const [errorMsg, setErrorMsg] = useState("");
   const memorySyncInFlightRef = useRef(new Set<string>());
   const [memorySyncingStoryId, setMemorySyncingStoryId] = useState<string | null>(null);
+  const storyPersistenceRef = useRef<Promise<boolean>>(Promise.resolve(true));
 
   const saveActiveStorySnapshot = (story: OfflineStory) => {
     activeStoryRef.current = story;
-    onSaveOfflineStory(story);
     setActiveStory(story);
+    const pendingSave = storyPersistenceRef.current
+      .catch(() => false)
+      .then(() => Promise.resolve(onSaveOfflineStory(story)))
+      .then((success) => success !== false)
+      .catch((error) => {
+        console.error("Failed to persist offline story:", error);
+        return false;
+      });
+    storyPersistenceRef.current = pendingSave;
+    void pendingSave.then((success) => {
+      if (!success) showToast("剧情暂未写入设备，请勿关闭应用并检查可用存储空间");
+    });
     return story;
   };
 
@@ -258,6 +271,7 @@ export default function AppOffline({
   const [settingsWordLimit, setSettingsWordLimit] = useState("");
   const [settingsPartnerP, setSettingsPartnerP] = useState("third");
   const [settingsUserP, setSettingsUserP] = useState("first");
+  const [settingsAllowCharacterToSpeakForUser, setSettingsAllowCharacterToSpeakForUser] = useState(true);
   const [settingsStylePresetId, setSettingsStylePresetId] = useState("none");
   const [settingsStylePromptName, setSettingsStylePromptName] = useState("");
   const [settingsStylePromptContent, setSettingsStylePromptContent] = useState("");
@@ -270,6 +284,7 @@ export default function AppOffline({
       setSettingsWordLimit(activeStory.wordLimit ? String(activeStory.wordLimit) : "");
       setSettingsPartnerP(activeStory.partnerPerspective || "third");
       setSettingsUserP(activeStory.userPerspective || "first");
+      setSettingsAllowCharacterToSpeakForUser(activeStory.allowCharacterToSpeakForUser !== false);
       setSettingsStylePresetId(activeStory.stylePresetId || "none");
       setSettingsStylePromptName(activeStory.stylePromptName || "");
       setSettingsStylePromptContent(activeStory.stylePromptContent || "");
@@ -288,6 +303,7 @@ export default function AppOffline({
       wordLimit: parsedLimit,
       partnerPerspective: settingsPartnerP,
       userPerspective: settingsUserP,
+      allowCharacterToSpeakForUser: settingsAllowCharacterToSpeakForUser,
       stylePresetId: settingsStylePresetId,
       stylePromptName: settingsStylePromptName,
       stylePromptContent: settingsStylePromptContent,
@@ -483,14 +499,17 @@ export default function AppOffline({
   const handleExitStoryWorkspace = async () => {
     // Ending any direct continuation confirms and archives its new memories.
     // Director and IF branches remain opt-in through the settings action.
+    await storyPersistenceRef.current;
     const latestStory = activeStoryRef.current;
     const completedStory = latestStory ? await finalizeStoryBeforeLeaving(latestStory) : null;
+    await storyPersistenceRef.current;
     if (completedStory) clearOfflineSession(completedStory);
     clearActiveStorySnapshot();
     setIsSettingsOpen(false);
   };
 
   const handleReturnToOnlineChat = async () => {
+    await storyPersistenceRef.current;
     const latestStory = activeStoryRef.current;
     if (!latestStory || !onNavigateToChat) return;
     const target = resolveOfflineChatNavigationTarget({
@@ -504,6 +523,7 @@ export default function AppOffline({
       return;
     }
     const completedStory = await finalizeStoryBeforeLeaving(latestStory);
+    await storyPersistenceRef.current;
     clearOfflineSession(completedStory);
     clearActiveStorySnapshot();
     setIsSettingsOpen(false);
@@ -840,19 +860,28 @@ export default function AppOffline({
   };
 
   // Send message inside workspace
-  const handleSendMessage = async (textToSend?: string, forceAIOnly = false) => {
+  const handleSendMessage = async (
+    textToSend?: string,
+    forceAIOnly = false,
+    options: { regenerateMessageId?: string } = {},
+  ) => {
     const storyAtSend = activeStoryRef.current ?? activeStory;
-    if (!storyAtSend) return;
+    if (!storyAtSend || isGenerating) return;
     setErrorMsg("");
+
+    const regeneration = prepareOfflineStoryRegeneration(storyAtSend.messages, options.regenerateMessageId);
+    const regenerateTarget = regeneration?.target;
+    const generationMessages = regeneration?.history || storyAtSend.messages;
 
     const text = textToSend !== undefined ? textToSend : inputText.trim();
     if (!text && !forceAIOnly) return;
 
     const storyParticipantIds = new Set(resolveOfflineStoryCharacterIds(storyAtSend, characters));
     let updatedStory = storyAtSend.worldBookSnapshot
-      ? { ...storyAtSend }
+      ? { ...storyAtSend, messages: generationMessages }
       : {
         ...storyAtSend,
+        messages: generationMessages,
         // One-time compatibility migration for stories created before
         // structured snapshots existed. The captured data is then frozen.
         worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
@@ -890,6 +919,8 @@ export default function AppOffline({
       updatedStory = {
         ...updatedStory,
         messages: [...updatedStory.messages, userMsg],
+        archivedAt: undefined,
+        memorySyncStatus: "pending",
         updatedAt: Date.now()
       };
       saveActiveStorySnapshot(updatedStory);
@@ -1013,13 +1044,23 @@ ${wbPrompts}\n`;
       } else {
         sysPrompt += `你在叙事和描述中，应当采用客观的第三人称（如“他”、“她”、“${storyCharsList[0]?.name || "对方"}”）来描述该角色的言行、神态和内心戏。`;
       }
-      sysPrompt += `\n- 用户（我）的视角：【${(activeStory.userPerspective || "first") === "first" ? "第一人称 (我)" : (activeStory.userPerspective || "first") === "second" ? "第二人称 (你)" : "第三人称 (他/她/具体名字)"}】。`;
-      if ((activeStory.userPerspective || "first") === "first") {
-        sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第一人称“我”指代用户（例如：“你深深凝视着我，缓步走来”）。`;
-      } else if ((activeStory.userPerspective || "first") === "second") {
-        sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第二人称“你”指代用户（例如：“他走到你面前，拉起你的手”）。`;
+      if (updatedStory.allowCharacterToSpeakForUser === false) {
+        sysPrompt += `\n\n【用户角色控制权】
+用户只由用户本人控制。你只能续写对方角色、环境和已经明确发生的事情：
+- 禁止替用户生成任何台词、引号内发言、内心独白或口头回应；
+- 禁止替用户决定接受、拒绝、承诺、提问、主动触碰或采取新的有意动作；
+- 可以承接用户在最新输入中已经明确写出的动作，但不能擅自补充下一步反应；
+- 需要用户回应时，停在对方角色的动作或话语之后，把决定权留给用户。
+即使为了叙事流畅，也不得越过此规则。`;
       } else {
-        sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第三人称“他/她/具体名字 ${settings.name || "主角"}”来指代用户（例如：“他向 ${settings.name || "主角"} 微微颔首”）。`;
+        sysPrompt += `\n- 用户（我）的视角：【${(activeStory.userPerspective || "first") === "first" ? "第一人称 (我)" : (activeStory.userPerspective || "first") === "second" ? "第二人称 (你)" : "第三人称 (他/她/具体名字)"}】。`;
+        if ((activeStory.userPerspective || "first") === "first") {
+          sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第一人称“我”指代用户（例如：“你深深凝视着我，缓步走来”）。`;
+        } else if ((activeStory.userPerspective || "first") === "second") {
+          sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第二人称“你”指代用户（例如：“他走到你面前，拉起你的手”）。`;
+        } else {
+          sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第三人称“他/她/具体名字 ${settings.name || "主角"}”来指代用户（例如：“他向 ${settings.name || "主角"} 微微颔首”）。`;
+        }
       }
 
       if (activeStory.wordLimit && activeStory.wordLimit > 0) {
@@ -1032,7 +1073,7 @@ ${wbPrompts}\n`;
 
       sysPrompt += `\n\n【线下模式及多角色控制规则】
 1. 用户可以通过文字、指令或旁白，像导播、写小说或主控一样描述故事进展。
-2. 作为一个优秀的内容创作者，你要输出一整段精美的、小说叙事般的回复，内容包括指定人称视角的场景描写、客观动作、旁白叙事，以及这些角色的对话。
+2. 作为一个优秀的内容创作者，你要输出一整段精美的、小说叙事般的回复，${updatedStory.allowCharacterToSpeakForUser === false ? "只描写对方角色、环境及用户已经明确完成的动作，并把下一步回应留给用户。" : "内容包括指定人称视角的场景描写、客观动作、旁白叙事，以及这些角色与用户的对话。"}
 3. 任何发言对话请使用中文引号 “ ” (例如 “你醒了？”) 或 「 」 括起来，以便阅读。任何非发言部分（动作描述、神态、场景描写、内心想法、旁白等）放在引号外面。
 4. 确保在对话中，通过在引号前或文中清晰提及名字（例如：A冷笑了一声：“...” / B有些局促地拍了拍衣角：“...”）来指明是谁在说话，使读者能一眼分辨。
 5. 必须保持极高的人设契合度、动作细节 and 情感氛围描写。不要说任何破戏（OOC）的话，不要说你是AI。
@@ -1041,7 +1082,7 @@ ${wbPrompts}\n`;
 【当前创作模式】：`;
 
       if (updatedStory.mode === "director") {
-        sysPrompt += `\n【导演模式】：用户是编剧/导演，给你发出控制剧本走向的指令。你要自行把控边界，像写小说一样输出一整段包含角色和用户所有完整对话、动作、旁白的文段。`;
+        sysPrompt += `\n【导演模式】：用户是编剧/导演，给你发出控制剧本走向的指令。你要自行把控边界，像写小说一样输出完整文段。${updatedStory.allowCharacterToSpeakForUser === false ? "只续写对方角色，不替用户补写台词、决定或新动作。" : "可以包含角色和用户的完整对话、动作与旁白。"}`;
       } else if (updatedStory.mode === "if") {
         sysPrompt += `\n【IF平行假想线】：当前故事处于一个脱离原作正统时间线的平行宇宙中！
 假想线宇宙设定：${updatedStory.ifPrompt || "自定义世界观设定"}
@@ -1091,7 +1132,9 @@ ${wbPrompts}\n`;
 ${lines}`;
       }
 
-      const lastUserMsgText = text || "请继续编织并续写这幕场景。";
+      const lastUserMsgText = text || (regenerateTarget
+        ? "请基于此前剧情重新生成这一段，不要复述被替换的内容。"
+        : "请继续编织并续写这幕场景。");
 
       const importedTail = updatedStory.importedContext?.messages.slice(-6) || [];
       if (updatedStory.importedContext && importedTail.length > 0) {
@@ -1148,18 +1191,23 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
           conversationId: updatedStory.conversationId,
           sender: "character",
           content: responseText.trim(),
-          timestamp: Date.now(),
+          timestamp: regenerateTarget?.timestamp || Date.now(),
           isOffline: true,
           isNarration: false
         }];
 
         const finalStory = {
           ...updatedStory,
-          messages: [...updatedStory.messages, ...newMsgs],
+          messages: regeneration
+            ? applyOfflineStoryRegeneration(regeneration, newMsgs[0])
+            : [...updatedStory.messages, ...newMsgs],
+          archivedAt: undefined,
+          memorySyncStatus: "pending" as const,
           updatedAt: Date.now()
         };
 
         saveActiveStorySnapshot(finalStory);
+        if (regenerateTarget) showToast("当前剧情已重新生成");
       }
     } catch (err: any) {
       console.error(err);
@@ -1167,6 +1215,11 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleRegenerateMessage = (messageId: string) => {
+    setActiveNodeMenuId(null);
+    void handleSendMessage(undefined, true, { regenerateMessageId: messageId });
   };
 
   return (
@@ -1485,15 +1538,28 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                       )}
                     </div>
                     <p className="text-xs text-[#8E8E93]">设定单次生成的最大字数范围，避免回复过长或过短。</p>
-                  </div>
-                  </section>
 
-                  {/* Perspectives */}
-                  <section className="space-y-2">
-                    <h4 className="text-sm font-medium text-[#999999]">写作视角</h4>
-                  <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
+                    <div className="border-t border-[#F0F0F0] pt-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[15px] font-medium text-[#111111]">允许对方替我做出回应</div>
+                          <p className="mt-1 text-xs leading-5 text-[#8E8E93]">关闭后，对方不能替你说话、决定或补写新的主动回应。</p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={settingsAllowCharacterToSpeakForUser}
+                          onClick={() => setSettingsAllowCharacterToSpeakForUser((current) => !current)}
+                          className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${settingsAllowCharacterToSpeakForUser ? "bg-[#111111]" : "bg-[#E5E5EA]"}`}
+                        >
+                          <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${settingsAllowCharacterToSpeakForUser ? "translate-x-[22px]" : "translate-x-0.5"}`} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-[#F0F0F0] pt-3">
                     <label className="text-[15px] font-medium text-[#111111] block">人称写作视角选择</label>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="mt-3 grid grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <span className="text-xs text-[#8E8E93] block">对方（角色们）的人称</span>
                         <select
@@ -1519,6 +1585,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                           <option value="third">名字</option>
                         </select>
                       </div>
+                    </div>
                     </div>
                   </div>
                   </section>
@@ -1773,6 +1840,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                     onEdit={() => { setActiveNodeMenuId(null); handleStartEdit(msg.id, msg.content); }}
                     onDelete={() => { setActiveNodeMenuId(null); setPendingDeleteMessageId(msg.id); }}
                     onGuidance={() => { setActiveNodeMenuId(null); setIsGuidancePanelOpen(true); }}
+                    onRegenerate={() => handleRegenerateMessage(msg.id)}
                   />;
                 })}
                 {isGenerating && <div className="offline-story-status"><RefreshCw size={15} className="animate-spin" />{selectedChar.remark || selectedChar.name} 正在续写这一幕…</div>}

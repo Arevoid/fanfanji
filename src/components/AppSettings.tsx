@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { UserSettings, StylePreset, ApiPreset, ImageApiPreset, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type HomeScreenItem, type UserSettingsUpdate } from "../types";
+import { UserSettings, StylePreset, ApiPreset, ImageApiPreset, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type HomeScreenItem, type OfflineStory, type UserSettingsUpdate } from "../types";
 import { apiFetchModels, apiTestKey, apiFetchImageModels, apiTestImageConnection } from "../utils/apiHelper";
 import {
   ChevronLeft,
@@ -42,6 +42,8 @@ import {
   type SettingsTab,
 } from "../features/settings/settingsNavigation";
 import { clearApplicationData } from "../features/settings/clearApplicationData";
+import { offlineStoryDb } from "../core/storage/offlineStoryDb";
+import { mergeOfflineStoryCollections } from "../core/storage/repositories/offlineRepository";
 import { normalizeMosslandApiEndpoint } from "../features/voice/ttsConfig";
 import {
   CLASSIC_BUBBLE_PRESET_ID,
@@ -181,11 +183,23 @@ const LIGHT_BACKUP_KEYS = [
   "phone_offline_stories",
 ] as const;
 
-function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][]): void {
+async function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][]): Promise<void> {
   const backupData: BackupData = {};
   keys.forEach((key) => {
     backupData[key] = sanitizeSystemBackupValue(key, localStorage.getItem(key));
   });
+  if (keys.includes("phone_offline_stories")) {
+    try {
+      const localStories = JSON.parse(backupData.phone_offline_stories || "[]") as OfflineStory[];
+      const durableStories = await offlineStoryDb.loadAll();
+      backupData.phone_offline_stories = JSON.stringify(mergeOfflineStoryCollections(
+        Array.isArray(localStories) ? localStories : [],
+        durableStories,
+      ));
+    } catch (error) {
+      console.warn("Unable to include the durable offline-story copy in this backup.", error);
+    }
+  }
   const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -2794,9 +2808,9 @@ export default function AppSettings({
                     <div className="space-y-2">
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           try {
-                            downloadSystemBackup(BACKUP_KEYS);
+                            await downloadSystemBackup(BACKUP_KEYS);
                             setShowBackupExportOptions(false);
                           } catch (err: any) {
                             alert("导出备份失败: " + err.message);
@@ -2809,9 +2823,9 @@ export default function AppSettings({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           try {
-                            downloadSystemBackup(LIGHT_BACKUP_KEYS);
+                            await downloadSystemBackup(LIGHT_BACKUP_KEYS);
                             setShowBackupExportOptions(false);
                           } catch (err: any) {
                             alert("导出备份失败: " + err.message);
@@ -2859,7 +2873,7 @@ export default function AppSettings({
                         if (!file) return;
 
                         const reader = new FileReader();
-                        reader.onload = () => {
+                        reader.onload = async () => {
                           try {
                             const json: unknown = JSON.parse(reader.result as string);
                             if (typeof json !== "object" || json === null || Array.isArray(json)) {
@@ -2885,6 +2899,12 @@ export default function AppSettings({
                                       json as Record<string, unknown>,
                                     ) || value);
                                   }
+                                }
+                                const restoredOfflineStories = entries.find(([key]) => key === "phone_offline_stories")?.[1];
+                                if (typeof restoredOfflineStories === "string") {
+                                  const parsedStories = JSON.parse(restoredOfflineStories) as unknown;
+                                  if (!Array.isArray(parsedStories)) throw new Error("线下故事备份格式无效");
+                                  await offlineStoryDb.replaceAll(parsedStories as OfflineStory[]);
                                 }
                               } catch (writeError) {
                                 for (const key of writtenKeys) {
@@ -2913,8 +2933,8 @@ export default function AppSettings({
                                 alert("外观设置已恢复并立即应用。");
                                 return;
                               }
-                              // JSON backups intentionally exclude MusicAppDB and StickerAppDB Blobs.
-                              // Importing JSON never clears IndexedDB, so existing local music and stickers remain.
+                              // JSON backups intentionally exclude media/sticker blobs. Offline stories
+                              // are restored to their durable store above before the app reloads.
                               alert("导入成功！应用即将刷新加载新数据。");
                               window.location.reload();
                             }
