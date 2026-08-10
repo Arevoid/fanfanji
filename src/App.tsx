@@ -87,6 +87,7 @@ import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/s
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
 import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
+import { migrateLegacyClassicBubblePreset } from "./features/chat/styles/classicBubblePreset";
 import StatusBar from "./components/StatusBar";
 import AppChat from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
@@ -330,7 +331,15 @@ export default function App() {
   // Load initial states from LocalStorage or fallbacks
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
 
-  const [settings, setSettingsState] = useState<UserSettings>(() => loadSettings(DEFAULT_SETTINGS).value);
+  const [settings, setSettingsState] = useState<UserSettings>(() => {
+    const loadedSettings = loadSettings(DEFAULT_SETTINGS).value;
+    const migration = migrateLegacyClassicBubblePreset(loadedSettings);
+    if (migration.migrated) {
+      const saved = saveSettings(migration.settings);
+      if (!saved.success) console.warn("[settings] Could not persist the legacy bubble preset migration.");
+    }
+    return migration.settings;
+  });
   const settingsRef = useRef<UserSettings>(settings);
   const settingsChangedByUser = useRef(false);
   const setSettings = (update: UserSettingsUpdate): void => {

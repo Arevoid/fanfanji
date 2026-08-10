@@ -96,6 +96,7 @@ export const getKnownMomentsContextString = (moments: Moment[], activeCharacter:
   activeIdentityId,
   userName: ownerName,
   getPublicBody: (moment) => renderMomentContent(moment.content),
+  getPublicComments: (moment) => getMomentComments(moment),
 });
 
 export const getPostIntervalMs = (character: Character) => {

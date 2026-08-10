@@ -43,6 +43,11 @@ import {
 } from "../features/settings/settingsNavigation";
 import { clearApplicationData } from "../features/settings/clearApplicationData";
 import { normalizeMosslandApiEndpoint } from "../features/voice/ttsConfig";
+import {
+  CLASSIC_BUBBLE_PRESET_ID,
+  CLASSIC_BUBBLE_PRESET_NAME,
+  CLASSIC_BUBBLE_STRUCTURED_STYLE,
+} from "../features/chat/styles/classicBubblePreset";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -76,18 +81,9 @@ interface AppSettingsProps {
 
 const DEFAULT_PRESETS: StylePreset[] = [
   {
-    id: "p-classic",
-    name: "温和灰蓝 (Default)",
-    bubbleCss: `.chat-bubble-self {
-  background: #3b82f6 !important;
-  color: #ffffff !important;
-  border-radius: 18px 18px 2px 18px !important;
-}
-.chat-bubble-other {
-  background: #e2e8f0 !important;
-  color: #1e293b !important;
-  border-radius: 18px 18px 18px 2px !important;
-}`,
+    id: CLASSIC_BUBBLE_PRESET_ID,
+    name: CLASSIC_BUBBLE_PRESET_NAME,
+    bubbleCss: "",
     globalCss: `.phone-screen-container {
   font-family: 'Inter', sans-serif;
 }`,
@@ -980,17 +976,30 @@ export default function AppSettings({
   };
 
   const applyPreset = (preset: StylePreset) => {
+    const isClassicPreset = preset.id === CLASSIC_BUBBLE_PRESET_ID;
     setWallpaper(preset.wallpaper);
-    setBubbleCss(preset.bubbleCss);
+    setBubbleCss(isClassicPreset ? "" : preset.bubbleCss);
     setGlobalCss(preset.globalCss);
+    if (isClassicPreset) {
+      setSelfBubbleBg(CLASSIC_BUBBLE_STRUCTURED_STYLE.selfBubbleBg);
+      setSelfBubbleColor(CLASSIC_BUBBLE_STRUCTURED_STYLE.selfBubbleColor);
+      setSelfBubbleRadius(CLASSIC_BUBBLE_STRUCTURED_STYLE.selfBubbleRadius);
+      setSelfBubbleOpacity(CLASSIC_BUBBLE_STRUCTURED_STYLE.selfBubbleOpacity);
+      setOtherBubbleBg(CLASSIC_BUBBLE_STRUCTURED_STYLE.otherBubbleBg);
+      setOtherBubbleColor(CLASSIC_BUBBLE_STRUCTURED_STYLE.otherBubbleColor);
+      setOtherBubbleRadius(CLASSIC_BUBBLE_STRUCTURED_STYLE.otherBubbleRadius);
+      setOtherBubbleOpacity(CLASSIC_BUBBLE_STRUCTURED_STYLE.otherBubbleOpacity);
+      setBubbleTailEnabled(false);
+    }
     
     onSaveSettings((previous) => ({
       ...previous,
       wallpaper: preset.wallpaper,
       wallpaperSource: "preset",
-      bubbleCss: preset.bubbleCss,
+      bubbleCss: isClassicPreset ? "" : preset.bubbleCss,
       globalCss: preset.globalCss,
-      activePreset: preset.name
+      activePreset: preset.name,
+      ...(isClassicPreset ? CLASSIC_BUBBLE_STRUCTURED_STYLE : {}),
     }));
   };
 
