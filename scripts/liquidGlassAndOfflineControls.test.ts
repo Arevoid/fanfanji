@@ -5,6 +5,7 @@ import {
   LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
   LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
   LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS,
+  LIQUID_GLASS_PALETTE_MIGRATION_VERSION,
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../src/features/chat/styles/liquidGlassDefaults";
 import type { UserSettings } from "../src/types";
@@ -27,6 +28,7 @@ assert.equal(firstUse.liquidGlassSelfBubbleRadius, LIQUID_GLASS_DEFAULT_BUBBLE_R
 assert.equal(firstUse.liquidGlassOtherBubbleRadius, LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS);
 assert.equal(firstUse.liquidGlassBubbleTailEnabled, false);
 assert.equal(firstUse.liquidGlassBubbleBorderEnabled, false);
+assert.equal(firstUse.liquidGlassPaletteMigrationVersion, LIQUID_GLASS_PALETTE_MIGRATION_VERSION);
 assert.equal(firstUse.liquidGlassTextDefaultsApplied, true);
 assert.equal(firstUse.liquidGlassVisualDefaultsApplied, true);
 
@@ -63,8 +65,30 @@ const preservedLegacyCustomization = applyLiquidGlassTextDefaults({
 });
 assert.equal(preservedLegacyCustomization.liquidGlassSelfBubbleBg, "#fde68a", "existing customized glass colours must be preserved during repair");
 
+const repairedUnreadableGlass = applyLiquidGlassTextDefaults({
+  ...base,
+  globalChatStylePreset: "default",
+  liquidGlassVisualDefaultsApplied: true,
+  liquidGlassSelfBubbleBg: "#18181b",
+  liquidGlassSelfBubbleColor: LIQUID_GLASS_DEFAULT_TEXT_COLOR,
+});
+assert.equal(repairedUnreadableGlass.liquidGlassSelfBubbleBg, LIQUID_GLASS_DEFAULT_BUBBLE_COLOR);
+assert.equal(repairedUnreadableGlass.liquidGlassSelfBubbleColor, LIQUID_GLASS_DEFAULT_TEXT_COLOR);
+assert.equal(repairedUnreadableGlass.liquidGlassPaletteMigrationVersion, LIQUID_GLASS_PALETTE_MIGRATION_VERSION);
+
+const preservedReadableBlackGlass = applyLiquidGlassTextDefaults({
+  ...base,
+  liquidGlassVisualDefaultsApplied: true,
+  liquidGlassSelfBubbleBg: "#18181b",
+  liquidGlassSelfBubbleColor: "#ffffff",
+  liquidGlassPaletteMigrationVersion: undefined,
+});
+assert.equal(preservedReadableBlackGlass.liquidGlassSelfBubbleBg, "#18181b", "readable black/white customization must be preserved");
+assert.equal(preservedReadableBlackGlass.liquidGlassSelfBubbleColor, "#ffffff");
+
 const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const serviceWorker = readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
 const offline = readFileSync(new URL("../src/components/AppOffline.tsx", import.meta.url), "utf8");
 const settings = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 assert.match(chat, /settings\.liquidGlassSelfBubbleBg \|\| LIQUID_GLASS_DEFAULT_BUBBLE_COLOR/);
@@ -76,11 +100,16 @@ assert.match(chat, /!isLiquidGlass && settings\.otherBubbleBg/);
 assert.match(chat, /settings\.liquidGlassSelfBubbleRadius \?\? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS/);
 assert.match(chat, /settings\.liquidGlassOtherBubbleRadius \?\? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS/);
 assert.match(chat, /#conv-screen\.style-liquid-glass \.chat-composer--liquid/);
+assert.match(chat, /#conv-screen\.style-liquid-glass \.cv-header \.back-btn[\s\S]*border-radius: 50%/);
+assert.match(chat, /#conv-screen\.style-liquid-glass \.cv-header \.menu-btn[\s\S]*backdrop-filter: blur\(20px\)/);
+assert.match(chat, /mx-3\.5 mb-3\.5 mt-1 overflow-visible shrink-0 flex flex-col cv-footer chat-input-area chat-composer--liquid/);
+assert.match(chat, /#conv-screen\.style-liquid-glass \.chat-composer__input[\s\S]*border-radius: 999px/);
 assert.match(chat, /#conv-screen\.style-liquid-glass \.chat-composer__attachment-panel/);
 assert.match(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-self/);
 assert.match(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-other/);
 assert.match(app, /bubbleStylePreset=\{resolveActiveChatStylePreset/);
 assert.match(settings, /effectiveBubbleStylePreset/);
+assert.match(serviceWorker, /fanfan-phone-v5/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("self"\)/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("other"\)/);
 assert.match(settings, /液态玻璃气泡设置/);

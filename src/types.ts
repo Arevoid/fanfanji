@@ -659,6 +659,8 @@ export interface UserSettings {
   liquidGlassTextDefaultsApplied?: boolean;
   /** Marks the complete liquid-glass bubble/background defaults as initialized. */
   liquidGlassVisualDefaultsApplied?: boolean;
+  /** One-time migration marker for legacy unreadable liquid-glass palettes. */
+  liquidGlassPaletteMigrationVersion?: number;
   liquidGlassOtherBubbleBg?: string;
   liquidGlassOtherBubbleColor?: string;
   liquidGlassOtherBubbleOpacity?: number;

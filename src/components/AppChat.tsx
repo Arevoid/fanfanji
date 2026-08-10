@@ -5904,6 +5904,42 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   align-items: center !important;
                   justify-content: center !important;
                 }
+                /* 液态玻璃导航控件：保留按钮底部的圆形玻璃承托，避免被
+                   聊天页基础样式重置为透明方形。 */
+                #conv-screen.style-liquid-glass .cv-header .back-btn,
+                #conv-screen.style-liquid-glass .cv-header .menu-btn,
+                #conv-screen.style-liquid-glass .cv-header .chat-header__back-button,
+                #conv-screen.style-liquid-glass .cv-header .chat-header__more-button {
+                  width: 42px !important;
+                  height: 42px !important;
+                  min-width: 42px !important;
+                  border-radius: 50% !important;
+                  background: rgba(255, 255, 255, 0.62) !important;
+                  background-color: rgba(255, 255, 255, 0.62) !important;
+                  border: 1.5px solid rgba(255, 255, 255, 0.72) !important;
+                  color: #1c1917 !important;
+                  backdrop-filter: blur(20px) saturate(190%) !important;
+                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06) !important;
+                  display: flex !important;
+                  align-items: center !important;
+                  justify-content: center !important;
+                }
+                #conv-screen.style-liquid-glass .cv-header .back-btn:hover,
+                #conv-screen.style-liquid-glass .cv-header .menu-btn:hover,
+                #conv-screen.style-liquid-glass .cv-header .chat-header__back-button:hover,
+                #conv-screen.style-liquid-glass .cv-header .chat-header__more-button:hover {
+                  background: rgba(255, 255, 255, 0.76) !important;
+                  opacity: 1 !important;
+                  transform: scale(1.04) !important;
+                }
+                #conv-screen.style-liquid-glass .cv-header .back-btn svg,
+                #conv-screen.style-liquid-glass .cv-header .menu-btn svg,
+                #conv-screen.style-liquid-glass .cv-header .chat-header__back-button svg,
+                #conv-screen.style-liquid-glass .cv-header .chat-header__more-button svg {
+                  color: #1c1917 !important;
+                  stroke: currentColor !important;
+                }
                 .cv-header .menu-btn:hover {
                   background: transparent !important;
                   opacity: 0.72 !important;
@@ -6060,20 +6096,21 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   margin-top: auto !important;
                 }
                 #conv-screen.style-liquid-glass .chat-composer--liquid {
-                  width: 100% !important;
-                  max-width: 100% !important;
-                  margin: 0 !important;
-                  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+                  width: auto !important;
+                  max-width: none !important;
+                  margin: 4px 14px calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+                  padding: 8px 10px !important;
                   overflow: visible !important;
                   box-sizing: border-box !important;
                   position: relative !important;
                   z-index: 20 !important;
-                  border-radius: 0 !important;
-                  border: 0 !important;
-                  background: rgba(255, 255, 255, 0.48) !important;
-                  background-color: rgba(255, 255, 255, 0.48) !important;
+                  border-radius: 28px !important;
+                  border: 1.5px solid rgba(255, 255, 255, 0.72) !important;
+                  background: rgba(255, 255, 255, 0.55) !important;
+                  background-color: rgba(255, 255, 255, 0.55) !important;
                   backdrop-filter: blur(24px) saturate(180%) !important;
                   -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+                  box-shadow: 0 8px 28px rgba(34, 46, 66, 0.1) !important;
                 }
                 #conv-screen.style-liquid-glass .chat-composer--liquid .chat-composer__form {
                   width: 100% !important;
@@ -6114,6 +6151,31 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   flex-grow: 1 !important;
                   flex-shrink: 1 !important;
                   min-width: 0 !important;
+                }
+                #conv-screen.style-liquid-glass .chat-composer__input {
+                  background: rgba(255, 255, 255, 0.64) !important;
+                  background-color: rgba(255, 255, 255, 0.64) !important;
+                  border: 1px solid rgba(255, 255, 255, 0.78) !important;
+                  border-radius: 999px !important;
+                  color: #1c1917 !important;
+                  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 2px 10px rgba(34, 46, 66, 0.06) !important;
+                }
+                #conv-screen.style-liquid-glass .chat-composer__input::placeholder {
+                  color: rgba(71, 85, 105, 0.72) !important;
+                }
+                #conv-screen.style-liquid-glass .chat-composer__button {
+                  border-radius: 50% !important;
+                  background: rgba(255, 255, 255, 0.64) !important;
+                  background-color: rgba(255, 255, 255, 0.64) !important;
+                  border: 1px solid rgba(255, 255, 255, 0.78) !important;
+                  color: #1c1917 !important;
+                  box-shadow: 0 4px 14px rgba(34, 46, 66, 0.08) !important;
+                }
+                #conv-screen.style-liquid-glass .chat-composer__send-reply-button {
+                  background: rgba(28, 25, 23, 0.88) !important;
+                  background-color: rgba(28, 25, 23, 0.88) !important;
+                  border-color: rgba(255, 255, 255, 0.42) !important;
+                  color: #ffffff !important;
                 }
                 .cv-footer .chat-input::placeholder {
                   font-weight: 600 !important;
@@ -7775,7 +7837,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
              isFloatingCute
                ? "mx-3.5 mb-3.5 mt-1 overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area chat-composer--floating"
                : activeStylePreset === "liquid-glass"
-                 ? "w-full overflow-visible shrink-0 flex flex-col cv-footer chat-input-area chat-composer--liquid"
+                 ? "mx-3.5 mb-3.5 mt-1 overflow-visible shrink-0 flex flex-col cv-footer chat-input-area chat-composer--liquid"
                  : "shrink-0 flex flex-col cv-footer chat-input-area chat-composer--default"
            }`} quotePreview={quotedMessage && <QuotedMessagePreview message={quotedMessage} senderName={activeCharacter.remark || activeCharacter.name} onClear={() => setQuotedMessage(null)} closeIcon={<X className="w-3.5 h-3.5" />} />}>
             
