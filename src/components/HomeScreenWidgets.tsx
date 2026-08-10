@@ -10,6 +10,7 @@ import {
   type UserIdentity,
 } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { formatTimeWidgetDate } from "../features/home/timeWidgetDate";
 import { audioDb } from "../utils/audioDb";
 import {
   compressImagePreservingTransparency,
@@ -27,7 +28,8 @@ import {
   Plus, 
   Check, 
   Volume2,
-  User
+  User,
+  Clock,
 } from "lucide-react";
 
 // Pre-seeded high-quality images for the Album Widget to look gorgeous
@@ -305,6 +307,148 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
                 <input type="color" value={normalizeWidgetTextColor(draftFontColor)} onChange={(event) => { setDraftFontColor(event.target.value); setFontColor(event.target.value); }} className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0" />
               </span>
             </label>
+            </div>
+            <div className="flex gap-2 border-t border-[var(--divider)] p-4">
+              <button type="button" onClick={cancelSettings} className="flex-1 rounded-xl bg-[var(--surface-muted)] py-2.5 text-xs font-bold text-[var(--text-secondary)]">取消</button>
+              <button type="button" onClick={saveSettings} className="flex-1 rounded-xl bg-[var(--accent)] py-2.5 text-xs font-bold text-[var(--accent-contrast)]">保存</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+/** Frameless 2×4 clock matching the compact date-over-time reference layout. */
+export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
+  const [now, setNow] = useState(() => new Date());
+  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(localStorage.getItem(`time_widget_font_color_${id}`), "#1c1917"));
+  const [draftFontColor, setDraftFontColor] = useState(fontColor);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const textRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const previewTextRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const display = formatTimeWidgetDate(now);
+
+  useEffect(() => {
+    let interval: number | undefined;
+    const timeout = window.setTimeout(() => {
+      setNow(new Date());
+      interval = window.setInterval(() => setNow(new Date()), 60 * 1000);
+    }, 60 * 1000 - (Date.now() % (60 * 1000)) + 30);
+    return () => {
+      window.clearTimeout(timeout);
+      if (interval !== undefined) window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    textRefs.current.forEach((element) => {
+      if (!element) return;
+      element.style.setProperty("color", fontColor, "important");
+      element.style.setProperty("font-family", '"Helvetica Neue", Arial, system-ui, sans-serif', "important");
+    });
+  }, [fontColor, isSettingsOpen]);
+
+  useEffect(() => {
+    const previewColor = normalizeWidgetTextColor(draftFontColor, fontColor);
+    previewTextRefs.current.forEach((element) => {
+      if (!element) return;
+      element.style.setProperty("color", previewColor, "important");
+      element.style.setProperty("font-family", '"Helvetica Neue", Arial, system-ui, sans-serif', "important");
+    });
+  }, [draftFontColor, fontColor, isSettingsOpen]);
+
+  const cancelSettings = () => {
+    setDraftFontColor(fontColor);
+    setIsSettingsOpen(false);
+  };
+
+  const saveSettings = () => {
+    const nextColor = normalizeWidgetTextColor(draftFontColor, fontColor);
+    setFontColor(nextColor);
+    setDraftFontColor(nextColor);
+    localStorage.setItem(`time_widget_font_color_${id}`, nextColor);
+    setIsSettingsOpen(false);
+  };
+
+  return (
+    <div className="time-widget relative h-full w-full select-none group">
+      <button
+        type="button"
+        className="flex h-full w-full flex-col items-start justify-center overflow-hidden bg-transparent px-[13%] text-left"
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!isEditing) {
+            setDraftFontColor(fontColor);
+            setIsSettingsOpen(true);
+          }
+        }}
+        aria-label="编辑时间小组件"
+      >
+        <span
+          ref={(element) => { textRefs.current[0] = element; }}
+          className="w-full whitespace-nowrap text-[15px] font-bold leading-none tracking-[-0.02em]"
+        >
+          {display.heading}
+        </span>
+        <span
+          ref={(element) => { textRefs.current[1] = element; }}
+          className="mt-2 whitespace-nowrap text-[65px] font-light leading-[0.78] tracking-[-0.065em]"
+        >
+          {display.time}
+        </span>
+      </button>
+
+      {isEditing && onRemove && (
+        <button
+          type="button"
+          data-home-delete
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); onRemove(); }}
+          className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md transition-transform active:scale-90"
+          aria-label="删除小组件"
+        >
+          ×
+        </button>
+      )}
+
+      {isSettingsOpen && createPortal(
+        <div className="theme-widget-sheet fixed inset-0 z-[100] flex items-end justify-center bg-[var(--overlay)] p-4" onClick={cancelSettings}>
+          <div className="w-full max-w-sm overflow-hidden rounded-[28px] bg-[var(--surface)] text-[var(--text-primary)] shadow-[var(--shadow-modal)]" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[var(--divider)] px-5 py-4">
+              <div>
+                <h3 className="text-sm font-black">时间小组件</h3>
+                <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">设置时间、日期与农历的字体颜色</p>
+              </div>
+              <button type="button" onClick={cancelSettings} className="rounded-full p-1 text-lg font-bold text-[var(--text-tertiary)]" aria-label="关闭">×</button>
+            </div>
+            <div className="space-y-4 px-5 py-4">
+              <div className="flex h-28 flex-col items-start justify-center rounded-2xl bg-slate-500 px-[13%] text-white">
+                <span ref={(element) => { previewTextRefs.current[0] = element; }} className="whitespace-nowrap text-[13px] font-bold leading-none">{display.heading}</span>
+                <span ref={(element) => { previewTextRefs.current[1] = element; }} className="mt-2 whitespace-nowrap text-[52px] font-light leading-[0.78] tracking-[-0.065em]">{display.time}</span>
+              </div>
+              <label className="flex items-center justify-between text-xs font-bold">
+                字体颜色
+                <span className="flex items-center gap-2">
+                  <input
+                    value={draftFontColor.toUpperCase()}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setDraftFontColor(value);
+                    }}
+                    className="w-[76px] rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 font-mono text-[10px] font-medium outline-none"
+                    aria-label="字体颜色 HEX 值"
+                  />
+                  <input
+                    type="color"
+                    value={normalizeWidgetTextColor(draftFontColor, fontColor)}
+                    onChange={(event) => setDraftFontColor(event.target.value)}
+                    className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0"
+                    aria-label="选择字体颜色"
+                  />
+                </span>
+              </label>
             </div>
             <div className="flex gap-2 border-t border-[var(--divider)] p-4">
               <button type="button" onClick={cancelSettings} className="flex-1 rounded-xl bg-[var(--surface-muted)] py-2.5 text-xs font-bold text-[var(--text-secondary)]">取消</button>
@@ -839,7 +983,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
 
 // Bottom sheet selector for preset widgets
 interface AddWidgetSheetProps {
-  onAdd: (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "welcome") => void;
+  onAdd: (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "welcome") => void;
   onClose: () => void;
   settings?: UserSettings;
 }
@@ -886,6 +1030,19 @@ export function AddWidgetSheet({ onAdd, onClose, settings }: AddWidgetSheetProps
           <div>
             <h4 className="text-xs font-black text-stone-800">日历相册 (2×4)</h4>
             <p className="text-[10px] text-stone-400 font-medium mt-0.5">无蒙版背景与实时时间日期</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => onAdd("time")}
+          className="flex items-center gap-3 rounded-2xl border border-stone-200/60 bg-stone-50 p-3 text-left transition-all hover:scale-[1.02] hover:bg-stone-100 active:scale-95"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+            <Clock className="h-5 w-5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-black text-stone-800">时间 (2×4)</h4>
+            <p className="mt-0.5 text-[10px] font-medium text-stone-400">透明背景、日期星期与农历</p>
           </div>
         </button>
 

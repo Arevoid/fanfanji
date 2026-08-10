@@ -16,7 +16,7 @@ const DESKTOP_STORAGE_KEYS = new Set([
   "phone_identity_music_states",
   "phone_relationship_music_states",
 ]);
-const WIDGET_STORAGE_PREFIXES = ["album_widget_photos_", "calendar_album_", "anniversary_"];
+const WIDGET_STORAGE_PREFIXES = ["album_widget_photos_", "calendar_album_", "anniversary_", "time_widget_"];
 
 export interface DesktopModuleBackup {
   format: "fanfanji-desktop-module";

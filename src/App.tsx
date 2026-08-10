@@ -53,6 +53,7 @@ import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, Musi
 import { 
   AlbumWidget, 
   CalendarAlbumWidget,
+  TimeWidget,
   MusicWidget,
   DualMusicWidget,
   AnniversaryWidget, 
@@ -1648,7 +1649,7 @@ export default function App() {
     }
   };
 
-  const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "welcome") => {
+  const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "welcome") => {
     if (widgetType === "welcome") {
       setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: false }));
       setIsShowingAddWidget(false);
@@ -1662,6 +1663,9 @@ export default function App() {
       if (widgetType === "calendar_album") {
         size = "2x4";
         actualWidgetType = "calendar-album";
+      } else if (widgetType === "time") {
+        size = "2x4";
+        actualWidgetType = "time";
       } else if (widgetType === "album") {
         size = "2x2";
         actualWidgetType = "album";
@@ -1697,12 +1701,14 @@ export default function App() {
   const handleRemoveWidget = (id: string) => {
     setHomeScreenItems(current => current.filter(item => item.id !== id));
     setDualMusicConfigs((configs) => configs.filter((config) => config.widgetId !== id));
+    localStorage.removeItem(`time_widget_font_color_${id}`);
   };
 
   const getWidgetComponent = (type?: string) => {
     switch (type) {
       case "album": return AlbumWidget;
       case "calendar-album": return CalendarAlbumWidget;
+      case "time": return TimeWidget;
       case "music": return MusicWidget;
       case "dual-music": return DualMusicWidget;
       case "anniversary": return AnniversaryWidget;
