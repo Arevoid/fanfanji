@@ -1,9 +1,9 @@
-const CACHE_NAME = "fanfan-phone-v3";
+const CACHE_NAME = "fanfan-phone-v4";
 const ASSETS_TO_CACHE = [
   "/",
   "/index.html",
   "/manifest.json",
-  "/icon.svg",
+  "/icon-180.png",
   "/icon-192.png",
   "/icon-512.png"
 ];
