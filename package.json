@@ -9,7 +9,9 @@
     "start": "node -e \"process.env.NODE_ENV='production'; require('./server-dist/server.cjs')\"",
     "deploy:cloudflare": "npm run build && npx wrangler deploy",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx scripts/runAllTests.ts",
+    "check": "npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
