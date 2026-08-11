@@ -41,7 +41,11 @@ try {
   assert.equal(assetCalls, 0, "Cloudflare must handle translation instead of sending it to static assets");
 
   globalThis.fetch = async () => { throw new TypeError("model endpoint unavailable"); };
-  await assert.rejects(() => apiFetchModels({ apiKey: "key", apiEndpoint: "https://provider.example/v1" }), /unavailable/);
+  await assert.rejects(
+    () => apiFetchModels({ apiKey: "key", apiEndpoint: "https://provider.example/v1" }),
+    /模型列表 API网络连接失败/,
+    "模型列表的底层网络异常应统一转换成用户可读错误",
+  );
 
   console.log("PASS selected-model preservation, Cloudflare translation routing, and honest model-list errors");
 } finally {

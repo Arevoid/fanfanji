@@ -1,4 +1,5 @@
 import type { GeminiImageAuthMode, ImageApiProtocol } from "../types";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 
 export interface ImageProxyRequest {
   protocol?: ImageApiProtocol;
@@ -85,7 +86,7 @@ export function parseImageModels(data: any): string[] {
 export async function fetchImageModels(input: Pick<ImageProxyRequest, "protocol" | "geminiAuthMode" | "apiKey" | "apiEndpoint">): Promise<string[]> {
   const protocol = resolveServerImageProtocol(input.protocol);
   if (!input.apiKey?.trim() || !input.apiEndpoint?.trim()) throw new Error("请填写图片 API 地址与 API Key。");
-  const response = await fetch(`${baseFor(input.apiEndpoint, protocol)}/models`, { headers: headersFor(protocol, input.apiKey.trim(), input.geminiAuthMode) });
+  const response = await fetchWithTimeout(`${baseFor(input.apiEndpoint, protocol)}/models`, { headers: headersFor(protocol, input.apiKey.trim(), input.geminiAuthMode) }, API_REQUEST_TIMEOUTS.modelList);
   await ensureOk(response, "model-list");
   const models = parseImageModels(await response.json());
   if (!models.length) throw new ImageApiError(200, "model-list-format", "模型列表响应格式不可识别；可手动填写服务商提供的图片模型名称。");
@@ -110,7 +111,7 @@ export async function testImageConnectionWithProtocol(input: ImageProxyRequest):
       throw error;
     }
   }
-  const response = await fetch(`${base}/models/${encodeURIComponent(modelName(input.model))}`, { headers });
+  const response = await fetchWithTimeout(`${base}/models/${encodeURIComponent(modelName(input.model))}`, { headers }, API_REQUEST_TIMEOUTS.connectionTest);
   if (!response.ok) {
     const summary = await errorSummary(response);
     if (response.status === 404 || response.status === 405) {
@@ -124,7 +125,7 @@ export async function testImageConnectionWithProtocol(input: ImageProxyRequest):
 async function urlToDataUrl(value: { b64_json?: string; url?: string }) {
   if (value.b64_json) return `data:image/png;base64,${value.b64_json}`;
   if (!value.url) throw new Error("图片响应中没有可解析的图像数据。");
-  const response = await fetch(value.url);
+  const response = await fetchWithTimeout(value.url, undefined, API_REQUEST_TIMEOUTS.remoteAsset);
   if (!response.ok) throw new Error(`无法下载图片 API 返回的 URL (${response.status})。`);
   return `data:${response.headers.get("content-type") || "image/png"};base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}`;
 }
@@ -166,9 +167,9 @@ export async function generateImageWithProtocol(input: ImageProxyRequest): Promi
       const form = new FormData(); form.append("model", model); form.append("prompt", input.prompt);
       form.append("image", new Blob([Buffer.from(reference, "base64")], { type: input.referenceImage?.mimeType || "image/png" }), "character-reference");
       form.append("input_fidelity", "high");
-      response = await fetch(`${base}/images/edits`, { method: "POST", headers: headersFor(protocol, input.apiKey.trim()), body: form });
+      response = await fetchWithTimeout(`${base}/images/edits`, { method: "POST", headers: headersFor(protocol, input.apiKey.trim()), body: form }, API_REQUEST_TIMEOUTS.imageGeneration);
     } else {
-      response = await fetch(`${base}/images/generations`, { method: "POST", headers: { ...headersFor(protocol, input.apiKey.trim()), "Content-Type": "application/json" }, body: JSON.stringify({ model, prompt: input.prompt, n: 1, size: "1024x1024" }) });
+      response = await fetchWithTimeout(`${base}/images/generations`, { method: "POST", headers: { ...headersFor(protocol, input.apiKey.trim()), "Content-Type": "application/json" }, body: JSON.stringify({ model, prompt: input.prompt, n: 1, size: "1024x1024" }) }, API_REQUEST_TIMEOUTS.imageGeneration);
     }
     await ensureOk(response, "generation");
     return urlToDataUrl((await response.json())?.data?.[0] || {});
@@ -177,20 +178,20 @@ export async function generateImageWithProtocol(input: ImageProxyRequest): Promi
   if (protocol === "gemini-native-image") {
     const parts: any[] = [{ text: input.prompt }];
     if (reference) parts.push({ inlineData: { mimeType: input.referenceImage?.mimeType || "image/png", data: reference } });
-    const response = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
+    const response = await fetchWithTimeout(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
       method: "POST", headers: { ...headersFor(protocol, input.apiKey.trim(), input.geminiAuthMode), "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { responseModalities: ["TEXT", "IMAGE"] } }),
-    });
+    }, API_REQUEST_TIMEOUTS.imageGeneration);
     await ensureOk(response, "generation");
     const payload = await response.json();
     return inlineDataToUrl(findGeminiInlineImage(payload), payload);
   }
 
   if (reference) throw new Error("Imagen text-to-image 第一版不支持角色参考图或编辑。");
-  const response = await fetch(`${base}/models/${encodeURIComponent(model)}:predict`, {
+  const response = await fetchWithTimeout(`${base}/models/${encodeURIComponent(model)}:predict`, {
     method: "POST", headers: { ...headersFor(protocol, input.apiKey.trim()), "Content-Type": "application/json" },
     body: JSON.stringify({ instances: [{ prompt: input.prompt }], parameters: { sampleCount: 1 } }),
-  });
+  }, API_REQUEST_TIMEOUTS.imageGeneration);
   await ensureOk(response, "generation");
   const prediction = (await response.json())?.predictions?.[0] || {};
   if (prediction.bytesBase64Encoded) return `data:${prediction.mimeType || "image/png"};base64,${prediction.bytesBase64Encoded}`;

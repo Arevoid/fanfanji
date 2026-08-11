@@ -7,6 +7,7 @@ import {
   type KnowledgeExtractionHistoryItem,
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
+import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError } from "./fetchWithTimeout";
 
 const parseApiErrorText = (rawText: string): string => {
   const trimmed = rawText.trim();
@@ -84,7 +85,7 @@ async function directClientChat(params: {
     }
     messagesPayload.push({ role: "user", content: message });
 
-    const responseFetch = await fetch(endpointUrl, {
+    const responseFetch = await fetchWithTimeout(endpointUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -96,7 +97,7 @@ async function directClientChat(params: {
         temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
         stream: streamCompatible || false
       })
-    });
+    }, API_REQUEST_TIMEOUTS.textGeneration);
 
     if (!responseFetch.ok) {
       const errorText = await responseFetch.text();
@@ -186,7 +187,7 @@ async function directClientChat(params: {
       });
     }
 
-    const responseFetch = await fetch(modelsUrl, {
+    const responseFetch = await fetchWithTimeout(modelsUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -202,7 +203,7 @@ async function directClientChat(params: {
           }
         } : {})
       })
-    });
+    }, API_REQUEST_TIMEOUTS.textGeneration);
 
     if (!responseFetch.ok) {
       const errorText = await responseFetch.text();
@@ -225,12 +226,12 @@ async function directClientFetchModels(apiKey: string, apiEndpoint?: string): Pr
     baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
     const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : (baseUrl + "/models");
 
-    const responseFetch = await fetch(modelsUrl, {
+    const responseFetch = await fetchWithTimeout(modelsUrl, {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${apiKey}`
       }
-    });
+    }, API_REQUEST_TIMEOUTS.modelList);
     if (responseFetch.ok) {
       const data = await responseFetch.json();
       const parsed = parseModels(data);
@@ -239,7 +240,7 @@ async function directClientFetchModels(apiKey: string, apiEndpoint?: string): Pr
     throw new Error("无法从自定义端点解析出模型列表");
   } else {
     const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-    const responseFetch = await fetch(modelsUrl);
+    const responseFetch = await fetchWithTimeout(modelsUrl, {}, API_REQUEST_TIMEOUTS.modelList);
     if (responseFetch.ok) {
       const data = await responseFetch.json();
       const parsed = parseModels(data);
@@ -264,17 +265,23 @@ export async function apiChat(params: {
 }): Promise<{ text: string }> {
   let res: Response | null = null;
   try {
-    res = await fetch("/api/chat", {
+    res = await fetchWithTimeout("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.textGeneration);
   } catch (err) {
     // A network failure means the optional app backend is genuinely absent.
     // Provider HTTP errors must not be retried through the browser because that
     // sends the same rejected prompt twice and hides the original status/body.
+    if (!isApiRequestError(err, "network")) throw new Error(describeApiRequestError(err, "聊天 API"));
     console.warn("apiChat backend network request failed, trying client direct fallback:", err);
-    return directClientChat(params);
+    try {
+      return await directClientChat(params);
+    } catch (fallbackError) {
+      if (isApiRequestError(fallbackError)) throw new Error(describeApiRequestError(fallbackError, "聊天 API"));
+      throw fallbackError;
+    }
   }
 
   const responseText = await res.text();
@@ -284,7 +291,12 @@ export async function apiChat(params: {
     || (routeMissingStatus && !responseText.trim());
   if (looksLikeStaticHostFallback) {
     console.warn("apiChat backend route is unavailable on this host, trying client direct fallback");
-    return directClientChat(params);
+    try {
+      return await directClientChat(params);
+    } catch (fallbackError) {
+      if (isApiRequestError(fallbackError)) throw new Error(describeApiRequestError(fallbackError, "聊天 API"));
+      throw fallbackError;
+    }
   }
   if (!res.ok) {
     throw new Error(`聊天 API 请求失败 (${res.status}): ${parseApiErrorText(responseText)}`);
@@ -306,11 +318,11 @@ export async function apiTestKey(params: {
   apiEndpoint?: string;
 }): Promise<{ success: boolean; message: string }> {
   try {
-    const res = await fetch("/api/test-key", {
+    const res = await fetchWithTimeout("/api/test-key", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.connectionTest);
     if (res.ok) {
       const data = await res.json();
       if (data.success) {
@@ -321,6 +333,9 @@ export async function apiTestKey(params: {
     }
     throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
+    if (isApiRequestError(err) && !isApiRequestError(err, "network")) {
+      return { success: false, message: describeApiRequestError(err, "连接测试") };
+    }
     console.warn("apiTestKey backend failed, trying client direct fallback:", err);
     try {
       if (params.apiEndpoint && params.apiEndpoint.trim()) {
@@ -349,7 +364,9 @@ export async function apiTestKey(params: {
       }
       return { success: false, message: "连接失败，请确认 API Key 是否正确，或网络是否可以访问。" };
     } catch (fallbackErr: any) {
-      return { success: false, message: fallbackErr.message || "直连也失败，请检查网络和 API 配置。" };
+      return { success: false, message: isApiRequestError(fallbackErr)
+        ? describeApiRequestError(fallbackErr, "连接测试")
+        : fallbackErr.message || "直连也失败，请检查网络和 API 配置。" };
     }
   }
 }
@@ -360,11 +377,11 @@ export async function apiFetchModels(params: {
   apiEndpoint?: string;
 }): Promise<string[]> {
   try {
-    const res = await fetch("/api/models", {
+    const res = await fetchWithTimeout("/api/models", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.modelList);
     if (res.ok) {
       const data = await res.json();
       if (data.success && Array.isArray(data.models) && data.models.length > 0) {
@@ -373,10 +390,14 @@ export async function apiFetchModels(params: {
     }
     throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
+    if (isApiRequestError(err) && !isApiRequestError(err, "network")) {
+      throw new Error(describeApiRequestError(err, "模型列表 API"));
+    }
     console.warn("apiFetchModels backend failed, trying client direct fallback:", err);
     try {
       return await directClientFetchModels(params.apiKey, params.apiEndpoint);
     } catch (fallbackErr) {
+      if (isApiRequestError(fallbackErr)) throw new Error(describeApiRequestError(fallbackErr, "模型列表 API"));
       throw fallbackErr;
     }
   }
@@ -412,12 +433,15 @@ export async function apiFetchImageModels(params: {
 }): Promise<string[]> {
   let response: Response;
   try {
-    response = await fetch("/api/image/models", {
+    response = await fetchWithTimeout("/api/image/models", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
-  } catch {
+    }, API_REQUEST_TIMEOUTS.modelList);
+  } catch (error) {
+    if (isApiRequestError(error) && !isApiRequestError(error, "network")) {
+      throw new Error(describeApiRequestError(error, "图片模型 API"));
+    }
     throw new Error(imageProxyUnavailableMessage());
   }
   const data = await readImageProxyPayload(response);
@@ -437,12 +461,15 @@ export async function apiTestImageConnection(params: {
 }): Promise<{ success: boolean; message: string }> {
   let response: Response;
   try {
-    response = await fetch("/api/image/test", {
+    response = await fetchWithTimeout("/api/image/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
-  } catch {
+    }, API_REQUEST_TIMEOUTS.connectionTest);
+  } catch (error) {
+    if (isApiRequestError(error) && !isApiRequestError(error, "network")) {
+      return { success: false, message: describeApiRequestError(error, "图片 API 连接测试") };
+    }
     return { success: false, message: imageProxyUnavailableMessage() };
   }
   const data = await readImageProxyPayload(response);
@@ -463,11 +490,11 @@ export async function apiExtractMemories(params: {
   scenario?: "offline";
 }): Promise<{ text: string; items: ExtractedKnowledgeCandidatePayload[]; candidates?: ExtractedKnowledgeCandidatePayload[]; error?: string }> {
   try {
-    const res = await fetch("/api/extract-memories", {
+    const res = await fetchWithTimeout("/api/extract-memories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.memoryTask);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.candidates)) {
@@ -476,6 +503,9 @@ export async function apiExtractMemories(params: {
     }
     throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
+    if (isApiRequestError(err) && err.kind !== "network") {
+      return { text: "", items: [], error: describeApiRequestError(err, "记忆提取") };
+    }
     console.warn("apiExtractMemories backend failed, trying client direct fallback:", err);
     try {
       const prompt = buildKnowledgeExtractionPrompt({
@@ -506,7 +536,9 @@ export async function apiExtractMemories(params: {
       return {
         text: "",
         items: [],
-        error: fallbackErr instanceof Error ? fallbackErr.message : "记忆提取服务不可用",
+        error: isApiRequestError(fallbackErr)
+          ? describeApiRequestError(fallbackErr, "记忆提取")
+          : fallbackErr instanceof Error ? fallbackErr.message : "记忆提取服务不可用",
       };
     }
   }
@@ -520,11 +552,11 @@ export async function apiSummarizePersonality(params: {
   apiEndpoint?: string;
 }): Promise<{ text: string }> {
   try {
-    const res = await fetch("/api/summarize-personality", {
+    const res = await fetchWithTimeout("/api/summarize-personality", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.memoryTask);
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data.text === "string") {
@@ -533,6 +565,9 @@ export async function apiSummarizePersonality(params: {
     }
     throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
+    if (isApiRequestError(err) && err.kind !== "network") {
+      throw new Error(describeApiRequestError(err, "人设总结"));
+    }
     console.warn("apiSummarizePersonality backend failed, trying client direct fallback:", err);
     try {
       const referencesText = params.references
@@ -565,7 +600,9 @@ ${referencesText}
       return { text: result.text };
     } catch (fallbackErr: any) {
       console.error("Direct summarize personality fallback failed:", fallbackErr);
-      throw new Error(fallbackErr.message || "直连总结失败");
+      throw new Error(isApiRequestError(fallbackErr)
+        ? describeApiRequestError(fallbackErr, "人设总结")
+        : fallbackErr.message || "直连总结失败");
     }
   }
 }
@@ -583,13 +620,18 @@ export async function apiTranslate(params: {
 }): Promise<{ text: string }> {
   let res: Response;
   try {
-    res = await fetch("/api/translate", {
+    res = await fetchWithTimeout("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.textGeneration);
   } catch (err) {
-    if (params.proxyOnly) throw err;
+    if (params.proxyOnly) {
+      throw new Error(isApiRequestError(err) ? describeApiRequestError(err, "翻译") : String(err));
+    }
+    if (isApiRequestError(err) && err.kind !== "network") {
+      throw new Error(describeApiRequestError(err, "翻译"));
+    }
     console.warn("apiTranslate backend failed, trying client direct fallback:", err);
   }
 
@@ -642,7 +684,9 @@ ${params.text}
       return { text: result.text };
     } catch (fallbackErr: any) {
       console.error("Direct translate fallback failed:", fallbackErr);
-      throw new Error(fallbackErr.message || "直连翻译失败");
+      throw new Error(isApiRequestError(fallbackErr)
+        ? describeApiRequestError(fallbackErr, "翻译")
+        : fallbackErr.message || "直连翻译失败");
   }
 }
 

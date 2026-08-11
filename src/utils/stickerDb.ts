@@ -1,4 +1,5 @@
 import { StickerGroup } from "../types";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./fetchWithTimeout";
 
 class StickerDB {
   private dbName = "StickerAppDB";
@@ -228,7 +229,7 @@ export async function aiNameSticker(
     }
 
     try {
-      const res = await fetch(endpointUrl, {
+      const res = await fetchWithTimeout(endpointUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -254,7 +255,7 @@ export async function aiNameSticker(
             },
           ],
         }),
-      });
+      }, API_REQUEST_TIMEOUTS.textGeneration);
 
       if (res.ok) {
         const data = await res.json();
@@ -292,11 +293,11 @@ export async function aiNameSticker(
     },
   };
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
+  }, API_REQUEST_TIMEOUTS.textGeneration);
 
   if (!response.ok) {
     const errText = await response.text();

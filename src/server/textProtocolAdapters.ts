@@ -5,6 +5,7 @@ import {
   toOpenAiHistoryEntry,
   type TransportHistoryEntry,
 } from "../domain/prompt/promptTransport";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 
 export class TextApiError extends Error {
   constructor(public status: number, message: string) {
@@ -90,7 +91,7 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
     messages.push(...prompt.history.map(toOpenAiHistoryEntry));
     if (prompt.finalSystemInstruction) messages.push({ role: "system", content: prompt.finalSystemInstruction });
     messages.push({ role: "user", content: input.message });
-    const response = await fetch(openAiEndpoint(input.apiEndpoint), {
+    const response = await fetchWithTimeout(openAiEndpoint(input.apiEndpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
@@ -99,7 +100,7 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
         temperature: input.temperature ?? 0.7,
         stream: input.streamCompatible === true,
       }),
-    });
+    }, API_REQUEST_TIMEOUTS.textGeneration);
     const raw = await response.text();
     if (!response.ok) throw new TextApiError(response.status, errorText(raw));
     const text = parseOpenAiText(raw);
@@ -118,7 +119,7 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
   if (contents.at(-1)?.role === "user") contents.at(-1)!.parts[0].text += `\n${input.message}`;
   else contents.push({ role: "user", parts: [{ text: input.message || " " }] });
   const cleanModel = model.replace(/^models\//, "");
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+  const response = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -126,7 +127,7 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
       generationConfig: { temperature: input.temperature ?? 0.7 },
       ...(prompt.systemInstruction ? { systemInstruction: { parts: [{ text: prompt.systemInstruction }] } } : {}),
     }),
-  });
+  }, API_REQUEST_TIMEOUTS.textGeneration);
   const raw = await response.text();
   if (!response.ok) throw new TextApiError(response.status, errorText(raw));
   let parsed: any;
@@ -145,7 +146,11 @@ export async function fetchTextModels(input: { apiKey: string; apiEndpoint?: str
   const url = input.apiEndpoint?.trim()
     ? `${openAiBase(input.apiEndpoint).replace(/\/models$/, "")}/models`
     : `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
-  const response = await fetch(url, input.apiEndpoint?.trim() ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined);
+  const response = await fetchWithTimeout(
+    url,
+    input.apiEndpoint?.trim() ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined,
+    API_REQUEST_TIMEOUTS.modelList,
+  );
   const raw = await response.text();
   if (!response.ok) throw new TextApiError(response.status, errorText(raw));
   let data: any;

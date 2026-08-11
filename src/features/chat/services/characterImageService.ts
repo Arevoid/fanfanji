@@ -4,6 +4,7 @@ import { buildCharacterImagePrompt } from "../../../domain/prompt/characterImage
 import { assertImageGenerationTrigger } from "./imageGenerationIntent";
 import { assertReferenceImageCapability, inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "./imageProtocol";
 import { imageAssetDb } from "../../../utils/imageAssetDb";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../../../utils/fetchWithTimeout";
 
 type ImageScope =
   | { kind: "direct"; relationId: string; conversationId: string }
@@ -77,7 +78,7 @@ export async function generateCharacterImage(input: {
   const protocol = inferImageProtocol(preset.selectedModel, preset.apiEndpoint, preset.protocol);
   const referenceImageSupported = supportsReferenceImageForModel(protocol, preset.selectedModel);
   assertReferenceImageCapability({ ...preset, protocol, referenceImageSupported }, Boolean(reference));
-  const response = await fetch("/api/image/generate", {
+  const response = await fetchWithTimeout("/api/image/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -92,7 +93,7 @@ export async function generateCharacterImage(input: {
       userText: input.userText,
       ...(reference ? { referenceImage: { mimeType: reference.type || input.character.imageReferenceMimeType || "image/png", base64: await blobToBase64(reference) } } : {}),
     }),
-  });
+  }, API_REQUEST_TIMEOUTS.imageGeneration);
   const data = await response.json().catch(() => ({}));
   if (!response.ok || typeof data.dataUrl !== "string" || !data.dataUrl.startsWith("data:image/")) {
     throw new Error(data.error || "服务返回成功但未返回图片数据。");

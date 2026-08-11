@@ -3,6 +3,7 @@ import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageCo
 import { MosslandTtsError, synthesizeMosslandSpeech } from "../server/mosslandTts";
 import { buildKnowledgeExtractionPrompt, parseKnowledgeExtractionOutput } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { buildTranslationPrompt, callTextProvider, fetchTextModels, TextApiError } from "../server/textProtocolAdapters";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -50,7 +51,7 @@ async function synthesizeMinimax(body: Record<string, unknown>): Promise<Respons
   const apiKey = String(body.apiKey || "").trim();
   const groupId = String(body.groupId || "").trim();
   if (!apiKey || !groupId) return json({ error: "请填写 MiniMax API Key 和 Group ID。" }, 400);
-  const response = await fetch(`https://api.minimax.chat/v1/t2a_v2?GroupId=${encodeURIComponent(groupId)}`, {
+  const response = await fetchWithTimeout(`https://api.minimax.chat/v1/t2a_v2?GroupId=${encodeURIComponent(groupId)}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -58,7 +59,7 @@ async function synthesizeMinimax(body: Record<string, unknown>): Promise<Respons
       voice_setting: { voice_id: String(body.voiceId || "female-shaonv"), speed: Number(body.speed ?? 1), vol: Number(body.vol ?? 1), pitch: Number(body.pitch ?? 0) },
       audio_setting: { sample_rate: 32000, bitrate: 128000, format: "mp3" },
     }),
-  });
+  }, API_REQUEST_TIMEOUTS.speechSynthesis);
   const data: any = await response.json().catch(() => null);
   if (!response.ok || !data?.data?.audio) return json({ error: data?.base_resp?.status_msg || data?.error || "MiniMax 未返回音频。" }, response.ok ? 502 : response.status);
   const value = String(data.data.audio);

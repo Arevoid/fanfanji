@@ -7,6 +7,7 @@ import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageCo
 import { buildKnowledgeExtractionPrompt, parseKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./src/utils/fetchWithTimeout";
 
 dotenv.config();
 
@@ -109,11 +110,11 @@ async function startServer() {
           stream: streamCompatible || false
         };
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers,
           body: JSON.stringify(bodyPayload)
-        });
+        }, API_REQUEST_TIMEOUTS.textGeneration);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -264,7 +265,7 @@ ${referencesText}
 
         const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -278,7 +279,7 @@ ${referencesText}
             ],
             temperature: 0.6
           })
-        });
+        }, API_REQUEST_TIMEOUTS.memoryTask);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -357,7 +358,7 @@ ${historyText}
 
         const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -371,7 +372,7 @@ ${historyText}
             ],
             temperature: 0.5
           })
-        });
+        }, API_REQUEST_TIMEOUTS.memoryTask);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -450,7 +451,7 @@ ${historyText}
 
         const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -464,7 +465,7 @@ ${historyText}
             ],
             temperature: 0.5
           })
-        });
+        }, API_REQUEST_TIMEOUTS.memoryTask);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -539,7 +540,7 @@ ${text}
 
         const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -553,7 +554,7 @@ ${text}
             ],
             temperature: 0.3
           })
-        });
+        }, API_REQUEST_TIMEOUTS.textGeneration);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -608,7 +609,7 @@ ${text}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -620,7 +621,7 @@ ${text}
             temperature: 0.1,
             max_tokens: 5
           })
-        });
+        }, API_REQUEST_TIMEOUTS.connectionTest);
 
         if (responseFetch.ok) {
           const dataFetch = await responseFetch.json();
@@ -697,12 +698,12 @@ ${text}
         baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
         const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : (baseUrl + "/models");
 
-        const responseFetch = await fetch(modelsUrl, {
+        const responseFetch = await fetchWithTimeout(modelsUrl, {
           method: "GET",
           headers: {
             "Authorization": `Bearer ${apiKeyValue}`
           }
-        });
+        }, API_REQUEST_TIMEOUTS.modelList);
         if (responseFetch.ok) {
           const data = await responseFetch.json();
           const parsed = parseModels(data);
@@ -713,7 +714,7 @@ ${text}
       } else if (apiKeyValue) {
         // Dynamically query Gemini models list if we have a key
         const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKeyValue}`;
-        const responseFetch = await fetch(modelsUrl);
+        const responseFetch = await fetchWithTimeout(modelsUrl, undefined, API_REQUEST_TIMEOUTS.modelList);
         if (responseFetch.ok) {
           const data = await responseFetch.json();
           const parsed = parseModels(data);
@@ -775,11 +776,11 @@ ${text}
         },
       };
 
-      const responseFetch = await fetch(url, {
+      const responseFetch = await fetchWithTimeout(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-      });
+      }, API_REQUEST_TIMEOUTS.speechSynthesis);
 
       if (!responseFetch.ok) {
         const errText = await responseFetch.text();

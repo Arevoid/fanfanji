@@ -1,4 +1,5 @@
 import { audioDb } from "./audioDb";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./fetchWithTimeout";
 
 export const MINIMAX_DEFAULT_VOICES = [
   { id: "female-shaonv", name: "甜美少女 (女)", gender: "female" },
@@ -114,7 +115,7 @@ export async function fetchSingleTtsSegment(
     if (!apiKey) throw new Error("请先填写 Mossland API Key");
     if (!voiceId) throw new Error("请先为角色填写 Mossland Voice ID");
 
-    const response = await fetch("/api/mossland-tts", {
+    const response = await fetchWithTimeout("/api/mossland-tts", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -126,7 +127,7 @@ export async function fetchSingleTtsSegment(
         text,
         voiceId,
       }),
-    });
+    }, API_REQUEST_TIMEOUTS.speechSynthesis);
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Mossland 合成失败 (${response.status}): ${errorText}`);
@@ -192,11 +193,11 @@ export async function fetchSingleTtsSegment(
     };
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
-  });
+  }, API_REQUEST_TIMEOUTS.speechSynthesis);
 
   if (!response.ok) {
     const textErr = await response.text();

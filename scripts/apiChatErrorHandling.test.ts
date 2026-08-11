@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { apiChat, isProhibitedContentError } from "../src/utils/apiHelper";
 
 const originalFetch = globalThis.fetch;
+const originalSetTimeout = globalThis.setTimeout;
 const request = {
   message: "生成一条动态",
   history: [],
@@ -67,8 +68,21 @@ try {
 
   assert.deepEqual(await apiChat(request), { text: "直连成功" });
   assert.equal(networkFallbackCalls, 2, "真正的后端网络故障仍应允许一次客户端直连");
+
+  let timeoutCalls = 0;
+  globalThis.setTimeout = ((callback: TimerHandler) => {
+    queueMicrotask(() => typeof callback === "function" && callback());
+    return 1 as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  globalThis.fetch = ((_input, init) => new Promise<Response>((_resolve, reject) => {
+    timeoutCalls += 1;
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+  })) as typeof fetch;
+  await assert.rejects(() => apiChat(request), /聊天 API请求超时/);
+  assert.equal(timeoutCalls, 1, "代理请求超时不得再发起一次供应商直连请求");
 } finally {
   globalThis.fetch = originalFetch;
+  globalThis.setTimeout = originalSetTimeout;
 }
 
-console.log("PASS chat API error preservation, prohibited-content no-retry, and network fallback");
+console.log("PASS chat API error preservation, prohibited-content no-retry, timeout no-retry, and network fallback");
