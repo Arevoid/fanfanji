@@ -96,13 +96,7 @@ import {
   migrateUnreadableClassicBubblePalette,
 } from "./features/chat/styles/classicBubblePreset";
 import StatusBar from "./components/StatusBar";
-import AppChat, { resolveActiveChatStylePreset } from "./components/AppChat";
-import AppArchives from "./components/AppArchives";
-import AppMusic from "./components/AppMusic";
-import AppStore from "./components/AppStore";
-import AppNotes from "./components/AppNotes";
-import AppDiary from "./components/AppDiary";
-import AppMemory from "./components/AppMemory";
+import { resolveActiveChatStylePreset } from "./features/chat/styles/chatStylePreset";
 import { useForumActivityEngine } from "./features/forum/hooks/useForumActivityEngine";
 import {
   BookOpen,
@@ -126,26 +120,49 @@ import {
   X
 } from "lucide-react";
 
+const loadAppChat = () => import("./components/AppChat");
+const loadAppArchives = () => import("./components/AppArchives");
 const loadAppWorldBook = () => import("./components/AppWorldBook");
+const loadAppMusic = () => import("./components/AppMusic");
 const loadAppForum = () => import("./components/AppForum");
+const loadAppNotes = () => import("./components/AppNotes");
+const loadAppDiary = () => import("./components/AppDiary");
+const loadAppStore = () => import("./components/AppStore");
 const loadAppSettings = () => import("./components/AppSettings");
+const loadAppMemory = () => import("./components/AppMemory");
 const loadAppOffline = () => import("./components/AppOffline");
 
-const SECONDARY_APP_LOADERS: Record<string, () => Promise<unknown>> = {
+const APP_LOADERS: Record<string, () => Promise<unknown>> = {
+  chat: loadAppChat,
+  archives: loadAppArchives,
   worldbook: loadAppWorldBook,
+  music: loadAppMusic,
   forum: loadAppForum,
+  notes: loadAppNotes,
+  diary: loadAppDiary,
+  store: loadAppStore,
   settings: loadAppSettings,
+  memory: loadAppMemory,
   offline: loadAppOffline,
 };
 
-const preloadSecondaryApp = (appId: string) => {
-  const loader = SECONDARY_APP_LOADERS[appId];
+const IDLE_PRELOAD_APP_IDS = ["archives", "worldbook", "notes", "store", "settings"] as const;
+
+const preloadApp = (appId: string) => {
+  const loader = APP_LOADERS[appId];
   if (loader) void loader();
 };
 
+const AppChat = React.lazy(loadAppChat);
+const AppArchives = React.lazy(loadAppArchives);
 const AppWorldBook = React.lazy(loadAppWorldBook);
+const AppMusic = React.lazy(loadAppMusic);
 const AppForum = React.lazy(loadAppForum);
+const AppNotes = React.lazy(loadAppNotes);
+const AppDiary = React.lazy(loadAppDiary);
+const AppStore = React.lazy(loadAppStore);
 const AppSettings = React.lazy(loadAppSettings);
+const AppMemory = React.lazy(loadAppMemory);
 const AppOffline = React.lazy(loadAppOffline);
 
 function LazyAppBoundary({ children }: React.PropsWithChildren) {
@@ -322,16 +339,16 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const preloadAll = () => Object.values(SECONDARY_APP_LOADERS).forEach((loader) => void loader());
+    const preloadIdleApps = () => IDLE_PRELOAD_APP_IDS.forEach(preloadApp);
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
     };
     if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(preloadAll, { timeout: 1500 });
+      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 1500 });
       return () => idleWindow.cancelIdleCallback?.(handle);
     }
-    const handle = window.setTimeout(preloadAll, 600);
+    const handle = window.setTimeout(preloadIdleApps, 600);
     return () => window.clearTimeout(handle);
   }, []);
 
@@ -405,11 +422,20 @@ export default function App() {
 
   // Navigation State
   const [activeApp, setActiveApp] = useState<string | null>(null);
+  const [chatModuleActivated, setChatModuleActivated] = useState(false);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
+
+  // Do not download/mount the large chat application when another app is
+  // opened first. Once chat is active, keep it mounted while navigating to a
+  // related app (for example a shared forum post) so drafts and call state live.
+  useEffect(() => {
+    if (activeApp === "chat") setChatModuleActivated(true);
+    else if (activeApp === null) setChatModuleActivated(false);
+  }, [activeApp]);
 
   // Offline Stories State & Handlers
   const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => loadOfflineStories([]).value);
@@ -1736,7 +1762,7 @@ export default function App() {
   const handleItemClick = (item: HomeScreenItem) => {
     if (isEditingHomeScreen || suppressNextItemClickRef.current) return;
     if (item.type === "app") {
-      preloadSecondaryApp(item.id);
+      preloadApp(item.id);
       setActiveApp(item.id);
     }
   };
@@ -3506,7 +3532,7 @@ export default function App() {
 
                     <div className="flex items-center justify-center w-full h-full">
                       <button
-                        onPointerDown={() => preloadSecondaryApp("settings")}
+                        onPointerDown={() => preloadApp("settings")}
                         onClick={() => setActiveApp("settings")}
                         className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
                           isTransparentDockIcon("settings")
@@ -3568,8 +3594,10 @@ export default function App() {
               }}
             >
               <div className="w-full flex-1 min-h-0 relative">
-                <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
-                  <AppChat
+                {(activeApp === "chat" || chatModuleActivated) && (
+                  <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
+                    <LazyAppBoundary>
+                      <AppChat
                     characters={characters}
                     relationships={relationships}
                     settings={settings}
@@ -3613,18 +3641,22 @@ export default function App() {
                       setOpenForumShareId(shareId);
                       setActiveApp("forum");
                     }}
-                  />
-                </div>
+                      />
+                    </LazyAppBoundary>
+                  </div>
+                )}
 
                 {activeApp === "archives" && (
-                  <AppArchives
-                    characters={characters}
-                    worldBookEntries={worldBookEntries}
-                    onSaveCharacter={handleSaveCharacter}
-                    onDeleteCharacter={handleDeleteCharacter}
-                    onClose={() => setActiveApp(null)}
-                    onSaveWorldBookEntries={handleSaveWorldBookEntries}
-                  />
+                  <LazyAppBoundary>
+                    <AppArchives
+                      characters={characters}
+                      worldBookEntries={worldBookEntries}
+                      onSaveCharacter={handleSaveCharacter}
+                      onDeleteCharacter={handleDeleteCharacter}
+                      onClose={() => setActiveApp(null)}
+                      onSaveWorldBookEntries={handleSaveWorldBookEntries}
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "worldbook" && (
@@ -3641,7 +3673,8 @@ export default function App() {
                 )}
 
                 {activeApp === "music" && (
-                  <AppMusic
+                  <LazyAppBoundary>
+                    <AppMusic
                     tracks={tracks}
                     playlists={playlists}
                     onAddTrack={handleAddMusicTrack}
@@ -3659,7 +3692,8 @@ export default function App() {
                     volume={volume}
                     setVolume={setVolume}
                     onPlayTrack={(track) => toggleTrack(track.id, "music-library", true, track)}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "forum" && (
@@ -3686,13 +3720,16 @@ export default function App() {
                 )}
 
                 {activeApp === "notes" && (
-                  <AppNotes
-                    onClose={() => setActiveApp(null)}
-                  />
+                  <LazyAppBoundary>
+                    <AppNotes
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "diary" && (
-                  <AppDiary
+                  <LazyAppBoundary>
+                    <AppDiary
                     activeIdentity={activeIdentity}
                     characters={characters}
                     relationships={relationships}
@@ -3707,11 +3744,13 @@ export default function App() {
                       setActiveApp("chat");
                     }}
                     onClose={() => setActiveApp(null)}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "store" && (
-                  <AppStore
+                  <LazyAppBoundary>
+                    <AppStore
                     installedAppIds={installedAppIds}
                     onInstallApp={handleInstallApp}
                     onUninstallApp={handleUninstallApp}
@@ -3724,7 +3763,8 @@ export default function App() {
                       const iconFn = AppIcons[id as keyof typeof AppIcons];
                       return iconFn ? iconFn(className) : null;
                     }}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "settings" && (
@@ -3745,7 +3785,8 @@ export default function App() {
                 )}
 
                 {activeApp === "memory" && (
-                  <AppMemory
+                  <LazyAppBoundary>
+                    <AppMemory
                     characters={characters}
                     relationships={relationships}
                     memories={memories}
@@ -3759,7 +3800,8 @@ export default function App() {
                     onClose={() => setActiveApp(null)}
                     selectedModel={settings.selectedModel}
                     apiEndpoint={settings.apiEndpoint}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "offline" && (

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { resolveActiveChatStylePreset } from "../src/components/AppChat";
+import { resolveActiveChatStylePreset } from "../src/features/chat/styles/chatStylePreset";
 
 assert.equal(
   resolveActiveChatStylePreset("default", "liquid-glass"),
