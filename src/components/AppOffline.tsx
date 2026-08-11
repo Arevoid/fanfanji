@@ -6,10 +6,10 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, UserSettings, WorldBookEntry } from "../types";
-import { apiChat, apiExtractMemories } from "../utils/apiHelper";
+import { apiChat, apiExtractMemoriesWithModelFallback } from "../utils/apiHelper";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { createPendingOfflineHandoff, filterOfflineExtractedFacts, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
+import { createOfflineStoryHandoffMemory, createPendingOfflineHandoff, filterOfflineExtractedFacts, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
 import { getLatestWorldBookEntries } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
@@ -816,17 +816,30 @@ export default function AppOffline({
           formatContent: (items, formatOptions) => `${isDelicate
             ? `${formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)}\n[${syncMarker}]\n【事实索引（系统）】\n${items.map((item) => `- ${item}`).join("\n")}`
             : `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]`}`,
-        }, apiExtractMemories);
-        if (result.apiError) throw new Error(result.apiError);
-        if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
-          throw new Error("Offline story knowledge persistence failed");
+        }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
+        if (result.apiError) {
+          console.warn("Offline memory extraction APIs unavailable; using a deterministic safe handoff:", result.apiError);
+          extractedMemories = [createOfflineStoryHandoffMemory({
+            story,
+            sourceMessages,
+            characterId: story.characterId,
+            relationId: story.relationId,
+            characterName: character.name,
+            id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            timestamp: Date.now(),
+            marker: "summary",
+          })];
+        } else {
+          if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
+            throw new Error("Offline story knowledge persistence failed");
+          }
+          acceptedOfflineClaims = result.acceptedClaims;
+          confirmedFacts = result.acceptedClaims
+            .filter((claim) => claim.status === "active"
+              && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
+            .map((claim) => claim.statement);
+          extractedMemories = result.extractedMemories;
         }
-        acceptedOfflineClaims = result.acceptedClaims;
-        confirmedFacts = result.acceptedClaims
-          .filter((claim) => claim.status === "active"
-            && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
-          .map((claim) => claim.statement);
-        extractedMemories = result.extractedMemories;
       } catch (error) {
         console.warn("Offline memory extraction unavailable; keeping the story retryable:", error);
       }

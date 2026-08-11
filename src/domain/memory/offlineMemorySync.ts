@@ -190,8 +190,12 @@ export function getOfflineHandoffSourceMessagesForReturn(story: OfflineStory): M
  * recipient are deliberately named instead of inheriting the source message's
  * first- or second-person pronouns.
  */
-export function collectOfflineHandoffContent(story: OfflineStory, characterName = "当前角色"): string {
-  const source = getOfflineMemorySourceMessages(story);
+export function collectOfflineHandoffContent(
+  story: OfflineStory,
+  characterName = "当前角色",
+  sourceMessages?: readonly Message[],
+): string {
+  const source = sourceMessages ? [...sourceMessages] : getOfflineMemorySourceMessages(story);
   const promptText = (message: Message) => serializeMessageContentForPrompt(message, { mode: "history", characterName });
   const sourceText = source.map(promptText).join("\n");
   const userText = source.filter((message) => message.sender === "user").map(promptText).join("\n");
@@ -310,12 +314,14 @@ export function createOfflineStoryHandoffMemory(input: {
   characterName?: string;
   id: string;
   timestamp: number;
+  /** A confirmed manual sync owns the story's replaceable canonical summary. */
+  marker?: "incremental" | "summary";
 }): MemoryItem {
   return {
     id: input.id,
     characterId: input.characterId,
     ...(input.relationId ? { relationId: input.relationId } : {}),
-    content: `【线下剧本《${input.story.title}》线上交接】\n[${getOfflineStorySyncMarker(input.story)}]\n${collectOfflineHandoffContent(input.story, input.characterName)}`,
+    content: `【线下剧本《${input.story.title}》线上交接】\n[${input.marker === "summary" ? getOfflineStorySummaryMarker(input.story) : getOfflineStorySyncMarker(input.story)}]\n${collectOfflineHandoffContent(input.story, input.characterName, input.sourceMessages)}`,
     timestamp: input.timestamp,
     // A handoff is intentionally short-lived context, not a permanent trait.
     importance: 4,

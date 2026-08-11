@@ -56,6 +56,8 @@ async function run() {
   const failed = await MemoryService.extractMemories(context, async () => ({ error: "offline" }));
   assert.equal(failed.extractedMemories.length, 0);
   assert.equal(failed.apiError, "offline");
+  const stableShapeFailure = await MemoryService.extractMemories(context, async () => ({ items: [], error: "model unavailable" }));
+  assert.equal(stableShapeFailure.apiError, "model unavailable", "an adapter error must not be mistaken for a valid empty extraction");
   assert.equal(MemoryService.mergeMemories(memories, []).length, memories.length);
   const retried = await MemoryService.extractMemories({ ...context, existingMemories: merged }, extractApi);
   assert.equal(retried.extractedMemories.length, 0);

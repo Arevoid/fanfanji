@@ -689,3 +689,23 @@ ${params.text}
         : fallbackErr.message || "直连翻译失败");
   }
 }
+
+type MemoryExtractionParams = Parameters<typeof apiExtractMemories>[0];
+type MemoryExtractionResponse = Awaited<ReturnType<typeof apiExtractMemories>>;
+
+/**
+ * A dedicated extraction model may not exist on the user's custom endpoint
+ * even though ordinary chat works. Retry only transport/model failures with
+ * the already verified chat model; an honestly empty extraction is preserved.
+ */
+export async function apiExtractMemoriesWithModelFallback(
+  params: MemoryExtractionParams,
+  fallbackModel?: string,
+  request: (nextParams: MemoryExtractionParams) => Promise<MemoryExtractionResponse> = apiExtractMemories,
+): Promise<MemoryExtractionResponse> {
+  const primary = await request(params);
+  const normalizedFallback = fallbackModel?.trim();
+  if (!primary.error || !normalizedFallback || normalizedFallback === params.model.trim()) return primary;
+  console.warn(`Memory extraction model '${params.model}' failed; retrying with the active chat model '${normalizedFallback}'.`);
+  return request({ ...params, model: normalizedFallback });
+}

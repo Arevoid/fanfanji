@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { apiChat, apiExtractMemories, apiTranslate } from "./utils/apiHelper";
+import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
@@ -1147,7 +1147,7 @@ export default function App() {
         formatContent: (items, formatOptions) => isDelicate
           ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
           : formatExtractedMemorySummary(headerLabel, items),
-      }, apiExtractMemories);
+      }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
       if (result.apiError) {
         setImmediateSummaryTask(prev => ({
           ...prev,

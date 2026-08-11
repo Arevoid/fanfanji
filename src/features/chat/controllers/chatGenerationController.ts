@@ -30,7 +30,7 @@ export async function requestDirectChatTurn(input: { prompt: PromptInput; settin
     systemInstruction: [request.systemInstruction, CHAT_DEGENERATE_RETRY_INSTRUCTION].filter(Boolean).join("\n\n"),
   });
   if (!retry.text.trim() || isDegenerateDirectReply(input.prompt.message, retry.text, request.history)) {
-    throw new Error("模型连续返回重复或无意义的单字回复，本次回复已停止写入，请重试。");
+    throw new Error("模型连续返回重复或无意义的回复，本次回复已停止写入，请重试。");
   }
   return retry;
 }

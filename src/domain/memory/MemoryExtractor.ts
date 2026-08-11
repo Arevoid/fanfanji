@@ -44,6 +44,18 @@ export async function extractMemories(
     ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
 
+  // API adapters return an empty array alongside their error so callers can
+  // keep a stable response shape. Preserve the error before interpreting that
+  // empty array as an honest "no durable facts" extraction.
+  if (data.error) {
+    return {
+      extractedMemories: [],
+      acceptedClaims: [],
+      rejectedCandidateCount: 0,
+      apiError: data.error,
+    };
+  }
+
   const rawItems = Array.isArray(data.candidates) ? data.candidates : data.items;
   if (!Array.isArray(rawItems)) {
     return {

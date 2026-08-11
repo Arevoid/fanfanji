@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
-import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
+import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../utils/apiHelper";
 import { readJson, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
@@ -4170,7 +4170,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         formatContent: (items, formatOptions) => isDelicate
           ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
           : formatExtractedMemorySummary(headerLabel, items),
-      }, apiExtractMemories);
+      }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
       if (result.apiError) {
         console.error("Extract memory API error:", result.apiError);
         return -1;

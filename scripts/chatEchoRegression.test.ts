@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { requestDirectChatTurn } from "../src/features/chat/controllers/chatGenerationController";
-import { getVisibleEchoCheckText, isDegenerateDirectReply, isLowInformationUserEcho, removeDegenerateReplyPattern } from "../src/features/chat/services/chatEchoGuard";
+import { getVisibleEchoCheckText, isDegenerateDirectReply, isLowInformationUserEcho, isRepeatedCharacterTurn, removeDegenerateReplyPattern } from "../src/features/chat/services/chatEchoGuard";
 import { formatCurrentVoiceMessagePrompt, formatVoiceMessageHistory } from "../src/features/chat/prompts/voiceMessagePrompt";
 import { CURRENT_SCENE_CONTINUITY_PROMPT } from "../src/features/chat/prompts/directChatTurnPrompt";
 
@@ -53,6 +53,34 @@ const prompt = {
   history: repeatedSingleCharacterHistory,
   systemInstruction: "保持角色口吻。",
 };
+
+const repeatedTurnHistory = [
+  { role: "user", text: "嗯对，我又跑了" },
+  { role: "model", text: "你又跑了？" },
+  { role: "model", text: "这次怎么跑的？" },
+];
+assert.equal(isRepeatedCharacterTurn("你又跑了？\n这次怎么跑的？", repeatedTurnHistory), true);
+assert.equal(isDegenerateDirectReply("？", "你又跑了？\n这次怎么跑的？", repeatedTurnHistory), true);
+assert.equal(isRepeatedCharacterTurn("嗯", [{ role: "model", text: "嗯" }]), false, "short reciprocal replies remain natural");
+assert.deepEqual(removeDegenerateReplyPattern(repeatedTurnHistory, "你又跑了？\n这次怎么跑的？"), [
+  { role: "user", text: "嗯对，我又跑了" },
+]);
+
+let repeatedTurnCalls = 0;
+const repeatedTurnCorrected = await requestDirectChatTurn({
+  prompt: { ...prompt, message: "？", history: repeatedTurnHistory },
+  settings,
+  requestAi: (async (request: any) => {
+    repeatedTurnCalls += 1;
+    if (repeatedTurnCalls === 1) return { text: "你又跑了？\n这次怎么跑的？" };
+    assert.equal(request.history.some((entry: any) => entry.role === "model"), false);
+    assert.match(request.systemInstruction, /previous character bubbles verbatim/i);
+    return { text: "我是没明白你刚才说的‘跑了’具体指什么" };
+  }) as any,
+});
+assert.equal(repeatedTurnCalls, 2);
+assert.equal(repeatedTurnCorrected.text, "我是没明白你刚才说的‘跑了’具体指什么");
+
 let calls = 0;
 const corrected = await requestDirectChatTurn({
   prompt,

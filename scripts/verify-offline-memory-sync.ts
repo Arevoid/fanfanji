@@ -59,6 +59,12 @@ const tests: Array<[string, () => void | Promise<void>]> = [
     const recalled = MemoryService.retrieveRelevantMemories({ characterId: "a", queryText: "刚才我们约好了什么", existingMemories: [handoff], limit: 5, scenario: "chat" });
     assert.equal(recalled[0]?.id, "handoff");
   }],
+  ["U confirmed fallback uses the replaceable canonical summary marker", () => {
+    const currentStory = story([message("new", "明天一起去看电影")]);
+    const handoff = createOfflineStoryHandoffMemory({ story: currentStory, sourceMessages: currentStory.messages, characterId: "a", id: "handoff-summary", timestamp: 2, marker: "summary" });
+    assert.ok(handoff.content.includes(`offline-story:${currentStory.id}:summary`));
+    assert.equal(hasOfflineStorySummary(currentStory, [handoff]), true);
+  }],
 ];
 
 for (const [name, run] of tests) {
