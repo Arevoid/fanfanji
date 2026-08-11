@@ -7,7 +7,7 @@ type LanguageDefinition = {
 };
 
 const LANGUAGES: readonly LanguageDefinition[] = [
-  { label: "Japanese", aliases: [/日语|日文|日本語|Japanese/i], nationalities: [/日本人|日本国籍|国籍\s*[:：]?\s*日本|来自日本|Japanese\s+national/i] },
+  { label: "Japanese", aliases: [/日语|日語|日文|日本語|Japanese/i], nationalities: [/日本人|日本国籍|日本國籍|日籍|(?:国籍|國籍)\s*[:：]?\s*日本|(?:来自|來自)日本|Nationality\s*[:：]?\s*(?:Japan|Japanese)|Japanese\s+national/i] },
   { label: "Korean", aliases: [/韩语|韓語|朝鲜语|韓国語|Korean/i], nationalities: [/韩国人|韓國人|韩国国籍|国籍\s*[:：]?\s*韩国|来自韩国|Korean\s+national/i] },
   { label: "English", aliases: [/英语|英文|English/i], nationalities: [/英国人|美国人|加拿大人|澳大利亚人|新西兰人|British|American|Canadian|Australian|New Zealand(?:er)?/i] },
   { label: "French", aliases: [/法语|法文|French/i], nationalities: [/法国人|法国国籍|国籍\s*[:：]?\s*法国|来自法国|French\s+national/i] },
@@ -23,8 +23,8 @@ const LANGUAGES: readonly LanguageDefinition[] = [
   { label: "Simplified Chinese", aliases: [/简体中文|簡體中文|普通话|普通話|汉语|漢語|Mandarin|Simplified Chinese/i], nationalities: [/中国人|中国国籍|国籍\s*[:：]?\s*中国|来自中国|Chinese\s+national/i] },
 ];
 
-const EXPLICIT_LANGUAGE_MARKER = /说话语言|聊天语言|回复语言|输出语言|使用语言|主要语言|母语|语言\s*[:：]|speaks?|reply language|output language|native language|language\s*[:：]/i;
-const GENERIC_LANGUAGE_VALUE = /(?:说话语言|聊天语言|回复语言|输出语言|使用语言|主要语言|常用语言|母语|language)\s*(?:[:：=]|为|是)\s*([^\n\r,，;；。]{1,40})/i;
+const EXPLICIT_LANGUAGE_MARKER = /说话语言|說話語言|聊天语言|聊天語言|回复语言|回覆語言|输出语言|輸出語言|使用语言|使用語言|主要语言|主要語言|常用语言|常用語言|母语|母語|语言\s*[:：]|語言\s*[:：]|台词|臺詞|对白|對白|对话|對話|发言|發言|说出口|說出口|必须|必須|只能|speaks?|reply language|output language|native language|language\s*[:：]/i;
+const GENERIC_LANGUAGE_VALUE = /(?:说话语言|說話語言|聊天语言|聊天語言|回复语言|回覆語言|输出语言|輸出語言|使用语言|使用語言|主要语言|主要語言|常用语言|常用語言|母语|母語|language)\s*(?:[:：=]|为|為|是)\s*([^\n\r,，;；。]{1,40})/i;
 
 const normalizeConfiguredLanguage = (value: string): string => {
   const trimmed = value.trim();
@@ -35,10 +35,12 @@ const normalizeConfiguredLanguage = (value: string): string => {
 const findExplicitLanguage = (text: string): string | undefined => {
   for (const language of LANGUAGES) {
     for (const alias of language.aliases) {
-      const match = alias.exec(text);
-      if (!match) continue;
-      const window = text.slice(Math.max(0, match.index - 36), Math.min(text.length, match.index + match[0].length + 36));
-      if (EXPLICIT_LANGUAGE_MARKER.test(window)) return language.label;
+      const matcher = new RegExp(alias.source, alias.flags.includes("g") ? alias.flags : `${alias.flags}g`);
+      for (const match of text.matchAll(matcher)) {
+        const matchIndex = match.index ?? 0;
+        const window = text.slice(Math.max(0, matchIndex - 48), Math.min(text.length, matchIndex + match[0].length + 48));
+        if (EXPLICIT_LANGUAGE_MARKER.test(window)) return language.label;
+      }
     }
   }
   const generic = GENERIC_LANGUAGE_VALUE.exec(text)?.[1]?.trim();
@@ -48,14 +50,22 @@ const findExplicitLanguage = (text: string): string | undefined => {
 const findNationalityLanguage = (text: string): string | undefined =>
   LANGUAGES.find((language) => language.nationalities.some((pattern) => pattern.test(text)))?.label;
 
+const findScriptLanguage = (text: string): string | undefined => {
+  if (/[ぁ-ゖァ-ヺ]/u.test(text)) return "Japanese";
+  if (/[가-힣]/u.test(text)) return "Korean";
+  if (/[ก-๛]/u.test(text)) return "Thai";
+  if (/[\u0600-\u06ff]/u.test(text)) return "Arabic";
+  return undefined;
+};
+
 export function resolveCharacterReplyLanguage(
-  character: Pick<Character, "replyLanguage" | "personality" | "backstory">,
+  character: Pick<Character, "replyLanguage" | "personality" | "backstory"> & Partial<Pick<Character, "name" | "greeting">>,
   worldKnowledge: readonly string[] = [],
 ): string | undefined {
   const configured = normalizeConfiguredLanguage(character.replyLanguage || "");
   if (configured) return configured;
-  const profileText = [character.personality, character.backstory, ...worldKnowledge].filter(Boolean).join("\n");
-  return findExplicitLanguage(profileText) || findNationalityLanguage(profileText);
+  const profileText = [character.name, character.personality, character.backstory, character.greeting, ...worldKnowledge].filter(Boolean).join("\n");
+  return findExplicitLanguage(profileText) || findNationalityLanguage(profileText) || findScriptLanguage(profileText);
 }
 
 export function formatFinalReplyLanguageInstruction(language?: string): string {
