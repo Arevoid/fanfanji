@@ -15,13 +15,15 @@ assert.equal(normalizeMosslandApiEndpoint("https://mossland.studio/"), "https://
 assert.equal(normalizeMosslandApiEndpoint("https://proxy.example/custom/speech"), "https://proxy.example/custom/speech");
 assert.equal(canPlayTtsMessage({ isOfflineModeActive: false, isVoiceMessage: false, isQueuedCallSpeech: true }), true, "plain call subtitles must reach TTS");
 assert.equal(canPlayTtsMessage({ isOfflineModeActive: false, isVoiceMessage: false, isQueuedCallSpeech: false }), false, "plain online text stays blocked");
-assert.equal(shouldQueueCallSpeech("character", "电话里的回复"), true, "character call subtitles always enter TTS regardless of the legacy normal-chat switch");
+assert.equal(shouldQueueCallSpeech("character", "电话里的回复"), true, "character call subtitles are eligible for TTS when the global switch is on");
 assert.equal(shouldQueueCallSpeech("user", "用户说话"), false, "user call subtitles are never synthesized as character speech");
 assert.equal(shouldQueueCallSpeech("character", "   "), false, "empty call subtitles are ignored");
 const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 assert.match(appChatSource, /callTtsAudioRef\.current \|\| new Audio\(\)/, "call playback must reuse the gesture-unlocked audio element");
 assert.match(appChatSource, /if \(!incoming\) unlockCallTtsPlayback\(\)/, "outgoing call taps must unlock mobile audio");
-assert.doesNotMatch(appChatSource, /subtitleContent && settings\.enableMiniMaxTts/, "legacy normal-chat TTS switch must not mute configured phone calls");
+assert.match(appChatSource, /settings\.enableMiniMaxTts && shouldQueueCallSpeech/, "the global TTS switch must govern call synthesis");
+assert.match(appChatSource, /if \(!settings\.enableMiniMaxTts\) return false/, "the global TTS switch must disable automatic normal-chat voice conversion");
+assert.match(appChatSource, /if \(callSpeechCompletion\) await callSpeechCompletion/, "the next call bubble must wait until the current speech finishes");
 const canonicalCharacter: any = { id: "profile", name: "角色", mosslandVoiceId: "canonical-voice" };
 const contactCharacter: any = { id: "contact", name: "联系人", isContactInstance: true, profileSourceId: "profile" };
 assert.equal(

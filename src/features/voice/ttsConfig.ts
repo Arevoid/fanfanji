@@ -29,7 +29,7 @@ export function canPlayTtsMessage(input: {
   return input.isOfflineModeActive || input.isVoiceMessage || input.isQueuedCallSpeech;
 }
 
-/** Calls are spoken sessions; the legacy normal-chat auto-TTS switch must not drop their replies. */
+/** Only non-empty character subtitles are eligible for call TTS; the global switch is applied by the caller. */
 export function shouldQueueCallSpeech(sender: "user" | "character", subtitle: string): boolean {
   return sender === "character" && Boolean(subtitle.trim());
 }

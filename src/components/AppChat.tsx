@@ -880,8 +880,9 @@ export default function AppChat({
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [audioLoadingMessageId, setAudioLoadingMessageId] = useState<string | null>(null);
   const [activeTtsAudio, setActiveTtsAudio] = useState<HTMLAudioElement | null>(null);
-  const callSpeechQueueRef = useRef<Message[]>([]);
+  const callSpeechQueueRef = useRef<Array<{ message: Message; resolve: () => void }>>([]);
   const isCallSpeechPlayingRef = useRef(false);
+  const activeCallSpeechResolveRef = useRef<(() => void) | null>(null);
   const callTtsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Mobile browsers only allow later asynchronous call audio when an element
@@ -943,6 +944,12 @@ export default function AppChat({
     const isVoice = Boolean(msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage));
     if (!canPlayTtsMessage({ isOfflineModeActive, isVoiceMessage: isVoice, isQueuedCallSpeech })) {
       console.warn("Speech synthesis blocked: Message is not a voice message in chat layout");
+      return;
+    }
+
+    if (msg.sender === "character" && !settings.enableMiniMaxTts) {
+      console.info("Speech synthesis skipped: global TTS switch is off");
+      finishQueuedCallSpeechOnce();
       return;
     }
 
@@ -1068,22 +1075,33 @@ export default function AppChat({
 
   const playNextQueuedCallSpeech = () => {
     if (isCallSpeechPlayingRef.current) return;
-    const nextMessage = callSpeechQueueRef.current.shift();
-    if (!nextMessage) return;
+    const nextJob = callSpeechQueueRef.current.shift();
+    if (!nextJob) return;
     isCallSpeechPlayingRef.current = true;
-    triggerMessageSpeech(nextMessage, true);
+    activeCallSpeechResolveRef.current = nextJob.resolve;
+    triggerMessageSpeech(nextJob.message, true);
   };
 
   const finishQueuedCallSpeech = () => {
+    const resolve = activeCallSpeechResolveRef.current;
+    activeCallSpeechResolveRef.current = null;
     isCallSpeechPlayingRef.current = false;
     setPlayingMessageId(null);
     setActiveTtsAudio(null);
+    resolve?.();
     window.setTimeout(playNextQueuedCallSpeech, 0);
   };
 
-  const enqueueCallSpeech = (msg: Message) => {
-    callSpeechQueueRef.current.push(msg);
+  const enqueueCallSpeech = (msg: Message): Promise<void> => new Promise((resolve) => {
+    callSpeechQueueRef.current.push({ message: msg, resolve });
     playNextQueuedCallSpeech();
+  });
+
+  const clearCallSpeechQueue = () => {
+    activeCallSpeechResolveRef.current?.();
+    activeCallSpeechResolveRef.current = null;
+    callSpeechQueueRef.current.splice(0).forEach((job) => job.resolve());
+    isCallSpeechPlayingRef.current = false;
   };
 
   // Visibility and Cleanup Effects
@@ -1168,10 +1186,10 @@ export default function AppChat({
         timestamp: msg.timestamp,
       }]);
 
-      if (shouldQueueCallSpeech(msg.sender, subtitleContent)) {
+      if (settings.enableMiniMaxTts && shouldQueueCallSpeech(msg.sender, subtitleContent)) {
         // TTS remains automatic during calls, but the call UI and saved transcript
         // always contain plain subtitles rather than voice-message markup.
-        enqueueCallSpeech({ ...msg, content: subtitleContent });
+        return enqueueCallSpeech({ ...msg, content: subtitleContent });
       }
       return;
     }
@@ -2292,8 +2310,7 @@ export default function AppChat({
   useEffect(() => {
     activeTtsAudio?.pause();
     if (voiceTimer) clearInterval(voiceTimer);
-    callSpeechQueueRef.current = [];
-    isCallSpeechPlayingRef.current = false;
+    clearCallSpeechQueue();
     setActiveTtsAudio(null);
     setPlayingMessageId(null);
     setAudioLoadingMessageId(null);
@@ -2588,8 +2605,7 @@ export default function AppChat({
 
     if (activeTtsAudio) activeTtsAudio.pause();
     resetCallTtsPlayback();
-    callSpeechQueueRef.current = [];
-    isCallSpeechPlayingRef.current = false;
+    clearCallSpeechQueue();
     setCallingStatus("ended");
     setCallingInputText("");
     setActiveAttachModal(null);
@@ -2620,8 +2636,7 @@ export default function AppChat({
   const finishVoiceCall = (requestedStatus: VoiceCallStatus) => {
     if (!activeChatCharId || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
       resetCallTtsPlayback();
-      callSpeechQueueRef.current = [];
-      isCallSpeechPlayingRef.current = false;
+      clearCallSpeechQueue();
       setActiveAttachModal(null);
       setVoiceCallRelationId(null);
       return;
@@ -2656,8 +2671,7 @@ export default function AppChat({
     }
     if (activeTtsAudio) activeTtsAudio.pause();
     resetCallTtsPlayback();
-    callSpeechQueueRef.current = [];
-    isCallSpeechPlayingRef.current = false;
+    clearCallSpeechQueue();
     setCallingStatus("ended");
     setCallingInputText("");
     setActiveAttachModal(null);
@@ -3016,6 +3030,7 @@ ${memberWbText}`;
     bubbleIndex: number,
     bubbleText: string
   ): boolean => {
+    if (!settings.enableMiniMaxTts) return false;
     return shouldAutomaticallyConvertTextToVoice({
       character,
       lastUserMessage: lastUserMsg,
@@ -3750,9 +3765,13 @@ ${stickerListStr}
             await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
             
             charMsg.timestamp = Date.now();
-            onSendMessage(charMsg);
+            const callSpeechCompletion = onSendMessage(charMsg);
             createdMessages.push(charMsg);
             setIsTyping(false);
+
+            // In a voice call, keep subtitles and speech in lockstep: show one
+            // bubble, play it completely, then allow the next bubble to appear.
+            if (callSpeechCompletion) await callSpeechCompletion;
             
             if (idx < replyCandidates.messages.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
