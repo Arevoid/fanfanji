@@ -275,7 +275,9 @@ export async function apiChat(params: {
 
   const responseText = await res.text();
   const contentType = res.headers.get("content-type") || "";
-  const looksLikeStaticHostFallback = /text\/html/i.test(contentType) && (res.status === 404 || res.status === 405 || res.ok);
+  const routeMissingStatus = res.status === 404 || res.status === 405;
+  const looksLikeStaticHostFallback = (/text\/html/i.test(contentType) && (routeMissingStatus || res.ok))
+    || (routeMissingStatus && !responseText.trim());
   if (looksLikeStaticHostFallback) {
     console.warn("apiChat backend route is unavailable on this host, trying client direct fallback");
     return directClientChat(params);

@@ -30,7 +30,7 @@ const corrected = await requestDirectChatTurn({
 });
 assert.equal(echoAttempts, 2);
 assert.equal(corrected.text, "没怪你，过来抱一下");
-assert.match(retryInstruction, /previous draft merely copied/);
+assert.match(retryInstruction, /previous draft was rejected because it copied the user/);
 
 const member = { id: "a", name: "甲", avatar: "", personality: "", backstory: "" } as Character;
 const groupAi = (async () => ({ text: "[SENDER_NAME: 甲]\n你好" })) as typeof apiChat;
