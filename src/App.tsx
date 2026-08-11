@@ -3,6 +3,8 @@ import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
+import { remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
+import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
@@ -390,10 +392,7 @@ export default function App() {
 
   const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
 
-  const [tracks, setTracks] = useState<MusicTrack[]>(() => {
-    const raw = localStorage.getItem("phone_music_tracks");
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [tracks, setTracks] = useState<MusicTrack[]>(() => readArray<MusicTrack>("phone_music_tracks", []).value);
   const tracksRef = useRef<MusicTrack[]>(tracks);
   const [dualMusicConfigs, setDualMusicConfigs] = useState<DualMusicWidgetConfig[]>(() => loadDualMusicWidgetConfigs());
   const [identityMusicStates, setIdentityMusicStates] = useState<IdentityMusicState[]>(() => loadIdentityMusicStates());
@@ -411,10 +410,7 @@ export default function App() {
     });
   }, []);
 
-  const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => {
-    const raw = localStorage.getItem("phone_music_playlists");
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => readArray<MusicPlaylist>("phone_music_playlists", []).value);
 
   const [calendarEvents] = useState<CalendarEvent[]>(() => loadCalendarEvents([]).value);
 
@@ -706,7 +702,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem("phone_installed_apps", JSON.stringify(installedAppIds));
+    writeJson("phone_installed_apps", installedAppIds);
   }, [installedAppIds]);
 
   // Global Music Player State
@@ -912,7 +908,7 @@ export default function App() {
         ? { ...item, widgetType: "calendar-album" }
         : item);
     const normalized = normalizeHomeScreenLayout(items);
-    localStorage.setItem("phone_homescreen_items", JSON.stringify(normalized));
+    writeJson("phone_homescreen_items", normalized);
     return normalized;
   });
 
@@ -946,10 +942,10 @@ export default function App() {
     Object.entries(result.relationIdRemaps).forEach(([fromRelationId, toRelationId]) => {
       const sourceStoryId = localStorage.getItem(getOfflineStoryStorageKey(fromRelationId));
       if (sourceStoryId && !localStorage.getItem(getOfflineStoryStorageKey(toRelationId))) {
-        localStorage.setItem(getOfflineStoryStorageKey(toRelationId), sourceStoryId);
+        writeString(getOfflineStoryStorageKey(toRelationId), sourceStoryId);
       }
-      localStorage.removeItem(getOfflineStoryStorageKey(fromRelationId));
-      localStorage.removeItem(getOfflineModeStorageKey(fromRelationId));
+      removeStoredValue(getOfflineStoryStorageKey(fromRelationId));
+      removeStoredValue(getOfflineModeStorageKey(fromRelationId));
     });
   }, [characters, relationships, messages, memories, offlineStories]);
 
@@ -1076,7 +1072,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem("phone_immediate_summary_task", JSON.stringify(immediateSummaryTask));
+    writeJson("phone_immediate_summary_task", immediateSummaryTask);
   }, [immediateSummaryTask]);
 
   const handleStartImmediateSummary = async (characterId: string, rounds: number, relationId?: string, conversationId?: string) => {
@@ -1271,7 +1267,7 @@ export default function App() {
   const visibleHomePageCount = getVisibleHomePageCount(homeScreenItems, isEditingHomeScreen);
 
   useEffect(() => {
-    localStorage.setItem("phone_homescreen_items", JSON.stringify(homeScreenItems));
+    writeJson("phone_homescreen_items", homeScreenItems);
   }, [homeScreenItems]);
 
   useEffect(() => {
@@ -1315,7 +1311,7 @@ export default function App() {
       if (current.some((item) => item.id === id)) {
         setInstalledAppIds((previous) => {
           const next = previous.includes(id) ? previous : [...previous, id];
-          localStorage.setItem("phone_installed_apps", JSON.stringify(next));
+          writeJson("phone_installed_apps", next);
           return next;
         });
         return current;
@@ -1327,12 +1323,12 @@ export default function App() {
       }
       setInstalledAppIds((previous) => {
         const next = previous.includes(id) ? previous : [...previous, id];
-        localStorage.setItem("phone_installed_apps", JSON.stringify(next));
+        writeJson("phone_installed_apps", next);
         return next;
       });
       setTimeout(() => setCurrentPage(position.page), 50);
       const next = [...current, { id, type: "app" as const, size: "1x1" as const, page: position.page, position }];
-      localStorage.setItem("phone_homescreen_items", JSON.stringify(next));
+      writeJson("phone_homescreen_items", next);
       return next;
     });
   };
@@ -1744,7 +1740,7 @@ export default function App() {
   const handleRemoveWidget = (id: string) => {
     setHomeScreenItems(current => current.filter(item => item.id !== id));
     setDualMusicConfigs((configs) => configs.filter((config) => config.widgetId !== id));
-    localStorage.removeItem(`time_widget_font_color_${id}`);
+    removeStoredValue(`time_widget_font_color_${id}`);
   };
 
   const getWidgetComponent = (type?: string) => {
@@ -1815,8 +1811,8 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("phone_music_tracks", JSON.stringify(tracks.map((track) =>
-        track.isLocal ? { ...track, url: "" } : track)));
+      writeJson("phone_music_tracks", tracks.map((track) =>
+        track.isLocal ? { ...track, url: "" } : track));
     } catch (e) {
       console.error("Failed to save tracks to localStorage:", e);
     }
@@ -1828,7 +1824,7 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("phone_music_playlists", JSON.stringify(playlists));
+      writeJson("phone_music_playlists", playlists);
     } catch (e) {
       console.error("Failed to save playlists to localStorage:", e);
     }
@@ -1956,7 +1952,7 @@ export default function App() {
         const parsed = JSON.parse(localStorage.getItem(RED_PACKET_STATUSES_KEY) || "{}") as RedPacketStatusMap;
         const removedMessages = messages.filter((message) => relationIds.includes(message.relationId || "") || characterIds.has(message.characterId));
         const withoutRelations = relationIds.reduce((statuses, relationId) => removePaymentStatusesByRelation(statuses, relationId), parsed);
-        localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(removePaymentStatusesForMessages(withoutRelations, removedMessages)));
+        writeJson(RED_PACKET_STATUSES_KEY, removePaymentStatusesForMessages(withoutRelations, removedMessages));
       } catch (error) {
         console.warn("Unable to clear payment state for deleted character:", error);
       }
@@ -2009,8 +2005,8 @@ export default function App() {
       saveDiaryGenerationTasks(diaryCleanup.tasks);
       saveDiaryTranslations(diaryCleanup.translations);
       relationIds.forEach((relationId) => {
-        localStorage.removeItem(getOfflineModeStorageKey(relationId));
-        localStorage.removeItem(getOfflineStoryStorageKey(relationId));
+        removeStoredValue(getOfflineModeStorageKey(relationId));
+        removeStoredValue(getOfflineStoryStorageKey(relationId));
       });
       // Relation-aware UI state is intentionally stored as maps keyed by the
       // relation ID. Remove only the deleted character's relation entries.
@@ -2022,7 +2018,7 @@ export default function App() {
           const next = Array.isArray(parsed)
             ? parsed.filter((value) => !relationIds.includes(value))
             : Object.fromEntries(Object.entries(parsed).filter(([relationId]) => !relationIds.includes(relationId)));
-          localStorage.setItem(key, JSON.stringify(next));
+          writeJson(key, next);
         } catch (error) {
           console.warn(`Unable to clear relationship state from ${key}:`, error);
         }

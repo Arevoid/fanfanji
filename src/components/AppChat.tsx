@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
+import { readJson, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
+import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { compressImage } from "../utils/pngParser";
@@ -699,18 +701,12 @@ export default function AppChat({
   }, []);
 
   // Initiated chats state to satisfy: unless user initiates chat or proactive message received, don't show thread
-  const [initiatedChatIds, setInitiatedChatIds] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem("phone_initiated_chat_ids");
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [initiatedChatIds, setInitiatedChatIds] = useState<string[]>(() =>
+    readArray<string>("phone_initiated_chat_ids", []).value);
 
   useEffect(() => {
     try {
-      localStorage.setItem("phone_initiated_chat_ids", JSON.stringify(initiatedChatIds));
+      writeJson("phone_initiated_chat_ids", initiatedChatIds);
     } catch (e) {
       console.error(e);
     }
@@ -725,18 +721,12 @@ export default function AppChat({
   }, [activeChatCharId, activeChatRelationId, initiatedChatIds]);
 
   // Unread messages tracking
-  const [lastReadTimestamps, setLastReadTimestamps] = useState<Record<string, number>>(() => {
-    try {
-      const raw = localStorage.getItem("phone_last_read_timestamps");
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [lastReadTimestamps, setLastReadTimestamps] = useState<Record<string, number>>(() =>
+    readJson<Record<string, number>>("phone_last_read_timestamps", {}).value);
 
   useEffect(() => {
     try {
-      localStorage.setItem("phone_last_read_timestamps", JSON.stringify(lastReadTimestamps));
+      writeJson("phone_last_read_timestamps", lastReadTimestamps);
     } catch (e) {
       console.error(e);
     }
@@ -1174,7 +1164,7 @@ export default function AppChat({
     saveDiaryTranslations(diaryCleanup.translations);
     setRedPacketStatuses((previous) => {
       const next = removePaymentStatusesByRelation(previous, relationId);
-      localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(next));
+      writeJson(RED_PACKET_STATUSES_KEY, next);
       return next;
     });
     onDeleteRelationshipMusic?.(relationId);
@@ -1215,8 +1205,8 @@ export default function AppChat({
         memberIds: group.memberIds?.filter((memberId) => memberId !== friendId),
       }));
 
-    localStorage.removeItem(getOfflineModeStorageKey(relationId));
-    localStorage.removeItem(getOfflineStoryStorageKey(relationId));
+    removeStoredValue(getOfflineModeStorageKey(relationId));
+    removeStoredValue(getOfflineStoryStorageKey(relationId));
     proactiveMessageInFlightRef.current.delete(relationId);
     setInitiatedChatIds((previous) => previous.filter((id) => id !== relationId));
     setLastReadTimestamps((previous) => {
@@ -1385,7 +1375,7 @@ export default function AppChat({
       const current = previous[activeIdentityId] || 0;
       const nextValue = typeof update === "function" ? update(current) : update;
       const next = { ...previous, [activeIdentityId]: nextValue };
-      localStorage.setItem(IDENTITY_WALLET_BALANCES_KEY, JSON.stringify(next));
+      writeJson(IDENTITY_WALLET_BALANCES_KEY, next);
       return next;
     });
   };
@@ -1517,8 +1507,8 @@ export default function AppChat({
     }
     
     if (activeRelationship) {
-      localStorage.setItem(getOfflineModeStorageKey(activeRelationship.id), "true");
-      localStorage.setItem(getOfflineStoryStorageKey(activeRelationship.id), newStory.id);
+      writeString(getOfflineModeStorageKey(activeRelationship.id), "true");
+      writeString(getOfflineStoryStorageKey(activeRelationship.id), newStory.id);
     }
     
     showToast("已无痛切换到线下故事模式");
@@ -1683,7 +1673,7 @@ export default function AppChat({
   const updateRedPacketStatus = (message: Message, status: RedPacketStatus) => {
     setRedPacketStatuses(prev => {
       const next = writeRedPacketStatus(prev, message, status);
-      localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(next));
+      writeJson(RED_PACKET_STATUSES_KEY, next);
       return next;
     });
   };
@@ -1735,7 +1725,7 @@ export default function AppChat({
 
     if (changed) {
       setRedPacketStatuses(updatedStatuses);
-      localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(updatedStatuses));
+      writeJson(RED_PACKET_STATUSES_KEY, updatedStatuses);
       if (refundAmountTotal > 0) {
         setWalletBalance(prev => {
           const next = prev + refundAmountTotal;
@@ -1798,13 +1788,8 @@ export default function AppChat({
   const commentLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressCommentClickRef = useRef(false);
 
-  const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("phone_moment_translations") || "{}");
-    } catch {
-      return {};
-    }
-  });
+  const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() =>
+    readJson<Record<string, string>>("phone_moment_translations", {}).value);
 
   const [momentFavorites, setMomentFavorites] = useState<{
     id: string;
@@ -1813,37 +1798,29 @@ export default function AppChat({
     authorAvatar: string;
     content: string;
     timestamp: number;
-  }[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("phone_moment_favorites") || "[]");
-    } catch {
-      return [];
-    }
-  });
+  }[]>(() => readArray<{
+    id: string;
+    momentId: string;
+    authorName: string;
+    authorAvatar: string;
+    content: string;
+    timestamp: number;
+  }>("phone_moment_favorites", []).value);
 
   const [favedTab, setFavedTab] = useState<"chats" | "moments">("chats");
 
   // Sync favorites & translations to localStorage when updated
   useEffect(() => {
-    localStorage.setItem("phone_moment_translations", JSON.stringify(momentTranslations));
+    writeJson("phone_moment_translations", momentTranslations);
   }, [momentTranslations]);
 
   useEffect(() => {
-    localStorage.setItem("phone_moment_favorites", JSON.stringify(momentFavorites));
+    writeJson("phone_moment_favorites", momentFavorites);
   }, [momentFavorites]);
 
   useEffect(() => {
     if (activeAttachModal === "file") {
-      const raw = localStorage.getItem("phone_memo_notes");
-      if (raw) {
-        try {
-          setMemoNotes(JSON.parse(raw));
-        } catch (e) {
-          setMemoNotes([]);
-        }
-      } else {
-        setMemoNotes([]);
-      }
+      setMemoNotes(readArray("phone_memo_notes", []).value);
     }
   }, [activeAttachModal]);
 
@@ -1857,7 +1834,7 @@ export default function AppChat({
     if (activeTab === "moments") {
       const now = Date.now();
       setLastViewedMomentsTime(now);
-      localStorage.setItem("phone_last_viewed_moments_time", now.toString());
+      writeString("phone_last_viewed_moments_time", now.toString());
     }
   }, [activeTab, moments]);
 
@@ -3325,7 +3302,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     if (relationId) {
       setRedPacketStatuses((previous) => {
         const next = removePaymentStatusesForMessages(removePaymentStatusesByRelation(previous, relationId), removedMessages);
-        localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(next));
+        writeJson(RED_PACKET_STATUSES_KEY, next);
         return next;
       });
     }

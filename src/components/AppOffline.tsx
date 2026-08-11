@@ -32,6 +32,7 @@ import { collectOfflineWorldBookContext, formatOfflineWorldBookEntries } from ".
 import { applyOfflineStoryRegeneration, prepareOfflineStoryRegeneration } from "../domain/offlineStory/offlineStoryRegeneration";
 import { createOfflineGroupParticipantMemories } from "../features/offline/services/offlineGroupMemorySync";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
+import { remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -343,7 +344,7 @@ export default function AppOffline({
     };
     const updated = [...customPresets, newPreset];
     setCustomPresets(updated);
-    localStorage.setItem("offline_custom_style_presets", JSON.stringify(updated));
+    writeJson("offline_custom_style_presets", updated);
     
     // Select the new preset
     setSettingsStylePresetId(newPreset.id);
@@ -358,7 +359,7 @@ export default function AppOffline({
 
     const updated = customPresets.filter((item) => item.id !== preset.id);
     setCustomPresets(updated);
-    localStorage.setItem("offline_custom_style_presets", JSON.stringify(updated));
+    writeJson("offline_custom_style_presets", updated);
     setSettingsStylePresetId("none");
     setSettingsStylePromptName("");
     setSettingsStylePromptContent("");
@@ -440,15 +441,15 @@ export default function AppOffline({
     activeStoryRef.current = story;
     setActiveStory(story);
     if (story.relationId) {
-      localStorage.setItem(getOfflineModeStorageKey(story.relationId), "true");
-      localStorage.setItem(getOfflineStoryStorageKey(story.relationId), story.id);
+      writeString(getOfflineModeStorageKey(story.relationId), "true");
+      writeString(getOfflineStoryStorageKey(story.relationId), story.id);
     }
   };
 
   const clearOfflineSession = (story: OfflineStory) => {
     if (story.relationId) {
-      localStorage.removeItem(getOfflineStoryStorageKey(story.relationId));
-      localStorage.setItem(getOfflineModeStorageKey(story.relationId), "false");
+      removeStoredValue(getOfflineStoryStorageKey(story.relationId));
+      writeString(getOfflineModeStorageKey(story.relationId), "false");
     }
   };
 
@@ -617,8 +618,8 @@ export default function AppOffline({
     };
 
     saveActiveStorySnapshot(newStory);
-    localStorage.setItem(getOfflineModeStorageKey(relationship.id), "true");
-    localStorage.setItem(getOfflineStoryStorageKey(relationship.id), newStory.id);
+    writeString(getOfflineModeStorageKey(relationship.id), "true");
+    writeString(getOfflineStoryStorageKey(relationship.id), newStory.id);
     setShowCreateModal(false);
 
     // Reset fields

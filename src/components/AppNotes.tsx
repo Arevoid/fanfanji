@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
+import {
   ChevronLeft, 
   Search, 
   Plus, 
@@ -12,6 +12,8 @@ import {
   Save, 
   CheckSquare,
 } from "lucide-react";
+import { remove as removeStoredValue, writeJson } from "../core/storage/storageAdapter";
+import { readArray } from "../core/storage/repositories/repositoryUtils";
 
 interface Note {
   id: string;
@@ -38,21 +40,15 @@ export default function AppNotes({ onClose }: AppNotesProps) {
   // Navigation: "notes" or "todo"
   const [activeTab, setActiveTab] = useState<"notes" | "todo">(() => {
     const savedTab = localStorage.getItem("memo_active_tab");
-    localStorage.removeItem("memo_active_tab"); // consume once
+    removeStoredValue("memo_active_tab"); // consume once
     return (savedTab === "todo" ? "todo" : "notes");
   });
 
   // Notes state
-  const [notes, setNotes] = useState<Note[]>(() => {
-    const raw = localStorage.getItem("phone_memo_notes");
-    return raw ? JSON.parse(raw) : SEED_NOTES;
-  });
+  const [notes, setNotes] = useState<Note[]>(() => readArray<Note>("phone_memo_notes", SEED_NOTES).value);
 
   // Todos state (shared with TodoWidget!)
-  const [todos, setTodos] = useState<Todo[]>(() => {
-    const raw = localStorage.getItem("phone_memo_todos");
-    return raw ? JSON.parse(raw) : SEED_TODOS;
-  });
+  const [todos, setTodos] = useState<Todo[]>(() => readArray<Todo>("phone_memo_todos", SEED_TODOS).value);
 
   // UI state
   const [searchQuery, setSearchQuery] = useState("");
@@ -73,7 +69,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
     const triggerEdit = localStorage.getItem("memo_open_todo_edit");
     if (triggerEdit === "true" && activeTab === "todo") {
       setIsAddingTodo(true);
-      localStorage.removeItem("memo_open_todo_edit"); // consume
+      removeStoredValue("memo_open_todo_edit"); // consume
       setTimeout(() => {
         todoInputRef.current?.focus();
       }, 300);
@@ -82,12 +78,12 @@ export default function AppNotes({ onClose }: AppNotesProps) {
 
   // Persist notes
   useEffect(() => {
-    localStorage.setItem("phone_memo_notes", JSON.stringify(notes));
+    writeJson("phone_memo_notes", notes);
   }, [notes]);
 
   // Persist todos
   useEffect(() => {
-    localStorage.setItem("phone_memo_todos", JSON.stringify(todos));
+    writeJson("phone_memo_todos", todos);
   }, [todos]);
 
   // Handle Note Save (Create or Update)
