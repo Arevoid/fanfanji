@@ -5,7 +5,7 @@ import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { compressImage } from "../utils/pngParser";
-import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, formatCallRecordHistory, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDistribution";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
@@ -24,7 +24,7 @@ import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
 import { formatCurrentVoiceMessagePrompt, formatVoiceMessageHistory } from "../features/chat/prompts/voiceMessagePrompt";
-import { CHARACTER_MEDIA_USAGE_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
+import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
 import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
@@ -3054,16 +3054,26 @@ ${memberWbText}`;
       const slicedMsgs = msgsForHistory.slice(-limit);
       const requestTime = new Date();
 
-      const history = slicedMsgs.map((m) => {
+      const history = slicedMsgs.flatMap((m) => {
+        const callTurns = expandCallRecordHistory(m.content, m.timestamp, {
+          userName: settings.name,
+          characterName: activeCharacter.name,
+        });
+        if (callTurns) {
+          return callTurns.map((turn) => ({
+            role: turn.role,
+            text: turnSettings.enableTimeAwareness
+              ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
+              : turn.text,
+          }));
+        }
+
         let contentText = m.content;
         const textImageDescription = parseTextImageDescription(contentText);
         if (textImageDescription) {
           contentText = `[文字图：${textImageDescription}]`;
         } else {
-          contentText = formatCallRecordHistory(contentText, {
-            userName: settings.name,
-            characterName: activeCharacter.name,
-          }) || formatVoiceMessageHistory(contentText) || contentText;
+          contentText = formatVoiceMessageHistory(contentText) || contentText;
         }
         return {
           role: m.sender === "user" ? "user" : "model",
@@ -3449,6 +3459,7 @@ ${isLastVoiceOld
       // 6. User Profile
       assembledInstructions.push(userProfileText);
       assembledInstructions.push(userKnowledgeBoundary);
+      assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
 
       // Recent dialogue is already present in the role-correct history. Do not
       // copy it into a system block: duplicate user wording encourages parroting
@@ -4287,9 +4298,24 @@ ${stickerListStr}
 
       // Map history with timestamps for time awareness
       const requestTime = new Date();
-      const history = slicedMsgs.map((m) => {
+      const history = slicedMsgs.flatMap((m) => {
+        const callTurns = expandCallRecordHistory(m.content, m.timestamp, {
+          userName: settings.name,
+          characterName: activeCharacter.name,
+        });
+        if (callTurns) {
+          return callTurns.map((turn) => ({
+            role: turn.role,
+            text: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness
+              ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
+              : turn.text,
+          }));
+        }
+
         const textImageDescription = parseTextImageDescription(m.content);
-        const content = textImageDescription ? `[文字图：${textImageDescription}]` : m.content;
+        const content = textImageDescription
+          ? `[文字图：${textImageDescription}]`
+          : formatVoiceMessageHistory(m.content) || m.content;
         return {
           role: m.sender === "user" ? "user" : "model",
           text: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness
@@ -4309,7 +4335,12 @@ ${stickerListStr}
             hour12: false
           });
           const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
-          const snippet = m.content.length > 20 ? m.content.slice(0, 20) + "..." : m.content;
+          let snippet = formatCallRecordHistory(m.content, {
+            userName: settings.name,
+            characterName: activeCharacter.name,
+            includeTranscript: false,
+          }) || formatVoiceMessageHistory(m.content) || m.content;
+          if (snippet.length > 80) snippet = snippet.slice(0, 80) + "...";
           return `- ${senderName}: "${snippet}" (发送于: ${timeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`;
         }).join("\n");
       }
@@ -4478,6 +4509,7 @@ ${timeLogString}
       // 6. User Profile
       assembledInstructions.push(userProfileText);
       assembledInstructions.push(userKnowledgeBoundary);
+      assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
 
       // 7. Before Chat History entries
       const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");

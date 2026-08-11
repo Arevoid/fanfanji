@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../src/features/chat/services/messageFactory";
-import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
+import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
 
 const clean = (text: string) => cleanAiReplyText(text, false);
 
@@ -68,6 +68,13 @@ assert.equal(
   formatCallRecordHistory(completedCall, { userName: "小林", characterName: "范千", includeTranscript: false }),
   "[已完成语音通话，小林发起，时长 02:43。这是与后续消息连续的真实通话记录]",
 );
+assert.deepEqual(expandCallRecordHistory(completedCall, 99), [
+  { role: "user", text: "小狗过来让我摸摸头", timestamp: 1 },
+  { role: "model", text: "我这儿还有事", timestamp: 2 },
+]);
+assert.deepEqual(expandCallRecordHistory(cancelledCall, 99, { userName: "小林", characterName: "范千" }), [
+  { role: "model", text: "[语音通话，范千发起，已取消]", timestamp: 99 },
+]);
 assert.equal(formatCallRecordHistory("普通文字"), null);
 
 console.log("Chat message services: status-aware call records and fixed acceptance checks passed");

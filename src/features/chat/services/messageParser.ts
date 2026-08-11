@@ -155,3 +155,44 @@ export function formatCallRecordHistory(
 
   return transcript.length > 0 ? `${header}\n${transcript.join("\n")}` : header;
 }
+
+export interface CallRecordHistoryTurn {
+  role: "user" | "model";
+  text: string;
+  timestamp: number;
+}
+
+/**
+ * Expands a persisted call into role-correct API turns. A call record's outer
+ * Message.sender only identifies who started the call; it must never own every
+ * line in the transcript.
+ */
+export function expandCallRecordHistory(
+  content: string,
+  fallbackTimestamp: number,
+  options: { userName?: string; characterName?: string } = {},
+): CallRecordHistoryTurn[] | null {
+  if (!isCallRecordMarkup(content)) return null;
+
+  const call = parseCallRecord(content);
+  if (call.status === "completed") {
+    const transcriptTurns = call.transcript
+      .map((item): CallRecordHistoryTurn | null => {
+        const text = getCallTranscriptText(item.content || "").trim();
+        if (!text) return null;
+        return {
+          role: item.sender === "user" ? "user" : "model",
+          text,
+          timestamp: Number.isFinite(item.timestamp) ? item.timestamp : fallbackTimestamp,
+        };
+      })
+      .filter((item): item is CallRecordHistoryTurn => Boolean(item));
+    if (transcriptTurns.length > 0) return transcriptTurns;
+  }
+
+  return [{
+    role: call.direction === "incoming" ? "model" : "user",
+    text: formatCallRecordHistory(content, { ...options, includeTranscript: false }) || `[${call.callType}]`,
+    timestamp: fallbackTimestamp,
+  }];
+}
