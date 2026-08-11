@@ -15,6 +15,6 @@ assert.match(appSource, /<React\.Suspense/);
 assert.match(appSource, /requestIdleCallback\(preloadAll, \{ timeout: 1500 \}\)/);
 assert.match(appSource, /preloadSecondaryApp\(item\.id\)/);
 assert.doesNotMatch(appSource, /正在打开/);
-assert.match(appSource, /import AppChat from "\.\/components\/AppChat"/);
+assert.match(appSource, /import AppChat(?:,\s*\{[^}]+\})? from "\.\/components\/AppChat"/);
 
 console.log("secondary app lazy-loading tests passed");
