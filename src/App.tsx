@@ -90,6 +90,7 @@ import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/s
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
 import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
+import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
 import { migrateLegacyClassicBubblePreset } from "./features/chat/styles/classicBubblePreset";
 import StatusBar from "./components/StatusBar";
 import AppChat, { resolveActiveChatStylePreset } from "./components/AppChat";
@@ -505,6 +506,8 @@ export default function App() {
   // Global message notification banner state
   const [globalNotification, setGlobalNotification] = useState<{
     characterId: string;
+    relationId: string | null;
+    conversationId: string | null;
     avatar: string;
     name: string;
     content: string;
@@ -620,12 +623,22 @@ export default function App() {
         latestMsg.sender === "character" &&
         Date.now() - latestMsg.timestamp < 4000
       ) {
-        const isNotActiveChat = activeApp !== "chat" || activeChatCharId !== latestMsg.characterId;
+        const notificationScope = {
+          characterId: latestMsg.characterId,
+          relationId: latestMsg.relationId || null,
+          conversationId: latestMsg.conversationId || null,
+        };
+        const isNotActiveChat = activeApp !== "chat" || !isNotificationForActiveChat(notificationScope, {
+          characterId: activeChatCharId,
+          relationId: activeChatRelationId,
+        });
         if (isNotActiveChat) {
           const char = characters.find((c) => c.id === latestMsg.characterId);
           if (char) {
             setGlobalNotification({
               characterId: char.id,
+              relationId: notificationScope.relationId,
+              conversationId: notificationScope.conversationId,
               avatar: char.avatar,
               name: char.remark || char.name,
               content: latestMsg.content,
@@ -635,7 +648,7 @@ export default function App() {
         }
       }
     }
-  }, [messages, activeApp, activeChatCharId, characters]);
+  }, [messages, activeApp, activeChatCharId, activeChatRelationId, characters]);
 
   const phoneScreenRef = useRef<HTMLDivElement>(null);
 
@@ -3045,8 +3058,10 @@ export default function App() {
         {globalNotification && (
           <div
             onClick={(e) => {
+              const target = getNotificationChatTarget(globalNotification);
               setActiveApp("chat");
-              setActiveChatCharId(globalNotification.characterId);
+              setActiveChatRelationId(target.relationId);
+              setActiveChatCharId(target.characterId);
               setGlobalNotification(null);
             }}
             className="absolute left-3.5 right-3.5 z-50 animate-slide-down bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 p-3 flex items-center gap-3 cursor-pointer select-none animate-fade-in"

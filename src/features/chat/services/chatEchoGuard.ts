@@ -27,14 +27,24 @@ function getHistoryText(entry: ChatHistoryEntry): string {
   return typeof entry.text === "string" ? entry.text : typeof entry.content === "string" ? entry.content : "";
 }
 
+/** Mirrors the visible-dialogue extraction performed by cleanOnlineMessage. */
+export function getVisibleEchoCheckText(replyText: string): string {
+  if (!/[“「『”」』]/.test(replyText)) return replyText;
+  const matches = Array.from(replyText.matchAll(/[“「『]([^”」』]+)[”」』]/g))
+    .map((match) => match[1].trim())
+    .filter(Boolean);
+  return matches.length > 0 ? matches.join("\n") : replyText;
+}
+
 export function isDegenerateDirectReply(
   userText: string,
   replyText: string,
   history: readonly ChatHistoryEntry[] = [],
 ): boolean {
-  if (isLowInformationUserEcho(userText, replyText)) return true;
+  const visibleReplyText = getVisibleEchoCheckText(replyText);
+  if (isLowInformationUserEcho(userText, visibleReplyText)) return true;
 
-  const reply = normalizeChatEchoText(replyText);
+  const reply = normalizeChatEchoText(visibleReplyText);
   if (reply.length !== 1 || RECIPROCAL_SHORT_REPLIES.has(reply)) return false;
 
   return history.slice(-12).some((entry) => (

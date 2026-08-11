@@ -23,6 +23,7 @@ import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromp
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
+import { formatCurrentVoiceMessagePrompt, formatVoiceMessageHistory } from "../features/chat/prompts/voiceMessagePrompt";
 import { CHARACTER_MEDIA_USAGE_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
@@ -33,6 +34,7 @@ import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
+import { formatUserKnowledgeBoundary } from "../domain/prompt/userKnowledgeBoundary";
 import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
 import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
 import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
@@ -49,11 +51,12 @@ import { generateCharacterImage } from "../features/chat/services/characterImage
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
+import { getChatTypingScopeKey, getVisibleChatTyping, setChatScopeCharacterOverride, setChatScopeTyping, type ChatTypingScopeState } from "../features/chat/services/chatTypingScope";
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
 import { useChatAttachmentState } from "../features/chat/hooks/useChatAttachmentState";
-import { createChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
+import { createChatRuntimeContext, type ChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
 import { attachDirectScope, isMessageInDirectScope, resolveDirectInteractionScope, toDirectChatRuntimeContext, type MessageMutationScope } from "../features/chat/context/directInteractionScope";
 import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
 import { removeCharacterTruthForRelations } from "../features/characterKnowledge/services/characterTruthCleanupService";
@@ -1316,6 +1319,9 @@ export default function AppChat({
     relationship: activeRelationship,
     isGroupChat: Boolean(activeCharacter?.isGroupChat),
   });
+  const isActiveChatScopeValid = Boolean(activeCharacter && (activeCharacter.isGroupChat
+    ? !activeChatRelationId
+    : activeDirectScope));
   const activeRuntimeContext = activeDirectScope
     ? toDirectChatRuntimeContext(activeDirectScope)
     : createChatRuntimeContext({
@@ -1734,6 +1740,16 @@ export default function AppChat({
     }
   }, [activeChatCharId, activeCharacter, characters, setActiveChatCharId]);
 
+  // The relationship owns a direct conversation. If legacy navigation ever
+  // updates only the displayed character, restore the character from that
+  // relationship before rendering so one contact can never label another
+  // contact's history with its own name and avatar.
+  useEffect(() => {
+    if (!activeRelationship || !activeCharacter || activeCharacter.isGroupChat) return;
+    const relationshipCharacterId = resolveCanonicalCharacterId(activeRelationship.characterId, characters);
+    if (relationshipCharacterId !== activeCharacter.id) setActiveChatCharId(relationshipCharacterId);
+  }, [activeRelationship?.id, activeRelationship?.characterId, activeCharacter?.id, activeCharacter?.isGroupChat, characters, setActiveChatCharId]);
+
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
     if (!activeCharacter) return [];
@@ -1870,8 +1886,22 @@ export default function AppChat({
   }, [isEditingProfile, settings]);
 
   // Inputs
-  const [isTyping, setIsTyping] = useState(false);
-  const [typingCharacterOverride, setTypingCharacterOverride] = useState<Character | null>(null);
+  // Reply requests can finish after the user has opened another conversation.
+  // Keep their typing state attached to the captured conversation instead of
+  // relabelling a global boolean with whichever contact is currently visible.
+  const activeTypingScopeKey = getChatTypingScopeKey(activeRuntimeContext);
+  const [typingByScope, setTypingByScope] = useState<ChatTypingScopeState<Character>>({});
+  const setIsTyping = (isTyping: boolean) => {
+    const capturedScopeKey = activeTypingScopeKey;
+    setTypingByScope((previous) => setChatScopeTyping(previous, capturedScopeKey, isTyping));
+  };
+  const setTypingCharacterOverride = (character: Character | null) => {
+    const capturedScopeKey = activeTypingScopeKey;
+    setTypingByScope((previous) => setChatScopeCharacterOverride(previous, capturedScopeKey, character));
+  };
+  const visibleTypingState = getVisibleChatTyping<Character>(typingByScope, activeTypingScopeKey);
+  const isTyping = Boolean(visibleTypingState);
+  const typingCharacterOverride = visibleTypingState?.characterOverride || null;
   const [manualLocationText, setManualLocationText] = useState("");
   const [, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
   const [sentGreetings, setSentGreetings] = useState<string[]>([]);
@@ -2674,7 +2704,8 @@ export default function AppChat({
       // Create a readable history for the AI, showing the user's name or character names as senders
       const historyText = slicedMsgs.map((m) => {
         const textImageDescription = parseTextImageDescription(m.content);
-        const content = textImageDescription ? `[文字图：${textImageDescription}]` : m.content;
+        const voiceHistory = formatVoiceMessageHistory(m.content);
+        const content = textImageDescription ? `[文字图：${textImageDescription}]` : voiceHistory || m.content;
         if (m.sender === "user") {
           return `${settings.name} (机主): ${content}`;
         } else {
@@ -2750,7 +2781,7 @@ ${memberWbText}`;
 
       // The first request is a public router only. Its generated text is never
       // displayed; only the selected, verified member identities are used.
-      const routerSystemInstruction = buildGroupChatSystemInstruction({ userName: settings.name, groupName: activeCharacter.name, worldContext: groupWbText, memberDefinitions: publicMembersDefText });
+      const routerSystemInstruction = buildGroupChatSystemInstruction({ userName: settings.name, userBio: settings.bio, groupName: activeCharacter.name, worldContext: groupWbText, memberDefinitions: publicMembersDefText });
       const promptMessage = buildGroupChatTaskMessage(historyText, Boolean(userMsg));
       const routerResult = await generateGroupChatTurn({
         prompt: {
@@ -2791,6 +2822,7 @@ ${memberWbText}`;
         ));
         const memberSystemInstruction = `${buildGroupChatSystemInstruction({
           userName: settings.name,
+          userBio: settings.bio,
           groupName: activeCharacter.name,
           worldContext: groupWbText,
           memberDefinitions,
@@ -2940,6 +2972,7 @@ ${memberWbText}`;
     userMsg: Message | null,
     customHistoryOverride?: Message[],
     cognitiveContext?: CharacterCognitiveContext,
+    replyContext: ChatRuntimeContext = activeRuntimeContext,
   ) => {
     setIsTyping(true);
     // Resolve toggles from the latest props for every send. A queued callback
@@ -3025,11 +3058,8 @@ ${memberWbText}`;
         const textImageDescription = parseTextImageDescription(contentText);
         if (textImageDescription) {
           contentText = `[文字图：${textImageDescription}]`;
-        } else if (contentText.startsWith("[语音]|")) {
-          const parts = contentText.split("|");
-          const secs = parts[1] || "5";
-          const voiceText = parts.slice(2).join("|") || "";
-          contentText = voiceText ? `[语音: "${voiceText}" (${secs}秒)]` : `[语音: ${secs}秒]`;
+        } else {
+          contentText = formatVoiceMessageHistory(contentText) || contentText;
         }
         return {
           role: m.sender === "user" ? "user" : "model",
@@ -3203,6 +3233,7 @@ ${turnSettings.disableBracketActions
       const userProfileText = `User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
+      const userKnowledgeBoundary = formatUserKnowledgeBoundary();
       const relationshipContext = characterProjection.relationship?.content || "";
       const chatPromptContext = cognitiveContext
         ? buildChatPromptContext(cognitiveContext, {
@@ -3406,6 +3437,7 @@ ${isLastVoiceOld
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
+      assembledInstructions.push(userKnowledgeBoundary);
 
       // Recent dialogue is already present in the role-correct history. Do not
       // copy it into a system block: duplicate user wording encourages parroting
@@ -3522,14 +3554,7 @@ ${stickerListStr}
         const status = parts[1] || "已结束";
         promptMessage = `[语音通话结束] 刚才我们进行了语音通话（通话状态：${status}）。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
       } else if (promptMessage.startsWith("[语音]|")) {
-        const parts = promptMessage.split("|");
-        const secs = parts[1] || "5";
-        const voiceText = parts.slice(2).join("|") || "";
-        if (voiceText) {
-          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒），语音对应的文字内容是：“${voiceText}”。请针对语音中的实际内容回应。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-        } else {
-          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒），但没有提供可确认的文字内容。不得脑补语音的具体内容或预设我的语气；可以按已知上下文自然承接，信息不足时按角色习惯询问。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-        }
+        promptMessage = `${formatCurrentVoiceMessagePrompt(promptMessage)}\n${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
       } else if (promptMessage.startsWith("[表情]|")) {
         const parts = promptMessage.split("|");
         const stickerName = parts[1] || "表情";
@@ -3619,7 +3644,7 @@ ${stickerListStr}
             rawText: data.text,
             disableBracketActions: turnSettings.disableBracketActions,
             keepPeriods,
-            characterId: activeChatCharId,
+            context: replyContext,
             allowEmoji: mayCharacterUseEmoji({
               latestUserMessage: userMsg?.content,
               recentCharacterMessages: currentChatMessages
@@ -3673,13 +3698,12 @@ ${stickerListStr}
           });
         }
       } else {
-        const errMsg: Message = {
+        const errMsg = createCharacterTextMessage({
           id: (Date.now() + 1).toString(),
-          characterId: activeChatCharId,
-          sender: "character",
+          context: replyContext,
           content: `⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`,
           timestamp: Date.now(),
-        };
+        });
         onSendMessage(errMsg);
       }
     } catch (err: any) {
@@ -3692,15 +3716,14 @@ ${stickerListStr}
                                 errMsgStr.toLowerCase().includes("400") ||
                                 errMsgStr.toLowerCase().includes("invalid");
 
-      const errMsg: Message = {
+      const errMsg = createCharacterTextMessage({
         id: (Date.now() + 1).toString(),
-        characterId: activeChatCharId,
-        sender: "character",
-        content: isQuotaOrKeyError 
+        context: replyContext,
+        content: isQuotaOrKeyError
           ? `⚠️ [连接错误]：智能体响应失败 (${errMsgStr})。请检查 API Key 是否正确、是否过期或余额不足。`
           : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`,
         timestamp: Date.now(),
-      };
+      });
       onSendMessage(errMsg);
     } finally {
       setIsTyping(false);
@@ -3769,8 +3792,8 @@ ${stickerListStr}
       }
     },
     generateGroupReply: generateResponseForGroupChat,
-    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext }) =>
-      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext),
+    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext, context }) =>
+      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext, context),
   });
 
   const chatSideEffectController = createChatSideEffectController({
@@ -4365,6 +4388,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const userProfileText = `User Profile:
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
+      const userKnowledgeBoundary = formatUserKnowledgeBoundary();
       const relationshipContext = characterProjection.relationship?.content || "";
 
       const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
@@ -4442,6 +4466,7 @@ ${timeLogString}
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
+      assembledInstructions.push(userKnowledgeBoundary);
 
       // 7. Before Chat History entries
       const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
@@ -5580,7 +5605,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       </Modal>
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
-      {activeChatCharId && activeCharacter ? (
+      {activeChatCharId && activeCharacter && isActiveChatScopeValid ? (
         <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"} data-user-chat-css={hasUserCustomChatCss ? "active" : "inactive"} data-chat-settings-open={isShowingCardModal ? "true" : "false"}>
             <div
               id="api-chat-screen"

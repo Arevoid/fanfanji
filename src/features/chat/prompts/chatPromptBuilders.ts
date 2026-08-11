@@ -1,5 +1,6 @@
 import type { CharacterPromptProjection } from "../../../domain/prompt/characterPromptProjector";
 import { CHARACTER_LANGUAGE_POLICY } from "../../../domain/prompt/characterPromptProjector";
+import { formatUserKnowledgeBoundary } from "../../../domain/prompt/userKnowledgeBoundary";
 import { LIVING_HUMAN_PROMPT } from "../../../utils/livingPrompt";
 import { assembleChatInstructions } from "./chatInstructionAssembler";
 import { CHARACTER_MEDIA_USAGE_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "./chatPromptPolicy";
@@ -22,11 +23,17 @@ export function finalizeCharacterChatSystemInstruction(input: {
   return `${assembly.systemInstruction}\n\n---\n\n${input.finalLanguageInstruction}`;
 }
 
-export function buildGroupChatSystemInstruction(input: { userName: string; groupName: string; worldContext: string; memberDefinitions: string }): string {
+export function buildGroupChatSystemInstruction(input: { userName: string; userBio?: string; groupName: string; worldContext: string; memberDefinitions: string }): string {
   return `你正在扮演微信群聊中的多位群成员（AI角色），正在与机主“${input.userName}”在群名为“${input.groupName}”的群组中进行互动。${input.worldContext}
 
 以下是微信群聊成员的设定档案：
 ${input.memberDefinitions}
+
+User Profile (interacting with the group):
+- Nickname: ${input.userName}
+- Personality/Bio: ${input.userBio || ""}
+
+${formatUserKnowledgeBoundary()}
 
 【群聊互动核心原则】：
 【成员私密认知访问规则】每个 [MEMBER_PRIVATE_CONTEXT] 只属于标签中指定的 speaker。生成其他成员的发言时，把该区块视为不存在；其他成员不能提及或回应其中的私聊事实。只有已经出现在“群聊最近历史消息”里的公开内容才是全员可见事实。
@@ -98,6 +105,8 @@ ${input.relationship}
 User Profile (interacting with you):
 - Nickname: ${input.userName}
 - Personality/Bio: ${input.userBio}
+
+${formatUserKnowledgeBoundary()}
 
 ${input.worldBook ? `[相关世界书背景设定]\n${input.worldBook}\n\n${WORLD_BOOK_CONTEXT_PRIORITY}\n\n` : ""}${input.timeContext}${input.knowledgeBoundary}${input.truthPrompt}\n\n${input.conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 ${input.taskPrompt}

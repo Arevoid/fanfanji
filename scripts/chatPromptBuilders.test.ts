@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { projectCharacterPrompt } from "../src/domain/prompt/characterPromptProjector";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage, buildProactiveChatSystemInstruction, finalizeCharacterChatSystemInstruction } from "../src/features/chat/prompts/chatPromptBuilders";
+import { formatUserKnowledgeBoundary } from "../src/domain/prompt/userKnowledgeBoundary";
 
 const group = buildGroupChatSystemInstruction({ userName: "用户", groupName: "群", worldContext: "世界", memberDefinitions: "成员" });
 assert.equal(group.includes("机主“用户”"), true);
@@ -27,4 +28,13 @@ assert.match(appChat, /buildGroupChatSystemInstruction/);
 assert.match(appChat, /buildProactiveChatSystemInstruction/);
 assert.doesNotMatch(appChat, /你正在扮演微信群聊中的多位群成员/);
 
-console.log("Chat prompt builders: 13 acceptance checks passed");
+const userBoundary = formatUserKnowledgeBoundary();
+assert.match(group, /用户资料留空表示“未知”/);
+assert.match(group, /不得转移、镜像或补写到用户身上/);
+assert.match(proactive, /角色自己先前对用户作出的猜测/);
+assert.match(userBoundary, /用户的职业、学校、课程、工作/);
+assert.match(userBoundary, /明天需要早起吗/);
+assert.match(userBoundary, /不得装作没说过/);
+assert.equal((appChat.match(/assembledInstructions\.push\(userKnowledgeBoundary\)/g) || []).length, 2);
+
+console.log("Chat prompt builders: 20 acceptance checks passed");
