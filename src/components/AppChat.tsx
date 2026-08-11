@@ -282,8 +282,7 @@ const CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面：设置页�
 .chat-bubble-other { background: var(--surface-raised); color: var(--chat-text); }
 .chat-bubble-self,
 .chat-bubble-other,
-.voice-message-bar,
-.transfer-card {
+.voice-message-bar {
   border: var(--chat-bubble-border-width) var(--chat-bubble-border-style) var(--chat-bubble-border);
   border-radius: 14px;
   box-shadow: none;
@@ -578,7 +577,6 @@ const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；�
   border-radius: 14px;
   box-shadow: none;
 }
-.chat-bubble-self * { color: var(--chat-user-text); }
 .chat-bubble-other {
   background: var(--chat-ai-bg);
   color: var(--chat-ai-text);
@@ -586,13 +584,8 @@ const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；�
   border-radius: 14px;
   box-shadow: none;
 }
-.chat-bubble-other * { color: var(--chat-ai-text); }
-.voice-message-bar.chat-bubble-self,
-.transfer-card { background: var(--chat-user-bg); color: var(--chat-user-text); }
-.voice-message-bar.chat-bubble-self *,
-.transfer-card * { color: var(--chat-user-text); }
+.voice-message-bar.chat-bubble-self { background: var(--chat-user-bg); color: var(--chat-user-text); }
 .voice-message-bar.chat-bubble-other { background: var(--chat-ai-bg); color: var(--chat-ai-text); }
-.voice-message-bar.chat-bubble-other * { color: var(--chat-ai-text); }
 
 /* ==================== 稳定消息类型接口 ==================== */
 /* 普通文字：高度由内容决定。 */
@@ -6044,7 +6037,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
               ${!isLiquidGlass ? (settings.bubbleBorderEnabled ? `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self {
                   border: ${settings.bubbleBorderWidth !== undefined ? settings.bubbleBorderWidth : 1}px solid ${settings.selfBubbleBorderColor || '#27272a'} !important;
                 }
@@ -6054,7 +6046,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 }
               ` : `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self,
                 #conv-screen .chat-bubble-other,
                 #conv-screen .voice-message-bar.chat-bubble-other {
@@ -6069,7 +6060,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                  stylesheet. */
               ${!isLiquidGlass && !hasUserCustomChatCss && settings.selfBubbleRadius !== undefined ? `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self {
                   border-radius: ${settings.selfBubbleRadius}px !important;
                 }
@@ -6091,9 +6081,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
               ${!isLiquidGlass && settings.otherBubbleColor ? `
                 #conv-screen .chat-bubble-other,
-                #conv-screen .chat-bubble-other *,
-                #conv-screen .voice-message-bar.chat-bubble-other,
-                #conv-screen .voice-message-bar.chat-bubble-other * {
+                #conv-screen .voice-message-bar.chat-bubble-other {
                   color: ${settings.otherBubbleColor} !important;
                 }
               ` : ''}
@@ -6129,7 +6117,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
               ${!isLiquidGlass && settings.selfBubbleBg ? `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self {
                   background-color: ${getBubbleBackgroundStyle(settings.selfBubbleBg, settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100)} !important;
                   background-image: none !important;
@@ -6138,11 +6125,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
               ${!isLiquidGlass && settings.selfBubbleColor ? `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .chat-bubble-self *,
-                #conv-screen .transfer-card,
-                #conv-screen .transfer-card *,
-                #conv-screen .voice-message-bar.chat-bubble-self,
-                #conv-screen .voice-message-bar.chat-bubble-self * {
+                #conv-screen .voice-message-bar.chat-bubble-self {
                   color: ${settings.selfBubbleColor} !important;
                 }
               ` : ''}
@@ -6333,7 +6316,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
  
                 /* 3. 聊天气泡 (Chat Bubbles) - 强效覆盖，解决圆角/背景色被 Tailwind 和 App.tsx 覆盖的问题 */
                 #conv-screen.style-liquid-glass .chat-bubble-self,
-                #conv-screen.style-liquid-glass .transfer-card,
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self,
                 .phone-screen-container .style-liquid-glass .chat-bubble-self,
                 .style-liquid-glass .chat-bubble-self {
@@ -6359,11 +6341,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   line-height: 1.4 !important;
                   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
                 }
-                #conv-screen.style-liquid-glass .chat-bubble-self *,
-                #conv-screen.style-liquid-glass .transfer-card *,
-                #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self *,
-                .phone-screen-container .style-liquid-glass .chat-bubble-self *,
-                .style-liquid-glass .chat-bubble-self * {
+                #conv-screen.style-liquid-glass .chat-bubble-self > .chat-message--voice-wave,
+                #conv-screen.style-liquid-glass .chat-bubble-self > .chat-message--voice-duration,
+                #conv-screen.style-liquid-glass .chat-bubble-self > .chat-message--call-icon,
+                #conv-screen.style-liquid-glass .chat-bubble-self > .chat-message--call-duration {
                   color: ${settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                 }
 
@@ -6393,10 +6374,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   line-height: 1.4 !important;
                   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
                 }
-                #conv-screen.style-liquid-glass .chat-bubble-other *,
-                #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other *,
-                .phone-screen-container .style-liquid-glass .chat-bubble-other *,
-                .style-liquid-glass .chat-bubble-other * {
+                #conv-screen.style-liquid-glass .chat-bubble-other > .chat-message--voice-wave,
+                #conv-screen.style-liquid-glass .chat-bubble-other > .chat-message--voice-duration,
+                #conv-screen.style-liquid-glass .chat-bubble-other > .chat-message--call-icon,
+                #conv-screen.style-liquid-glass .chat-bubble-other > .chat-message--call-duration {
                   color: ${settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                 }
  

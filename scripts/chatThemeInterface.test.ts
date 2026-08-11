@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const chatSource = fs.readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const settingsSource = fs.readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 const redPacketSource = fs.readFileSync(new URL("../src/features/chat/components/SpecialMessage/RedPacketCard.tsx", import.meta.url), "utf8");
 const transferSource = fs.readFileSync(new URL("../src/features/chat/components/SpecialMessage/TransferCard.tsx", import.meta.url), "utf8");
 const forumShareSource = fs.readFileSync(new URL("../src/features/forum/components/ForumShareCard.tsx", import.meta.url), "utf8");
@@ -36,6 +37,9 @@ for (const item of ["album", "text-image", "red-packet", "voice", "call", "locat
 assert.match(chatSource, /--chat-header-control-bg:/);
 assert.match(chatSource, /--chat-attachment-panel-bg:/);
 assert.doesNotMatch(chatSource, /received-transfer-card/);
+assert.doesNotMatch(chatSource, /chat-bubble-(?:self|other)\s+\*/);
+assert.doesNotMatch(settingsSource, /chat-bubble-(?:self|other)\s+\*/);
+assert.doesNotMatch(chatSource, /#conv-screen \.transfer-card/);
 assert.match(chatSource, /默认保持注释，避免在尚未配置图片 URL 时隐藏功能图标/);
 assert.match(chatSource, /\/\*\s*\n\.cv-plus-icon svg,/);
 

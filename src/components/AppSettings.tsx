@@ -134,9 +134,11 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
 .cv-header { background: var(--chat-header-bg); }
 .cv-messages-list { background: var(--chat-message-list-bg); }
 .chat-bubble-self { background: var(--chat-user-bg); color: var(--chat-user-text); border: 1px solid var(--chat-bubble-border); border-radius: 14px; }
-.chat-bubble-self * { color: var(--chat-user-text); }
 .chat-bubble-other { background: var(--chat-ai-bg); color: var(--chat-ai-text); border: 1px solid var(--chat-bubble-border); border-radius: 14px; }
-.chat-bubble-other * { color: var(--chat-ai-text); }
+.chat-message--voice-wave,
+.chat-message--voice-duration,
+.chat-message--call-icon,
+.chat-message--call-duration { color: currentColor; }
 .chat-composer--default,
 .chat-composer--floating,
 .chat-composer--liquid { background: var(--chat-composer-bg); }
