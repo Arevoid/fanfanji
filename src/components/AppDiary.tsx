@@ -6,6 +6,7 @@ import {
   MessageCircle,
   Plus,
   Search,
+  Share2,
   Trash2,
 } from "lucide-react";
 import type {
@@ -25,16 +26,19 @@ import {
   loadDiaryDrafts,
   loadDiaryEntries,
   loadDiaryGenerationTasks,
+  loadDiaryShares,
   removeDiaryEntryArtifacts,
   saveDiaryDrafts,
   saveDiaryEntries,
   saveDiaryGenerationTasks,
+  saveDiaryShares,
   subscribeDiaryState,
 } from "../core/storage/repositories/diaryRepository";
 import {
   generateDiaryEntry,
   canGenerateDiary,
 } from "../features/diary/services/diaryGenerationService";
+import { createDiaryShareMessage } from "../features/diary/services/diaryShareService";
 
 interface AppDiaryProps {
   activeIdentity: UserIdentity;
@@ -88,6 +92,7 @@ export default function AppDiary({
     tags: "",
   });
   const [busyRelationId, setBusyRelationId] = useState<string | null>(null);
+  const [sharingRelationId, setSharingRelationId] = useState<string | null>(null);
   const [relationFilterId, setRelationFilterId] = useState<string | null>(null);
 
   useEffect(
@@ -150,6 +155,9 @@ export default function AppDiary({
     [relationships, activeIdentity.id, characters],
   );
   const selected = ownEntries.find((entry) => entry.id === selectedId) || null;
+  const shareTargets = selected
+    ? directRelations.filter(({ relation }) => selected.authorType === "user" || selected.relationId === relation.id)
+    : [];
   const filtered = ownEntries.filter(
     (entry) =>
       !query ||
@@ -224,10 +232,31 @@ export default function AppDiary({
     setSelectedId(entry.id);
   };
   const removeEntry = (entry: DiaryEntry) => {
-    if (!window.confirm("删除这篇日记？关联的翻译和分享快照也会删除。")) return;
+    if (!window.confirm("删除这篇日记？关联翻译会删除；已经发送到聊天中的冻结分享仍会保留。")) return;
     removeDiaryEntryArtifacts(entry.id);
     persist(entries.filter((item) => item.id !== entry.id));
     setSelectedId(null);
+  };
+  const shareEntry = (entry: DiaryEntry, target: (typeof directRelations)[number]) => {
+    if (sharingRelationId) return;
+    const displayName = target.character.remark || target.character.name;
+    if (!window.confirm(`将当前日记的冻结副本明确分享给 ${displayName}？`)) return;
+
+    setSharingRelationId(target.relation.id);
+    try {
+      const { share, message } = createDiaryShareMessage({ entry, relation: target.relation });
+      const writeResult = saveDiaryShares([
+        share,
+        ...loadDiaryShares().value.filter((item) => item.id !== share.id),
+      ]);
+      if (!writeResult.success) throw new Error("分享快照保存失败，请检查本地存储空间");
+      onSendMessage(message);
+      onOpenChat(target.relation.characterId, target.relation.id, message.id);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "日记分享失败，请稍后重试");
+    } finally {
+      setSharingRelationId(null);
+    }
   };
   const generate = async (
     relation: CharacterRelationship,
@@ -421,6 +450,35 @@ export default function AppDiary({
               </div>
             )}
           </div>
+          {shareTargets.length > 0 && (
+            <section className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex items-center gap-2 text-sm font-bold">
+                <Share2 size={16} />
+                明确分享给好友
+              </div>
+              <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                只会发送当前内容的冻结副本，对方无法读取你的其他日记。
+              </p>
+              <div className="mt-3 grid gap-2">
+                {shareTargets.map((target) => {
+                  const displayName = target.character.remark || target.character.name;
+                  const isSharing = sharingRelationId === target.relation.id;
+                  return (
+                    <button
+                      key={target.relation.id}
+                      type="button"
+                      disabled={Boolean(sharingRelationId)}
+                      onClick={() => shareEntry(selected, target)}
+                      className="flex items-center justify-between rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-left text-sm disabled:opacity-50"
+                    >
+                      <span className="truncate">分享给 {displayName}</span>
+                      <span className="text-xs text-[var(--text-secondary)]">{isSharing ? "分享中…" : "发送"}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           {selected.authorType === "character" && selected.relationId && (
             <button
               onClick={() => {
