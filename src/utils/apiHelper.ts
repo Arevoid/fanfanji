@@ -6,7 +6,7 @@ import {
   type ExtractedKnowledgeCandidatePayload,
   type KnowledgeExtractionHistoryItem,
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
-import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
+import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
 
 const parseApiErrorText = (rawText: string): string => {
   const trimmed = rawText.trim();
@@ -70,13 +70,17 @@ async function directClientChat(params: {
     }
 
     const messagesPayload: any[] = [];
-    if (systemInstruction) {
-      messagesPayload.push({ role: "system", content: systemInstruction });
+    const openAiPrompt = prepareOpenAiPromptTransport(history, systemInstruction);
+    if (openAiPrompt.systemInstruction) {
+      messagesPayload.push({ role: "system", content: openAiPrompt.systemInstruction });
     }
-    if (history && Array.isArray(history)) {
-      for (const h of history) {
+    if (openAiPrompt.history.length > 0) {
+      for (const h of openAiPrompt.history) {
         messagesPayload.push(toOpenAiHistoryEntry(h));
       }
+    }
+    if (openAiPrompt.finalSystemInstruction) {
+      messagesPayload.push({ role: "system", content: openAiPrompt.finalSystemInstruction });
     }
     messagesPayload.push({ role: "user", content: message });
 

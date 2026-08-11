@@ -110,6 +110,7 @@ export default function AppArchives({
   const [mbti, setMbti] = useState("");
   const [avatar, setAvatar] = useState("");
   const [personality, setPersonality] = useState("");
+  const [replyLanguage, setReplyLanguage] = useState("");
   const [, setBackstory] = useState("");
   const [greeting, setGreeting] = useState("");
   const [initialChatMode, setInitialChatMode] = useState<"greeting" | "context">("greeting");
@@ -184,6 +185,7 @@ export default function AppArchives({
     setMbti("");
     setAvatar("");
     setPersonality("");
+    setReplyLanguage("");
     setBackstory("");
     setGreeting("");
     setAlbum([]);
@@ -216,6 +218,7 @@ export default function AppArchives({
       combined += "\n\n【背景故事】\n" + char.backstory;
     }
     setPersonality(combined);
+    setReplyLanguage(char.replyLanguage || "");
     setBackstory("");
     setGreeting(char.initialChatContext || char.greeting || "");
     setInitialChatMode(char.initialChatMode || (char.initialChatContext ? "context" : "greeting"));
@@ -435,6 +438,7 @@ export default function AppArchives({
       avatar: finalAvatar,
       personality: finalPersonality,
       backstory: "",
+      replyLanguage: replyLanguage.trim() || undefined,
       greeting: initialChatMode === "greeting" ? greeting.trim() : undefined,
       initialChatContext: initialChatMode === "context" ? greeting.trim() : undefined,
       initialChatMode,
@@ -753,6 +757,17 @@ export default function AppArchives({
             </div>
 
             {/* Detailed Personality and Backstory */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">角色回复语言（选填）</label>
+              <input
+                type="text"
+                value={replyLanguage}
+                onChange={(e) => setReplyLanguage(e.target.value)}
+                placeholder="例如：日语、English；留空则从人设/国籍自动识别"
+                className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+              />
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1">
                 详细人设与背景 (选填)

@@ -10,6 +10,7 @@ const character = {
   avatar: "avatar",
   personality: "克制",
   backstory: "背景",
+  replyLanguage: "Japanese",
   greeting: "你好",
   album: ["private-album"],
   references: [{ id: "private-reference", title: "聊天参考", content: "private-reference-content" }],
@@ -47,6 +48,7 @@ assert.deepEqual(withBook.data.extensions.fanfanji.character, {
   mbti: "INTJ",
   personality: "克制",
   backstory: "背景",
+  replyLanguage: "Japanese",
   greeting: "你好",
 });
 assert.deepEqual(Object.keys(withBook.data.character_book?.entries || {}), ["0"]);
@@ -83,6 +85,7 @@ assert.deepEqual(imported, {
   mbti: "INTJ",
   personality: "克制",
   backstory: "背景",
+  replyLanguage: "Japanese",
   greeting: "你好",
   album: [],
   references: [],

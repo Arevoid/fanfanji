@@ -30,6 +30,8 @@ export interface Character {
   mbti?: string;
   personality: string;
   backstory: string;
+  /** Explicit visible reply language. When absent, it is inferred from persona/nationality and then defaults to Simplified Chinese. */
+  replyLanguage?: string;
   remark?: string; // Edit remark in chat menu
   isPinned?: boolean; // Pin chat to top
   chatBg?: string; // Custom chat background image

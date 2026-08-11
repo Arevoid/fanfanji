@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { PromptComposer } from "../src/domain/prompt/PromptComposer";
 import { clearPromptDebugSnapshots, listPromptDebugSnapshots } from "../src/domain/prompt/promptDebugRegistry";
-import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../src/domain/prompt/promptTransport";
+import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../src/domain/prompt/promptTransport";
 import { mapSillyTavernEntry } from "../src/utils/pngParser";
 import { buildWorldBookSystemBlocks } from "../src/utils/worldBook";
 import type { WorldBookEntry } from "../src/types";
@@ -28,6 +28,13 @@ assert.equal(composed.history[0].text.includes("远"), true);
 assert.equal(composed.history[4].text.includes("近"), true);
 assert.equal(listPromptDebugSnapshots().length, 1);
 assert.deepEqual(listPromptDebugSnapshots()[0].historyInjections.map((item) => item.insertionIndex), [0, 4]);
+
+const anchoredSystem = `BASE\n\n[FINAL OUTPUT LANGUAGE — HIGHEST PRIORITY]\nJapanese only`;
+const geminiTransport = prepareGeminiPromptTransport([{ role: "system", text: "DEPTH" }], anchoredSystem);
+assert.equal(geminiTransport.systemInstruction?.endsWith("Japanese only"), true);
+assert.ok((geminiTransport.systemInstruction || "").indexOf("DEPTH") < (geminiTransport.systemInstruction || "").indexOf("Japanese only"));
+const openAiTransport = prepareOpenAiPromptTransport([{ role: "system", text: "DEPTH" }], anchoredSystem);
+assert.equal(openAiTransport.finalSystemInstruction?.endsWith("Japanese only"), true);
 assert.deepEqual(toOpenAiHistoryEntry({ role: "system", text: "规则" }), { role: "system", content: "规则" });
 assert.equal(toGeminiHistoryEntry({ role: "system", text: "规则" }), null);
 const geminiPrompt = prepareGeminiPromptTransport(composed.history, composed.systemInstruction);

@@ -10,15 +10,17 @@ assert.equal(group.includes("[SENDER_NAME: 角色名字]"), true);
 assert.equal(buildGroupChatTaskMessage("历史", true).includes("不返回任何回复"), true);
 assert.equal(buildGroupChatTaskMessage("", false).includes("不要保持沉默"), true);
 
-const proactive = buildProactiveChatSystemInstruction({ characterName: "角色", description: "DESC_MARK", personality: "PERSONA_MARK", relationship: "RELATION_MARK", userName: "用户", userBio: "简介", worldBook: "世界书", timeContext: "时间", knowledgeBoundary: "边界", truthPrompt: "事实", conversationGuidance: "会话", taskPrompt: "任务", instructionsPrompt: "格式" });
+const proactive = buildProactiveChatSystemInstruction({ characterName: "角色", description: "DESC_MARK", personality: "PERSONA_MARK", relationship: "RELATION_MARK", userName: "用户", userBio: "简介", worldBook: "世界书", timeContext: "时间", knowledgeBoundary: "边界", truthPrompt: "事实", conversationGuidance: "会话", taskPrompt: "任务", instructionsPrompt: "格式", finalLanguageInstruction: "FINAL_LANG" });
 assert.equal(proactive.indexOf("DESC_MARK") < proactive.indexOf("PERSONA_MARK"), true);
 assert.equal(proactive.indexOf("PERSONA_MARK") < proactive.indexOf("RELATION_MARK"), true);
 assert.equal(proactive.includes("世界书背景设定"), true);
 assert.equal(proactive.includes("发送前确认"), true);
+assert.equal(proactive.endsWith("FINAL_LANG"), true);
 
 const projection = projectCharacterPrompt({ id: "c", name: "角色", personality: "活泼", backstory: "背景" }, "friend");
-const finalized = finalizeCharacterChatSystemInstruction({ instructions: [projection.description.content, projection.personality.content, projection.personality.content], characterProjection: projection, characterDescriptionText: projection.description.content, diagnosticLabel: "direct chat prompt" });
+const finalized = finalizeCharacterChatSystemInstruction({ instructions: [projection.description.content, projection.personality.content, projection.personality.content], characterProjection: projection, characterDescriptionText: projection.description.content, diagnosticLabel: "direct chat prompt", finalLanguageInstruction: "FINAL_LANG" });
 assert.equal(finalized.split("[Character Personality / 角色性格与行为]").length - 1, 1);
+assert.equal(finalized.endsWith("FINAL_LANG"), true);
 
 const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 assert.match(appChat, /buildGroupChatSystemInstruction/);

@@ -9,6 +9,7 @@ export function finalizeCharacterChatSystemInstruction(input: {
   characterProjection: CharacterPromptProjection;
   characterDescriptionText: string;
   diagnosticLabel: "direct chat prompt" | "regenerate prompt";
+  finalLanguageInstruction: string;
 }): string {
   const assembly = assembleChatInstructions(input.instructions, [
     { ...input.characterProjection.description, content: input.characterDescriptionText },
@@ -18,7 +19,7 @@ export function finalizeCharacterChatSystemInstruction(input: {
   if (assembly.diagnostics.duplicateBlockIds.length || assembly.diagnostics.duplicateSourceIds.length || assembly.diagnostics.duplicateContentBlockIds.length) {
     console.warn(`[${input.diagnosticLabel}] duplicate blocks removed`, assembly.diagnostics);
   }
-  return assembly.systemInstruction;
+  return `${assembly.systemInstruction}\n\n---\n\n${input.finalLanguageInstruction}`;
 }
 
 export function buildGroupChatSystemInstruction(input: { userName: string; groupName: string; worldContext: string; memberDefinitions: string }): string {
@@ -81,6 +82,7 @@ export function buildProactiveChatSystemInstruction(input: {
   userName: string; userBio: string; worldBook: string; timeContext: string;
   knowledgeBoundary: string; truthPrompt: string; conversationGuidance: string;
   taskPrompt: string; instructionsPrompt: string;
+  finalLanguageInstruction: string;
 }): string {
   return `${LIVING_HUMAN_PROMPT}
 
@@ -102,5 +104,9 @@ ${input.taskPrompt}
 
 ${input.instructionsPrompt}
 
-发送前确认：回复内容、称呼、主动程度、话量和情感方向都与上方唯一的人设块一致。`;
+发送前确认：回复内容、称呼、主动程度、话量和情感方向都与上方唯一的人设块一致。
+
+---
+
+${input.finalLanguageInstruction}`;
 }

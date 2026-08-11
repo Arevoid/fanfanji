@@ -22,6 +22,7 @@ import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary,
 import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
+import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
 import { CHARACTER_MEDIA_USAGE_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
@@ -2778,12 +2779,16 @@ ${memberWbText}`;
           publicRoster: groupMembers.map((candidate) => candidate.name),
           privateContext: memberPrivateContext,
         });
-        const memberSystemInstruction = buildGroupChatSystemInstruction({
+        const memberLanguageInstruction = formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
+          member,
+          [publicDefinition, groupWbText],
+        ));
+        const memberSystemInstruction = `${buildGroupChatSystemInstruction({
           userName: settings.name,
           groupName: activeCharacter.name,
           worldContext: groupWbText,
           memberDefinitions,
-        });
+        })}\n\n---\n\n${memberLanguageInstruction}`;
         const memberPrompt = `${buildGroupChatTaskMessage(sameTurnPublicHistory, Boolean(userMsg))}\n\n【单成员生成】本次请求只允许 ${member.name} 发言。可以保持沉默；若发言，每一条都必须使用 [SENDER_NAME: ${member.name}]，不得代替其他成员输出。`;
         const isolatedDepthInjections = new Map(groupWbBlocks.at_depth.map((entry) => [entry.sourceId, entry]));
         (memberAtDepthInjections.get(member.id) || []).forEach((entry) => isolatedDepthInjections.set(entry.sourceId, entry));
@@ -3454,7 +3459,16 @@ ${stickerListStr}
       }
 
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
-      const systemInstruction = finalizeCharacterChatSystemInstruction({ instructions: assembledInstructions, characterProjection, characterDescriptionText, diagnosticLabel: "direct chat prompt" });
+      const systemInstruction = finalizeCharacterChatSystemInstruction({
+        instructions: assembledInstructions,
+        characterProjection,
+        characterDescriptionText,
+        diagnosticLabel: "direct chat prompt",
+        finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
+          activeCharacter,
+          wbBlocks.allTriggered.map((entry) => `${entry.title}\n${entry.content}`),
+        )),
+      });
 
       // Custom tool/attachment format descriptions for character context
       let promptMessage = userMsg ? userMsg.content : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
@@ -4455,7 +4469,16 @@ ${stickerListStr}
       }
 
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
-      const systemInstruction = finalizeCharacterChatSystemInstruction({ instructions: assembledInstructions, characterProjection, characterDescriptionText, diagnosticLabel: "regenerate prompt" });
+      const systemInstruction = finalizeCharacterChatSystemInstruction({
+        instructions: assembledInstructions,
+        characterProjection,
+        characterDescriptionText,
+        diagnosticLabel: "regenerate prompt",
+        finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
+          activeCharacter,
+          wbBlocks.allTriggered.map((entry) => `${entry.title}\n${entry.content}`),
+        )),
+      });
 
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
       const { data, candidates: replyCandidates } = await generateRegeneratedChatTurn({
@@ -4856,6 +4879,10 @@ ${stickerListStr}
         conversationGuidance,
         taskPrompt,
         instructionsPrompt,
+        finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
+          friend,
+          wbBlocks.allTriggered.map((entry) => `${entry.title}\n${entry.content}`),
+        )),
       });
 
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
@@ -5001,6 +5028,8 @@ ${stickerListStr}
 4. You may naturally reference confirmed shared experiences or relationship facts from the supplied context, but never invent them or mention another relationship or user identity.
 ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 ${CHARACTER_LANGUAGE_POLICY}
+
+${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 `;
 
           const composedPrompt = PromptComposer.compose({
@@ -5103,6 +5132,8 @@ ${CHARACTER_LANGUAGE_POLICY}
 4. You may naturally reference only confirmed material from this supplied relationship context. Never invent shared experiences or use another relationship's information.
 ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 ${CHARACTER_LANGUAGE_POLICY}
+
+${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 `;
 
         const composedPrompt = PromptComposer.compose({
@@ -5162,7 +5193,7 @@ ${CHARACTER_LANGUAGE_POLICY}
       const systemInstruction = `Your task: Write a WeChat Moment post from the character's scoped life context supplied by the Moment Prompt Adapter.
 🚨 [CRITICAL WECHAT MOMENT RULES]:
 1. The post must fit the character and may draw on confirmed material from this exact relationship, including confirmed offline experiences and relationship progress.
-2. The post content must be natural, engaging, and in Chinese.
+2. The post content must be natural, engaging, and use the final output language specified below.
 3. Vary the form and length: a one-line fragment (5-30 Chinese characters), a short thought (20-60), or a concrete life record (60-160). Do not force every post into the same paragraph length or literary style.
 4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, or talk like an AI. Just output the text of the Moment post.
 5. Moments do not support chat stickers or sticker links. Never output [表情]、[表情]|名称|URL、blob: URL, sticker names, or chat attachment markup. Use post text, with only the dedicated final "(配图：...)" text-image line permitted by rule 7.
@@ -5171,6 +5202,8 @@ ${CHARACTER_LANGUAGE_POLICY}
 8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the supplied feed history. Prefer a specific detail from the scoped context over generic weather, tiredness, coffee, work, or vague feelings.
 10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or AI-inferred events. If there is no fresh scoped topic, output exactly "SKIP" and nothing else.
+
+${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 `;
 
       const composedPrompt = PromptComposer.compose({

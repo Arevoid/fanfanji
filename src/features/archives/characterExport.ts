@@ -1,7 +1,7 @@
 import type { Character, WorldBookEntry } from "../../types";
 
 export type PortableCharacterProfile = Pick<Character,
-  "name" | "age" | "avatar" | "gender" | "mbti" | "personality" | "backstory" | "greeting"
+  "name" | "age" | "avatar" | "gender" | "mbti" | "personality" | "backstory" | "replyLanguage" | "greeting"
 >;
 
 const readString = (value: unknown): string => typeof value === "string" ? value : "";
@@ -20,6 +20,7 @@ export const toPortableCharacterProfile = (character: Character): PortableCharac
   mbti: character.mbti || "",
   personality: character.personality || "",
   backstory: character.backstory || "",
+  replyLanguage: character.replyLanguage || "",
   greeting: character.greeting || "",
 });
 
@@ -41,6 +42,7 @@ export const createCharacterFromImportedProfile = (value: unknown, id: string): 
     mbti: readString(profile.mbti),
     personality: readString(profile.personality),
     backstory: readString(profile.backstory),
+    replyLanguage: readString(profile.replyLanguage),
     greeting: readString(profile.greeting),
     album: [],
     references: [],

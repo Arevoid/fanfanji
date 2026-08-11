@@ -5,7 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
 import { buildKnowledgeExtractionPrompt, parseKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
-import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
+import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
 
 dotenv.config();
@@ -88,13 +88,17 @@ async function startServer() {
         };
 
         const messagesPayload = [];
-        if (systemInstruction) {
-          messagesPayload.push({ role: "system", content: systemInstruction });
+        const openAiPrompt = prepareOpenAiPromptTransport(history, systemInstruction);
+        if (openAiPrompt.systemInstruction) {
+          messagesPayload.push({ role: "system", content: openAiPrompt.systemInstruction });
         }
-        if (history && Array.isArray(history)) {
-          for (const h of history) {
+        if (openAiPrompt.history.length > 0) {
+          for (const h of openAiPrompt.history) {
             messagesPayload.push(toOpenAiHistoryEntry(h));
           }
+        }
+        if (openAiPrompt.finalSystemInstruction) {
+          messagesPayload.push({ role: "system", content: openAiPrompt.finalSystemInstruction });
         }
         messagesPayload.push({ role: "user", content: message });
 
