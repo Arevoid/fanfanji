@@ -24,6 +24,7 @@ const LANGUAGES: readonly LanguageDefinition[] = [
 ];
 
 const EXPLICIT_LANGUAGE_MARKER = /说话语言|聊天语言|回复语言|输出语言|使用语言|主要语言|母语|语言\s*[:：]|speaks?|reply language|output language|native language|language\s*[:：]/i;
+const GENERIC_LANGUAGE_VALUE = /(?:说话语言|聊天语言|回复语言|输出语言|使用语言|主要语言|常用语言|母语|language)\s*(?:[:：=]|为|是)\s*([^\n\r,，;；。]{1,40})/i;
 
 const normalizeConfiguredLanguage = (value: string): string => {
   const trimmed = value.trim();
@@ -40,7 +41,8 @@ const findExplicitLanguage = (text: string): string | undefined => {
       if (EXPLICIT_LANGUAGE_MARKER.test(window)) return language.label;
     }
   }
-  return undefined;
+  const generic = GENERIC_LANGUAGE_VALUE.exec(text)?.[1]?.trim();
+  return generic ? normalizeConfiguredLanguage(generic) : undefined;
 };
 
 const findNationalityLanguage = (text: string): string | undefined =>
@@ -49,14 +51,22 @@ const findNationalityLanguage = (text: string): string | undefined =>
 export function resolveCharacterReplyLanguage(
   character: Pick<Character, "replyLanguage" | "personality" | "backstory">,
   worldKnowledge: readonly string[] = [],
-): string {
+): string | undefined {
   const configured = normalizeConfiguredLanguage(character.replyLanguage || "");
   if (configured) return configured;
   const profileText = [character.personality, character.backstory, ...worldKnowledge].filter(Boolean).join("\n");
-  return findExplicitLanguage(profileText) || findNationalityLanguage(profileText) || "Simplified Chinese";
+  return findExplicitLanguage(profileText) || findNationalityLanguage(profileText);
 }
 
-export function formatFinalReplyLanguageInstruction(language: string): string {
+export function formatFinalReplyLanguageInstruction(language?: string): string {
+  if (!language) {
+    return `[FINAL OUTPUT LANGUAGE — HIGHEST PRIORITY]
+Infer the character's natural reply language from the complete character profile, explicit speech-language settings, nationality, background, and supplied World Book metadata.
+Do not default to Simplified Chinese merely because the user, UI, task instructions, or conversation history are Chinese.
+If the profile implies a non-Chinese native language, write every character-authored chat bubble, voice transcript, Moment post, and Moment comment in that language only.
+Only when the complete character material truly contains no language or nationality clue may you use Simplified Chinese.
+Do not append a translation or bilingual duplicate unless the user explicitly asks for translation in the current message.`;
+  }
   return `[FINAL OUTPUT LANGUAGE — HIGHEST PRIORITY]
 The character's visible reply language for this turn is: ${language}.
 Write every character-authored chat bubble, voice transcript, Moment post, and Moment comment in ${language} only.

@@ -1,9 +1,10 @@
 import { strict as assert } from "node:assert";
 import { PromptComposer } from "../src/domain/prompt/PromptComposer";
 import { clearPromptDebugSnapshots, listPromptDebugSnapshots } from "../src/domain/prompt/promptDebugRegistry";
+import { resolveCharacterReplyLanguage } from "../src/domain/prompt/characterLanguage";
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../src/domain/prompt/promptTransport";
 import { mapSillyTavernEntry } from "../src/utils/pngParser";
-import { buildWorldBookSystemBlocks } from "../src/utils/worldBook";
+import { buildWorldBookSystemBlocks, getVisibleWorldBookEntries } from "../src/utils/worldBook";
 import type { WorldBookEntry } from "../src/types";
 
 const base: WorldBookEntry = { id: "normal", title: "普通", content: "普通内容", category: "test", characterId: "global", triggerType: "constant", isActive: true, timestamp: 1, position: "before_chat_history", depth: 2 };
@@ -14,6 +15,14 @@ assert.equal(blocks.at_depth.length, 1);
 assert.equal(blocks.formattedAll.includes("普通内容"), true);
 assert.equal(blocks.formattedAll.includes("深度内容"), false);
 assert.equal(blocks.allTriggered.length, 2);
+const dormantLanguage = { ...base, id: "language", title: "角色资料", content: "国籍：日本", triggerType: "keys" as const, keywords: "国籍" };
+assert.equal(buildWorldBookSystemBlocks([dormantLanguage], "character", "早上好", { scenario: "chat", characterId: "character" }).allTriggered.length, 0);
+const visibleLanguageEntries = getVisibleWorldBookEntries([dormantLanguage], "character", { scenario: "chat", characterId: "character" });
+assert.deepEqual(visibleLanguageEntries.map((entry) => entry.id), ["language"], "language metadata remains readable without a chat keyword trigger");
+assert.equal(resolveCharacterReplyLanguage(
+  { personality: "沉稳寡言", backstory: "" },
+  visibleLanguageEntries.map((entry) => `${entry.title}\n${entry.content}`),
+), "Japanese", "a dormant Japanese nationality entry still controls the reply language");
 assert.equal(mapSillyTavernEntry({ uid: 3, comment: "导入", content: "内容", constant: true, position: 4, depth: 3 }, "character").position, "at_depth");
 
 clearPromptDebugSnapshots();

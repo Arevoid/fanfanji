@@ -7,10 +7,12 @@ assert.equal(resolveCharacterReplyLanguage({ ...base, replyLanguage: "", backsto
 assert.equal(resolveCharacterReplyLanguage({ ...base, replyLanguage: "", personality: "说话语言：韩语" }), "Korean", "explicit language in persona is inferred");
 assert.equal(resolveCharacterReplyLanguage({ ...base, replyLanguage: "", personality: "中国人，但回复语言：English" }), "English", "explicit language outranks nationality");
 assert.equal(resolveCharacterReplyLanguage({ ...base, replyLanguage: "" }, ["角色来自法国"]), "French", "active World Book may define nationality");
-assert.equal(resolveCharacterReplyLanguage({ ...base, replyLanguage: "" }), "Simplified Chinese", "Chinese is fallback only");
+assert.equal(resolveCharacterReplyLanguage({ ...base, replyLanguage: "", personality: "常用语言：Polski" }), "Polski", "unlisted explicit languages remain supported");
+assert.equal(resolveCharacterReplyLanguage({ ...base, replyLanguage: "" }), undefined, "unknown profiles stay in automatic inference mode");
 
 const finalInstruction = formatFinalReplyLanguageInstruction("Japanese");
 assert.match(finalInstruction, /Japanese only/);
 assert.match(finalInstruction, /prior Chinese conversation history must never change/);
+assert.match(formatFinalReplyLanguageInstruction(), /Do not default to Simplified Chinese/);
 
 console.log("PASS deterministic character language resolution and final output anchor");

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
-import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
+import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
@@ -2781,7 +2781,13 @@ ${memberWbText}`;
         });
         const memberLanguageInstruction = formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           member,
-          [publicDefinition, groupWbText],
+          [
+            publicDefinition,
+            ...getVisibleWorldBookEntries(worldBookEntries || [], member.id, {
+              scenario: "group",
+              characterId: member.id,
+            }).map((entry) => `${entry.title}\n${entry.content}`),
+          ],
         ));
         const memberSystemInstruction = `${buildGroupChatSystemInstruction({
           userName: settings.name,
@@ -3466,7 +3472,12 @@ ${stickerListStr}
         diagnosticLabel: "direct chat prompt",
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           activeCharacter,
-          wbBlocks.allTriggered.map((entry) => `${entry.title}\n${entry.content}`),
+          getVisibleWorldBookEntries(worldBookEntries || [], activeChatCharId || "", {
+            scenario: "chat",
+            characterId: activeRelationship?.characterId || activeChatCharId || undefined,
+            userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
+            relationId: activeRelationship?.id,
+          }).map((entry) => `${entry.title}\n${entry.content}`),
         )),
       });
 
@@ -4476,7 +4487,12 @@ ${stickerListStr}
         diagnosticLabel: "regenerate prompt",
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           activeCharacter,
-          wbBlocks.allTriggered.map((entry) => `${entry.title}\n${entry.content}`),
+          getVisibleWorldBookEntries(worldBookEntries || [], activeChatCharId || "", {
+            scenario: "chat",
+            characterId: activeRelationship?.characterId || activeChatCharId || undefined,
+            userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
+            relationId: activeRelationship?.id,
+          }).map((entry) => `${entry.title}\n${entry.content}`),
         )),
       });
 
@@ -4881,7 +4897,12 @@ ${stickerListStr}
         instructionsPrompt,
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           friend,
-          wbBlocks.allTriggered.map((entry) => `${entry.title}\n${entry.content}`),
+          getVisibleWorldBookEntries(worldBookEntries || [], friend.id, {
+            scenario: "chat",
+            characterId: relationship.characterId,
+            userIdentityId: relationship.userIdentityId,
+            relationId: relationship.id,
+          }).map((entry) => `${entry.title}\n${entry.content}`),
         )),
       });
 
