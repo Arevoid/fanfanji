@@ -1,3 +1,5 @@
+import { splitIntoWeChatBubbles } from "../../../utils/pngParser";
+
 const RECIPROCAL_SHORT_REPLIES = new Set([
   "早", "早安", "晚安", "拜拜", "再见", "谢谢", "谢谢你", "哈哈", "哈哈哈", "嘿嘿", "嗯", "嗯嗯", "好", "好的", "收到",
 ]);
@@ -42,7 +44,8 @@ export function isDegenerateDirectReply(
   history: readonly ChatHistoryEntry[] = [],
 ): boolean {
   const visibleReplyText = getVisibleEchoCheckText(replyText);
-  if (isLowInformationUserEcho(userText, visibleReplyText)) return true;
+  const visibleBubbles = splitIntoWeChatBubbles(visibleReplyText);
+  if (visibleBubbles.some((bubble) => isLowInformationUserEcho(userText, bubble))) return true;
 
   const reply = normalizeChatEchoText(visibleReplyText);
   if (reply.length !== 1 || RECIPROCAL_SHORT_REPLIES.has(reply)) return false;
@@ -65,4 +68,4 @@ export function removeDegenerateReplyPattern(
 }
 
 export const CHAT_DEGENERATE_RETRY_INSTRUCTION = `[Current-turn degenerate-response correction]
-The previous draft was rejected because it copied the user or repeated a meaningless one-character response from recent history. Generate a fresh reply from the character's own perspective and according to the character profile. The corrected reply must contain a genuine reaction, answer, or conversational move and must not be only one character. Do not mention this correction or the rejected draft.`;
+The previous draft was rejected because it copied the user or repeated a meaningless one-character response from recent history. Generate a fresh reply from the character's own perspective and according to the character profile. Answer the user's latest message directly; do not first repeat, quote, or paraphrase it in a separate bubble. The corrected reply must contain a genuine reaction, answer, or conversational move and must not be only one character. Do not mention this correction or the rejected draft.`;

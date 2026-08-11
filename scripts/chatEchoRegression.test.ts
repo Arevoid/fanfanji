@@ -21,6 +21,16 @@ assert.equal(voicePrompt.endsWith("老公～"), true);
 assert.equal(formatVoiceMessageHistory("[语音]|1|老公～"), "[语音消息，1秒；准确转写，与前后文字属于同一段对话]\n老公～");
 assert.equal(getVisibleEchoCheckText("“老公”\n（学你说话）"), "老公");
 assert.equal(isDegenerateDirectReply(voicePrompt, "“老公”\n（学你说话）"), true, "visible post-cleaning voice echo must be rejected");
+assert.equal(
+  isDegenerateDirectReply("你看过《凡人修仙传》吗？", "你看过《凡人修仙传》吗？\n看"),
+  true,
+  "an echoed first bubble must not be hidden by a later answer bubble",
+);
+assert.equal(
+  isDegenerateDirectReply("你看过《凡人修仙传》吗？", "看过，动画和小说都接触过"),
+  false,
+  "a direct answer must remain valid",
+);
 
 const repeatedSingleCharacterHistory = [
   { role: "user", text: "在吗" },
@@ -54,6 +64,20 @@ const corrected = await requestDirectChatTurn({
 });
 assert.equal(calls, 2);
 assert.equal(corrected.text, "怎么突然这么说，出什么事了？");
+
+let multiBubbleCalls = 0;
+const multiBubbleCorrected = await requestDirectChatTurn({
+  prompt: { ...prompt, message: "你看过《凡人修仙传》吗？", history: [] },
+  settings,
+  requestAi: (async (request: any) => {
+    multiBubbleCalls += 1;
+    if (multiBubbleCalls === 1) return { text: "你看过《凡人修仙传》吗？\n看" };
+    assert.match(request.systemInstruction, /do not first repeat, quote, or paraphrase/i);
+    return { text: "看过，动画和小说都接触过" };
+  }) as any,
+});
+assert.equal(multiBubbleCalls, 2);
+assert.equal(multiBubbleCorrected.text, "看过，动画和小说都接触过");
 
 const precedingConversation = [
   { role: "user", text: "那我们就在门口见" },
