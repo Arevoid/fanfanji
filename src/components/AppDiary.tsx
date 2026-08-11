@@ -626,7 +626,7 @@ export default function AppDiary({
           </>
         )}
       </main>
-      <style>{`.diary-editor-field{border-radius:16px !important}.diary-action{display:flex;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:8px 4px;font-size:13px;line-height:1.2}.diary-action svg{flex-shrink:0}.diary-action:disabled{opacity:.42}.diary-filter-hint{display:none}`}</style>
+      <style>{`.diary-editor-field{border-radius:16px !important}.diary-action{display:flex;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:8px 4px;font-size: calc(13px * var(--app-font-scale, 1));line-height:1.2}.diary-action svg{flex-shrink:0}.diary-action:disabled{opacity:.42}.diary-filter-hint{display:none}`}</style>
     </div>
   );
 }

@@ -5462,7 +5462,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   border: 1px solid rgba(255, 255, 255, 0.6) !important;
                 }
                 .cv-header .header-title-name {
-                  font-size: 11px !important;
+                  font-size: calc(11px * var(--app-font-scale, 1)) !important;
                   font-weight: 800 !important;
                   letter-spacing: 0.08em !important;
                   text-transform: uppercase !important;
@@ -5503,7 +5503,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   border-radius: ${settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS}px !important;
                   color: ${settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                   padding: 11px 16px !important;
-                  font-size: 12px !important;
+                  font-size: calc(12px * var(--app-font-scale, 1)) !important;
                   font-weight: 600 !important;
                   line-height: 1.4 !important;
                   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
@@ -5536,7 +5536,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   border-radius: ${settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS}px !important;
                   color: ${settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                   padding: 11px 16px !important;
-                  font-size: 12px !important;
+                  font-size: calc(12px * var(--app-font-scale, 1)) !important;
                   font-weight: 600 !important;
                   line-height: 1.4 !important;
                   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
@@ -5554,14 +5554,14 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 }
                 .msg-meta-name {
                   color: #3f3f46 !important;
-                  font-size: 9px !important;
+                  font-size: calc(9px * var(--app-font-scale, 1)) !important;
                   font-weight: 800 !important;
                   letter-spacing: 0.08em !important;
                   margin-bottom: 2px !important;
                 }
                 .msg-meta-date, .msg-meta-time {
                   color: #71717a !important;
-                  font-size: 9px !important;
+                  font-size: calc(9px * var(--app-font-scale, 1)) !important;
                   font-weight: 500 !important;
                   letter-spacing: 0.02em !important;
                   display: inline-block !important;
@@ -5627,7 +5627,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   height: 42px !important;
                   backdrop-filter: blur(20px) saturate(190%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  font-size: 11px !important;
+                  font-size: calc(11px * var(--app-font-scale, 1)) !important;
                   font-weight: 700 !important;
                   letter-spacing: 0.04em !important;
                   padding-left: 16px !important;
@@ -5703,8 +5703,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 }
                 #conv-screen.style-liquid-glass .chat-composer__attachment-panel > * > span {
                   color: #334155 !important;
-                  font-size: 10px !important;
-                  line-height: 14px !important;
+                  font-size: calc(10px * var(--app-font-scale, 1)) !important;
+                  line-height: calc(14px * var(--app-font-scale, 1)) !important;
                   white-space: nowrap !important;
                 }
                 .cv-footer .cv-send-reply-icon svg {

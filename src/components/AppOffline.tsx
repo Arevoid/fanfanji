@@ -389,7 +389,7 @@ export default function AppOffline({
   );
   const editingMessage = (Array.isArray(activeStory?.messages) ? activeStory.messages : []).find((message) => message.id === editingMessageId) || null;
   const readingStyle = {
-    "--offline-reading-font-size": `${readingPreferences.fontSize}px`,
+    "--offline-reading-font-size": `calc(${readingPreferences.fontSize}px * var(--app-font-scale, 1))`,
     "--offline-reading-letter-spacing": `${readingPreferences.letterSpacing}em`,
     "--offline-reading-line-height": String(readingPreferences.lineHeight),
     "--offline-reading-paragraph-gap": `${readingPreferences.paragraphSpacing}px`,
@@ -1744,7 +1744,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
   background-color: transparent !important;
 }
 .offline-msg-content {
-  font-size: 15px !important;
+  font-size: calc(15px * var(--app-font-scale, 1)) !important;
   color: #3f3f46 !important;
   line-height: 1.8 !important;
   letter-spacing: 0.05em !important;

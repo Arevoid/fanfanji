@@ -255,11 +255,11 @@ export default function AppNotes({ onClose }: AppNotesProps) {
                 margin: 0 !important;
               }
               .memo-editor-container input {
-                font-size: 16px !important;
+                font-size: calc(16px * var(--app-font-scale, 1)) !important;
                 font-weight: 800 !important;
               }
               .memo-editor-container textarea {
-                font-size: 14px !important;
+                font-size: calc(14px * var(--app-font-scale, 1)) !important;
               }
             `}</style>
             <input

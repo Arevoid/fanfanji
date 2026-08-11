@@ -82,6 +82,7 @@ import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./feat
 import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./features/music/services/musicPlayback";
 import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
+import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
 import { retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
@@ -259,6 +260,11 @@ const DEFAULT_SETTINGS: UserSettings = {
   chatIcons: {},
   customFontName: "",
   customFontData: "",
+  globalFontSource: "default",
+  globalFontName: "",
+  globalFontUrl: "",
+  globalFontAssetId: "",
+  globalFontSize: 16,
   activePreset: "温和灰蓝 (Default)",
   momentsCover: "",
   apiEndpoint: "",
@@ -368,20 +374,18 @@ export default function App() {
     }
     return migratedSettings;
   });
+  useGlobalTypography(settings);
   const settingsRef = useRef<UserSettings>(settings);
-  const settingsChangedByUser = useRef(false);
-  const setSettings = (update: UserSettingsUpdate): void => {
+  const setSettings = (update: UserSettingsUpdate): boolean => {
     const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(settingsRef.current, update));
-    settingsRef.current = nextSettings;
-    settingsChangedByUser.current = true;
-    setSettingsState(nextSettings);
-
     const result = saveSettings(nextSettings);
-    if (result.success) {
-      settingsChangedByUser.current = false;
-    } else {
+    if (!result.success) {
       console.error("Failed to save settings to localStorage:", result.error);
+      return false;
     }
+    settingsRef.current = nextSettings;
+    setSettingsState(nextSettings);
+    return true;
   };
 
   const [messages, setMessages] = useState<Message[]>(() => loadMessages(DEFAULT_MESSAGES).value.filter((message) =>
@@ -1772,17 +1776,6 @@ export default function App() {
   }, [characters]);
 
   useEffect(() => {
-    if (!settingsChangedByUser.current) return;
-
-    const result = saveSettings(settingsRef.current);
-    if (result.success) {
-      settingsChangedByUser.current = false;
-    } else {
-      console.error("Failed to save settings to localStorage:", result.error);
-    }
-  }, [settings]);
-
-  useEffect(() => {
     if (!messagesPersistenceReady.current) {
       messagesPersistenceReady.current = true;
       return;
@@ -2607,7 +2600,7 @@ export default function App() {
           border-style: solid !important;
         }
         body, button, input, textarea, select, div, p, span, h1, h2, h3, h4, h5, h6 {
-          font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif !important;
+          font-family: var(--app-font-family, var(--app-default-font-family)) !important;
         }
 
         /* FIGMA SPECIFICATION OVERRIDES FOR ALL PAGES & COMPONENTS */
@@ -2732,8 +2725,8 @@ export default function App() {
         }
         .phone-screen-container [data-settings-shell] .settings-section-header {
           color: var(--text-tertiary);
-          font-size: 14px;
-          line-height: 20px;
+          font-size: calc(14px * var(--app-font-scale, 1));
+          line-height: calc(20px * var(--app-font-scale, 1));
           padding-inline: 4px;
         }
         .phone-screen-container [data-settings-shell] [data-settings-beauty] [class~="rounded-[24px]"] {
@@ -2789,9 +2782,9 @@ export default function App() {
           align-items: center;
           justify-content: center;
           padding: 0 16px;
-          font-size: 14px;
+          font-size: calc(14px * var(--app-font-scale, 1));
           font-weight: 600;
-          line-height: 20px;
+          line-height: calc(20px * var(--app-font-scale, 1));
           transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
         }
         .phone-screen-container .settings-wide-action-primary {
@@ -2852,7 +2845,7 @@ export default function App() {
         .phone-screen-container [class*="text-xs"][class*="font-extrabold"][class*="text-stone-"],
         .phone-screen-container [class*="text-xs"][class*="font-semibold"][class*="text-slate-"],
         .phone-screen-container [class*="text-xs"][class*="font-bold"][class*="text-stone-"] {
-          font-size: 11px !important;
+          font-size: calc(11px * var(--app-font-scale, 1)) !important;
           color: var(--text-secondary) !important;
           font-weight: 700 !important;
           letter-spacing: 0.02em !important;
@@ -2873,7 +2866,7 @@ export default function App() {
         .phone-screen-container div[class*="text-stone-400"],
         .phone-screen-container div[class*="text-slate-400"] {
           color: var(--text-tertiary) !important;
-          font-size: 10px !important;
+          font-size: calc(10px * var(--app-font-scale, 1)) !important;
         }
 
         /* 7. Button Elements Global Harmonization */
