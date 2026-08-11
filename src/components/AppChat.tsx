@@ -509,6 +509,21 @@ const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；�
   --chat-send-hover-bg: var(--button-primary-hover-bg);
   --chat-send-hover-text: var(--button-primary-text);
   --chat-send-hover-border: var(--button-primary-hover-bg);
+  /* 顶部导航按钮 */
+  --chat-header-control-bg: transparent;
+  --chat-header-control-text: var(--chat-text);
+  --chat-header-control-border: transparent;
+  --chat-header-control-radius: 0px;
+  --chat-header-control-shadow: none;
+  /* 展开工具栏 */
+  --chat-attachment-panel-bg: var(--surface-muted);
+  --chat-attachment-panel-border: var(--divider);
+  --chat-attachment-panel-radius: 0px;
+  --chat-attachment-icon-bg: var(--surface);
+  --chat-attachment-icon-text: var(--text-primary);
+  --chat-attachment-icon-border: var(--border);
+  --chat-attachment-icon-radius: var(--radius-xl);
+  --chat-attachment-label-text: var(--text-secondary);
 }
 
 /* ==================== 页面与壁纸 ==================== */
@@ -530,6 +545,18 @@ const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；�
 .user-avatar,
 .ai-avatar { border-radius: 50%; }
 .character-status { color: var(--accent); }
+
+/* ==================== 顶部导航按钮 ==================== */
+.chat-header__back-button,
+.chat-header__more-button {
+  background: var(--chat-header-control-bg);
+  color: var(--chat-header-control-text);
+  border: 1px solid var(--chat-header-control-border);
+  border-radius: var(--chat-header-control-radius);
+  box-shadow: var(--chat-header-control-shadow);
+}
+.cv-back-icon,
+.cv-menu-icon { color: currentColor; }
 
 /* ==================== 消息区域 ==================== */
 .cv-messages-list { background: var(--chat-message-list-bg); color: var(--chat-text); }
@@ -636,6 +663,21 @@ const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；�
 .message-quote__header,
 .message-quote__content,
 .message-quote__reply-body { color: inherit; }
+
+/* ==================== 展开工具栏 ==================== */
+.chat-composer__attachment-panel {
+  background: var(--chat-attachment-panel-bg);
+  border-color: var(--chat-attachment-panel-border);
+  border-radius: var(--chat-attachment-panel-radius);
+}
+.chat-attachment-item { color: var(--chat-text); }
+.chat-attachment-icon {
+  background: var(--chat-attachment-icon-bg);
+  color: var(--chat-attachment-icon-text);
+  border-color: var(--chat-attachment-icon-border);
+  border-radius: var(--chat-attachment-icon-radius);
+}
+.chat-attachment-label { color: var(--chat-attachment-label-text); }
 
 /* ==================== 底部输入栏 ==================== */
 .cv-footer,
@@ -8173,11 +8215,11 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   : "bg-slate-50 border-t border-slate-100"
               }`}>
                 {/* 1. 相册 (Album) */}
-                <label className="flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                <label className="chat-attachment-item chat-attachment-item--album flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("image")} className="w-4 h-4"><ImageIcon className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">相册</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">相册</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -8202,9 +8244,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   />
                 </label>
 
-                <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="flex-1 flex flex-col items-center justify-center group min-w-10" title="发送文字图">
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><Camera className="w-4 h-4 text-slate-700" /></div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">文字图</span>
+                <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="chat-attachment-item chat-attachment-item--text-image flex-1 flex flex-col items-center justify-center group min-w-10" title="发送文字图">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><Camera className="w-4 h-4 text-slate-700" /></div>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">文字图</span>
                 </button>
 
                 {/* 2. 红包 (Red Packet) */}
@@ -8216,12 +8258,12 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                     setActiveAttachModal("redpacket");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--red-packet flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("redPacket")} className="w-4 h-4"><Gift className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
                 </button>
 
                 {/* 3. 语音 (Voice) */}
@@ -8232,12 +8274,12 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                     setActiveAttachModal("voice");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--voice flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("voice")} className="w-4 h-4"><Mic className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
                 </button>
 
                 {/* 5. 电话 (Phone) */}
@@ -8246,12 +8288,12 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   onClick={() => {
                     beginVoiceCall(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--call flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("call")} className="w-4 h-4"><Phone className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
                 </button>
 
                 {/* 7. 位置 (Location) */}
@@ -8261,12 +8303,12 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                     setActiveAttachModal("location");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--location flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("location")} className="w-4 h-4"><MapPin className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
                 </button>
 
                 {/* 8. 表情 (Emoji) */}
@@ -8276,12 +8318,12 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                     setShowStickerSelector(true);
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--sticker flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("sticker")} className="w-4 h-4"><Smile className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
                 </button>
               </AttachmentMenu>
             )}
