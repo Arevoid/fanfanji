@@ -35,6 +35,9 @@ for (const item of ["album", "text-image", "red-packet", "voice", "call", "locat
 }
 assert.match(chatSource, /--chat-header-control-bg:/);
 assert.match(chatSource, /--chat-attachment-panel-bg:/);
+assert.doesNotMatch(chatSource, /received-transfer-card/);
+assert.match(chatSource, /默认保持注释，避免在尚未配置图片 URL 时隐藏功能图标/);
+assert.match(chatSource, /\/\*\s*\n\.cv-plus-icon svg,/);
 
 // The visible placeholder and both clipboard paths must use the same current template.
 assert.match(chatSource, /placeholder=\{COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE\}/);

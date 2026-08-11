@@ -283,8 +283,7 @@ const CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面：设置页�
 .chat-bubble-self,
 .chat-bubble-other,
 .voice-message-bar,
-.transfer-card,
-.received-transfer-card {
+.transfer-card {
   border: var(--chat-bubble-border-width) var(--chat-bubble-border-style) var(--chat-bubble-border);
   border-radius: 14px;
   box-shadow: none;
@@ -444,7 +443,8 @@ const CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面：设置页�
 .chat-composer__attachment-panel { color: var(--chat-composer-text); }
 
 /* ==================== 自定义图标 ==================== */
-/* 隐藏默认 SVG 后填入图片 URL；url() 内不要留多余空格。 */
+/* 默认保持注释。确认图片 URL 有效后，再取消下面整段注释。 */
+/*
 .cv-back-icon svg { display: none; }
 .cv-back-icon { background: url("返回按钮图片URL") center / contain no-repeat; }
 .cv-menu-icon svg { display: none; }
@@ -455,6 +455,7 @@ const CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面：设置页�
 .cv-send-only-icon { background: url("仅发送按钮图片URL") center / contain no-repeat; }
 .cv-send-reply-icon svg { display: none; }
 .cv-send-reply-icon { background: url("发送回复按钮图片URL") center / contain no-repeat; }
+*/
 `;
 
 const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置页和其他应用不会应用本样式。 */
@@ -590,10 +591,8 @@ const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；�
 .transfer-card { background: var(--chat-user-bg); color: var(--chat-user-text); }
 .voice-message-bar.chat-bubble-self *,
 .transfer-card * { color: var(--chat-user-text); }
-.voice-message-bar.chat-bubble-other,
-.received-transfer-card { background: var(--chat-ai-bg); color: var(--chat-ai-text); }
-.voice-message-bar.chat-bubble-other *,
-.received-transfer-card * { color: var(--chat-ai-text); }
+.voice-message-bar.chat-bubble-other { background: var(--chat-ai-bg); color: var(--chat-ai-text); }
+.voice-message-bar.chat-bubble-other * { color: var(--chat-ai-text); }
 
 /* ==================== 稳定消息类型接口 ==================== */
 /* 普通文字：高度由内容决定。 */
@@ -728,13 +727,16 @@ const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；�
 .chat-composer__button:disabled { background: var(--button-disabled-bg); color: var(--button-disabled-text); opacity: 0.4; }
 
 /* ==================== 可选图片按钮 ==================== */
-/* 返回按钮和更多按钮默认已是透明底板，无需配置。 */
+/* 默认保持注释，避免在尚未配置图片 URL 时隐藏功能图标。
+   确认三个 URL 均有效后，再取消下面整段注释。 */
+/*
 .cv-plus-icon svg,
 .cv-send-only-icon svg,
 .cv-send-reply-icon svg { display: none; }
 .cv-plus-icon { background: url("加号按钮图片URL") center / contain no-repeat; }
 .cv-send-only-icon { background: url("仅发送按钮图片URL") center / contain no-repeat; }
 .cv-send-reply-icon { background: url("发送回复按钮图片URL") center / contain no-repeat; }
+*/
 `;
 
 /* The legacy template remains referenced only to keep old persisted code compatible. */
@@ -5996,7 +5998,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   border: ${settings.bubbleBorderWidth !== undefined ? settings.bubbleBorderWidth : 1}px solid ${settings.selfBubbleBorderColor || '#27272a'} !important;
                 }
                 #conv-screen .chat-bubble-other,
-                #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
                   border: ${settings.bubbleBorderWidth !== undefined ? settings.bubbleBorderWidth : 1}px solid ${settings.otherBubbleBorderColor || '#e4e4e7'} !important;
                 }
@@ -6005,7 +6006,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self,
                 #conv-screen .chat-bubble-other,
-                #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
                   border: none !important;
                 }
@@ -6025,7 +6025,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
               ` : ""}
               ${!isLiquidGlass && !hasUserCustomChatCss && settings.otherBubbleRadius !== undefined ? `
                 #conv-screen .chat-bubble-other,
-                #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
                   border-radius: ${settings.otherBubbleRadius}px !important;
                 }
@@ -6033,7 +6032,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
               ${!isLiquidGlass && settings.otherBubbleBg ? `
                 #conv-screen .chat-bubble-other,
-                #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
                   background-color: ${getBubbleBackgroundStyle(settings.otherBubbleBg, settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100)} !important;
                   background-image: none !important;
@@ -6043,8 +6041,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
               ${!isLiquidGlass && settings.otherBubbleColor ? `
                 #conv-screen .chat-bubble-other,
                 #conv-screen .chat-bubble-other *,
-                #conv-screen .received-transfer-card,
-                #conv-screen .received-transfer-card *,
                 #conv-screen .voice-message-bar.chat-bubble-other,
                 #conv-screen .voice-message-bar.chat-bubble-other * {
                   color: ${settings.otherBubbleColor} !important;
@@ -6321,7 +6317,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 }
 
                 #conv-screen.style-liquid-glass .chat-bubble-other,
-                #conv-screen.style-liquid-glass .received-transfer-card,
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other,
                 .phone-screen-container .style-liquid-glass .chat-bubble-other,
                 .style-liquid-glass .chat-bubble-other {
@@ -6348,7 +6343,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
                 }
                 #conv-screen.style-liquid-glass .chat-bubble-other *,
-                #conv-screen.style-liquid-glass .received-transfer-card *,
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other *,
                 .phone-screen-container .style-liquid-glass .chat-bubble-other *,
                 .style-liquid-glass .chat-bubble-other * {
