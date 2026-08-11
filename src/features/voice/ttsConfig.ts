@@ -21,6 +21,14 @@ export function getTtsProvider(settings: Pick<UserSettings, "ttsProvider">): Tts
   return settings.ttsProvider === "mossland" ? "mossland" : "minimax";
 }
 
+export function canPlayTtsMessage(input: {
+  isOfflineModeActive: boolean;
+  isVoiceMessage: boolean;
+  isQueuedCallSpeech: boolean;
+}): boolean {
+  return input.isOfflineModeActive || input.isVoiceMessage || input.isQueuedCallSpeech;
+}
+
 export function resolveTtsCharacter(
   characters: readonly Character[],
   characterId?: string,

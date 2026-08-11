@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../src/features/chat/services/messageFactory";
-import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
+import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
 
 const clean = (text: string) => cleanAiReplyText(text, false);
 
@@ -49,5 +49,25 @@ assert.equal(isTransferMarkup("[微信转账]|1|x"), true);
 assert.deepEqual(parseCallRecord("[通话记录]|语音通话|00:02|%5B%5D"), { callType: "语音通话", status: "completed", direction: "outgoing", duration: "00:02", transcript: [] });
 const cancelledCall = createCallRecordMarkup({ callType: "语音通话", status: "cancelled", direction: "incoming", duration: "00:00", transcript: [] });
 assert.deepEqual(parseCallRecord(cancelledCall), { callType: "语音通话", status: "cancelled", direction: "incoming", duration: "00:00", transcript: [] });
+assert.equal(formatCallRecordHistory(cancelledCall, { userName: "小林", characterName: "范千" }), "[语音通话，范千发起，已取消]");
+const completedCall = createCallRecordMarkup({
+  callType: "语音通话",
+  status: "completed",
+  direction: "outgoing",
+  duration: "02:43",
+  transcript: [
+    { id: "call-u1", sender: "user", content: "小狗过来让我摸摸头", timestamp: 1 },
+    { id: "call-c1", sender: "character", content: "我这儿还有事", timestamp: 2 },
+  ],
+});
+assert.equal(
+  formatCallRecordHistory(completedCall, { userName: "小林", characterName: "范千" }),
+  "[已完成语音通话，小林发起，时长 02:43。这是与后续消息连续的真实通话记录]\n小林：小狗过来让我摸摸头\n范千：我这儿还有事",
+);
+assert.equal(
+  formatCallRecordHistory(completedCall, { userName: "小林", characterName: "范千", includeTranscript: false }),
+  "[已完成语音通话，小林发起，时长 02:43。这是与后续消息连续的真实通话记录]",
+);
+assert.equal(formatCallRecordHistory("普通文字"), null);
 
 console.log("Chat message services: status-aware call records and fixed acceptance checks passed");

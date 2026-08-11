@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildCharacterTtsOptions, getTtsProvider, normalizeMosslandApiEndpoint, resolveTtsCharacter } from "../src/features/voice/ttsConfig";
+import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, normalizeMosslandApiEndpoint, resolveTtsCharacter } from "../src/features/voice/ttsConfig";
 import { fetchSingleTtsSegment } from "../src/utils/minimaxTts";
 
 const mosslandSettings: any = {
@@ -12,6 +12,8 @@ assert.equal(getTtsProvider({}), "minimax", "legacy settings must remain on Mini
 assert.equal(normalizeMosslandApiEndpoint("https://mossland.mosi.cn"), "https://api.mosi.cn/v1/audio/speech");
 assert.equal(normalizeMosslandApiEndpoint("https://mossland.studio/"), "https://api.mosi.cn/v1/audio/speech");
 assert.equal(normalizeMosslandApiEndpoint("https://proxy.example/custom/speech"), "https://proxy.example/custom/speech");
+assert.equal(canPlayTtsMessage({ isOfflineModeActive: false, isVoiceMessage: false, isQueuedCallSpeech: true }), true, "plain call subtitles must reach TTS");
+assert.equal(canPlayTtsMessage({ isOfflineModeActive: false, isVoiceMessage: false, isQueuedCallSpeech: false }), false, "plain online text stays blocked");
 const canonicalCharacter: any = { id: "profile", name: "角色", mosslandVoiceId: "canonical-voice" };
 const contactCharacter: any = { id: "contact", name: "联系人", isContactInstance: true, profileSourceId: "profile" };
 assert.equal(

@@ -125,3 +125,33 @@ export function parseCallRecord(content: string): VoiceCallRecord {
     return { callType, status, direction, duration, transcript: [] };
   }
 }
+
+export function formatCallRecordHistory(
+  content: string,
+  options: { userName?: string; characterName?: string; includeTranscript?: boolean } = {},
+): string | null {
+  if (!isCallRecordMarkup(content)) return null;
+
+  const call = parseCallRecord(content);
+  const userName = options.userName?.trim() || "用户";
+  const characterName = options.characterName?.trim() || "角色";
+  const direction = call.direction === "incoming" ? `${characterName}发起` : `${userName}发起`;
+
+  if (call.status !== "completed") {
+    const result = call.status === "rejected" ? "已拒绝" : "已取消";
+    return `[${call.callType}，${direction}，${result}]`;
+  }
+
+  const header = `[已完成${call.callType}，${direction}，时长 ${call.duration}。这是与后续消息连续的真实通话记录]`;
+  if (options.includeTranscript === false) return header;
+
+  const transcript = call.transcript
+    .map((item) => {
+      const text = getCallTranscriptText(item.content || "").trim();
+      if (!text) return "";
+      return `${item.sender === "user" ? userName : characterName}：${text}`;
+    })
+    .filter(Boolean);
+
+  return transcript.length > 0 ? `${header}\n${transcript.join("\n")}` : header;
+}

@@ -5,7 +5,7 @@ import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { compressImage } from "../utils/pngParser";
-import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, formatCallRecordHistory, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDistribution";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
@@ -165,7 +165,7 @@ import {
 } from "lucide-react";
 
 import { getSpeechForText } from "../utils/minimaxTts";
-import { buildCharacterTtsOptions, getTtsProvider, resolveTtsCharacter } from "../features/voice/ttsConfig";
+import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, resolveTtsCharacter } from "../features/voice/ttsConfig";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -892,9 +892,16 @@ export default function AppChat({
 
   // TTS Trigger Speech Function
   const triggerMessageSpeech = async (msg: Message, isQueuedCallSpeech = false) => {
+    let queuedCallSpeechFinished = false;
+    const finishQueuedCallSpeechOnce = () => {
+      if (!isQueuedCallSpeech || queuedCallSpeechFinished) return;
+      queuedCallSpeechFinished = true;
+      finishQueuedCallSpeech();
+    };
+
     // Guard: Prevent non-voice messages from being synthesized/played in standard chat layout
-    const isVoice = msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage);
-    if (!isOfflineModeActive && !isVoice) {
+    const isVoice = Boolean(msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage));
+    if (!canPlayTtsMessage({ isOfflineModeActive, isVoiceMessage: isVoice, isQueuedCallSpeech })) {
       console.warn("Speech synthesis blocked: Message is not a voice message in chat layout");
       return;
     }
@@ -955,13 +962,7 @@ export default function AppChat({
     let ttsProviderName = "MiniMax";
 
     try {
-      let userSettings: any = {};
-      try {
-        const saved = localStorage.getItem("phone_settings");
-        if (saved) userSettings = JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
+      const userSettings = settings;
       ttsProviderName = getTtsProvider(userSettings) === "mossland" ? "Mossland" : "MiniMax";
 
       const msgChar = resolveTtsCharacter(characters, msg.characterId, msg.senderId);
@@ -980,7 +981,7 @@ export default function AppChat({
       if (!cleanText) {
         setPlayingMessageId(null);
         setAudioLoadingMessageId(null);
-        if (isQueuedCallSpeech) finishQueuedCallSpeech();
+        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
         else playNextMessageInQueue(msg.id);
         return;
       }
@@ -993,7 +994,7 @@ export default function AppChat({
       setAudioLoadingMessageId(null);
 
       audio.onended = () => {
-        if (isQueuedCallSpeech) finishQueuedCallSpeech();
+        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
         else playNextMessageInQueue(msg.id);
       };
 
@@ -1001,15 +1002,15 @@ export default function AppChat({
         console.warn("Audio playback error:", e);
         setPlayingMessageId(null);
         setAudioLoadingMessageId(null);
-        if (isQueuedCallSpeech) finishQueuedCallSpeech();
+        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
       };
 
-      audio.play();
+      await audio.play();
     } catch (err: any) {
       console.warn("TTS generation failed:", err);
       setPlayingMessageId(null);
       setAudioLoadingMessageId(null);
-      if (isQueuedCallSpeech) finishQueuedCallSpeech();
+      if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
       const detail = err instanceof Error ? err.message.replace(/\s+/g, " ").trim().slice(0, 120) : "";
       showToast(detail || `语音合成失败，请确认 ${ttsProviderName} 设置正确！`);
     }
@@ -1117,7 +1118,7 @@ export default function AppChat({
         timestamp: msg.timestamp,
       }]);
 
-      if (msg.sender === "character" && subtitleContent) {
+      if (msg.sender === "character" && subtitleContent && settings.enableMiniMaxTts) {
         // TTS remains automatic during calls, but the call UI and saved transcript
         // always contain plain subtitles rather than voice-message markup.
         enqueueCallSpeech({ ...msg, content: subtitleContent });
@@ -3059,7 +3060,10 @@ ${memberWbText}`;
         if (textImageDescription) {
           contentText = `[文字图：${textImageDescription}]`;
         } else {
-          contentText = formatVoiceMessageHistory(contentText) || contentText;
+          contentText = formatCallRecordHistory(contentText, {
+            userName: settings.name,
+            characterName: activeCharacter.name,
+          }) || formatVoiceMessageHistory(contentText) || contentText;
         }
         return {
           role: m.sender === "user" ? "user" : "model",
@@ -3090,7 +3094,14 @@ ${memberWbText}`;
           const fullTimeStr = `${y}-${mo}-${d} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
           const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
           let contentSnippet = m.content;
-          if (contentSnippet.startsWith("[语音]|")) {
+          const callHistory = formatCallRecordHistory(contentSnippet, {
+            userName: settings.name,
+            characterName: activeCharacter.name,
+            includeTranscript: false,
+          });
+          if (callHistory) {
+            contentSnippet = callHistory;
+          } else if (contentSnippet.startsWith("[语音]|")) {
             const parts = contentSnippet.split("|");
             const secs = parts[1] || "5";
             const voiceText = parts.slice(2).join("|") || "";
