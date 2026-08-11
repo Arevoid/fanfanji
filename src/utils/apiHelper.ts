@@ -689,12 +689,3 @@ ${params.text}
         : fallbackErr.message || "直连翻译失败");
   }
 }
-
-// Estimates the prompt token size in client-side real-time preview
-export function estimateTokenCount(text: string): number {
-  if (!text) return 0;
-  // Estimate: Chinese character is ~1.5 to 2 tokens. English word is ~1.3 tokens.
-  const chineseChars = text.match(/[\u4e00-\u9fa5]/g)?.length || 0;
-  const remaining = text.length - chineseChars;
-  return Math.round(chineseChars * 1.5 + remaining * 0.4);
-}

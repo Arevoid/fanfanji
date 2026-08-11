@@ -442,8 +442,6 @@ export interface ForumMutationEvent {
   occurredAt: number;
 }
 
-export type ForumRootTab = "home" | "mine";
-
 export interface ForumUserProfile {
   ownerIdentityId: string;
   displayName: string;

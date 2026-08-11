@@ -1,20 +1,6 @@
 import { audioDb } from "./audioDb";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./fetchWithTimeout";
 
-export const MINIMAX_DEFAULT_VOICES = [
-  { id: "female-shaonv", name: "甜美少女 (女)", gender: "female" },
-  { id: "female-qn-jiaochen", name: "娇嗔可人 (女)", gender: "female" },
-  { id: "female-qn-yujie", name: "高冷御姐 (女)", gender: "female" },
-  { id: "female-qn-shuangkuai", name: "爽快大姐 (女)", gender: "female" },
-  { id: "female-qn-ruomei", name: "柔美温婉 (女)", gender: "female" },
-  { id: "male-qn-qingse", name: "青涩青年 (男)", gender: "male" },
-  { id: "male-qn-shaonian", name: "阳光少年 (男)", gender: "male" },
-  { id: "male-qn-chaoku", name: "潮酷青年 (男)", gender: "male" },
-  { id: "male-qn-badao", name: "霸道总裁 (男)", gender: "male" },
-  { id: "presenter_female", name: "播音女声 (女)", gender: "female" },
-  { id: "presenter_male", name: "播音男声 (男)", gender: "male" },
-];
-
 /**
  * Filter out dialogue actions in brackets / parentheticals or asterisks.
  * e.g., (微笑)你好 -> 你好, *摸头*好久不见 -> 好久不见, 【开心】今天 -> 今天
@@ -97,9 +83,6 @@ export interface TtsOptions {
   proxyUrl?: string;
   forceDirectTts?: boolean;
 }
-
-/** @deprecated Use TtsOptions. Kept for source compatibility. */
-export type MiniMaxTtsOptions = TtsOptions;
 
 /**
  * Perform a single segment TTS synthesis
@@ -324,35 +307,4 @@ export async function getSpeechForText(
   }
 
   return mergedBlob;
-}
-
-/**
- * Request audio playback permission on mobile browsers
- */
-export function initAudioContextPermission(): Promise<boolean> {
-  return new Promise((resolve) => {
-    // Standard AudioContext unlocking sequence
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) {
-      resolve(false);
-      return;
-    }
-    const ctx = new AudioContextClass();
-    if (ctx.state === "suspended") {
-      const unlock = () => {
-        ctx.resume().then(() => {
-          cleanUp();
-          resolve(true);
-        });
-      };
-      const cleanUp = () => {
-        document.removeEventListener("click", unlock);
-        document.removeEventListener("touchstart", unlock);
-      };
-      document.addEventListener("click", unlock);
-      document.addEventListener("touchstart", unlock);
-    } else {
-      resolve(true);
-    }
-  });
 }
