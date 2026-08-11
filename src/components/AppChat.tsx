@@ -3151,15 +3151,23 @@ ${memberWbText}`;
     lastUserMsg: Message | null,
     recentMsgs: Message[],
     bubbleIndex: number,
-    bubbleText: string
+    bubbleText: string,
+    replyContext: ChatRuntimeContext,
   ): boolean => {
     if (!settings.enableMiniMaxTts) return false;
+    if (!replyContext.characterId || !replyContext.relationId || !replyContext.conversationId || replyContext.isGroup) return false;
     return shouldAutomaticallyConvertTextToVoice({
       character,
       lastUserMessage: lastUserMsg,
       recentMessages: recentMsgs,
       bubbleIndex,
       bubbleText,
+      scope: {
+        characterId: replyContext.characterId,
+        relationId: replyContext.relationId,
+        conversationId: replyContext.conversationId,
+        userIdentityId: replyContext.userIdentityId,
+      },
     });
   };
 
@@ -3675,7 +3683,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             createId: (idx) => `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
             currentTime: () => Date.now(),
             transformBubble: (bubbleText, idx) => {
-              const isVoice = activeAttachModal !== "calling" && shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
+              const isVoice = activeAttachModal !== "calling" && shouldConvertBubbleToVoice(turnCharacter, userMsg, messages, idx, bubbleText, replyContext);
               if (!isVoice) return bubbleText;
               const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
               return `[语音]|${secs}|${bubbleText}`;
@@ -5013,6 +5021,12 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       });
 
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
+      const proactiveReplyContext = createChatRuntimeContext({
+        characterId: relationship.characterId,
+        relationId: relationship.id,
+        conversationId: relationship.conversationId || getConversationId(relationship.id),
+        userIdentityId: relationship.userIdentityId,
+      });
       const proactiveResult = await generateProactiveChatTurn({
         prompt: {
           scenario: "proactive-message",
@@ -5033,7 +5047,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         currentTime: (idx) => backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
         cognitiveContext,
         transformBubble: (bubbleText, idx) => {
-          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText);
+          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText, proactiveReplyContext);
           if (!isVoice) return bubbleText;
           const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
           return `[语音]|${secs}|${bubbleText}`;
