@@ -1,5 +1,6 @@
 import type { Character, Message } from "../../types";
 import type { CharacterRelationship } from "../relationship/characterRelationship";
+import { serializeMessageContentForPrompt } from "../../features/chat/prompts/messagePromptSerializer";
 
 export interface InnerVoicePromptInput {
   character: Character;
@@ -13,7 +14,7 @@ export interface InnerVoicePromptInput {
 }
 
 const formatMessage = (message: Message, characterName: string, userName: string) =>
-  `${message.sender === "user" ? userName : characterName}: ${message.content}`;
+  `${message.sender === "user" ? userName : characterName}: ${serializeMessageContentForPrompt(message, { mode: "history", userName, characterName })}`;
 
 /** A deliberately separate prompt: it must not alter the normal chat prompt pipeline. */
 export function buildInnerVoicePrompt({ character, relationship, relationId, triggerMessage, recentMessages, userName, offlineContinuityContext }: InnerVoicePromptInput): string {

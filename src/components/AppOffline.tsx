@@ -31,6 +31,7 @@ import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { collectOfflineWorldBookContext, formatOfflineWorldBookEntries } from "../features/offline/prompts/offlineWorldBookContext";
 import { applyOfflineStoryRegeneration, prepareOfflineStoryRegeneration } from "../domain/offlineStory/offlineStoryRegeneration";
 import { createOfflineGroupParticipantMemories } from "../features/offline/services/offlineGroupMemorySync";
+import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -970,19 +971,14 @@ export default function AppOffline({
         ? updatedStory.messages.slice(0, -1)
         : updatedStory.messages;
 
-      const historyContext = msgsForHistory.map(m => {
-        if (m.sender === "user") {
-          return {
-            role: "user",
-            text: m.isNarration ? `(客观旁白) ${m.content}` : `我: “${m.content}”`
-          };
-        } else {
-          return {
-            role: "model",
-            text: m.content
-          };
-        }
-      });
+      const historyContext = msgsForHistory.flatMap((message) => serializeMessageToPromptTurns(message, {
+        mode: "history",
+        userName: settings.name,
+        characterName: selectedChar.name,
+      }).map((turn) => ({
+        role: turn.role,
+        text: message.isNarration ? `(客观旁白) ${turn.text}` : turn.role === "user" ? `我: “${turn.text}”` : turn.text,
+      })));
 
       // We can collect worldbook blocks for all story characters
       const storyCharsList = updatedStory.characterIds && updatedStory.characterIds.length > 0 
@@ -993,7 +989,11 @@ export default function AppOffline({
 
       const worldBookScanText = [
         text || "",
-        ...updatedStory.messages.slice(-10).map((message) => message.content),
+        ...updatedStory.messages.slice(-10).map((message) => serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: settings.name,
+          characterName: selectedChar.name,
+        })),
       ].filter(Boolean).join("\n");
       const scopedRelationship = updatedStory.relationId
         ? relationships.find((relation) => relation.id === updatedStory.relationId)
@@ -1167,7 +1167,8 @@ ${wbPrompts}\n`;
         const lines = importedOnlineMessages.map((message) => {
           const senderCharacter = storyCharsList.find((character) =>
             character.id === message.senderId || character.id === message.characterId);
-          return `- ${message.sender === "user" ? settings.name : (senderCharacter?.remark || senderCharacter?.name || selectedChar?.name || "Character")}: ${message.content}`;
+          const senderName = message.sender === "user" ? settings.name : (senderCharacter?.remark || senderCharacter?.name || selectedChar?.name || "Character");
+          return `- ${senderName}: ${serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: senderName })}`;
         }).join("\n");
         sysPrompt += `\n\n【互通的线上最新对话记忆（Online Chat Context）】：
 以下是各位参与角色最近在微信（线上聊天）中的最新真实对话。这些是你们当下关系的最新现状与真实记忆。请确保线下小说剧本的走向与其认知保持连贯和融合，避免发生剧情上的冲突：

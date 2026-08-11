@@ -5,7 +5,7 @@ import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { compressImage } from "../utils/pngParser";
-import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDistribution";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
@@ -23,9 +23,9 @@ import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromp
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
-import { formatCurrentVoiceMessagePrompt, formatVoiceMessageHistory } from "../features/chat/prompts/voiceMessagePrompt";
-import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
+import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT } from "../features/chat/prompts/directChatTurnPrompt";
+import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
 import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
@@ -2893,22 +2893,26 @@ export default function AppChat({
 
       // Create a readable history for the AI, showing the user's name or character names as senders
       const historyText = slicedMsgs.map((m) => {
-        const textImageDescription = parseTextImageDescription(m.content);
-        const voiceHistory = formatVoiceMessageHistory(m.content);
-        const content = textImageDescription ? `[文字图：${textImageDescription}]` : voiceHistory || m.content;
+        const senderChar = m.sender === "character" ? groupMembers.find(c => c.id === m.senderId) : undefined;
+        const senderName = m.sender === "user"
+          ? settings.name
+          : senderChar ? (senderChar.remark || senderChar.name) : (m.senderId || "成员");
+        const content = serializeMessageContentForPrompt(m, {
+          mode: "history",
+          userName: settings.name,
+          characterName: senderName,
+        });
         if (m.sender === "user") {
           return `${settings.name} (机主): ${content}`;
         } else {
-          const senderChar = groupMembers.find(c => c.id === m.senderId);
-          const senderName = senderChar ? (senderChar.remark || senderChar.name) : (m.senderId || "成员");
           return `${senderName}: ${content}`;
         }
       }).join("\n");
 
       // Scan context for World Book triggers in group chat
       const scanContextParts = [
-        userMsg ? userMsg.content : "",
-        ...slicedMsgs.slice(-10).map(m => m.content)
+        userMsg ? serializeMessageContentForPrompt(userMsg, { mode: "history", userName: settings.name }) : "",
+        ...slicedMsgs.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
@@ -3040,7 +3044,7 @@ ${memberWbText}`;
         if (memberResult.messages.length > 0) {
           sameTurnPublicHistory = [
             sameTurnPublicHistory,
-            ...memberResult.messages.map((message) => `${member.remark || member.name}: ${message.content}`),
+            ...memberResult.messages.map((message) => `${member.remark || member.name}: ${serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: member.remark || member.name })}`),
           ].filter(Boolean).join("\n");
         }
       }
@@ -3249,34 +3253,15 @@ ${memberWbText}`;
       const slicedMsgs = msgsForHistory.slice(-limit);
       const requestTime = new Date();
 
-      const history = slicedMsgs.flatMap((m) => {
-        const callTurns = expandCallRecordHistory(m.content, m.timestamp, {
+      const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
           userName: settings.name,
           characterName: activeCharacter.name,
-        });
-        if (callTurns) {
-          return callTurns.map((turn) => ({
-            role: turn.role,
-            text: turnSettings.enableTimeAwareness
-              ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
-              : turn.text,
-          }));
-        }
-
-        let contentText = m.content;
-        const textImageDescription = parseTextImageDescription(contentText);
-        if (textImageDescription) {
-          contentText = `[文字图：${textImageDescription}]`;
-        } else {
-          contentText = formatVoiceMessageHistory(contentText) || contentText;
-        }
-        return {
-          role: m.sender === "user" ? "user" : "model",
+        }).map((turn) => ({
+          role: turn.role,
           text: turnSettings.enableTimeAwareness
-            ? formatHistoricalMessageForPrompt(contentText, m.timestamp, requestTime)
-            : contentText,
-        };
-      });
+            ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
+            : turn.text,
+        })));
 
       let timeLogString = "";
       if (turnSettings.enableTimeAwareness) {
@@ -3298,22 +3283,13 @@ ${memberWbText}`;
           
           const fullTimeStr = `${y}-${mo}-${d} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
           const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
-          let contentSnippet = m.content;
-          const callHistory = formatCallRecordHistory(contentSnippet, {
+          let contentSnippet = serializeMessageContentForPrompt(m, {
+            mode: "history",
             userName: settings.name,
             characterName: activeCharacter.name,
-            includeTranscript: false,
+            includeCallTranscript: false,
           });
-          if (callHistory) {
-            contentSnippet = callHistory;
-          } else if (contentSnippet.startsWith("[语音]|")) {
-            const parts = contentSnippet.split("|");
-            const secs = parts[1] || "5";
-            const voiceText = parts.slice(2).join("|") || "";
-            contentSnippet = voiceText ? `[语音消息: "${voiceText}" (${secs}秒)]` : `[语音消息: ${secs}秒]`;
-          } else if (contentSnippet.length > 25) {
-            contentSnippet = contentSnippet.slice(0, 25) + "...";
-          }
+          if (contentSnippet.length > 80) contentSnippet = contentSnippet.slice(0, 80) + "...";
           
           timeLogLines.push(`- ${senderName}: "${contentSnippet}" (发送于: ${fullTimeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`);
         });
@@ -3350,9 +3326,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：短期聊天记录已按用户限制截断；需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
 
+      const currentMessageContextText = userMsg
+        ? serializeMessageContentForPrompt(userMsg, { mode: "history", userName: settings.name, characterName: activeCharacter.name })
+        : "";
+
       const callTopicShiftDetected = detectCallTopicShift({
         isConnectedVoiceCall,
-        userText: userMsg?.content || "",
+        userText: currentMessageContextText,
         callTranscript,
       });
       const shouldLoadLongTermMemory = (!isConnectedVoiceCall || callTopicShiftDetected)
@@ -3361,7 +3341,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = shouldLoadLongTermMemory
-        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: userMsg ? userMsg.content : "", existingMemories: memories || [], limit: topK, scenario: "chat" })
+        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, scenario: "chat" })
         : [];
       const truthRetrieval = activeRelationship
         ? retrieveTruthForPrivatePrompt({
@@ -3371,7 +3351,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             userIdentityId: activeRelationship.userIdentityId,
             conversationId: activeRelationship.conversationId,
           },
-          queryText: userMsg?.content || "",
+          queryText: currentMessageContextText,
           limit: topK,
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
@@ -3395,7 +3375,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
         memories: memories || [],
         relationId: activeRelationship?.id,
-        queryText: userMsg?.content,
+        queryText: currentMessageContextText,
       });
       pendingOfflineHandoffForReply = getPendingOfflineHandoff();
       if (pendingOfflineHandoffForReply) {
@@ -3436,7 +3416,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const cognitivePromptBlock = formatChatPromptContext(chatPromptContext);
       const musicContext = activeRelationship && userMsg
         ? buildRelationMusicContext({
-          userText: userMsg.content,
+          userText: currentMessageContextText,
           ownerIdentityId: activeRelationship.userIdentityId,
           relationId: activeRelationship.id,
           tracks: musicTracks,
@@ -3466,8 +3446,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
-        userMsg ? userMsg.content : "",
-        ...currentChatMessages.slice(-10).map(m => m.content)
+        currentMessageContextText,
+        ...currentChatMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
@@ -3597,55 +3577,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       });
 
       // Custom tool/attachment format descriptions for character context
-      let promptMessage = userMsg ? userMsg.content : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
-      if (promptMessage.startsWith("data:image/")) {
-        promptMessage = `[发送图片/照片] 我给你发送了一张照片。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (parseTextImageDescription(promptMessage)) {
-        const description = parseTextImageDescription(promptMessage)!;
-        promptMessage = `[发送文字图] 我发送了一张不含真实图片、仅用文字描述画面的文字图，描述内容是：“${description}”。请把它当作我主动分享的画面描述来回应，不要声称看到了真实照片。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[红包]")) {
-        const parts = promptMessage.split("|");
-        const amount = parts[1] || "8.88";
-        const greeting = parts[2] || "恭喜发财，万事如意";
-        promptMessage = `[发送红包] 我给你发送了一个金额为 ${amount} 元的微信红包，祝福语是：“${greeting}”。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[位置]")) {
-        const parts = promptMessage.split("|");
-        const loc = parts[1] || "位置";
-        promptMessage = `[发送位置] 我给你分享了一个微信位置：[${loc}]。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[音乐]")) {
-        const parts = promptMessage.split("|");
-        const title = parts[1] || "音乐";
-        promptMessage = `[分享音乐] 我给你分享了一首音乐：《${title}》。这是一次线上音乐分享聊天。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}
-禁止为了回应这次分享而补写地点、动作或双方共同场景，也不要新增未提供的现场状态。`;
-      } else if (promptMessage.startsWith("[文件]")) {
-        const parts = promptMessage.split("|");
-        const title = parts[1] || "无标题";
-        const fileContentRaw = parts[2] || "";
-        let decodedContent = "";
-        try {
-          decodedContent = decodeURIComponent(fileContentRaw);
-        } catch (e) {
-          decodedContent = fileContentRaw;
-        }
-        promptMessage = `[分享文件] 我给你分享了一篇备忘录笔记，标题是《${title}》，内容如下：\n"""\n${decodedContent}\n"""\n请针对标题和具体内容回应。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[视频通话]")) {
-        const parts = promptMessage.split("|");
-        const status = parts[1] || "已结束";
-        promptMessage = `[视频通话结束] 刚才我们进行了视频通话（通话状态：${status}）。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[语音通话]")) {
-        const parts = promptMessage.split("|");
-        const status = parts[1] || "已结束";
-        promptMessage = `[语音通话结束] 刚才我们进行了语音通话（通话状态：${status}）。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[语音]|")) {
-        promptMessage = `${formatCurrentVoiceMessagePrompt(promptMessage)}\n${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[表情]|")) {
-        const parts = promptMessage.split("|");
-        const stickerName = parts[1] || "表情";
-        promptMessage = `[发送表情包] 我给你发送了一个表达当下状态或心情的表情包，名称是：“${stickerName}”。
-【重要表情包处理规则】：
-这个表情包只是我正常聊天时随性表达的状态、心情、气场或情绪。你【绝对不一定要】针对这个表情包特意进行点评、中断我们之前正在进行的话题、或者刻意为了回复这个表情而说多余的话（例如不要说“你发了个表情包”、“你表情包真多”这类废话）。
-请你根据我们正在聊天的上下文话题或我们之前的对话脉络【极其自然、顺畅地继续对话】。如果当下适合，你也可以顺应氛围跟着发一个你自己的表情包，或者在文字对话里自然带过，保持微信好友日常聊天和斗图的真实、轻松感。`;
-      }
+      const promptMessage = userMsg
+        ? serializeMessageContentForPrompt(userMsg, {
+          mode: "current",
+          userName: settings.name,
+          characterName: activeCharacter.name,
+        })
+        : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
 
       const data = await requestDirectChatTurn({
         prompt: { scenario: "direct-chat", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
@@ -4366,6 +4304,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const msgsForHistory = previousMessages.filter(m => m.id !== lastUserMsg.id);
       const slicedMsgs = msgsForHistory.slice(-limit);
       const turnSettings = resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter);
+      const currentMessageContextText = serializeMessageContentForPrompt(lastUserMsg, {
+        mode: "history",
+        userName: settings.name,
+        characterName: activeCharacter.name,
+      });
       const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
       const isSameLocalDay = (left: number, right: number) => {
         const leftDate = new Date(left);
@@ -4380,7 +4323,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const isConnectedVoiceCall = activeAttachModal === "calling" && callingStatus === "connected";
       const callTopicShiftDetected = detectCallTopicShift({
         isConnectedVoiceCall,
-        userText: lastUserMsg.content,
+        userText: currentMessageContextText,
         callTranscript,
       });
       const shouldLoadLongTermMemory = (!isConnectedVoiceCall || callTopicShiftDetected)
@@ -4388,31 +4331,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
       // Map history with timestamps for time awareness
       const requestTime = new Date();
-      const history = slicedMsgs.flatMap((m) => {
-        const callTurns = expandCallRecordHistory(m.content, m.timestamp, {
+      const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
           userName: settings.name,
           characterName: activeCharacter.name,
-        });
-        if (callTurns) {
-          return callTurns.map((turn) => ({
-            role: turn.role,
-            text: turnSettings.enableTimeAwareness
-              ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
-              : turn.text,
-          }));
-        }
-
-        const textImageDescription = parseTextImageDescription(m.content);
-        const content = textImageDescription
-          ? `[文字图：${textImageDescription}]`
-          : formatVoiceMessageHistory(m.content) || m.content;
-        return {
-          role: m.sender === "user" ? "user" : "model",
+        }).map((turn) => ({
+          role: turn.role,
           text: turnSettings.enableTimeAwareness
-            ? formatHistoricalMessageForPrompt(content, m.timestamp, requestTime)
-            : content,
-        };
-      });
+            ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
+            : turn.text,
+        })));
 
       let timeLogString = "";
       if (turnSettings.enableTimeAwareness) {
@@ -4425,11 +4352,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             hour12: false
           });
           const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
-          let snippet = formatCallRecordHistory(m.content, {
+          let snippet = serializeMessageContentForPrompt(m, {
+            mode: "history",
             userName: settings.name,
             characterName: activeCharacter.name,
-            includeTranscript: false,
-          }) || formatVoiceMessageHistory(m.content) || m.content;
+            includeCallTranscript: false,
+          });
           if (snippet.length > 80) snippet = snippet.slice(0, 80) + "...";
           return `- ${senderName}: "${snippet}" (发送于: ${timeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`;
         }).join("\n");
@@ -4456,7 +4384,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // Recall memories
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = shouldLoadLongTermMemory
-        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: lastUserMsg.content, existingMemories: memories || [], limit: topK, scenario: "chat" })
+        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, scenario: "chat" })
         : [];
       const truthRetrieval = activeRelationship
         ? retrieveTruthForPrivatePrompt({
@@ -4466,7 +4394,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
             userIdentityId: activeRelationship.userIdentityId,
             conversationId: activeRelationship.conversationId,
           },
-          queryText: lastUserMsg.content,
+          queryText: currentMessageContextText,
           limit: topK,
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
@@ -4487,7 +4415,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
         memories: memories || [],
         relationId: activeRelationship?.id,
-        queryText: lastUserMsg.content,
+        queryText: currentMessageContextText,
       });
       pendingOfflineHandoffForReply = getPendingOfflineHandoff();
       if (pendingOfflineHandoffForReply) {
@@ -4516,7 +4444,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const offlineStoriesContextRegen = getOfflineStoriesContextForOnlineChat();
       const musicContext = activeRelationship
         ? buildRelationMusicContext({
-          userText: lastUserMsg.content,
+          userText: currentMessageContextText,
           ownerIdentityId: activeRelationship.userIdentityId,
           relationId: activeRelationship.id,
           tracks: musicTracks,
@@ -4546,8 +4474,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
-        lastUserMsg ? lastUserMsg.content : "",
-        ...previousMessages.slice(-10).map(m => m.content)
+        currentMessageContextText,
+        ...previousMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
@@ -4670,8 +4598,13 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       });
 
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+      const promptMessage = serializeMessageContentForPrompt(lastUserMsg, {
+        mode: "current",
+        userName: settings.name,
+        characterName: activeCharacter.name,
+      });
       const { data, candidates: replyCandidates } = await generateRegeneratedChatTurn({
-        prompt: { scenario: "regenerate", message: lastUserMsg.content, history, systemInstruction, historyInjections: wbBlocks.at_depth },
+        prompt: { scenario: "regenerate", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
         settings,
         candidateContext: {
           disableBracketActions: turnSettings.disableBracketActions,
@@ -5016,7 +4949,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const charMsgs = messagesRef.current.filter((message) => message.relationId === relationId);
       const recentConversation = analyzeRecentConversation(charMsgs, friend.id);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
-      const scanText = charMsgs.slice(-10).map(m => m.content).join("\n");
+      const scanText = charMsgs.slice(-10).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: friend.name })).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, scanText, {
         scenario: "chat",
         characterId: relationship.characterId,
@@ -5035,7 +4968,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           userIdentityId: relationship.userIdentityId,
           conversationId: relationship.conversationId,
         },
-        queryText: recentConversation.recentMessages.slice(-2).map((message) => message.content).join(" "),
+        queryText: recentConversation.recentMessages.slice(-2).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: friend.name })).join(" "),
         limit: recallSettings?.recallCount || 5,
         claims: loadKnowledgeClaims().value,
         summaries: loadConversationSummaries().value,
@@ -5084,7 +5017,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         prompt: {
           scenario: "proactive-message",
           message: "(你主动给用户发送了一条信息)",
-          history: recentConversation.recentMessages.map((message) => ({ role: message.sender === "user" ? "user" : "model", text: message.content })),
+          history: recentConversation.recentMessages.flatMap((message) => serializeMessageToPromptTurns(message, {
+            mode: "history",
+            userName: settings.name,
+            characterName: friend.name,
+          }).map((turn) => ({ role: turn.role, text: turn.text }))),
           systemInstruction,
           historyInjections: wbBlocks.at_depth,
         },

@@ -1,4 +1,5 @@
 import type { MemoryItem, Message, OfflineStory } from "../../types";
+import { serializeMessageContentForPrompt } from "../../features/chat/prompts/messagePromptSerializer";
 
 export function getOfflineStorySyncMarker(story: OfflineStory): string {
   const syncStart = story.lastSyncedMessageCount ?? (story.archivedAt ? story.messages.length : 0);
@@ -191,9 +192,10 @@ export function getOfflineHandoffSourceMessagesForReturn(story: OfflineStory): M
  */
 export function collectOfflineHandoffContent(story: OfflineStory, characterName = "当前角色"): string {
   const source = getOfflineMemorySourceMessages(story);
-  const sourceText = source.map((message) => message.content).join("\n");
-  const userText = source.filter((message) => message.sender === "user").map((message) => message.content).join("\n");
-  const characterText = source.filter((message) => message.sender === "character").map((message) => message.content).join("\n");
+  const promptText = (message: Message) => serializeMessageContentForPrompt(message, { mode: "history", characterName });
+  const sourceText = source.map(promptText).join("\n");
+  const userText = source.filter((message) => message.sender === "user").map(promptText).join("\n");
+  const characterText = source.filter((message) => message.sender === "character").map(promptText).join("\n");
   const facts: string[] = [];
   const mentionsWaterPipe = /(水管|漏水|修水|修理)/.test(sourceText);
   const userCreditsCharacterForRepair = /(谢谢|感谢).{0,24}(你|您|角色).{0,24}(帮|修).{0,24}(水管|漏水)/.test(userText);
@@ -390,7 +392,11 @@ export function buildPendingOfflineHandoffPromptBlock(input: {
     : [...sourceMessages.slice(0, 15), ...sourceMessages.slice(-25)];
   const transcript = selectedMessages.map((message) => {
     const speaker = message.sender === "user" ? (input.userName || "用户") : input.characterName;
-    const content = message.content.replace(/\s+/gu, " ").trim().slice(0, 800);
+    const content = serializeMessageContentForPrompt(message, {
+      mode: "history",
+      userName: input.userName,
+      characterName: input.characterName,
+    }).replace(/\s+/gu, " ").trim().slice(0, 800);
     return `- ${formatTimelineTime(message.timestamp)}｜${speaker}：${content}`;
   }).join("\n");
   const omitted = sourceMessages.length - selectedMessages.length;

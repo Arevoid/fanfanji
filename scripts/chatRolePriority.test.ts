@@ -89,6 +89,7 @@ assert.match(matchedBlocks.formattedAll, /第三食堂/, "keyword entries must a
 
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const chatPromptBuilderSource = readFileSync(new URL("../src/features/chat/prompts/chatPromptBuilders.ts", import.meta.url), "utf8");
+const messagePromptSerializerSource = readFileSync(new URL("../src/features/chat/prompts/messagePromptSerializer.ts", import.meta.url), "utf8");
 assert.match(chatSource, /projectCharacterPrompt\(activeCharacter, activeRelationship\?\.relationship\)/);
 assert.match(chatPromptBuilderSource, /assembleChatInstructions\(input\.instructions/);
 assert.match(chatSource, /slice\(-10\)/, "World Book activation must scan roughly ten recent messages");
@@ -97,7 +98,7 @@ assert.doesNotMatch(chatSource, /includeAllVisibleEntries: true/, "direct chat m
 assert.doesNotMatch(chatSource, /Do not force warmth/, "base chat prompt must not bias every role toward coldness");
 assert.doesNotMatch(chatSource, /Keep replies concise, warm/, "proactive chat must not force a warm and brief persona");
 assert.doesNotMatch(chatSource, /温暖、有爱的微信回复|假设 you 听到了我用温暖/, "media events must not force warmth or invent voice tone");
-assert.match(chatSource, /MEDIA_EVENT_PERSONA_RESPONSE_RULE/);
+assert.match(messagePromptSerializerSource, /MEDIA_EVENT_PERSONA_RESPONSE_RULE/);
 assert.match(chatSource, /projectCharacterPrompt\(friend, relationship\.relationship\)/, "proactive chat must use the same character projection");
 assert.doesNotMatch(chatSource, /Absolute Supreme Priority|removeLegacyWorldBookPriorityDirective/);
 assert.match(chatSource, /WORLD_BOOK_CONTEXT_PRIORITY/);

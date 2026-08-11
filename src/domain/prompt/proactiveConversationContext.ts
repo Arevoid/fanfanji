@@ -1,4 +1,5 @@
 import type { Message } from "../../types";
+import { serializeMessageContentForPrompt } from "../../features/chat/prompts/messagePromptSerializer";
 
 export interface RecentConversationContext {
   recentMessages: Message[];
@@ -13,6 +14,7 @@ const ENDING_PATTERN = /(晚安|早点休息|睡吧|再见|拜拜|回头聊|下�
 const WAITING_PATTERN = /(等会儿|等一下|明天.*(?:告诉|说|聊)|回来.*(?:告诉|说|聊)|晚点.*(?:说|聊)|待会)/;
 const QUESTION_PATTERN = /[？?]|(怎么|什么|为何|为什么|能不能|可不可以|要不要|好吗|行吗|有没有|几点)/;
 const EMOTION_PATTERN = /(难过|伤心|委屈|生气|担心|害怕|失落|烦|哭|不舒服|难受|吵架)/;
+const promptContent = (message: Message): string => serializeMessageContentForPrompt(message, { mode: "history" });
 
 function isConversationMessage(message: Message, characterId: string): boolean {
   return message.characterId === characterId
@@ -38,9 +40,9 @@ export function analyzeRecentConversation(
   const minutesSinceLastMessage = lastMessage
     ? Math.max(0, Math.floor((now.getTime() - lastMessage.timestamp) / 60000))
     : undefined;
-  const lastContent = lastMessage?.content || "";
-  const recentText = recentMessages.map((message) => message.content).join("\n");
-  const hasRecentEnding = ENDING_PATTERN.test(recentMessages.slice(-2).map((message) => message.content).join("\n"));
+  const lastContent = lastMessage ? promptContent(lastMessage) : "";
+  const recentText = recentMessages.map(promptContent).join("\n");
+  const hasRecentEnding = ENDING_PATTERN.test(recentMessages.slice(-2).map(promptContent).join("\n"));
   const isRecentEnough = minutesSinceLastMessage !== undefined && minutesSinceLastMessage <= 12 * 60;
   const hasWaitingItem = WAITING_PATTERN.test(recentText);
   const hints: string[] = [];
@@ -72,8 +74,8 @@ export function formatProactiveConversationGuidance(context: RecentConversationC
   const decision = context.likelyUnfinished
     ? "最近对话可能未结束：优先自然延续实际存在的问题、约定或情绪；不要重复原句，也不要生硬地说“继续刚才的话题”。"
     : "最近对话已结束、间隔较久或信息不足：可自然问候后按人设开启新话题；不要强行续接旧话题。";
-  const lastUser = context.lastUserMessage ? `用户最后一条：${context.lastUserMessage.content}` : "用户最后一条：无";
-  const lastCharacter = context.lastCharacterMessage ? `角色最后一条：${context.lastCharacterMessage.content}` : "角色最后一条：无";
+  const lastUser = context.lastUserMessage ? `用户最后一条：${promptContent(context.lastUserMessage)}` : "用户最后一条：无";
+  const lastCharacter = context.lastCharacterMessage ? `角色最后一条：${promptContent(context.lastCharacterMessage)}` : "角色最后一条：无";
 
   return `[最近对话状态]\n${decision}\n${lastUser}\n${lastCharacter}\n${context.continuationHints.map((hint) => `- ${hint}`).join("\n")}\n只能依据以上实际历史，不得虚构双方讨论过的内容。`;
 }
