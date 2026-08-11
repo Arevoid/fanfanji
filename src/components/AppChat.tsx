@@ -165,7 +165,7 @@ import {
 } from "lucide-react";
 
 import { getSpeechForText } from "../utils/minimaxTts";
-import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, resolveTtsCharacter } from "../features/voice/ttsConfig";
+import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, resolveTtsCharacter, shouldQueueCallSpeech } from "../features/voice/ttsConfig";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -882,6 +882,40 @@ export default function AppChat({
   const [activeTtsAudio, setActiveTtsAudio] = useState<HTMLAudioElement | null>(null);
   const callSpeechQueueRef = useRef<Message[]>([]);
   const isCallSpeechPlayingRef = useRef(false);
+  const callTtsAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Mobile browsers only allow later asynchronous call audio when an element
+  // has first been played from the user's call/accept gesture. Reuse that same
+  // element for every synthesized reply in the call.
+  const unlockCallTtsPlayback = () => {
+    if (typeof Audio === "undefined") return;
+    const silentWav = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAACAgICA";
+    const audio = callTtsAudioRef.current || new Audio();
+    callTtsAudioRef.current = audio;
+    audio.onended = null;
+    audio.onerror = null;
+    audio.src = silentWav;
+    audio.preload = "auto";
+    void audio.play().then(() => {
+      audio.pause();
+      audio.currentTime = 0;
+    }).catch((error) => {
+      console.warn("Call audio unlock failed:", error);
+    });
+  };
+
+  const resetCallTtsPlayback = () => {
+    const audio = callTtsAudioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.onended = null;
+      audio.onerror = null;
+      audio.removeAttribute("src");
+      audio.load();
+    }
+    callTtsAudioRef.current = null;
+    setActiveTtsAudio(null);
+  };
 
   // Serial Playback Queue Manager
   const playNextMessageInQueue = (currentId: string) => {
@@ -892,6 +926,12 @@ export default function AppChat({
 
   // TTS Trigger Speech Function
   const triggerMessageSpeech = async (msg: Message, isQueuedCallSpeech = false) => {
+    let objectUrl: string | null = null;
+    const releaseObjectUrl = () => {
+      if (!objectUrl) return;
+      URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+    };
     let queuedCallSpeechFinished = false;
     const finishQueuedCallSpeechOnce = () => {
       if (!isQueuedCallSpeech || queuedCallSpeechFinished) return;
@@ -987,19 +1027,28 @@ export default function AppChat({
       }
 
       const blob = await getSpeechForText(cleanText, ttsOptions);
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
+      objectUrl = URL.createObjectURL(blob);
+      const audio = isQueuedCallSpeech
+        ? (callTtsAudioRef.current || new Audio())
+        : new Audio();
+      if (isQueuedCallSpeech) callTtsAudioRef.current = audio;
+      audio.onended = null;
+      audio.onerror = null;
+      audio.src = objectUrl;
+      audio.preload = "auto";
       
       setActiveTtsAudio(audio);
       setAudioLoadingMessageId(null);
 
       audio.onended = () => {
+        releaseObjectUrl();
         if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
         else playNextMessageInQueue(msg.id);
       };
 
       audio.onerror = (e) => {
         console.warn("Audio playback error:", e);
+        releaseObjectUrl();
         setPlayingMessageId(null);
         setAudioLoadingMessageId(null);
         if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
@@ -1008,6 +1057,7 @@ export default function AppChat({
       await audio.play();
     } catch (err: any) {
       console.warn("TTS generation failed:", err);
+      releaseObjectUrl();
       setPlayingMessageId(null);
       setAudioLoadingMessageId(null);
       if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
@@ -1118,7 +1168,7 @@ export default function AppChat({
         timestamp: msg.timestamp,
       }]);
 
-      if (msg.sender === "character" && subtitleContent && settings.enableMiniMaxTts) {
+      if (shouldQueueCallSpeech(msg.sender, subtitleContent)) {
         // TTS remains automatic during calls, but the call UI and saved transcript
         // always contain plain subtitles rather than voice-message markup.
         enqueueCallSpeech({ ...msg, content: subtitleContent });
@@ -2537,6 +2587,7 @@ export default function AppChat({
     if (isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) return;
 
     if (activeTtsAudio) activeTtsAudio.pause();
+    resetCallTtsPlayback();
     callSpeechQueueRef.current = [];
     isCallSpeechPlayingRef.current = false;
     setCallingStatus("ended");
@@ -2554,6 +2605,7 @@ export default function AppChat({
 
   const beginVoiceCall = (incoming: boolean) => {
     if (!activeCharacter || activeCharacter.isGroupChat || !activeVoiceCallScope) return;
+    if (!incoming) unlockCallTtsPlayback();
     setIsIncomingCall(incoming);
     setVoiceCallRelationId(activeVoiceCallScope.relationId);
     setCallingStatus("ringing");
@@ -2567,6 +2619,9 @@ export default function AppChat({
 
   const finishVoiceCall = (requestedStatus: VoiceCallStatus) => {
     if (!activeChatCharId || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
+      resetCallTtsPlayback();
+      callSpeechQueueRef.current = [];
+      isCallSpeechPlayingRef.current = false;
       setActiveAttachModal(null);
       setVoiceCallRelationId(null);
       return;
@@ -2600,6 +2655,7 @@ export default function AppChat({
       updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallRejectionPatch(Date.now()));
     }
     if (activeTtsAudio) activeTtsAudio.pause();
+    resetCallTtsPlayback();
     callSpeechQueueRef.current = [];
     isCallSpeechPlayingRef.current = false;
     setCallingStatus("ended");
@@ -8841,6 +8897,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       {/* Accept (Incoming Call) */}
                       <button
                         onClick={() => {
+                          unlockCallTtsPlayback();
                           setCallingStatus("connected");
                           setCallStartTime(Date.now());
                         }}
