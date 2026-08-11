@@ -140,7 +140,9 @@ export async function fetchSingleTtsSegment(
   const pitch = options.pitch !== undefined ? options.pitch : 0;
   const model = options.model || "speech-2.8-hd";
 
-  const isDirectCall = !!(options.forceDirectTts || (options.apiKey && options.groupId));
+  // Prefer the app proxy so browser CORS policy does not decide whether TTS
+  // works. Direct provider access remains available only as an explicit opt-in.
+  const isDirectCall = options.forceDirectTts === true;
   
   let url = "/api/minimax-tts";
   const headers: Record<string, string> = {

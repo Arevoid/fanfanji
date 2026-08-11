@@ -2027,7 +2027,7 @@ export default function AppChat({
     })
     .catch(err => {
       console.error("Translate message failed:", err);
-      showToast("翻译失败，请检查 API 配置");
+      showToast(err instanceof Error ? err.message : "翻译失败，请检查 API 配置");
     });
   };
 
@@ -4111,7 +4111,7 @@ ${stickerListStr}
       }
     } catch (err) {
       console.error("Translate moment failed:", err);
-      showToast("翻译失败，请检查 API 配置");
+      showToast(err instanceof Error ? err.message : "翻译失败，请检查 API 配置");
     }
   };
 

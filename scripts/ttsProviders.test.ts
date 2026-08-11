@@ -66,6 +66,11 @@ try {
   });
   assert.equal(blob.type, "audio/mpeg");
 
+  const minimaxBlob = await fetchSingleTtsSegment("你好", minimaxOptions);
+  assert.equal(capturedUrl, "/api/minimax-tts", "MiniMax must use the app proxy by default");
+  assert.equal(JSON.parse(String(capturedInit?.body)).apiKey, "mini-key");
+  assert.equal(minimaxBlob.type, "audio/mpeg");
+
   await assert.rejects(
     () => fetchSingleTtsSegment("你好", buildCharacterTtsOptions(mosslandSettings)),
     /Mossland Voice ID/,

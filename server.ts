@@ -262,10 +262,7 @@ ${referencesText}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
         const responseFetch = await fetch(endpointUrl, {
           method: "POST",
@@ -358,10 +355,7 @@ ${historyText}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
         const responseFetch = await fetch(endpointUrl, {
           method: "POST",
@@ -454,10 +448,7 @@ ${historyText}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
         const responseFetch = await fetch(endpointUrl, {
           method: "POST",
@@ -546,10 +537,7 @@ ${text}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
         const responseFetch = await fetch(endpointUrl, {
           method: "POST",
@@ -735,32 +723,9 @@ ${text}
         }
       }
 
-      // Default models fallback
-      res.json({
-        success: true,
-        models: [
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-1.5-flash",
-          "gemini-1.5-pro",
-          "deepseek-chat",
-          "deepseek-reasoner",
-          "deepseek-v3"
-        ]
-      });
+      res.status(502).json({ success: false, error: "接口没有返回可用的模型列表。" });
     } catch (err: any) {
-      res.json({
-        success: true,
-        models: [
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-1.5-flash",
-          "gemini-1.5-pro",
-          "deepseek-chat",
-          "deepseek-reasoner",
-          "deepseek-v3"
-        ]
-      });
+      res.status(502).json({ success: false, error: err?.message || "模型列表获取失败。" });
     }
   });
 

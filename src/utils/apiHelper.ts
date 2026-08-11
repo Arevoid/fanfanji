@@ -262,7 +262,7 @@ export async function apiChat(params: {
   apiTemperature?: number;
   streamCompatible?: boolean;
 }): Promise<{ text: string }> {
-  let res: Response;
+  let res: Response | null = null;
   try {
     res = await fetch("/api/chat", {
       method: "POST",
@@ -377,19 +377,7 @@ export async function apiFetchModels(params: {
     try {
       return await directClientFetchModels(params.apiKey, params.apiEndpoint);
     } catch (fallbackErr) {
-      // Return hardcoded elegant defaults so it never fails completely
-      return [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "deepseek-chat",
-        "deepseek-reasoner",
-        "deepseek-v3",
-        "gpt-4o",
-        "gpt-4o-mini",
-        "claude-3-5-sonnet"
-      ];
+      throw fallbackErr;
     }
   }
 }
@@ -498,18 +486,11 @@ export async function apiExtractMemories(params: {
         scenario: params.scenario,
       });
 
-      let targetModel = params.model;
-      if (params.apiEndpoint && params.apiEndpoint.trim()) {
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-chat";
-        }
-      }
-
       const result = await directClientChat({
         message: prompt,
         history: [],
         apiKey: params.apiKey,
-        model: targetModel,
+        model: params.model,
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.5,
         systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
@@ -569,18 +550,11 @@ ${referencesText}
 3. 语言要极具表现力，可以直接用于大语言模型的系统提示词，使扮演效果极其传神逼真。
 4. 排除一切寒暄、解释或 markdown 包裹废话，直接给出提炼后的设定正文内容。`;
 
-      let targetModel = params.model;
-      if (params.apiEndpoint && params.apiEndpoint.trim()) {
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-chat";
-        }
-      }
-
       const result = await directClientChat({
         message: prompt,
         history: [],
         apiKey: params.apiKey,
-        model: targetModel,
+        model: params.model,
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.5,
         systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
@@ -607,23 +581,40 @@ export async function apiTranslate(params: {
   /** Forum translations must never fall back to a browser-to-provider request. */
   proxyOnly?: boolean;
 }): Promise<{ text: string }> {
+  let res: Response;
   try {
-    const res = await fetch("/api/translate", {
+    res = await fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data.text === "string") {
-        return { text: data.text };
-      }
-    }
-    throw new Error("翻译代理服务不可用");
   } catch (err) {
     if (params.proxyOnly) throw err;
     console.warn("apiTranslate backend failed, trying client direct fallback:", err);
-    try {
+  }
+
+  if (res) {
+    const raw = await res.text();
+    const contentType = res.headers.get("content-type") || "";
+    const routeMissing = res.status === 404 || res.status === 405;
+    const staticFallback = (/text\/html/i.test(contentType) && (routeMissing || res.ok)) || (routeMissing && !raw.trim());
+    if (res.ok && !staticFallback) {
+      try {
+        const data = JSON.parse(raw);
+        if (data && typeof data.text === "string" && data.text.trim()) return { text: data.text };
+      } catch {
+        throw new Error("翻译服务返回了无法解析的响应。");
+      }
+      throw new Error("翻译服务没有返回有效文本。");
+    }
+    if (!staticFallback) {
+      throw new Error(`翻译 API 请求失败 (${res.status}): ${parseApiErrorText(raw)}`);
+    }
+    if (params.proxyOnly) throw new Error("当前部署没有提供翻译代理路由。");
+    console.warn("apiTranslate backend route is unavailable, trying client direct fallback");
+  }
+
+  try {
       const targetLanguage = params.targetLanguage || "zh-CN";
       const prompt = `你是一个专业的翻译官。请将下面这段文本忠实翻译成${targetLanguage}。
       
@@ -636,22 +627,15 @@ ${params.text}
 3. 如果输入包含 [FORUM_TITLE] 或 [FORUM_BODY] 标记，必须原样保留标记，仅翻译标记后的公开文本。
 4. 请直接输出翻译结果，不要包含任何多余的说明、解释或 markdown 格式包装。`;
 
-      let targetModel = params.model;
-      if (params.apiEndpoint && params.apiEndpoint.trim()) {
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-chat";
-        }
-      }
-
       const result = await directClientChat({
         message: prompt,
         history: [],
         apiKey: params.apiKey,
-        model: targetModel,
+        model: params.model,
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.3,
-        systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
-          ? "你是一个翻译助手，直接输出目标简体中文，不要带任何废话和解释。"
+        systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
+          ? `你是翻译助手，直接输出目标语言 ${targetLanguage}，不要带任何解释。`
           : undefined
       });
 
@@ -659,7 +643,6 @@ ${params.text}
     } catch (fallbackErr: any) {
       console.error("Direct translate fallback failed:", fallbackErr);
       throw new Error(fallbackErr.message || "直连翻译失败");
-    }
   }
 }
 
