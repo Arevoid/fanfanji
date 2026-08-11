@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { assemblePromptBlocks } from "../src/domain/prompt/PromptBlock";
-import { CHARACTER_PERSONA_PROTECTION, projectCharacterPrompt } from "../src/domain/prompt/characterPromptProjector";
+import { CHARACTER_LANGUAGE_POLICY, CHARACTER_PERSONA_PROTECTION, projectCharacterPrompt } from "../src/domain/prompt/characterPromptProjector";
 import { assembleChatInstructions } from "../src/features/chat/prompts/chatInstructionAssembler";
 import { WORLD_BOOK_CONTEXT_PRIORITY } from "../src/features/chat/prompts/chatPromptPolicy";
 import { buildWorldBookSystemBlocks } from "../src/utils/worldBook";
@@ -23,6 +23,9 @@ assert.match(projection.personality.content, new RegExp(personality), "personali
 assert.match(projection.personality.content, /不得因为“自然”“简短”或“活人感”而变得冷淡|不得无故变成冷淡、敷衍/);
 assert.match(projection.relationship?.content || "", /不得因默认状态为 friend 而削弱/);
 assert.match(CHARACTER_PERSONA_PROTECTION, /角色卡的明确设定为准/);
+assert.match(CHARACTER_LANGUAGE_POLICY, /明确指定.*说话语言/);
+assert.match(CHARACTER_LANGUAGE_POLICY, /日本角色默认使用日语/);
+assert.match(CHARACTER_LANGUAGE_POLICY, /才默认使用简体中文/);
 
 const assembled = assemblePromptBlocks([
   projection.description,
@@ -98,5 +101,8 @@ assert.match(chatSource, /MEDIA_EVENT_PERSONA_RESPONSE_RULE/);
 assert.match(chatSource, /projectCharacterPrompt\(friend, relationship\.relationship\)/, "proactive chat must use the same character projection");
 assert.doesNotMatch(chatSource, /Absolute Supreme Priority|removeLegacyWorldBookPriorityDirective/);
 assert.match(chatSource, /WORLD_BOOK_CONTEXT_PRIORITY/);
+assert.doesNotMatch(chatSource, /Speak in Chinese/, "character-facing generation must not force every role to use Chinese");
+assert.match(chatSource, /CHARACTER_LANGUAGE_POLICY/, "moment comments must follow the same character language policy");
+assert.match(chatPromptBuilderSource, /CHARACTER_LANGUAGE_POLICY/, "group members must keep their individual languages");
 
 console.log("PASS chat prompt projection, deduplication, persona protection, and World Book relevance");

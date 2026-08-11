@@ -8,6 +8,20 @@ import {
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
 
+const parseApiErrorText = (rawText: string): string => {
+  const trimmed = rawText.trim();
+  if (!trimmed) return "无响应";
+  try {
+    const parsed = JSON.parse(trimmed);
+    return String(parsed?.detail || parsed?.error?.message || parsed?.error || parsed?.message || trimmed);
+  } catch {
+    return trimmed;
+  }
+};
+
+export const isProhibitedContentError = (error: unknown): boolean =>
+  /PROHIBITED_CONTENT|request blocked by Gemini API/i.test(error instanceof Error ? error.message : String(error));
+
 // Helper to parse different models response formats
 export const parseModels = (data: any): string[] | null => {
   if (!data) return null;
@@ -82,7 +96,7 @@ async function directClientChat(params: {
 
     if (!responseFetch.ok) {
       const errorText = await responseFetch.text();
-      throw new Error(`自定义 API 接口请求失败 (${responseFetch.status}): ${errorText || "无响应"}`);
+      throw new Error(`自定义 API 接口请求失败 (${responseFetch.status}): ${parseApiErrorText(errorText)}`);
     }
 
     const responseText = await responseFetch.text();
@@ -244,23 +258,39 @@ export async function apiChat(params: {
   apiTemperature?: number;
   streamCompatible?: boolean;
 }): Promise<{ text: string }> {
+  let res: Response;
   try {
-    const res = await fetch("/api/chat", {
+    res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data.text === "string") {
-        return { text: data.text };
-      }
-    }
-    throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
-    console.warn("apiChat backend failed, trying client direct fallback:", err);
+    // A network failure means the optional app backend is genuinely absent.
+    // Provider HTTP errors must not be retried through the browser because that
+    // sends the same rejected prompt twice and hides the original status/body.
+    console.warn("apiChat backend network request failed, trying client direct fallback:", err);
     return directClientChat(params);
   }
+
+  const responseText = await res.text();
+  const contentType = res.headers.get("content-type") || "";
+  const looksLikeStaticHostFallback = /text\/html/i.test(contentType) && (res.status === 404 || res.status === 405 || res.ok);
+  if (looksLikeStaticHostFallback) {
+    console.warn("apiChat backend route is unavailable on this host, trying client direct fallback");
+    return directClientChat(params);
+  }
+  if (!res.ok) {
+    throw new Error(`聊天 API 请求失败 (${res.status}): ${parseApiErrorText(responseText)}`);
+  }
+
+  try {
+    const data = JSON.parse(responseText);
+    if (data && typeof data.text === "string") return { text: data.text };
+  } catch {
+    // A successful non-JSON response is not a valid chat backend response.
+  }
+  throw new Error("聊天 API 返回成功状态，但没有有效的文本响应。");
 }
 
 // test key wrapper

@@ -1,4 +1,5 @@
 import type { CharacterPromptProjection } from "../../../domain/prompt/characterPromptProjector";
+import { CHARACTER_LANGUAGE_POLICY } from "../../../domain/prompt/characterPromptProjector";
 import { LIVING_HUMAN_PROMPT } from "../../../utils/livingPrompt";
 import { assembleChatInstructions } from "./chatInstructionAssembler";
 import { CHARACTER_MEDIA_USAGE_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "./chatPromptPolicy";
@@ -39,11 +40,14 @@ ${input.memberDefinitions}
    - 每条发言都可以回应机主，或回应历史中另一位成员刚刚说过的话。成员之间的接话、赞同、反驳、打趣和追问都应基于真实群聊历史、人设、世界书和明确关系。
    - 同一成员可以连续发送 2 至 3 条短消息，例如先回应再补充，或发出一句后被另一位成员接话再继续；每一条都必须独立使用自己的 [SENDER_NAME: 名字] 标记。
    - 不要为了“多人”而编造成员之间不存在的熟识、共同经历或关系；没有足够上下文时宁可让该成员保持沉默。
-6. 🚨【中国标点与格式规范】：
+6. 🚨【标点与格式规范】：
    - 微信聊天简短而随意，请保持口语化、极度真实的微信聊天风格。
    - 不要输出大段的长篇大论，尽量简短有力。
    - 不要使用任何小说式的“旁白、场景描写、动作心理括号（如 '(笑)' 或 '（叹气）'）”。群聊里只能输出他们作为真人打字发在微信群里的文本。
 7. 🚨【特殊媒体克制使用】：日常群聊默认使用普通文字。除非成员人设或可用世界书明确偏好、当前语境确实需要声音或即时反应、或用户明确要求，否则不要输出语音或表情包标记；不要连续无理由发送特殊消息。
+
+${CHARACTER_LANGUAGE_POLICY}
+群聊中每位成员必须分别依据自己的角色资料决定输出语言，不能把一位成员的国籍或语言设定套用给其他成员。
 
 【🚨🚨🚨 极其严格的输出格式规则】：
 你必须按照以下格式输出成员的发言。请确保在每条发言的前一行，用且仅用 \`[SENDER_NAME: 角色名字]\` 指定发送者。不要输出任何其他 markdown 标记，不要输出 JSON 块。

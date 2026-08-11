@@ -21,7 +21,7 @@ import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../util
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
-import { projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
+import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { CHARACTER_MEDIA_USAGE_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
@@ -3077,7 +3077,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 4. You must ONLY use Chinese double quotes “ ” to enclose actual spoken dialogue (口语/说话内容) by ${activeCharacter.name}. NEVER use quotes for thoughts, descriptions, emphasis, or words within third-person narration! This is extremely important so the user's system can correctly parse dialogue bubbles.`
         : `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
 Reply length, initiative, warmth, restraint, and emotional intensity must follow the character profile and the current conversation. Keep the wording natural and conversational without imposing a universally cold, brief, caring, or agreeable style.
-Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
+Incorporate your background, age, personality traits, nationality, and configured speaking language organically. Maintain character role-play thoroughly.
 Do NOT say you are an AI or Gemini, unless that is your explicit character人设.
 Show the character through what they say, not by explaining their own persona. For an ordinary greeting or short message, do not manufacture a dramatic scenario, claim an unconfirmed shared history, or narrate that you are “acting cool/talkative”; simply respond as this person would to this user.
 
@@ -4258,7 +4258,7 @@ ${stickerListStr}
       // Construct system instructions
       let mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
 Reply length, initiative, warmth, restraint, and emotional intensity must follow the character profile and the current conversation. Keep the wording natural and conversational without imposing a universally cold, brief, caring, or agreeable style.
-Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
+Incorporate your background, age, personality traits, nationality, and configured speaking language organically. Maintain character role-play thoroughly.
 Do NOT say you are an AI or Gemini.
 
 🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
@@ -4792,7 +4792,7 @@ ${stickerListStr}
     proactiveMessageInFlightRef.current.add(relationId);
     try {
       let instructionsPrompt = `Instructions:
-1. Speak in Chinese. Maintain character role-play thoroughly.
+1. Follow the character's configured language and nationality according to the character language policy. Maintain character role-play thoroughly.
 2. Use a natural WeChat style. Reply length, warmth, initiative, and emotional intensity must follow the character profile and relationship.
 3. This is an initiator message. Let the character decide whether to share, ask, tease, express affection, stay restrained, or use another natural opening; do not default to caretaking or a generic check-in.
 4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
@@ -4996,10 +4996,11 @@ ${stickerListStr}
           const systemInstruction = `Your task: Write a short, natural comment on the Moment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
 1. The comment must be brief, extremely natural, and fit the character and current relationship context supplied by the Moment Prompt Adapter.
-2. Keep it under 35 characters. Speak in Chinese.
+2. Keep it under 35 characters and follow the character language policy below.
 3. No OOC, no narrative brackets like (微笑), just the direct comment text.
 4. You may naturally reference confirmed shared experiences or relationship facts from the supplied context, but never invent them or mention another relationship or user identity.
 ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
+${CHARACTER_LANGUAGE_POLICY}
 `;
 
           const composedPrompt = PromptComposer.compose({
@@ -5097,10 +5098,11 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
         const systemInstruction = `Your task: Write a short, extremely natural WeChat reply/comment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
 1. The reply must be brief, lively, extremely natural, and match the character and current relationship context supplied by the Moment Prompt Adapter.
-2. Keep it under 35 characters. Speak in Chinese.
+2. Keep it under 35 characters and follow the character language policy below.
 3. Speak directly to the user without formal prefixes. Do not write narrative actions or brackets like "(害羞)", just output the comment text.
 4. You may naturally reference only confirmed material from this supplied relationship context. Never invent shared experiences or use another relationship's information.
 ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
+${CHARACTER_LANGUAGE_POLICY}
 `;
 
         const composedPrompt = PromptComposer.compose({
@@ -5197,6 +5199,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
         relationContext,
         relationWorldKnowledge,
       });
+      if (generated.blockedReason === "prohibited-content") {
+        // Automatic Moments are optional background content. A provider safety
+        // rejection should silently skip this post instead of asking the user
+        // to rewrite the character or World Book for a non-essential feature.
+        return;
+      }
       if (generated.moment) {
         onAddMoment(generated.moment);
         const topic = compactTopicHint([generated.moment.content]);

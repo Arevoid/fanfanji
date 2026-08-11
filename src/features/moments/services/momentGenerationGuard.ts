@@ -6,6 +6,7 @@ import {
 } from "../../../core/storage/repositories/momentGenerationRepository";
 
 const inFlightTaskKeys = new Set<string>();
+export const BLOCKED_MOMENT_RETRY_COOLDOWN_MS = 3 * 60 * 60 * 1000;
 
 export const getLocalMomentGenerationDate = (date: Date): string => {
   const year = date.getFullYear();
@@ -22,10 +23,35 @@ export const getCharacterMomentTaskKey = (characterId: string, date: Date, relat
 export function claimCharacterMomentGeneration(characterId: string, now: Date, relationId?: string): string | undefined {
   const taskKey = getCharacterMomentTaskKey(characterId, now, relationId);
   const tasks = loadMomentGenerationTasks().value;
-  if (tasks[taskKey] || inFlightTaskKeys.has(taskKey)) return undefined;
+  const existing = tasks[taskKey];
+  const blockedCooldownExpired = existing?.status === "blocked"
+    && now.getTime() - existing.updatedAt >= BLOCKED_MOMENT_RETRY_COOLDOWN_MS;
+  if ((existing && !blockedCooldownExpired) || inFlightTaskKeys.has(taskKey)) return undefined;
 
   inFlightTaskKeys.add(taskKey);
   return taskKey;
+}
+
+export function completeBlockedCharacterMomentGeneration(
+  taskKey: string,
+  characterId: string,
+  relationId: string | undefined,
+  now: Date,
+): boolean {
+  const tasks = loadMomentGenerationTasks().value;
+  const task: MomentGenerationTask = {
+    taskKey,
+    characterId,
+    relationId,
+    date: getLocalMomentGenerationDate(now),
+    type: "character-moment",
+    status: "blocked",
+    blockedReason: "prohibited-content",
+    updatedAt: now.getTime(),
+  };
+  const result = saveMomentGenerationTasks({ ...tasks, [taskKey]: task });
+  inFlightTaskKeys.delete(taskKey);
+  return result.success;
 }
 
 export function completeCharacterMomentGeneration(taskKey: string, moment: Moment, now: Date): boolean {
