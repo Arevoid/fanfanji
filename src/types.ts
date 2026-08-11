@@ -709,6 +709,8 @@ export interface UserSettings {
   avatarBorderRadius?: number;
   otherBubbleBg?: string;
   otherBubbleColor?: string;
+  /** One-time repair version for unreadable legacy classic bubble palettes. */
+  classicBubblePaletteMigrationVersion?: number;
   otherBubbleRadius?: number;
   otherBubbleOpacity?: number;
   selfBubbleBg?: string;

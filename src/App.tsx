@@ -91,7 +91,10 @@ import { createConversationSummaryRecord } from "./features/characterKnowledge/s
 import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
 import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
-import { migrateLegacyClassicBubblePreset } from "./features/chat/styles/classicBubblePreset";
+import {
+  migrateLegacyClassicBubblePreset,
+  migrateUnreadableClassicBubblePalette,
+} from "./features/chat/styles/classicBubblePreset";
 import StatusBar from "./components/StatusBar";
 import AppChat, { resolveActiveChatStylePreset } from "./components/AppChat";
 import AppArchives from "./components/AppArchives";
@@ -338,8 +341,9 @@ export default function App() {
   const [settings, setSettingsState] = useState<UserSettings>(() => {
     const loadedSettings = loadSettings(DEFAULT_SETTINGS).value;
     const migration = migrateLegacyClassicBubblePreset(loadedSettings);
-    const migratedSettings = applyLiquidGlassTextDefaults(migration.settings);
-    if (migration.migrated || migratedSettings !== migration.settings) {
+    const classicPaletteMigration = migrateUnreadableClassicBubblePalette(migration.settings);
+    const migratedSettings = applyLiquidGlassTextDefaults(classicPaletteMigration.settings);
+    if (migration.migrated || classicPaletteMigration.settings !== migration.settings || migratedSettings !== classicPaletteMigration.settings) {
       const saved = saveSettings(migratedSettings);
       if (!saved.success) console.warn("[settings] Could not persist the legacy bubble preset migration.");
     }
@@ -2633,12 +2637,7 @@ export default function App() {
         .phone-screen-container button:not(.chat-header-control--plain),
         .phone-screen-container [class*="rounded-"]:not(img):not(.avatar-img):not(.avatar-icon):not(input):not(select):not(textarea):not(.chat-header-control--plain),
         .phone-screen-container .back-btn:not(.chat-header-control--plain),
-        .phone-screen-container #schedule_back_btn,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-other,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"],
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-slate-200"],
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-stone-100"] {
+        .phone-screen-container #schedule_back_btn {
           border-radius: 32px !important;
         }
 
@@ -2904,29 +2903,8 @@ export default function App() {
           padding: 0 !important;
         }
 
-        /* 8. Specific Chat Bubble Alignment */
-        /* Self bubble: Solid charcoal black, crisp white text, 32px round */
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"] {
-          background-color: var(--chat-user-bg) !important;
-          color: var(--chat-user-text) !important;
-          border-radius: 32px !important;
-          border: none !important;
-        }
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self *,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"] * {
-          color: var(--chat-user-text) !important;
-        }
-
-        /* Other bubble: Soft light gray, charcoal text, 32px round */
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-other,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-slate-200"],
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-stone-100"] {
-          background-color: var(--chat-ai-bg) !important;
-          color: var(--chat-ai-text) !important;
-          border-radius: 32px !important;
-          border: 1px solid var(--border) !important;
-        }
+        /* 8. Chat bubbles own their palette, radius and border inside AppChat.
+           Phone-wide !important rules here used to block the classic controls. */
 
         /* Double segment buttons (such as stays/experiences, notes/todo tabs) */
         .phone-screen-container .flex-1.py-2.rounded-xl {

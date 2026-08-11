@@ -5847,7 +5847,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 #conv-screen .received-transfer-card *,
                 #conv-screen .voice-message-bar.chat-bubble-other,
                 #conv-screen .voice-message-bar.chat-bubble-other * {
-                  color: ${settings.otherBubbleColor};
+                  color: ${settings.otherBubbleColor} !important;
                 }
               ` : ''}
 
@@ -5861,13 +5861,17 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                     settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
                     settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
                   )
-                  : "var(--button-primary-bg)"};
+                  : settings.selfBubbleBg
+                    ? getBubbleBackgroundStyle(settings.selfBubbleBg, settings.selfBubbleOpacity ?? 100)
+                    : "var(--button-primary-bg)"};
                 --chat-ai-bg: ${isLiquidGlass
                   ? getBubbleBackgroundStyle(
                     settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
                     settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
                   )
-                  : "var(--surface-raised)"};
+                  : settings.otherBubbleBg
+                    ? getBubbleBackgroundStyle(settings.otherBubbleBg, settings.otherBubbleOpacity ?? 100)
+                    : "var(--surface-raised)"};
                 --chat-user-text: ${isLiquidGlass
                   ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
                   : settings.selfBubbleColor || "var(--button-primary-text)"};
@@ -5892,7 +5896,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 #conv-screen .transfer-card *,
                 #conv-screen .voice-message-bar.chat-bubble-self,
                 #conv-screen .voice-message-bar.chat-bubble-self * {
-                  color: ${settings.selfBubbleColor};
+                  color: ${settings.selfBubbleColor} !important;
                 }
               ` : ''}
 

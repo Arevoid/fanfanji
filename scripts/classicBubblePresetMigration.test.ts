@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  CLASSIC_BUBBLE_PALETTE_MIGRATION_VERSION,
   CLASSIC_BUBBLE_PRESET_NAME,
   LEGACY_CLASSIC_BUBBLE_CSS,
   migrateLegacyClassicBubblePreset,
+  migrateUnreadableClassicBubblePalette,
 } from "../src/features/chat/styles/classicBubblePreset";
 import type { UserSettings } from "../src/types";
 
@@ -42,5 +44,25 @@ assert.equal(custom.settings.bubbleCss, customCss);
 const differentlyNamed = migrateLegacyClassicBubblePreset({ ...base, activePreset: "我的自定义预设" });
 assert.equal(differentlyNamed.migrated, false);
 assert.equal(differentlyNamed.settings.bubbleCss, LEGACY_CLASSIC_BUBBLE_CSS);
+
+const unreadable = migrateUnreadableClassicBubblePalette({
+  ...base,
+  otherBubbleBg: "#ffffff",
+  otherBubbleColor: "#fff",
+  classicBubblePaletteMigrationVersion: undefined,
+});
+assert.equal(unreadable.migrated, true);
+assert.equal(unreadable.settings.otherBubbleColor, "#18181b");
+assert.equal(unreadable.settings.classicBubblePaletteMigrationVersion, CLASSIC_BUBBLE_PALETTE_MIGRATION_VERSION);
+assert.equal(migrateUnreadableClassicBubblePalette(unreadable.settings).migrated, false);
+
+const readableCustomization = migrateUnreadableClassicBubblePalette({
+  ...base,
+  otherBubbleBg: "#000000",
+  otherBubbleColor: "#ffffff",
+  classicBubblePaletteMigrationVersion: undefined,
+});
+assert.equal(readableCustomization.migrated, false);
+assert.equal(readableCustomization.settings.otherBubbleColor, "#ffffff");
 
 console.log("classic bubble preset migration tests passed");
