@@ -568,6 +568,46 @@ const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；�
 .voice-message-bar.chat-bubble-other *,
 .received-transfer-card * { color: var(--chat-ai-text); }
 
+/* ==================== 稳定消息类型接口 ==================== */
+/* 普通文字：高度由内容决定。 */
+.chat-message--text {
+  padding: 8px 12px;
+  border-radius: 14px;
+}
+
+/* 语音：保持独立胶囊尺寸，宽度仍由语音时长决定。 */
+.chat-message--voice {
+  min-width: 95px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border-radius: 14px;
+}
+.chat-message--voice-wave,
+.chat-message--voice-duration { color: currentColor; }
+
+/* 通话记录：不依赖 :has() 或内部 SVG。 */
+.chat-message--call {
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 14px;
+}
+.chat-message--call-icon,
+.chat-message--call-duration { color: currentColor; }
+
+/* 图片、文字图与表情包。 */
+.chat-message--image { max-width: 160px; border-radius: 16px; }
+.chat-message--text-image { border-radius: 16px; }
+.chat-message--sticker { /* 表情包容器样式。 */ }
+
+/* 红包与转账共享卡片入口，同时保留各自专用入口。 */
+.chat-message--payment { border-radius: 18px; }
+.chat-message--red-packet { /* 红包专属背景和文字。 */ }
+.chat-message--transfer { /* 转账专属背景和文字。 */ }
+
+/* 分享卡片。 */
+.chat-message--forum-share,
+.chat-message--diary-share { border-radius: 16px; }
+
 /* 连续消息分组：只有 top 渲染尾巴和装饰。 */
 .msg-group-top.chat-bubble-self,
 .msg-group-top.chat-bubble-other { border-radius: 14px; }
@@ -780,7 +820,7 @@ const StoredChatImage = ({ assetId, alt, generated = false }: { assetId: string;
     }).catch((error) => console.warn("Failed to load chat image asset:", error));
     return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId]);
-  return url ? <img src={url} alt={alt} className={`max-w-[160px] rounded-lg object-cover cursor-zoom-in bg-stone-100 ${generated ? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"}`} /> : <div className="h-24 w-28 animate-pulse rounded-lg bg-slate-100" />;
+  return url ? <img src={url} alt={alt} className={`chat-message--image max-w-[160px] rounded-lg object-cover cursor-zoom-in bg-stone-100 ${generated ? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"}`} /> : <div className="chat-message--image-placeholder h-24 w-28 animate-pulse rounded-lg bg-slate-100" />;
 };
 
 interface AppChatProps {
@@ -7603,7 +7643,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       <div className="max-w-full">
                       {msg.diaryShareId ? (() => {
                         const share = diarySharesForCurrentIdentity.find((item) => item.id === msg.diaryShareId && item.messageId === msg.id && item.targetRelationId === msg.relationId && item.conversationId === msg.conversationId);
-                        return share ? <div className="w-[210px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-sm"><div className="flex items-center gap-2 text-xs font-bold"><BookOpen size={15}/>日记分享</div><p className="mt-2 text-[11px] text-[var(--text-secondary)]">{share.snapshot.authorName} · {new Date(share.snapshot.occurredAt).toLocaleDateString("zh-CN")}</p><p className="mt-2 line-clamp-3 text-xs leading-5">{share.snapshot.body}</p></div> : <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">日记分享已不可用</div>;
+                        return share ? <div className="chat-message--diary-share w-[210px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-sm"><div className="flex items-center gap-2 text-xs font-bold"><BookOpen size={15}/>日记分享</div><p className="mt-2 text-[11px] text-[var(--text-secondary)]">{share.snapshot.authorName} · {new Date(share.snapshot.occurredAt).toLocaleDateString("zh-CN")}</p><p className="mt-2 line-clamp-3 text-xs leading-5">{share.snapshot.body}</p></div> : <div className="chat-message--diary-share rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">日记分享已不可用</div>;
                       })() : msg.forumShareId ? (() => {
                         const share = forumSharesForCurrentIdentity.find((item) =>
                           item.id === msg.forumShareId
@@ -7616,7 +7656,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                             onOpen={() => onOpenForumShare?.(share.id)}
                           />
                         ) : (
-                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                          <div className="chat-message--forum-share rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
                             论坛分享已不可用
                           </div>
                         );
@@ -7626,7 +7666,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                         <img
                           src={msg.content}
                           alt="chat-pic"
-                          className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
+                          className="chat-message--image max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
                         />
                       ) : parseTextImageDescription(msg.content) ? (() => {
                         const description = parseTextImageDescription(msg.content)!;
@@ -7634,7 +7674,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           <button
                             type="button"
                             onClick={() => setViewingImageDescription(description)}
-                            className="w-[210px] min-h-32 rounded-2xl border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-sm"
+                            className="chat-message--text-image w-[210px] min-h-32 rounded-2xl border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-sm"
                           >
                             <ImageIcon className="mb-4 h-4 w-4 text-[var(--media-placeholder-text)]" />
                             <p className="line-clamp-3 text-xs leading-relaxed text-[var(--text-primary)]">{description}</p>
@@ -7647,7 +7687,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                         const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s => s.name === stickerName);
                         const displayUrl = foundSticker ? foundSticker.url : stickerUrl;
                         return (
-                          <div className="max-w-[130px] rounded-xl overflow-hidden relative select-none">
+                          <div className="chat-message--sticker max-w-[130px] rounded-xl overflow-hidden relative select-none">
                             <img
                               src={displayUrl}
                               alt={stickerName}
@@ -7669,11 +7709,11 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           <button
                             type="button"
                             onClick={() => { if (canOpenDetail) setCallRecordDetail(callRecord); }}
-                            className={`inline-flex items-center gap-1.5 px-3 py-2 shadow-sm cv-bubble message-bubble relative ${bubbleStyle} ${messageGroupClass} ${canOpenDetail ? "transition-transform active:scale-[0.98]" : "cursor-default"}`}
+                            className={`chat-message--call inline-flex items-center gap-1.5 px-3 py-2 shadow-sm cv-bubble message-bubble relative ${bubbleStyle} ${messageGroupClass} ${canOpenDetail ? "transition-transform active:scale-[0.98]" : "cursor-default"}`}
                             title={canOpenDetail ? "查看通话内容" : resultLabel}
                           >
-                            <Phone className="w-3.5 h-3.5 shrink-0" />
-                            <span className="text-xs font-medium whitespace-nowrap">{resultLabel}</span>
+                            <Phone className="chat-message--call-icon w-3.5 h-3.5 shrink-0" />
+                            <span className="chat-message--call-duration text-xs font-medium whitespace-nowrap">{resultLabel}</span>
                             <span className="sr-only">{callRecord.callType}</span>
                           </button>
                         );
@@ -7771,7 +7811,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                   triggerMessageSpeech(msg);
                                   setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
                                 }}
-                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape} ${messageGroupClass}`}
+                                className={`chat-message--voice flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape} ${messageGroupClass}`}
                                 style={{ width: `${80 + duration * 6.5}px`, minWidth: "95px", maxWidth: "220px" }}
                               >
                                 {/* Left element: Play/Pause/Speaker icon */}
@@ -7784,7 +7824,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                 </div>
 
                                 {/* Middle element: Sound Wave Pattern */}
-                                <div className="flex-1 flex items-end justify-center gap-[2px] h-5 px-1 overflow-hidden pb-[1px]">
+                                <div className="chat-message--voice-wave flex-1 flex items-end justify-center gap-[2px] h-5 px-1 overflow-hidden pb-[1px]">
                                   {waveBars.map((barHeight, idx) => {
                                     const delay = idx * 80;
                                     const scaledHeight = Math.max(3, Math.round(barHeight * 0.7));
@@ -7807,7 +7847,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                 </div>
 
                                 {/* Duration display */}
-                                <span className="font-sans text-[11px] font-bold text-current opacity-70 shrink-0">
+                                <span className="chat-message--voice-duration font-sans text-[11px] font-bold text-current opacity-70 shrink-0">
                                   {formattedDuration}
                                 </span>
                                 {/* WeChat unplayed red dot at the top-right corner of the capsule */}
@@ -7836,7 +7876,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                             {/* Transcription Display - Rendered exactly like a regular text bubble below matching Image 2 */}
                             {voiceTranscribed[msg.id] && (
                               <div 
-                                className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble mt-0.5 max-w-[240px] ${
+                                className={`chat-message--text chat-message--voice-transcript px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble mt-0.5 max-w-[240px] ${
                                   isSelf
                                     ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
                                     : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
@@ -7848,7 +7888,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           </div>
                         );
                       })() : (
-                        <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"}` : `px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                        <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"}` : `chat-message--text px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                           isSelf
                             ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
                             : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
@@ -7861,7 +7901,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                 <div className="message-quote text-left text-[11px]">
                                   <div className="message-quote__content px-3 py-2">{quoteReply.content}</div>
                                 </div>
-                                <div className={`message-quote__reply-body px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                                <div className={`chat-message--text message-quote__reply-body px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                                   isSelf
                                     ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self pr-6")
                                     : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other border border-slate-100 pr-6")
