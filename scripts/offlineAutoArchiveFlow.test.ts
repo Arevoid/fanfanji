@@ -27,6 +27,9 @@ assert.doesNotMatch(
 assert.match(source, /setMemorySyncingStoryId\(story\.id\)/, "sync starts a visible processing state");
 assert.match(source, /同步中，请稍候…/, "manual sync button reports progress");
 assert.match(source, /当前进展已经同步，无需重复处理/, "already-synced clicks receive explicit feedback");
+assert.match(source, /needsUninformativeSummaryRepair/, "legacy generic summaries remain eligible for a useful resync");
+assert.match(source, /提炼接口未返回可用摘要，已保存可核对的安全剧情摘要/, "safe fallback success is distinguished from an AI-generated summary");
+assert.match(source, /hasOfflineStorySummary\(story, mergedMemories\)/, "sync success verifies that the canonical story summary is present");
 assert.match(source, /loading=\{memorySyncingStoryId === activeStory\.id\}/, "duplicate clicks are disabled while syncing");
 
 console.log("PASS offline continuation auto archive and fictional-branch manual sync wiring");

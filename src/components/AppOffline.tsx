@@ -461,9 +461,21 @@ export default function AppOffline({
   const needsMissingSummaryRepair = (story: OfflineStory) =>
     Boolean(story.archivedAt || story.memorySyncStatus === "synced") && !hasOfflineStorySummary(story, memories);
 
+  const needsUninformativeSummaryRepair = (story: OfflineStory) => {
+    const summaryMarker = getOfflineStorySummaryMarker(story);
+    return memories.some((memory) =>
+      isOfflineStoryHandoffMemory(memory, story)
+      && memory.content.includes(summaryMarker)
+      && memory.content.includes("双方有过线下互动；具体动作、场景和演出对白不作为线上记忆"),
+    );
+  };
+
   const shouldSyncStoryMemory = (story: OfflineStory) =>
     story.mode === "continue"
-    && (shouldAutoSyncOnlineContinuation(story) || needsLegacyHandoffRepair(story) || needsMissingSummaryRepair(story));
+    && (shouldAutoSyncOnlineContinuation(story)
+      || needsLegacyHandoffRepair(story)
+      || needsMissingSummaryRepair(story)
+      || needsUninformativeSummaryRepair(story));
 
   const finalizeStoryBeforeLeaving = async (story: OfflineStory): Promise<OfflineStory> => {
     let completedStory = story;
@@ -682,7 +694,11 @@ export default function AppOffline({
     }
     const repairingLegacyHandoff = needsLegacyHandoffRepair(story);
     const repairingMissingSummary = needsMissingSummaryRepair(story);
-    if (!hasUnsyncedOfflineMemoryProgress(story) && !repairingLegacyHandoff && !repairingMissingSummary) {
+    const repairingUninformativeSummary = needsUninformativeSummaryRepair(story);
+    if (!hasUnsyncedOfflineMemoryProgress(story)
+      && !repairingLegacyHandoff
+      && !repairingMissingSummary
+      && !repairingUninformativeSummary) {
       showToast("当前进展已经同步，无需重复处理");
       return story;
     }
