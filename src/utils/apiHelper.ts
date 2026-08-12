@@ -693,6 +693,15 @@ ${params.text}
 type MemoryExtractionParams = Parameters<typeof apiExtractMemories>[0];
 type MemoryExtractionResponse = Awaited<ReturnType<typeof apiExtractMemories>>;
 
+function normalizeMemoryExtractionResponse(response: MemoryExtractionResponse): MemoryExtractionResponse {
+  const hasStructuredItems = (response.items?.length || 0) > 0 || (response.candidates?.length || 0) > 0;
+  if (response.error || hasStructuredItems || !response.text?.trim()) return response;
+  return {
+    ...response,
+    error: "记忆提取模型返回了无法识别的结构化结果",
+  };
+}
+
 /**
  * A dedicated extraction model may not exist on the user's custom endpoint
  * even though ordinary chat works. Retry only transport/model failures with
@@ -703,9 +712,9 @@ export async function apiExtractMemoriesWithModelFallback(
   fallbackModel?: string,
   request: (nextParams: MemoryExtractionParams) => Promise<MemoryExtractionResponse> = apiExtractMemories,
 ): Promise<MemoryExtractionResponse> {
-  const primary = await request(params);
+  const primary = normalizeMemoryExtractionResponse(await request(params));
   const normalizedFallback = fallbackModel?.trim();
   if (!primary.error || !normalizedFallback || normalizedFallback === params.model.trim()) return primary;
   console.warn(`Memory extraction model '${params.model}' failed; retrying with the active chat model '${normalizedFallback}'.`);
-  return request({ ...params, model: normalizedFallback });
+  return normalizeMemoryExtractionResponse(await request({ ...params, model: normalizedFallback }));
 }

@@ -194,6 +194,7 @@ export function collectOfflineHandoffContent(
   story: OfflineStory,
   characterName = "当前角色",
   sourceMessages?: readonly Message[],
+  options: { includeConfirmedExcerpts?: boolean } = {},
 ): string {
   const source = sourceMessages ? [...sourceMessages] : getOfflineMemorySourceMessages(story);
   const promptText = (message: Message) => serializeMessageContentForPrompt(message, { mode: "history", characterName });
@@ -233,11 +234,32 @@ export function collectOfflineHandoffContent(
   if (/(糖果|一颗糖|给了他.*糖)/.test(userText)) facts.push(`用户向${characterName}赠送过糖果。`);
   if (/(电影|看电影)/.test(sourceText)) facts.push("用户与当前角色曾讨论或约定一起看电影。");
 
+  if (options.includeConfirmedExcerpts) {
+    const seenExcerpts = new Set<string>();
+    for (const message of source.slice(-8)) {
+      const excerpt = promptText(message)
+        .replace(/<\/?(?:system|assistant|user|developer)[^>]*>/giu, "")
+        .replace(/\s+/gu, " ")
+        .trim();
+      if (!excerpt || excerpt.startsWith("data:") || OFFLINE_EXPLICIT_DETAIL_PATTERN.test(excerpt)) continue;
+      const conciseExcerpt = excerpt.length > 120 ? `${excerpt.slice(0, 117)}...` : excerpt;
+      const fact = message.sender === "user"
+        ? `用户在线下剧情中留下过可核对的表达：${conciseExcerpt}`
+        : `${characterName}在线下剧情中留下过可核对的回应：${conciseExcerpt}`;
+      if (seenExcerpts.has(fact)) continue;
+      seenExcerpts.add(fact);
+      facts.push(fact);
+      if (seenExcerpts.size >= 4) break;
+    }
+  }
+
   const uniqueFacts = Array.from(new Set(facts));
   return uniqueFacts.length > 0
     ? uniqueFacts.map((fact) => `- ${fact}`).join("\n")
     : `- 线下剧本《${story.title}》已结束，双方有过线下互动；具体动作、场景和演出对白不作为线上记忆。`;
 }
+
+const OFFLINE_EXPLICIT_DETAIL_PATTERN = /(衬衫|内裤|没穿|开门瞬间|姿势|阴茎|阴道|乳房|插入|抽插|射精|口交|肛交)/;
 
 /** Keeps only extracted facts that do not rely on ambiguous speaker pronouns. */
 export function filterOfflineExtractedFacts(items: readonly string[]): string[] {
@@ -249,7 +271,7 @@ export function filterOfflineExtractedFacts(items: readonly string[]): string[] 
     .filter((item) => !/(?:我们|你们|他们|她们|我|你|他|她|它)/.test(item))
     // Keep intimacy as a durable, non-graphic relationship event and discard
     // transient screenplay or explicit physical detail.
-    .filter((item) => !/(衬衫|内裤|没穿|开门瞬间|姿势|阴茎|阴道|乳房|插入|抽插|射精|口交|肛交)/.test(item))
+    .filter((item) => !OFFLINE_EXPLICIT_DETAIL_PATTERN.test(item))
     // The source-derived facts below are authoritative for these directional
     // events, so a model summary cannot reverse their actor and recipient.
     .filter((item) => !/(水管|漏水|感谢|谢谢|请.*吃饭)/.test(item));
@@ -316,12 +338,14 @@ export function createOfflineStoryHandoffMemory(input: {
   timestamp: number;
   /** A confirmed manual sync owns the story's replaceable canonical summary. */
   marker?: "incremental" | "summary";
+  /** API failure fallback: retain a few speaker-labelled, non-graphic source excerpts. */
+  includeConfirmedExcerpts?: boolean;
 }): MemoryItem {
   return {
     id: input.id,
     characterId: input.characterId,
     ...(input.relationId ? { relationId: input.relationId } : {}),
-    content: `【线下剧本《${input.story.title}》线上交接】\n[${input.marker === "summary" ? getOfflineStorySummaryMarker(input.story) : getOfflineStorySyncMarker(input.story)}]\n${collectOfflineHandoffContent(input.story, input.characterName, input.sourceMessages)}`,
+    content: `【线下剧本《${input.story.title}》线上交接】\n[${input.marker === "summary" ? getOfflineStorySummaryMarker(input.story) : getOfflineStorySyncMarker(input.story)}]\n${collectOfflineHandoffContent(input.story, input.characterName, input.sourceMessages, { includeConfirmedExcerpts: input.includeConfirmedExcerpts })}`,
     timestamp: input.timestamp,
     // A handoff is intentionally short-lived context, not a permanent trait.
     importance: 4,

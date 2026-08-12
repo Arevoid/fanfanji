@@ -790,6 +790,21 @@ export default function AppOffline({
       let extractedMemories: MemoryItem[] = [];
       let confirmedFacts: string[] = [];
       let acceptedOfflineClaims: KnowledgeClaim[] = [];
+      let usedSafeFallback = false;
+      const createSafeFallback = () => {
+        usedSafeFallback = true;
+        extractedMemories = [createOfflineStoryHandoffMemory({
+          story,
+          sourceMessages,
+          characterId: story.characterId,
+          relationId: story.relationId,
+          characterName: character.name,
+          id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: Date.now(),
+          marker: "summary",
+          includeConfirmedExcerpts: true,
+        })];
+      };
       try {
         const result = await MemoryService.extractMemories({
           character,
@@ -819,16 +834,7 @@ export default function AppOffline({
         }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
         if (result.apiError) {
           console.warn("Offline memory extraction APIs unavailable; using a deterministic safe handoff:", result.apiError);
-          extractedMemories = [createOfflineStoryHandoffMemory({
-            story,
-            sourceMessages,
-            characterId: story.characterId,
-            relationId: story.relationId,
-            characterName: character.name,
-            id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            timestamp: Date.now(),
-            marker: "summary",
-          })];
+          createSafeFallback();
         } else {
           if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
             throw new Error("Offline story knowledge persistence failed");
@@ -839,9 +845,15 @@ export default function AppOffline({
               && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
             .map((claim) => claim.statement);
           extractedMemories = result.extractedMemories;
+          if (extractedMemories.length === 0) {
+            console.warn("Offline memory extraction returned no usable facts; using a deterministic safe handoff.");
+            createSafeFallback();
+          }
         }
       } catch (error) {
-        console.warn("Offline memory extraction unavailable; keeping the story retryable:", error);
+        if (error instanceof Error && error.message === "Offline story knowledge persistence failed") throw error;
+        console.warn("Offline memory extraction unavailable; using a deterministic safe handoff:", error);
+        createSafeFallback();
       }
 
       if (extractedMemories.length === 0) {
@@ -852,6 +864,9 @@ export default function AppOffline({
       // legacy generic fallbacks or prior batches; neither should accumulate.
       const retainedMemories = memories.filter((memory) => !isOfflineStoryHandoffMemory(memory, story));
       const mergedMemories = MemoryService.mergeMemories(retainedMemories, extractedMemories);
+      if (!hasOfflineStorySummary(story, mergedMemories)) {
+        throw new Error("Offline story summary merge verification failed");
+      }
       const persisted = onPersistMemories
         ? await onPersistMemories(mergedMemories)
         : (onSaveMemories(mergedMemories), true);
@@ -880,7 +895,9 @@ export default function AppOffline({
           recordedAt: now,
         });
       }
-      showToast("线下剧情摘要已同步到当前角色");
+      showToast(usedSafeFallback
+        ? "提炼接口未返回可用摘要，已保存可核对的安全剧情摘要"
+        : "线下剧情摘要已同步到当前角色");
       return syncedStory;
     } catch (error) {
       console.error("Failed to sync offline story memories:", error);
