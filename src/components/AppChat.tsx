@@ -1747,6 +1747,8 @@ export default function AppChat({
   const [memoNotes, setMemoNotes] = useState<any[]>([]);
   const [activeMenuMsg, setActiveMenuMsg] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isMultiSelectDeleteMode, setIsMultiSelectDeleteMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
   const [voicePlayed, setVoicePlayed] = useState<Record<string, boolean>>({});
   const [voiceTranscribed, setVoiceTranscribed] = useState<Record<string, boolean>>({});
 
@@ -1767,6 +1769,8 @@ export default function AppChat({
     setShowTransferDetailModal(false);
     setShowAttachPanel(false);
     setActiveAttachModal(null);
+    setIsMultiSelectDeleteMode(false);
+    setSelectedMessageIds(new Set());
   }, [activeIdentityId, activeChatRelationId, activeChatCharId]);
 
   const [selectedFileNote, setSelectedFileNote] = useState<{ title: string; content: string } | null>(null);
@@ -3287,6 +3291,35 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       removed.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete generated image asset:", error)));
     }
     onDeleteMessage?.(messageId, targetMessage);
+  };
+
+  const startMultiSelectDelete = (initialMessageId: string) => {
+    setActiveMenuMsg(null);
+    setSelectedMessageIds(new Set([initialMessageId]));
+    setIsMultiSelectDeleteMode(true);
+  };
+
+  const toggleMultiSelectedMessage = (messageId: string) => {
+    setSelectedMessageIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  };
+
+  const exitMultiSelectDelete = () => {
+    setIsMultiSelectDeleteMode(false);
+    setSelectedMessageIds(new Set());
+  };
+
+  const deleteSelectedMessages = () => {
+    const selectedMessages = currentChatMessages.filter((message) => selectedMessageIds.has(message.id));
+    if (!selectedMessages.length) return;
+    if (!window.confirm(`确定删除选中的 ${selectedMessages.length} 条消息吗？删除后无法恢复。`)) return;
+    selectedMessages.forEach((message) => deleteMessageAndLinkedImage(message.id));
+    exitMultiSelectDelete();
+    showToast(`已删除 ${selectedMessages.length} 条消息`);
   };
 
   const clearMessagesAndLinkedArtifacts = (characterId: string, relationId?: string) => {
@@ -6662,7 +6695,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           )}
 
           {/* Active Chat Messages body */}
-          <div className={`chat-content-scope chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} flex min-h-0 flex-1 flex-col`}>
+          <div className={`chat-content-scope chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} relative flex min-h-0 flex-1 flex-col`}>
           <MessageList
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
@@ -6699,8 +6732,47 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 }
               }
 
+              const wrapSelectableMessage = (messageElement: React.ReactElement) => {
+                if (!isMultiSelectDeleteMode) return messageElement;
+                const isSelected = selectedMessageIds.has(msg.id);
+                return (
+                  <div
+                    key={`selectable-${msg.id}`}
+                    className="chat-message-selection-row flex w-full items-center gap-2"
+                    onClickCapture={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      toggleMultiSelectedMessage(msg.id);
+                    }}
+                    onPointerDownCapture={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onContextMenuCapture={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      toggleMultiSelectedMessage(msg.id);
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label={isSelected ? "取消选择消息" : "选择消息"}
+                      aria-pressed={isSelected}
+                      className={`chat-message-selection-toggle ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                        isSelected
+                          ? "border-neutral-950 bg-neutral-950 text-white"
+                          : "border-stone-300 bg-white/90 text-transparent"
+                      }`}
+                    >
+                      <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                    </button>
+                    <div className="min-w-0 flex-1">{messageElement}</div>
+                  </div>
+                );
+              };
+
               const wrapMessageWithDivider = (messageElement: React.ReactElement) => {
-                if (!showWeChatDivider) return messageElement;
+                const selectableMessage = wrapSelectableMessage(messageElement);
+                if (!showWeChatDivider) return selectableMessage;
                 return (
                   <React.Fragment key={`msg-group-${msg.id}`}>
                     <div className="w-full flex justify-center my-3.5 select-none animate-fade-in chat-timestamp" id={`timestamp-divider-${msg.id}`}>
@@ -6708,7 +6780,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                         {dividerText}
                       </div>
                     </div>
-                    {messageElement}
+                    {selectableMessage}
                   </React.Fragment>
                 );
               };
@@ -6716,7 +6788,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
               if (isOfflineModeActive) {
                 // 1. Narration (centered divider with grey text and dashed line)
                 if (msg.isNarration) {
-                  return (
+                  return wrapSelectableMessage(
                     <div 
                       key={msg.id}
                       className="w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed text-[#a1a3a8] border-b border-dashed border-slate-100/60 dark:border-slate-800/60 transition-all cursor-pointer"
@@ -6729,13 +6801,13 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       <div className="max-w-[90%] mx-auto font-normal tracking-wide select-text">
                         {msg.content}
                       </div>
-                    </div>
+                    </div>,
                   );
                 }
 
                 // 2. Character lines & descriptions (beautiful book paragraph layout, NO bubble, NO avatar)
                 if (msg.sender === "character") {
-                  return (
+                  return wrapSelectableMessage(
                     <div 
                       key={msg.id}
                       className="w-full text-left my-4 px-1 py-1 group/novel relative select-text transition-all duration-200 hover:bg-slate-50/10 dark:hover:bg-stone-800/20 rounded-lg cursor-pointer pr-10"
@@ -6772,12 +6844,12 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           <Volume2 className="w-3.5 h-3.5 text-indigo-500" />
                         )}
                       </button>
-                    </div>
+                    </div>,
                   );
                 }
 
                 // 3. User spoken dialogue ("我的发言", beautiful center-right soft grey bubble)
-                return (
+                return wrapSelectableMessage(
                   <div 
                     key={msg.id}
                     className="w-full flex justify-end my-4 group relative select-text cursor-pointer"
@@ -6792,7 +6864,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                         {msg.content}
                       </p>
                     </div>
-                  </div>
+                  </div>,
                 );
               }
 
@@ -7312,6 +7384,31 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
            <div ref={chatEndRef} />
           </MessageList>
+
+          {isMultiSelectDeleteMode && (
+            <div className="chat-multi-select-toolbar absolute inset-x-0 bottom-0 z-[85] border-t border-stone-200/80 bg-white/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)] backdrop-blur-xl">
+              <div className="mx-auto flex max-w-md items-center gap-3">
+                <button
+                  type="button"
+                  onClick={exitMultiSelectDelete}
+                  className="flex-1 rounded-xl border border-stone-200 bg-white py-2.5 text-xs font-bold text-stone-600 active:bg-stone-100"
+                >
+                  取消
+                </button>
+                <div className="min-w-16 text-center text-xs font-bold text-stone-500">
+                  已选 {selectedMessageIds.size} 条
+                </div>
+                <button
+                  type="button"
+                  onClick={deleteSelectedMessages}
+                  disabled={selectedMessageIds.size === 0}
+                  className="flex-1 rounded-xl bg-red-500 py-2.5 text-xs font-bold text-white active:bg-red-600 disabled:opacity-40"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          )}
 
           <BubbleTipPortalLayer enabled={!isShowingCardModal && activeBubbleTailEnabled} />
 
@@ -10073,20 +10170,36 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       )}
 
       {/* Long Press Bubble Context Menu */}
-      {activeMenuMsg && (
+      {activeMenuMsg && (() => {
+        const visualViewport = window.visualViewport;
+        const viewportTop = visualViewport?.offsetTop ?? 0;
+        const viewportLeft = visualViewport?.offsetLeft ?? 0;
+        const viewportHeight = visualViewport?.height ?? window.innerHeight;
+        const viewportWidth = visualViewport?.width ?? window.innerWidth;
+        const viewportBottom = viewportTop + viewportHeight;
+        const spaceAbove = menuPosition.y - viewportTop;
+        const spaceBelow = viewportBottom - menuPosition.y;
+        const shouldOpenUpward = spaceBelow < Math.min(360, viewportHeight * 0.55) && spaceAbove > spaceBelow;
+        const menuWidth = Math.min(176, viewportWidth - 20);
+        const menuLeft = Math.max(viewportLeft + 10, Math.min(viewportLeft + viewportWidth - menuWidth - 10, menuPosition.x - menuWidth / 2));
+        return (
         <div 
           className="fixed inset-0 z-50 bg-black/10 flex items-center justify-center backdrop-blur-[1px]"
           onClick={() => setActiveMenuMsg(null)}
           onContextMenu={(e) => { e.preventDefault(); setActiveMenuMsg(null); }}
         >
           <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[140px] text-stone-800 space-y-1"
+            initial={{ opacity: 0, scale: 0.95, y: shouldOpenUpward ? 6 : -6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="chat-bubble-context-menu overflow-y-auto bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 text-stone-800 space-y-1"
             style={{
               position: "absolute",
-              top: Math.max(10, Math.min(window.innerHeight - 220, menuPosition.y - 10)),
-              left: Math.max(10, Math.min(window.innerWidth - 160, menuPosition.x - 70)),
+              width: menuWidth,
+              maxHeight: Math.max(160, viewportHeight - 20),
+              top: shouldOpenUpward ? undefined : Math.max(viewportTop + 10, menuPosition.y + 8),
+              bottom: shouldOpenUpward ? Math.max(10, window.innerHeight - menuPosition.y + 8) : undefined,
+              left: menuLeft,
+              transformOrigin: shouldOpenUpward ? "bottom center" : "top center",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -10114,16 +10227,25 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
             </button>
 
             {onDeleteMessage && (
-              <button
-                onClick={() => {
-                  deleteMessageAndLinkedImage(activeMenuMsg.id);
-                  setActiveMenuMsg(null);
-                }}
-                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-stone-500" />
-                <span>删除</span>
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    deleteMessageAndLinkedImage(activeMenuMsg.id);
+                    setActiveMenuMsg(null);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-stone-500" />
+                  <span>删除</span>
+                </button>
+                <button
+                  onClick={() => startMultiSelectDelete(activeMenuMsg.id)}
+                  className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <Check className="w-3.5 h-3.5 text-stone-500" />
+                  <span>多选删除</span>
+                </button>
+              </>
             )}
 
             <button
@@ -10200,7 +10322,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
             )}
           </motion.div>
         </div>
-      )}
+        );
+      })()}
 
       {/* OOC Comment Modal */}
       {showOocCommentModal && (
