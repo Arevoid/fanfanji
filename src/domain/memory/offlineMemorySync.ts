@@ -71,6 +71,42 @@ export function selectFreshOfflineHandoffMemory(input: {
     .sort((left, right) => right.timestamp - left.timestamp)[0];
 }
 
+/**
+ * Selects a confirmed offline event that chronologically occurred after the
+ * previous dated online session and before the current message. Unlike
+ * semantic recall, this bridge must not disappear merely because the user
+ * uses a new relationship word that is absent from the summary text.
+ */
+export function selectInterveningOfflineHandoff(input: {
+  stories: readonly OfflineStory[];
+  memories: readonly MemoryItem[];
+  relationId?: string;
+  after?: number;
+  before?: number;
+}): { story: OfflineStory; memory: MemoryItem; occurredAt: number } | undefined {
+  if (!input.relationId) return undefined;
+  const after = input.after ?? 0;
+  const before = input.before ?? Date.now();
+  for (const story of [...input.stories]
+    .filter((candidate) => candidate.relationId === input.relationId)
+    .map((candidate) => ({
+      story: candidate,
+      occurredAt: candidate.onlineHandoff?.endedAt
+        ?? candidate.archivedAt
+        ?? candidate.lastMemorySyncAt
+        ?? candidate.updatedAt,
+    }))
+    .filter(({ occurredAt }) => occurredAt > after && occurredAt <= before)
+    .sort((left, right) => right.occurredAt - left.occurredAt)) {
+    const memory = input.memories
+      .filter((candidate) => isOfflineStoryHandoffMemory(candidate, story.story))
+      .filter((candidate) => candidate.content.includes(getOfflineStorySummaryMarker(story.story)))
+      .sort((left, right) => right.timestamp - left.timestamp)[0];
+    if (memory) return { ...story, memory };
+  }
+  return undefined;
+}
+
 export function selectPendingOfflineHandoffStory(input: {
   stories: readonly OfflineStory[];
   relationId?: string;

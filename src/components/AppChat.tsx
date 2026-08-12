@@ -21,12 +21,12 @@ import { getWorldBookLocationReferences } from "../domain/worldbook/locationRefe
 import { stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
-import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
+import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectInterveningOfflineHandoff, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
 import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
-import { buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
+import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
@@ -939,6 +939,36 @@ export default function AppChat({
       currentOnlineAt,
     });
   };
+  const getInterveningOfflineHandoff = (currentOnlineAt?: number) => {
+    if (!currentOnlineAt || !activeRelationship?.id) return undefined;
+    const currentDate = new Date(currentOnlineAt);
+    const currentDayStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
+    const previousOnlineAt = [...currentChatMessages]
+      .filter((message) => message.timestamp < currentDayStart)
+      .sort((left, right) => right.timestamp - left.timestamp)[0]?.timestamp ?? 0;
+    return selectInterveningOfflineHandoff({
+      stories: offlineStories,
+      memories: memories || [],
+      relationId: activeRelationship.id,
+      after: previousOnlineAt,
+      before: currentOnlineAt,
+    });
+  };
+  const getOfflineTimelineStoriesBetween = (previousAt: number | undefined, currentAt: number): OfflineStory[] => {
+    if (!previousAt || !activeRelationship?.id || activeCharacter?.isGroupChat) return [];
+    return offlineStories
+      .filter((story) => story.relationId === activeRelationship.id)
+      .filter((story) => hasOfflineStorySummary(story, memories || []))
+      .filter((story) => {
+        const occurredAt = story.onlineHandoff?.endedAt ?? story.archivedAt ?? story.lastMemorySyncAt ?? story.updatedAt;
+        return occurredAt > previousAt && occurredAt <= currentAt;
+      })
+      .sort((left, right) => {
+        const leftAt = left.onlineHandoff?.endedAt ?? left.archivedAt ?? left.lastMemorySyncAt ?? left.updatedAt;
+        const rightAt = right.onlineHandoff?.endedAt ?? right.archivedAt ?? right.lastMemorySyncAt ?? right.updatedAt;
+        return leftAt - rightAt;
+      });
+  };
   const activeStylePreset = resolveActiveChatStylePreset(
     activeCharacter?.chatStylePreset,
     settings.globalChatStylePreset,
@@ -1028,13 +1058,14 @@ export default function AppChat({
         ? message.relationId === activeRelationship.id
         : message.characterId === groupId && activeCharacter?.isGroupChat,
       );
-      const latestOfflineMemory = relationId
+      const interveningOfflineHandoff = relationId ? getInterveningOfflineHandoff(triggerMessage.timestamp) : undefined;
+      const latestOfflineMemory = interveningOfflineHandoff?.memory || (relationId
         ? selectFreshOfflineHandoffMemory({
           memories: memories || [],
           relationId,
           queryText: triggerMessage.content,
         })
-        : undefined;
+        : undefined);
       const pendingOfflineStory = relationId ? getPendingOfflineHandoff() : undefined;
       const offlineContinuityContext = pendingOfflineStory
         ? buildPendingOfflineTimelineHandoff(
@@ -2571,8 +2602,24 @@ ${memberWbText}`;
         currentMessageAt: userMsg?.timestamp,
         latestHistoryMessageAt: latestHistoryMessage?.timestamp,
       });
-      const slicedMsgs = msgsForHistory.slice(-limit);
       const requestTime = new Date();
+      const historyPartition = partitionDirectChatHistoryByCurrentDay({
+        messages: msgsForHistory,
+        currentMessageAt: userMsg?.timestamp,
+        enableTimeAwareness: turnSettings.enableTimeAwareness,
+      });
+      const slicedMsgs = historyPartition.liveMessages.slice(-limit);
+      const historicalReferenceLines = historyPartition.historicalMessages.map((message) => {
+        const speaker = message.sender === "user" ? "用户" : activeCharacter.name;
+        const content = serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: settings.name,
+          characterName: activeCharacter.name,
+          includeCallTranscript: false,
+        }).replace(/\s+/gu, " ").trim().slice(0, 240);
+        return `- ${new Date(message.timestamp).toLocaleString("zh-CN", { hour12: false })}｜${speaker}：${content}`;
+      });
+      const crossDayHistoricalReference = buildCrossDayHistoricalReferencePrompt(historicalReferenceLines);
 
       const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
           userName: settings.name,
@@ -2646,6 +2693,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：短期聊天记录已按用户限制截断；需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
+      if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
 
       const currentMessageContextText = userMsg
         ? serializeMessageContentForPrompt(userMsg, { mode: "history", userName: settings.name, characterName: activeCharacter.name })
@@ -2656,8 +2704,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         userText: currentMessageContextText,
         callTranscript,
       });
-      const shouldLoadLongTermMemory = (!isConnectedVoiceCall || callTopicShiftDetected)
-        && !isCrossDayNewSession;
+      const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
 
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
@@ -2693,7 +2740,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // A continuation synchronized while leaving the offline app is an explicit
       // handoff. Surface the newest one on the immediate return to online chat,
       // even when a short greeting is too vague for semantic retrieval.
-      const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
+      const interveningOfflineHandoff = getInterveningOfflineHandoff(userMsg?.timestamp);
+      const latestOfflineContinuationMemory = interveningOfflineHandoff?.memory || selectFreshOfflineHandoffMemory({
         memories: memories || [],
         relationId: activeRelationship?.id,
         queryText: currentMessageContextText,
@@ -2797,7 +2845,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         assembledInstructions.push(buildRedPacketReactionPrompt(userMsg.content));
       }
 
-      if (isCrossDayNewSession) {
+      if (isCrossDayNewSession || historyPartition.hasCrossDayHistory) {
         assembledInstructions.push(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT);
       }
 
@@ -3655,7 +3703,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       
       // Exclude lastUserMsg from the history parameter since it is sent as the main message parameter.
       const msgsForHistory = previousMessages.filter(m => m.id !== lastUserMsg.id);
-      const slicedMsgs = msgsForHistory.slice(-limit);
       const turnSettings = resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter);
       const currentMessageContextText = serializeMessageContentForPrompt(lastUserMsg, {
         mode: "history",
@@ -3674,11 +3721,27 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         userText: currentMessageContextText,
         callTranscript,
       });
-      const shouldLoadLongTermMemory = (!isConnectedVoiceCall || callTopicShiftDetected)
-        && !isCrossDayNewSession;
+      const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
 
       // Map history with timestamps for time awareness
       const requestTime = new Date();
+      const historyPartition = partitionDirectChatHistoryByCurrentDay({
+        messages: msgsForHistory,
+        currentMessageAt: lastUserMsg.timestamp,
+        enableTimeAwareness: turnSettings.enableTimeAwareness,
+      });
+      const slicedMsgs = historyPartition.liveMessages.slice(-limit);
+      const historicalReferenceLines = historyPartition.historicalMessages.map((message) => {
+        const speaker = message.sender === "user" ? "用户" : activeCharacter.name;
+        const content = serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: settings.name,
+          characterName: activeCharacter.name,
+          includeCallTranscript: false,
+        }).replace(/\s+/gu, " ").trim().slice(0, 240);
+        return `- ${new Date(message.timestamp).toLocaleString("zh-CN", { hour12: false })}｜${speaker}：${content}`;
+      });
+      const crossDayHistoricalReference = buildCrossDayHistoricalReferencePrompt(historicalReferenceLines);
       const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
           userName: settings.name,
           characterName: activeCharacter.name,
@@ -3722,6 +3785,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
+      if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
 
       // Add OOC comment correction as high priority instruction
       characterContextText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
@@ -3760,7 +3824,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         characterContextText += formatTruthRetrievalForPrompt(truthRetrieval);
       }
 
-      const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
+      const interveningOfflineHandoff = getInterveningOfflineHandoff(lastUserMsg.timestamp);
+      const latestOfflineContinuationMemory = interveningOfflineHandoff?.memory || selectFreshOfflineHandoffMemory({
         memories: memories || [],
         relationId: activeRelationship?.id,
         queryText: currentMessageContextText,
@@ -3851,7 +3916,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         assembledInstructions.push(buildRedPacketReactionPrompt(lastUserMsg.content));
       }
 
-      if (isCrossDayNewSession) {
+      if (isCrossDayNewSession || historyPartition.hasCrossDayHistory) {
         assembledInstructions.push(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT);
       }
 
@@ -6697,6 +6762,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
               WebkitOverflowScrolling: "touch",
             }}
             renderMessage={(msg, idx) => {
+              const previousVisibleMessage = idx > 0 ? visibleChatMessages[idx - 1] : undefined;
+              const interveningOfflineStories = getOfflineTimelineStoriesBetween(previousVisibleMessage?.timestamp, msg.timestamp);
               // Calculate WeChat timestamp divider
               let showWeChatDivider = false;
               let dividerText = "";
@@ -6762,14 +6829,34 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
               const wrapMessageWithDivider = (messageElement: React.ReactElement) => {
                 const selectableMessage = wrapSelectableMessage(messageElement);
-                if (!showWeChatDivider) return selectableMessage;
+                if (!showWeChatDivider && interveningOfflineStories.length === 0) return selectableMessage;
                 return (
                   <React.Fragment key={`msg-group-${msg.id}`}>
-                    <div className="w-full flex justify-center my-3.5 select-none animate-fade-in chat-timestamp" id={`timestamp-divider-${msg.id}`}>
-                      <div className="bg-black/5 dark:bg-white/10 text-[#888888] dark:text-stone-400 text-[11.5px] px-2.5 py-0.5 rounded-[4px] tracking-wide font-normal chat-timestamp__label">
-                        {dividerText}
+                    {interveningOfflineStories.map((story) => {
+                      const occurredAt = story.onlineHandoff?.endedAt ?? story.archivedAt ?? story.lastMemorySyncAt ?? story.updatedAt;
+                      const eventDate = new Date(occurredAt);
+                      const eventTime = eventDate.toLocaleString("zh-CN", {
+                        month: "numeric",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                      });
+                      return (
+                        <div key={`offline-timeline-${story.id}`} className="chat-offline-timeline-event w-full flex justify-center my-3.5 select-none animate-fade-in">
+                          <div className="chat-offline-timeline-event__label bg-black/5 dark:bg-white/10 text-[#777] dark:text-stone-300 text-[11.5px] px-2.5 py-1 rounded-[4px] tracking-wide font-normal">
+                            {eventTime} · 线下见面 · 《{story.title}》
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {showWeChatDivider && (
+                      <div className="w-full flex justify-center my-3.5 select-none animate-fade-in chat-timestamp" id={`timestamp-divider-${msg.id}`}>
+                        <div className="bg-black/5 dark:bg-white/10 text-[#888888] dark:text-stone-400 text-[11.5px] px-2.5 py-0.5 rounded-[4px] tracking-wide font-normal chat-timestamp__label">
+                          {dividerText}
+                        </div>
                       </div>
-                    </div>
+                    )}
                     {selectableMessage}
                   </React.Fragment>
                 );

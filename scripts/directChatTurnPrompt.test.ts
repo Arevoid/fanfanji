@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   buildDirectChatMainPrompt,
+  buildCrossDayHistoricalReferencePrompt,
   buildRedPacketReactionPrompt,
   buildStickerResponsePrompt,
   buildTimeAwarenessPrompt,
@@ -10,6 +11,7 @@ import {
   CURRENT_SCENE_CONTINUITY_PROMPT,
   detectCallTopicShift,
   NEW_DAY_CONVERSATION_BOUNDARY_PROMPT,
+  partitionDirectChatHistoryByCurrentDay,
   shouldUseCrossDayHistoryBoundary,
 } from "../src/features/chat/prompts/directChatTurnPrompt";
 
@@ -40,6 +42,22 @@ const currentMessageAt = new Date("2026-08-12T14:19:00+08:00").getTime();
 assert.equal(shouldUseCrossDayHistoryBoundary({ enableTimeAwareness: true, currentMessageAt, latestHistoryMessageAt: oldMessageAt }), true);
 assert.equal(shouldUseCrossDayHistoryBoundary({ enableTimeAwareness: false, currentMessageAt, latestHistoryMessageAt: oldMessageAt }), false);
 assert.equal(shouldUseCrossDayHistoryBoundary({ enableTimeAwareness: true, currentMessageAt, latestHistoryMessageAt: currentMessageAt - 60_000 }), false);
+const partitioned = partitionDirectChatHistoryByCurrentDay({
+  messages: [
+    { id: "old", timestamp: oldMessageAt },
+    { id: "today", timestamp: currentMessageAt - 60_000 },
+  ],
+  currentMessageAt,
+  enableTimeAwareness: true,
+});
+assert.deepEqual(partitioned.liveMessages.map((message) => message.id), ["today"]);
+assert.deepEqual(partitioned.historicalMessages.map((message) => message.id), ["old"]);
+assert.equal(partitioned.hasCrossDayHistory, true);
+const historicalReference = buildCrossDayHistoricalReferencePrompt(["- 2026/8/11 23:45｜角色：你到楼下了告诉我"]);
+assert.match(historicalReference, /不是当前仍在进行的现场/);
+assert.match(historicalReference, /到楼下、等待、准备见面.*即时状态均已过期/);
+assert.match(historicalReference, /线下经历是更晚发生的事实/);
+assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /who acts, who travels, who waits/);
 assert.match(buildRedPacketReactionPrompt("[红包]|6.66|开心"), /¥6\.66/);
 assert.match(buildRedPacketReactionPrompt("[红包]|6.66|开心"), /开心/);
 assert.match(buildStickerResponsePrompt("[表情]|笑|url"), /\[表情\]\|笑\|url/);
@@ -96,6 +114,8 @@ assert.equal((appChatSource.match(/if \(forumContext\) assembledInstructions\.pu
 assert.equal((appChatSource.match(/if \(diaryContext\) assembledInstructions\.push\(diaryContext\)/g) || []).length, 2);
 assert.equal((appChatSource.match(/NEW_DAY_CONVERSATION_BOUNDARY_PROMPT/g) || []).length >= 3, true);
 assert.equal((appChatSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 2, "send and regeneration must share cross-day history routing");
+assert.equal((appChatSource.match(/partitionDirectChatHistoryByCurrentDay\(\{/g) || []).length, 2, "send and regeneration must remove old live-scene turns from current-day history");
+assert.equal((appChatSource.match(/&& !isCrossDayNewSession/g) || []).length, 0, "cross-day routing must not disable relation and offline memory retrieval");
 assert.equal((appChatSource.match(/buildVoiceCallPrompts\(callTopicShiftDetected\)/g) || []).length, 2);
 
 console.log("Direct chat turn prompt parity tests passed");

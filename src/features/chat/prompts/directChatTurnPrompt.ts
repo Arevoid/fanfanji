@@ -9,6 +9,42 @@ Time awareness is enabled, and the user's newest message was sent on a later cal
 - Relative dates in an old message stay anchored to that message's send date. An old “tomorrow”, “tonight”, or “next week” must never be reinterpreted relative to today.
 - When a promised date has passed, it is only a past agreement whose outcome may be unknown. Do not assume it is still pending, move it to a new future date, or claim to still be waiting for that old “tomorrow”. If it becomes relevant, acknowledge naturally that the stated date has already passed.`;
 
+export function partitionDirectChatHistoryByCurrentDay<T extends { timestamp: number }>(input: {
+  messages: readonly T[];
+  currentMessageAt?: number;
+  enableTimeAwareness: boolean;
+  historicalLimit?: number;
+}): { liveMessages: T[]; historicalMessages: T[]; hasCrossDayHistory: boolean } {
+  if (!input.enableTimeAwareness || !input.currentMessageAt) {
+    return { liveMessages: [...input.messages], historicalMessages: [], hasCrossDayHistory: false };
+  }
+  const current = new Date(input.currentMessageAt);
+  const isCurrentDay = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.getFullYear() === current.getFullYear()
+      && date.getMonth() === current.getMonth()
+      && date.getDate() === current.getDate();
+  };
+  const liveMessages = input.messages.filter((message) => isCurrentDay(message.timestamp));
+  const olderMessages = input.messages.filter((message) => !isCurrentDay(message.timestamp));
+  const historicalLimit = Math.max(1, input.historicalLimit ?? 6);
+  return {
+    liveMessages,
+    historicalMessages: olderMessages.slice(-historicalLimit),
+    hasCrossDayHistory: olderMessages.length > 0,
+  };
+}
+
+export function buildCrossDayHistoricalReferencePrompt(lines: readonly string[]): string {
+  if (lines.length === 0) return "";
+  return `[CLOSED HISTORICAL CHAT REFERENCE / 已结束的旧聊天片段]
+以下内容发生在当前日期之前，只能帮助理解用户明确提到的旧事，不是当前仍在进行的现场：
+${lines.join("\n")}
+- 当前地点、正在路上、到楼下、等待、准备见面、正在做某事等即时状态均已过期，除非今天的消息或中间已确认事件重新建立。
+- 不得因为这些旧句子继续催促用户到达、声称自己仍在等待，或把昨晚/旧日期称为现在的“大晚上”。
+- 如果旧线上聊天与当前消息之间存在已确认的线下经历，线下经历是更晚发生的事实，优先于这段旧聊天。`;
+}
+
 export const CURRENT_SCENE_CONTINUITY_PROMPT = `[CURRENT-SCENE CONTINUITY]
 Treat recently established activities, locations, physical conditions, possessions, and relationship facts in the conversation history as context, while respecting any supplied timestamps and later updates.
 - Never silently replace one activity with another. For example, if you just said you were sweaty from running, do not later say you just returned from cycling.
@@ -16,6 +52,7 @@ Treat recently established activities, locations, physical conditions, possessio
 - A plan or promise is not automatically still pending forever. When time-awareness metadata says its target date has passed, preserve it only as a past agreement with an unknown outcome unless later messages confirm what happened.
 - Interpret the newest user message in context rather than demanding a literal question-and-answer format. A reply such as “I'm away travelling” can explain why a gift has not been received and can naturally support both concerns: the trip and handling the gift later.
 - When the history is unclear, avoid inventing a new concrete activity. Continue the genuinely related context or ask naturally instead.
+- Before sending a location, movement, waiting, arrival, pickup, visit, or threat-related sentence, make it unambiguous who acts, who travels, who waits, and where. Colloquial fragments are fine only when their subject and direction remain clear; never compress several speakers' actions into an unreadable chain.
 - This continuity rule applies to every message in a multi-bubble reply as well.`;
 
 export function shouldUseCrossDayHistoryBoundary(input: {
