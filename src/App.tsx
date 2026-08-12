@@ -22,6 +22,7 @@ import { loadBehaviorCorrections, saveBehaviorCorrections, retractBehaviorCorrec
 import { loadCharacterKnowledgeMigrationState, saveCharacterKnowledgeMigrationState } from "./core/storage/repositories/characterKnowledgeMigrationRepository";
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadScheduleStore } from "./core/storage/repositories/scheduleRepository";
+import { projectAppointmentsToScheduleEntries } from "./domain/schedule/scheduleProjection";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
@@ -420,6 +421,10 @@ export default function App() {
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => readArray<MusicPlaylist>("phone_music_playlists", []).value);
 
   const [scheduleStore] = useState(() => loadScheduleStore().value);
+  const scheduleEntries = React.useMemo(
+    () => projectAppointmentsToScheduleEntries(scheduleStore.appointments),
+    [scheduleStore.appointments],
+  );
 
   const [worldBookEntries, setWorldBookEntries] = useState<WorldBookEntry[]>(() => loadWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES).value);
 
@@ -3713,7 +3718,7 @@ export default function App() {
                 {activeApp === "schedule" && (
                   <LazyAppBoundary>
                     <AppSchedule
-                      entries={scheduleStore.entries}
+                      entries={scheduleEntries}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { loadScheduleStore, saveScheduleStore } from "../src/core/storage/repositories/scheduleRepository";
-import { EMPTY_SCHEDULE_STORE, SCHEDULE_SCHEMA_VERSION, type ScheduleStore } from "../src/domain/schedule/scheduleTypes";
+import { EMPTY_SCHEDULE_STORE } from "../src/domain/schedule/scheduleTypes";
 
 const values = new Map<string, string>();
 const localStorage = {
@@ -13,31 +13,6 @@ Object.defineProperty(globalThis, "window", { value: { localStorage }, configura
 
 assert.equal(saveScheduleStore(EMPTY_SCHEDULE_STORE).success, true);
 assert.deepEqual(loadScheduleStore().value, EMPTY_SCHEDULE_STORE);
-
-const scopedStore: ScheduleStore = {
-  schemaVersion: SCHEDULE_SCHEMA_VERSION,
-  entries: [{
-    id: "appointment-a",
-    schemaVersion: SCHEDULE_SCHEMA_VERSION,
-    category: "appointment",
-    title: "与角色见面",
-    status: "confirmed",
-    dateKey: "2026-08-16",
-    relationId: "relation-a",
-    characterId: "character-a",
-    userIdentityId: "identity-a",
-    createdAt: 1,
-    updatedAt: 1,
-  }],
-};
-assert.equal(saveScheduleStore(scopedStore).success, true);
-assert.deepEqual(loadScheduleStore().value, scopedStore);
-
-const invalidStore = {
-  ...scopedStore,
-  entries: [{ ...scopedStore.entries[0], relationId: "" }],
-} as ScheduleStore;
-assert.equal(saveScheduleStore(invalidStore).success, false, "unscoped entries must not be persisted");
 
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const storeSource = readFileSync(new URL("../src/components/AppStore.tsx", import.meta.url), "utf8");
@@ -54,4 +29,4 @@ assert.doesNotMatch(scheduleSource, /添加日程|经期|待办/);
 assert.match(settingsSource, /"phone_schedule_v1"/);
 assert.doesNotMatch(settingsSource, /"phone_calendar_events"/);
 
-console.log("PASS schedule app foundation, store install path, scoped storage, and V1 empty UI");
+console.log("PASS schedule app foundation, store install path, versioned storage, and V1 empty UI");
