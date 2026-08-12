@@ -21,6 +21,19 @@ export function getTtsProvider(settings: Pick<UserSettings, "ttsProvider">): Tts
   return settings.ttsProvider === "mossland" ? "mossland" : "minimax";
 }
 
+export function canPlayTtsMessage(input: {
+  isOfflineModeActive: boolean;
+  isVoiceMessage: boolean;
+  isQueuedCallSpeech: boolean;
+}): boolean {
+  return input.isOfflineModeActive || input.isVoiceMessage || input.isQueuedCallSpeech;
+}
+
+/** Only non-empty character subtitles are eligible for call TTS; the global switch is applied by the caller. */
+export function shouldQueueCallSpeech(sender: "user" | "character", subtitle: string): boolean {
+  return sender === "character" && Boolean(subtitle.trim());
+}
+
 export function resolveTtsCharacter(
   characters: readonly Character[],
   characterId?: string,

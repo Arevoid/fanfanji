@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { resolveActiveChatStylePreset } from "../src/components/AppChat";
+import { resolveActiveChatStylePreset } from "../src/features/chat/styles/chatStylePreset";
 
 assert.equal(
   resolveActiveChatStylePreset("default", "liquid-glass"),
@@ -32,8 +32,13 @@ assert.match(
 );
 assert.match(
   appChatSource,
-  /#conv-screen\.style-liquid-glass \.chat-bubble-self \*,/,
-  "liquid glass must force readable text inside a self bubble",
+  /#conv-screen\.style-liquid-glass \.chat-bubble-self > \.chat-message--voice-duration,/,
+  "liquid glass must target semantic message children instead of every bubble descendant",
+);
+assert.doesNotMatch(
+  appChatSource,
+  /chat-bubble-(?:self|other)\s+\*/,
+  "bubble theme rules must not leak into quotes, payments, or other nested special content",
 );
 
 console.log("chat style preset resolution tests passed");

@@ -28,9 +28,9 @@ assert.throws(() => assertReferenceImageCapability({ id: "p", name: "Imagen", pr
 const settingsPage = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 const imageSettings = settingsPage.slice(settingsPage.indexOf('activeTab === "image_api"'), settingsPage.indexOf('activeTab === "beauty"'));
 assert.doesNotMatch(imageSettings, /Provider Protocol|认证方式|OpenAI Images|Gemini Native|Imagen text-to-image|模型已验证|未验证/);
-const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const storedChatImage = readFileSync(new URL("../src/features/chat/components/StoredChatImage.tsx", import.meta.url), "utf8");
 const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
-assert.match(chat, /generated \? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"/);
+assert.match(storedChatImage, /generated \? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"/);
 assert.match(settingsPage, /const updateCurrentImageModel = \(model: string\)/);
 assert.match(settingsPage, /const persistImagePresetDraft =/);
 assert.match(settingsPage, /onSaveSettings\(\(previous\) => \(\{ \.\.\.previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId \}\)\)/);

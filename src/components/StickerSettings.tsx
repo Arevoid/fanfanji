@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Sticker, StickerGroup, UserSettings } from "../types";
 import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
 import { parseStickerImportLine } from "../utils/stickerImport";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import {
   Trash2,
   Link,
@@ -217,7 +218,7 @@ export default function StickerSettings({
 
       // Attempt to fetch, compress and save to IndexedDB as background enhancement!
       // If fails due to CORS, it simply stays as raw URL sticker. This is extremely robust!
-      fetch(url)
+      fetchWithTimeout(url, undefined, API_REQUEST_TIMEOUTS.remoteAsset)
         .then((res) => {
           if (res.ok) return res.blob();
           throw new Error("HTTP Fetch failed");
@@ -324,7 +325,7 @@ export default function StickerSettings({
             // 2. If it is a remote URL and not cached locally, try to fetch it
             if (!imageBlob && sticker.url && !sticker.url.startsWith("blob:") && !sticker.url.startsWith("data:")) {
               try {
-                const res = await fetch(sticker.url);
+                const res = await fetchWithTimeout(sticker.url, undefined, API_REQUEST_TIMEOUTS.remoteAsset);
                 if (res.ok) {
                   imageBlob = await res.blob();
                 }

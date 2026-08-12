@@ -5,6 +5,7 @@ import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldB
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
 import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
 import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
+import { writeJson } from "../core/storage/storageAdapter";
 
 export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBookEntry | null => {
   if (!e || typeof e !== "object") return null;
@@ -156,7 +157,7 @@ export default function AppWorldBook({
 
   useEffect(() => {
     try {
-      localStorage.setItem("worldbook_collapsed_categories", JSON.stringify(collapsedCategories));
+      writeJson("worldbook_collapsed_categories", collapsedCategories);
     } catch (e) {
       console.error(e);
     }

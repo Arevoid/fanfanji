@@ -30,6 +30,8 @@ export interface Character {
   mbti?: string;
   personality: string;
   backstory: string;
+  /** Explicit visible reply language. When absent, it is inferred from the complete persona, nationality, and visible World Book metadata. */
+  replyLanguage?: string;
   remark?: string; // Edit remark in chat menu
   isPinned?: boolean; // Pin chat to top
   chatBg?: string; // Custom chat background image
@@ -440,8 +442,6 @@ export interface ForumMutationEvent {
   occurredAt: number;
 }
 
-export type ForumRootTab = "home" | "mine";
-
 export interface ForumUserProfile {
   ownerIdentityId: string;
   displayName: string;
@@ -691,6 +691,12 @@ export interface UserSettings {
   widgetOpacity?: number;
   customFontName?: string;
   customFontData?: string;
+  /** Global application typography. Uploaded font binaries live in IndexedDB. */
+  globalFontSource?: "default" | "upload" | "url";
+  globalFontName?: string;
+  globalFontUrl?: string;
+  globalFontAssetId?: string;
+  globalFontSize?: number;
   iconBorderRadius?: number;
   iconBgOpacity?: number;
   iconBorderWidth?: number;
@@ -707,6 +713,8 @@ export interface UserSettings {
   avatarBorderRadius?: number;
   otherBubbleBg?: string;
   otherBubbleColor?: string;
+  /** One-time repair version for unreadable legacy classic bubble palettes. */
+  classicBubblePaletteMigrationVersion?: number;
   otherBubbleRadius?: number;
   otherBubbleOpacity?: number;
   selfBubbleBg?: string;

@@ -199,9 +199,13 @@ export function appendMomentPublicPromptContext<T extends { systemInstruction?: 
     { ...options, publicContext },
   ));
   if (!supplement) return request;
+  const instruction = request.systemInstruction || "";
+  const finalLanguageIndex = instruction.lastIndexOf("[FINAL OUTPUT LANGUAGE — HIGHEST PRIORITY]");
+  const baseInstruction = finalLanguageIndex >= 0 ? instruction.slice(0, finalLanguageIndex).trim() : instruction;
+  const finalLanguageInstruction = finalLanguageIndex >= 0 ? instruction.slice(finalLanguageIndex).trim() : "";
   return {
     ...request,
-    systemInstruction: [request.systemInstruction, supplement].filter(Boolean).join("\n\n"),
+    systemInstruction: [baseInstruction, supplement, finalLanguageInstruction].filter(Boolean).join("\n\n"),
   };
 }
 

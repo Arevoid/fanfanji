@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { apiChat, apiExtractMemories, apiTranslate } from "./utils/apiHelper";
+import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
+import { remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
+import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
@@ -80,6 +82,7 @@ import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./feat
 import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./features/music/services/musicPlayback";
 import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
+import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
 import { retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
@@ -90,15 +93,13 @@ import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/s
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
 import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
-import { migrateLegacyClassicBubblePreset } from "./features/chat/styles/classicBubblePreset";
+import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
+import {
+  migrateLegacyClassicBubblePreset,
+  migrateUnreadableClassicBubblePalette,
+} from "./features/chat/styles/classicBubblePreset";
 import StatusBar from "./components/StatusBar";
-import AppChat, { resolveActiveChatStylePreset } from "./components/AppChat";
-import AppArchives from "./components/AppArchives";
-import AppMusic from "./components/AppMusic";
-import AppStore from "./components/AppStore";
-import AppNotes from "./components/AppNotes";
-import AppDiary from "./components/AppDiary";
-import AppMemory from "./components/AppMemory";
+import { resolveActiveChatStylePreset } from "./features/chat/styles/chatStylePreset";
 import { useForumActivityEngine } from "./features/forum/hooks/useForumActivityEngine";
 import {
   BookOpen,
@@ -122,26 +123,49 @@ import {
   X
 } from "lucide-react";
 
+const loadAppChat = () => import("./components/AppChat");
+const loadAppArchives = () => import("./components/AppArchives");
 const loadAppWorldBook = () => import("./components/AppWorldBook");
+const loadAppMusic = () => import("./components/AppMusic");
 const loadAppForum = () => import("./components/AppForum");
+const loadAppNotes = () => import("./components/AppNotes");
+const loadAppDiary = () => import("./components/AppDiary");
+const loadAppStore = () => import("./components/AppStore");
 const loadAppSettings = () => import("./components/AppSettings");
+const loadAppMemory = () => import("./components/AppMemory");
 const loadAppOffline = () => import("./components/AppOffline");
 
-const SECONDARY_APP_LOADERS: Record<string, () => Promise<unknown>> = {
+const APP_LOADERS: Record<string, () => Promise<unknown>> = {
+  chat: loadAppChat,
+  archives: loadAppArchives,
   worldbook: loadAppWorldBook,
+  music: loadAppMusic,
   forum: loadAppForum,
+  notes: loadAppNotes,
+  diary: loadAppDiary,
+  store: loadAppStore,
   settings: loadAppSettings,
+  memory: loadAppMemory,
   offline: loadAppOffline,
 };
 
-const preloadSecondaryApp = (appId: string) => {
-  const loader = SECONDARY_APP_LOADERS[appId];
+const IDLE_PRELOAD_APP_IDS = ["archives", "worldbook", "notes", "store", "settings"] as const;
+
+const preloadApp = (appId: string) => {
+  const loader = APP_LOADERS[appId];
   if (loader) void loader();
 };
 
+const AppChat = React.lazy(loadAppChat);
+const AppArchives = React.lazy(loadAppArchives);
 const AppWorldBook = React.lazy(loadAppWorldBook);
+const AppMusic = React.lazy(loadAppMusic);
 const AppForum = React.lazy(loadAppForum);
+const AppNotes = React.lazy(loadAppNotes);
+const AppDiary = React.lazy(loadAppDiary);
+const AppStore = React.lazy(loadAppStore);
 const AppSettings = React.lazy(loadAppSettings);
+const AppMemory = React.lazy(loadAppMemory);
 const AppOffline = React.lazy(loadAppOffline);
 
 function LazyAppBoundary({ children }: React.PropsWithChildren) {
@@ -236,6 +260,11 @@ const DEFAULT_SETTINGS: UserSettings = {
   chatIcons: {},
   customFontName: "",
   customFontData: "",
+  globalFontSource: "default",
+  globalFontName: "",
+  globalFontUrl: "",
+  globalFontAssetId: "",
+  globalFontSize: 16,
   activePreset: "温和灰蓝 (Default)",
   momentsCover: "",
   apiEndpoint: "",
@@ -318,16 +347,16 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const preloadAll = () => Object.values(SECONDARY_APP_LOADERS).forEach((loader) => void loader());
+    const preloadIdleApps = () => IDLE_PRELOAD_APP_IDS.forEach(preloadApp);
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
     };
     if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(preloadAll, { timeout: 1500 });
+      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 1500 });
       return () => idleWindow.cancelIdleCallback?.(handle);
     }
-    const handle = window.setTimeout(preloadAll, 600);
+    const handle = window.setTimeout(preloadIdleApps, 600);
     return () => window.clearTimeout(handle);
   }, []);
 
@@ -337,27 +366,26 @@ export default function App() {
   const [settings, setSettingsState] = useState<UserSettings>(() => {
     const loadedSettings = loadSettings(DEFAULT_SETTINGS).value;
     const migration = migrateLegacyClassicBubblePreset(loadedSettings);
-    const migratedSettings = applyLiquidGlassTextDefaults(migration.settings);
-    if (migration.migrated || migratedSettings !== migration.settings) {
+    const classicPaletteMigration = migrateUnreadableClassicBubblePalette(migration.settings);
+    const migratedSettings = applyLiquidGlassTextDefaults(classicPaletteMigration.settings);
+    if (migration.migrated || classicPaletteMigration.settings !== migration.settings || migratedSettings !== classicPaletteMigration.settings) {
       const saved = saveSettings(migratedSettings);
       if (!saved.success) console.warn("[settings] Could not persist the legacy bubble preset migration.");
     }
     return migratedSettings;
   });
+  useGlobalTypography(settings);
   const settingsRef = useRef<UserSettings>(settings);
-  const settingsChangedByUser = useRef(false);
-  const setSettings = (update: UserSettingsUpdate): void => {
+  const setSettings = (update: UserSettingsUpdate): boolean => {
     const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(settingsRef.current, update));
-    settingsRef.current = nextSettings;
-    settingsChangedByUser.current = true;
-    setSettingsState(nextSettings);
-
     const result = saveSettings(nextSettings);
-    if (result.success) {
-      settingsChangedByUser.current = false;
-    } else {
+    if (!result.success) {
       console.error("Failed to save settings to localStorage:", result.error);
+      return false;
     }
+    settingsRef.current = nextSettings;
+    setSettingsState(nextSettings);
+    return true;
   };
 
   const [messages, setMessages] = useState<Message[]>(() => loadMessages(DEFAULT_MESSAGES).value.filter((message) =>
@@ -368,10 +396,7 @@ export default function App() {
 
   const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
 
-  const [tracks, setTracks] = useState<MusicTrack[]>(() => {
-    const raw = localStorage.getItem("phone_music_tracks");
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [tracks, setTracks] = useState<MusicTrack[]>(() => readArray<MusicTrack>("phone_music_tracks", []).value);
   const tracksRef = useRef<MusicTrack[]>(tracks);
   const [dualMusicConfigs, setDualMusicConfigs] = useState<DualMusicWidgetConfig[]>(() => loadDualMusicWidgetConfigs());
   const [identityMusicStates, setIdentityMusicStates] = useState<IdentityMusicState[]>(() => loadIdentityMusicStates());
@@ -389,10 +414,7 @@ export default function App() {
     });
   }, []);
 
-  const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => {
-    const raw = localStorage.getItem("phone_music_playlists");
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => readArray<MusicPlaylist>("phone_music_playlists", []).value);
 
   const [calendarEvents] = useState<CalendarEvent[]>(() => loadCalendarEvents([]).value);
 
@@ -400,11 +422,20 @@ export default function App() {
 
   // Navigation State
   const [activeApp, setActiveApp] = useState<string | null>(null);
+  const [chatModuleActivated, setChatModuleActivated] = useState(false);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
+
+  // Do not download/mount the large chat application when another app is
+  // opened first. Once chat is active, keep it mounted while navigating to a
+  // related app (for example a shared forum post) so drafts and call state live.
+  useEffect(() => {
+    if (activeApp === "chat") setChatModuleActivated(true);
+    else if (activeApp === null) setChatModuleActivated(false);
+  }, [activeApp]);
 
   // Offline Stories State & Handlers
   const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => loadOfflineStories([]).value);
@@ -505,6 +536,8 @@ export default function App() {
   // Global message notification banner state
   const [globalNotification, setGlobalNotification] = useState<{
     characterId: string;
+    relationId: string | null;
+    conversationId: string | null;
     avatar: string;
     name: string;
     content: string;
@@ -620,12 +653,22 @@ export default function App() {
         latestMsg.sender === "character" &&
         Date.now() - latestMsg.timestamp < 4000
       ) {
-        const isNotActiveChat = activeApp !== "chat" || activeChatCharId !== latestMsg.characterId;
+        const notificationScope = {
+          characterId: latestMsg.characterId,
+          relationId: latestMsg.relationId || null,
+          conversationId: latestMsg.conversationId || null,
+        };
+        const isNotActiveChat = activeApp !== "chat" || !isNotificationForActiveChat(notificationScope, {
+          characterId: activeChatCharId,
+          relationId: activeChatRelationId,
+        });
         if (isNotActiveChat) {
           const char = characters.find((c) => c.id === latestMsg.characterId);
           if (char) {
             setGlobalNotification({
               characterId: char.id,
+              relationId: notificationScope.relationId,
+              conversationId: notificationScope.conversationId,
               avatar: char.avatar,
               name: char.remark || char.name,
               content: latestMsg.content,
@@ -635,7 +678,7 @@ export default function App() {
         }
       }
     }
-  }, [messages, activeApp, activeChatCharId, characters]);
+  }, [messages, activeApp, activeChatCharId, activeChatRelationId, characters]);
 
   const phoneScreenRef = useRef<HTMLDivElement>(null);
 
@@ -663,7 +706,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem("phone_installed_apps", JSON.stringify(installedAppIds));
+    writeJson("phone_installed_apps", installedAppIds);
   }, [installedAppIds]);
 
   // Global Music Player State
@@ -869,7 +912,7 @@ export default function App() {
         ? { ...item, widgetType: "calendar-album" }
         : item);
     const normalized = normalizeHomeScreenLayout(items);
-    localStorage.setItem("phone_homescreen_items", JSON.stringify(normalized));
+    writeJson("phone_homescreen_items", normalized);
     return normalized;
   });
 
@@ -903,10 +946,10 @@ export default function App() {
     Object.entries(result.relationIdRemaps).forEach(([fromRelationId, toRelationId]) => {
       const sourceStoryId = localStorage.getItem(getOfflineStoryStorageKey(fromRelationId));
       if (sourceStoryId && !localStorage.getItem(getOfflineStoryStorageKey(toRelationId))) {
-        localStorage.setItem(getOfflineStoryStorageKey(toRelationId), sourceStoryId);
+        writeString(getOfflineStoryStorageKey(toRelationId), sourceStoryId);
       }
-      localStorage.removeItem(getOfflineStoryStorageKey(fromRelationId));
-      localStorage.removeItem(getOfflineModeStorageKey(fromRelationId));
+      removeStoredValue(getOfflineStoryStorageKey(fromRelationId));
+      removeStoredValue(getOfflineModeStorageKey(fromRelationId));
     });
   }, [characters, relationships, messages, memories, offlineStories]);
 
@@ -1033,7 +1076,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem("phone_immediate_summary_task", JSON.stringify(immediateSummaryTask));
+    writeJson("phone_immediate_summary_task", immediateSummaryTask);
   }, [immediateSummaryTask]);
 
   const handleStartImmediateSummary = async (characterId: string, rounds: number, relationId?: string, conversationId?: string) => {
@@ -1104,7 +1147,7 @@ export default function App() {
         formatContent: (items, formatOptions) => isDelicate
           ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
           : formatExtractedMemorySummary(headerLabel, items),
-      }, apiExtractMemories);
+      }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
       if (result.apiError) {
         setImmediateSummaryTask(prev => ({
           ...prev,
@@ -1228,7 +1271,7 @@ export default function App() {
   const visibleHomePageCount = getVisibleHomePageCount(homeScreenItems, isEditingHomeScreen);
 
   useEffect(() => {
-    localStorage.setItem("phone_homescreen_items", JSON.stringify(homeScreenItems));
+    writeJson("phone_homescreen_items", homeScreenItems);
   }, [homeScreenItems]);
 
   useEffect(() => {
@@ -1272,7 +1315,7 @@ export default function App() {
       if (current.some((item) => item.id === id)) {
         setInstalledAppIds((previous) => {
           const next = previous.includes(id) ? previous : [...previous, id];
-          localStorage.setItem("phone_installed_apps", JSON.stringify(next));
+          writeJson("phone_installed_apps", next);
           return next;
         });
         return current;
@@ -1284,12 +1327,12 @@ export default function App() {
       }
       setInstalledAppIds((previous) => {
         const next = previous.includes(id) ? previous : [...previous, id];
-        localStorage.setItem("phone_installed_apps", JSON.stringify(next));
+        writeJson("phone_installed_apps", next);
         return next;
       });
       setTimeout(() => setCurrentPage(position.page), 50);
       const next = [...current, { id, type: "app" as const, size: "1x1" as const, page: position.page, position }];
-      localStorage.setItem("phone_homescreen_items", JSON.stringify(next));
+      writeJson("phone_homescreen_items", next);
       return next;
     });
   };
@@ -1701,7 +1744,7 @@ export default function App() {
   const handleRemoveWidget = (id: string) => {
     setHomeScreenItems(current => current.filter(item => item.id !== id));
     setDualMusicConfigs((configs) => configs.filter((config) => config.widgetId !== id));
-    localStorage.removeItem(`time_widget_font_color_${id}`);
+    removeStoredValue(`time_widget_font_color_${id}`);
   };
 
   const getWidgetComponent = (type?: string) => {
@@ -1719,7 +1762,7 @@ export default function App() {
   const handleItemClick = (item: HomeScreenItem) => {
     if (isEditingHomeScreen || suppressNextItemClickRef.current) return;
     if (item.type === "app") {
-      preloadSecondaryApp(item.id);
+      preloadApp(item.id);
       setActiveApp(item.id);
     }
   };
@@ -1731,17 +1774,6 @@ export default function App() {
     const result = saveCharacters(characters);
     if (!result.success) console.error("Failed to save characters to localStorage:", result.error);
   }, [characters]);
-
-  useEffect(() => {
-    if (!settingsChangedByUser.current) return;
-
-    const result = saveSettings(settingsRef.current);
-    if (result.success) {
-      settingsChangedByUser.current = false;
-    } else {
-      console.error("Failed to save settings to localStorage:", result.error);
-    }
-  }, [settings]);
 
   useEffect(() => {
     if (!messagesPersistenceReady.current) {
@@ -1772,8 +1804,8 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("phone_music_tracks", JSON.stringify(tracks.map((track) =>
-        track.isLocal ? { ...track, url: "" } : track)));
+      writeJson("phone_music_tracks", tracks.map((track) =>
+        track.isLocal ? { ...track, url: "" } : track));
     } catch (e) {
       console.error("Failed to save tracks to localStorage:", e);
     }
@@ -1785,7 +1817,7 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("phone_music_playlists", JSON.stringify(playlists));
+      writeJson("phone_music_playlists", playlists);
     } catch (e) {
       console.error("Failed to save playlists to localStorage:", e);
     }
@@ -1913,7 +1945,7 @@ export default function App() {
         const parsed = JSON.parse(localStorage.getItem(RED_PACKET_STATUSES_KEY) || "{}") as RedPacketStatusMap;
         const removedMessages = messages.filter((message) => relationIds.includes(message.relationId || "") || characterIds.has(message.characterId));
         const withoutRelations = relationIds.reduce((statuses, relationId) => removePaymentStatusesByRelation(statuses, relationId), parsed);
-        localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(removePaymentStatusesForMessages(withoutRelations, removedMessages)));
+        writeJson(RED_PACKET_STATUSES_KEY, removePaymentStatusesForMessages(withoutRelations, removedMessages));
       } catch (error) {
         console.warn("Unable to clear payment state for deleted character:", error);
       }
@@ -1966,8 +1998,8 @@ export default function App() {
       saveDiaryGenerationTasks(diaryCleanup.tasks);
       saveDiaryTranslations(diaryCleanup.translations);
       relationIds.forEach((relationId) => {
-        localStorage.removeItem(getOfflineModeStorageKey(relationId));
-        localStorage.removeItem(getOfflineStoryStorageKey(relationId));
+        removeStoredValue(getOfflineModeStorageKey(relationId));
+        removeStoredValue(getOfflineStoryStorageKey(relationId));
       });
       // Relation-aware UI state is intentionally stored as maps keyed by the
       // relation ID. Remove only the deleted character's relation entries.
@@ -1979,7 +2011,7 @@ export default function App() {
           const next = Array.isArray(parsed)
             ? parsed.filter((value) => !relationIds.includes(value))
             : Object.fromEntries(Object.entries(parsed).filter(([relationId]) => !relationIds.includes(relationId)));
-          localStorage.setItem(key, JSON.stringify(next));
+          writeJson(key, next);
         } catch (error) {
           console.warn(`Unable to clear relationship state from ${key}:`, error);
         }
@@ -2568,7 +2600,7 @@ export default function App() {
           border-style: solid !important;
         }
         body, button, input, textarea, select, div, p, span, h1, h2, h3, h4, h5, h6 {
-          font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif !important;
+          font-family: var(--app-font-family, var(--app-default-font-family)) !important;
         }
 
         /* FIGMA SPECIFICATION OVERRIDES FOR ALL PAGES & COMPONENTS */
@@ -2620,12 +2652,7 @@ export default function App() {
         .phone-screen-container button:not(.chat-header-control--plain),
         .phone-screen-container [class*="rounded-"]:not(img):not(.avatar-img):not(.avatar-icon):not(input):not(select):not(textarea):not(.chat-header-control--plain),
         .phone-screen-container .back-btn:not(.chat-header-control--plain),
-        .phone-screen-container #schedule_back_btn,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-other,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"],
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-slate-200"],
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-stone-100"] {
+        .phone-screen-container #schedule_back_btn {
           border-radius: 32px !important;
         }
 
@@ -2698,8 +2725,8 @@ export default function App() {
         }
         .phone-screen-container [data-settings-shell] .settings-section-header {
           color: var(--text-tertiary);
-          font-size: 14px;
-          line-height: 20px;
+          font-size: calc(14px * var(--app-font-scale, 1));
+          line-height: calc(20px * var(--app-font-scale, 1));
           padding-inline: 4px;
         }
         .phone-screen-container [data-settings-shell] [data-settings-beauty] [class~="rounded-[24px]"] {
@@ -2755,9 +2782,9 @@ export default function App() {
           align-items: center;
           justify-content: center;
           padding: 0 16px;
-          font-size: 14px;
+          font-size: calc(14px * var(--app-font-scale, 1));
           font-weight: 600;
-          line-height: 20px;
+          line-height: calc(20px * var(--app-font-scale, 1));
           transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
         }
         .phone-screen-container .settings-wide-action-primary {
@@ -2818,7 +2845,7 @@ export default function App() {
         .phone-screen-container [class*="text-xs"][class*="font-extrabold"][class*="text-stone-"],
         .phone-screen-container [class*="text-xs"][class*="font-semibold"][class*="text-slate-"],
         .phone-screen-container [class*="text-xs"][class*="font-bold"][class*="text-stone-"] {
-          font-size: 11px !important;
+          font-size: calc(11px * var(--app-font-scale, 1)) !important;
           color: var(--text-secondary) !important;
           font-weight: 700 !important;
           letter-spacing: 0.02em !important;
@@ -2839,7 +2866,7 @@ export default function App() {
         .phone-screen-container div[class*="text-stone-400"],
         .phone-screen-container div[class*="text-slate-400"] {
           color: var(--text-tertiary) !important;
-          font-size: 10px !important;
+          font-size: calc(10px * var(--app-font-scale, 1)) !important;
         }
 
         /* 7. Button Elements Global Harmonization */
@@ -2891,29 +2918,8 @@ export default function App() {
           padding: 0 !important;
         }
 
-        /* 8. Specific Chat Bubble Alignment */
-        /* Self bubble: Solid charcoal black, crisp white text, 32px round */
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"] {
-          background-color: var(--chat-user-bg) !important;
-          color: var(--chat-user-text) !important;
-          border-radius: 32px !important;
-          border: none !important;
-        }
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self *,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"] * {
-          color: var(--chat-user-text) !important;
-        }
-
-        /* Other bubble: Soft light gray, charcoal text, 32px round */
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-other,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-slate-200"],
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-stone-100"] {
-          background-color: var(--chat-ai-bg) !important;
-          color: var(--chat-ai-text) !important;
-          border-radius: 32px !important;
-          border: 1px solid var(--border) !important;
-        }
+        /* 8. Chat bubbles own their palette, radius and border inside AppChat.
+           Phone-wide !important rules here used to block the classic controls. */
 
         /* Double segment buttons (such as stays/experiences, notes/todo tabs) */
         .phone-screen-container .flex-1.py-2.rounded-xl {
@@ -3045,8 +3051,10 @@ export default function App() {
         {globalNotification && (
           <div
             onClick={(e) => {
+              const target = getNotificationChatTarget(globalNotification);
               setActiveApp("chat");
-              setActiveChatCharId(globalNotification.characterId);
+              setActiveChatRelationId(target.relationId);
+              setActiveChatCharId(target.characterId);
               setGlobalNotification(null);
             }}
             className="absolute left-3.5 right-3.5 z-50 animate-slide-down bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 p-3 flex items-center gap-3 cursor-pointer select-none animate-fade-in"
@@ -3513,7 +3521,7 @@ export default function App() {
 
                     <div className="flex items-center justify-center w-full h-full">
                       <button
-                        onPointerDown={() => preloadSecondaryApp("settings")}
+                        onPointerDown={() => preloadApp("settings")}
                         onClick={() => setActiveApp("settings")}
                         className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
                           isTransparentDockIcon("settings")
@@ -3575,8 +3583,10 @@ export default function App() {
               }}
             >
               <div className="w-full flex-1 min-h-0 relative">
-                <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
-                  <AppChat
+                {(activeApp === "chat" || chatModuleActivated) && (
+                  <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
+                    <LazyAppBoundary>
+                      <AppChat
                     characters={characters}
                     relationships={relationships}
                     settings={settings}
@@ -3620,18 +3630,22 @@ export default function App() {
                       setOpenForumShareId(shareId);
                       setActiveApp("forum");
                     }}
-                  />
-                </div>
+                      />
+                    </LazyAppBoundary>
+                  </div>
+                )}
 
                 {activeApp === "archives" && (
-                  <AppArchives
-                    characters={characters}
-                    worldBookEntries={worldBookEntries}
-                    onSaveCharacter={handleSaveCharacter}
-                    onDeleteCharacter={handleDeleteCharacter}
-                    onClose={() => setActiveApp(null)}
-                    onSaveWorldBookEntries={handleSaveWorldBookEntries}
-                  />
+                  <LazyAppBoundary>
+                    <AppArchives
+                      characters={characters}
+                      worldBookEntries={worldBookEntries}
+                      onSaveCharacter={handleSaveCharacter}
+                      onDeleteCharacter={handleDeleteCharacter}
+                      onClose={() => setActiveApp(null)}
+                      onSaveWorldBookEntries={handleSaveWorldBookEntries}
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "worldbook" && (
@@ -3648,7 +3662,8 @@ export default function App() {
                 )}
 
                 {activeApp === "music" && (
-                  <AppMusic
+                  <LazyAppBoundary>
+                    <AppMusic
                     tracks={tracks}
                     playlists={playlists}
                     onAddTrack={handleAddMusicTrack}
@@ -3666,7 +3681,8 @@ export default function App() {
                     volume={volume}
                     setVolume={setVolume}
                     onPlayTrack={(track) => toggleTrack(track.id, "music-library", true, track)}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "forum" && (
@@ -3693,13 +3709,16 @@ export default function App() {
                 )}
 
                 {activeApp === "notes" && (
-                  <AppNotes
-                    onClose={() => setActiveApp(null)}
-                  />
+                  <LazyAppBoundary>
+                    <AppNotes
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "diary" && (
-                  <AppDiary
+                  <LazyAppBoundary>
+                    <AppDiary
                     activeIdentity={activeIdentity}
                     characters={characters}
                     relationships={relationships}
@@ -3714,11 +3733,13 @@ export default function App() {
                       setActiveApp("chat");
                     }}
                     onClose={() => setActiveApp(null)}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "store" && (
-                  <AppStore
+                  <LazyAppBoundary>
+                    <AppStore
                     installedAppIds={installedAppIds}
                     onInstallApp={handleInstallApp}
                     onUninstallApp={handleUninstallApp}
@@ -3731,7 +3752,8 @@ export default function App() {
                       const iconFn = AppIcons[id as keyof typeof AppIcons];
                       return iconFn ? iconFn(className) : null;
                     }}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "settings" && (
@@ -3752,7 +3774,8 @@ export default function App() {
                 )}
 
                 {activeApp === "memory" && (
-                  <AppMemory
+                  <LazyAppBoundary>
+                    <AppMemory
                     characters={characters}
                     relationships={relationships}
                     memories={memories}
@@ -3766,7 +3789,8 @@ export default function App() {
                     onClose={() => setActiveApp(null)}
                     selectedModel={settings.selectedModel}
                     apiEndpoint={settings.apiEndpoint}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
                 {activeApp === "offline" && (

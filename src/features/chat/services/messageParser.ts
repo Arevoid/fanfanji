@@ -8,7 +8,7 @@ const INTERNAL_DELIVERY_MARKER = /\[\s*(?:消息发送于|消息发送时间|消
 // Date/time context is retained in Message records for ordering and model
 // context, but must never render as a user-facing chat bubble. This removes
 // named date-and-clock blocks while leaving the underlying timestamp intact.
-const INTERNAL_NAMED_TIMESTAMP_MARKER = /\[\s*(?:历史时间|当前时间|本地时间|现实时间|时间戳|消息时间|发送时间)\s*(?:[:：]\s*)?[^\]]*(?:\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}\s*[-/]\s*\d{1,2}\s*[-/]\s*\d{1,2})[^\]]*(?:\d{1,2}\s*[:：]\s*\d{2})[^\]]*\]/gi;
+const INTERNAL_NAMED_TIMESTAMP_MARKER = /\[\s*(?:历史发送时间|历史时间|当前时间|本地时间|现实时间|时间戳|消息时间|发送时间|时间)\s*(?:[:：]\s*)?[^\]]*(?:\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}\s*[-/]\s*\d{1,2}\s*[-/]\s*\d{1,2})[^\]]*(?:\d{1,2}\s*[:：]\s*\d{2})[^\]]*\]/gi;
 const INTERNAL_DATE_TIMESTAMP_MARKER = /\[\s*(?:\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}\s*[-/]\s*\d{1,2}\s*[-/]\s*\d{1,2})\s+(?:上午|下午|早上|晚上)?\s*\d{1,2}\s*[:：]\s*\d{2}[^\]]*\]/gi;
 const INTERNAL_STANDALONE_CLOCK_MARKER = /(^|\n)[\t ]*[\[【（(]\s*(?:(?:上午|下午|早上|晚上)\s*)?(?:[01]?\d|2[0-3])\s*[:：]\s*[0-5]\d(?:\s*[:：]\s*[0-5]\d)?\s*[\]】）)][\t ]*(?=\n|$)/gim;
 const INTERNAL_RELATIVE_SECOND_MARKER = /(^|\n)[\t ]*\[\s*第\s*\d{1,4}\s*秒\s*\][\t ]*(?=\n|$)/gim;
@@ -124,4 +124,75 @@ export function parseCallRecord(content: string): VoiceCallRecord {
   } catch {
     return { callType, status, direction, duration, transcript: [] };
   }
+}
+
+export function formatCallRecordHistory(
+  content: string,
+  options: { userName?: string; characterName?: string; includeTranscript?: boolean } = {},
+): string | null {
+  if (!isCallRecordMarkup(content)) return null;
+
+  const call = parseCallRecord(content);
+  const userName = options.userName?.trim() || "用户";
+  const characterName = options.characterName?.trim() || "角色";
+  const direction = call.direction === "incoming" ? `${characterName}发起` : `${userName}发起`;
+
+  if (call.status !== "completed") {
+    const result = call.status === "rejected" ? "已拒绝" : "已取消";
+    return `[${call.callType}，${direction}，${result}]`;
+  }
+
+  const header = `[已完成${call.callType}，${direction}，时长 ${call.duration}。这是与后续消息连续的真实通话记录]`;
+  if (options.includeTranscript === false) return header;
+
+  const transcript = call.transcript
+    .map((item) => {
+      const text = getCallTranscriptText(item.content || "").trim();
+      if (!text) return "";
+      return `${item.sender === "user" ? userName : characterName}：${text}`;
+    })
+    .filter(Boolean);
+
+  return transcript.length > 0 ? `${header}\n${transcript.join("\n")}` : header;
+}
+
+export interface CallRecordHistoryTurn {
+  role: "user" | "model";
+  text: string;
+  timestamp: number;
+}
+
+/**
+ * Expands a persisted call into role-correct API turns. A call record's outer
+ * Message.sender only identifies who started the call; it must never own every
+ * line in the transcript.
+ */
+export function expandCallRecordHistory(
+  content: string,
+  fallbackTimestamp: number,
+  options: { userName?: string; characterName?: string } = {},
+): CallRecordHistoryTurn[] | null {
+  if (!isCallRecordMarkup(content)) return null;
+
+  const call = parseCallRecord(content);
+  if (call.status === "completed") {
+    const transcriptTurns = call.transcript
+      .map((item): CallRecordHistoryTurn | null => {
+        const text = getCallTranscriptText(item.content || "").trim();
+        if (!text) return null;
+        return {
+          role: item.sender === "user" ? "user" : "model",
+          text,
+          timestamp: Number.isFinite(item.timestamp) ? item.timestamp : fallbackTimestamp,
+        };
+      })
+      .filter((item): item is CallRecordHistoryTurn => Boolean(item));
+    if (transcriptTurns.length > 0) return transcriptTurns;
+  }
+
+  return [{
+    role: call.direction === "incoming" ? "model" : "user",
+    text: formatCallRecordHistory(content, { ...options, includeTranscript: false }) || `[${call.callType}]`,
+    timestamp: fallbackTimestamp,
+  }];
 }

@@ -42,6 +42,20 @@ try {
   assert.equal(mosslandResult.headers.get("Content-Type"), "audio/mpeg");
   assert.equal((await mosslandResult.arrayBuffer()).byteLength, 3);
 
+  globalThis.fetch = async (input, init) => {
+    assert.match(String(input), /api\.minimax\.chat\/v1\/t2a_v2/);
+    assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer mini-key-not-logged");
+    return Response.json({ data: { audio: "010203" } });
+  };
+  const minimaxResult = await worker.fetch(new Request("https://app.example/api/minimax-tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey: "mini-key-not-logged", groupId: "group-a", model: "speech-2.8-hd", voiceId: "voice-a", text: "你好" }),
+  }), { ASSETS: assets });
+  assert.equal(minimaxResult.status, 200);
+  assert.equal(minimaxResult.headers.get("Content-Type"), "audio/mpeg");
+  assert.equal((await minimaxResult.arrayBuffer()).byteLength, 3);
+
   console.log("cloudflareImageProxy.test passed");
 } finally {
   globalThis.fetch = originalFetch;

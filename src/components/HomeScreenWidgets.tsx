@@ -12,6 +12,8 @@ import {
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { formatTimeWidgetDate } from "../features/home/timeWidgetDate";
 import { audioDb } from "../utils/audioDb";
+import { remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
+import { readArray } from "../core/storage/repositories/repositoryUtils";
 import {
   compressImagePreservingTransparency,
   isTransparencyPreservedImage,
@@ -109,10 +111,7 @@ interface WidgetProps {
 }
 
 export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBorderRadius }: WidgetProps) {
-  const [customPhotos, setCustomPhotos] = useState<string[]>(() => {
-    const raw = localStorage.getItem(`album_widget_photos_${id}`);
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [customPhotos, setCustomPhotos] = useState<string[]>(() => readArray<string>(`album_widget_photos_${id}`, []).value);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -120,7 +119,7 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
       const compressed = await compressImagePreservingTransparency(file, 800, 800, 0.75);
       const updated = [compressed];
       setCustomPhotos(updated);
-      localStorage.setItem(`album_widget_photos_${id}`, JSON.stringify(updated));
+      writeJson(`album_widget_photos_${id}`, updated);
     }
   };
 
@@ -225,8 +224,8 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
     const nextColor = normalizeWidgetTextColor(draftFontColor, fontColor);
     setBackgroundImage(draftBackgroundImage);
     setFontColor(nextColor);
-    localStorage.setItem(`calendar_album_image_${id}`, draftBackgroundImage);
-    localStorage.setItem(`calendar_album_font_color_${id}`, nextColor);
+    writeString(`calendar_album_image_${id}`, draftBackgroundImage);
+    writeString(`calendar_album_font_color_${id}`, nextColor);
     setIsSettingsOpen(false);
   };
 
@@ -368,7 +367,7 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
     const nextColor = normalizeWidgetTextColor(draftFontColor, fontColor);
     setFontColor(nextColor);
     setDraftFontColor(nextColor);
-    localStorage.setItem(`time_widget_font_color_${id}`, nextColor);
+    writeString(`time_widget_font_color_${id}`, nextColor);
     setIsSettingsOpen(false);
   };
 
@@ -598,12 +597,12 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
     setWidgetType(draftWidgetType);
     setBackgroundImage(draftBackgroundImage);
     setFontColor(nextColor);
-    localStorage.setItem(`anniversary_date_${id}`, draftTargetDate);
-    localStorage.setItem(`anniversary_title_${id}`, draftTitle);
-    localStorage.setItem(`anniversary_type_${id}`, draftWidgetType);
-    localStorage.setItem(`anniversary_color_${id}`, nextColor);
-    if (draftBackgroundImage) localStorage.setItem(`anniversary_bg_${id}`, draftBackgroundImage);
-    else localStorage.removeItem(`anniversary_bg_${id}`);
+    writeString(`anniversary_date_${id}`, draftTargetDate);
+    writeString(`anniversary_title_${id}`, draftTitle);
+    writeString(`anniversary_type_${id}`, draftWidgetType);
+    writeString(`anniversary_color_${id}`, nextColor);
+    if (draftBackgroundImage) writeString(`anniversary_bg_${id}`, draftBackgroundImage);
+    else removeStoredValue(`anniversary_bg_${id}`);
     setIsSettingsOpen(false);
   };
 
@@ -852,14 +851,16 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
 
   useEffect(() => {
     const loadTodos = () => {
-      const raw = localStorage.getItem("phone_memo_todos");
-      if (raw) {
-        setTodos(JSON.parse(raw));
-      } else {
+      const result = readArray<{ id: string; text: string; checked: boolean }>("phone_memo_todos", []);
+      if (result.found && result.valid) {
+        setTodos(result.value);
+      } else if (!result.found) {
         // Fallback default todos
         const defaultTodos: { id: string; text: string; checked: boolean }[] = [];
         setTodos(defaultTodos);
-        localStorage.setItem("phone_memo_todos", JSON.stringify(defaultTodos));
+        writeJson("phone_memo_todos", defaultTodos);
+      } else {
+        setTodos([]);
       }
     };
     loadTodos();
@@ -873,7 +874,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
     e.stopPropagation();
     const updated = todos.map(t => t.id === todoId ? { ...t, checked: !t.checked } : t);
     setTodos(updated);
-    localStorage.setItem("phone_memo_todos", JSON.stringify(updated));
+    writeJson("phone_memo_todos", updated);
   };
 
   const completedCount = todos.filter(t => t.checked).length;
@@ -903,8 +904,8 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
               return;
             }
 
-            localStorage.setItem("memo_active_tab", "todo");
-            localStorage.setItem("memo_open_todo_edit", "true");
+            writeString("memo_active_tab", "todo");
+            writeString("memo_open_todo_edit", "true");
             onOpenApp("notes");
           }
         }}

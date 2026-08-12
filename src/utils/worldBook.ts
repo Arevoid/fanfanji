@@ -35,13 +35,31 @@ export interface WorldBookDepthInjection {
   content: string;
 }
 
+/**
+ * Returns every entry visible to one request scope without applying keyword
+ * triggers. This is intended for small metadata projections (for example,
+ * detecting a character's configured language), not for injecting the whole
+ * World Book into the generated prompt.
+ */
+export function getVisibleWorldBookEntries(
+  propEntries: WorldBookEntry[],
+  characterId: string,
+  readContext?: WorldBookReadContext,
+): WorldBookEntry[] {
+  return getLatestWorldBookEntries(propEntries).filter((entry) => {
+    if (readContext ? !isWorldBookEntryVisible(entry, readContext) : entry.isActive === false) return false;
+    const isGlobal = !entry.characterId || entry.characterId === "global";
+    return isGlobal || entry.characterId === characterId;
+  });
+}
+
 export function buildWorldBookSystemBlocks(
   propEntries: WorldBookEntry[],
   characterId: string,
   scanText: string,
   readContext?: WorldBookReadContext,
 ): WorldBookSystemBlocks {
-  const latestWorldBookEntries = getLatestWorldBookEntries(propEntries);
+  const visibleWorldBookEntries = getVisibleWorldBookEntries(propEntries, characterId, readContext);
   const scanTextLower = scanText.toLowerCase();
 
   const triggeredEntries: {
@@ -49,17 +67,14 @@ export function buildWorldBookSystemBlocks(
     text: string;
   }[] = [];
 
-  for (const entry of latestWorldBookEntries) {
-    if (readContext ? !isWorldBookEntryVisible(entry, readContext) : entry.isActive === false) continue;
-
-    // Check if bound to global or specific character
-    const isGlobal = !entry.characterId || entry.characterId === "global";
-    if (!isGlobal && entry.characterId !== characterId) {
-      continue;
-    }
-
+  for (const entry of visibleWorldBookEntries) {
     let isTriggered = false;
-    if (entry.triggerType === "constant") {
+    // Persona rules describe a character's stable voice and behavior. They are
+    // always present for their matching scope; keyword misses must never make a
+    // character temporarily lose their own speech habits.
+    if (entry.purpose === "persona_rule") {
+      isTriggered = true;
+    } else if (entry.triggerType === "constant") {
       isTriggered = true;
     } else if (entry.triggerType === "vector") {
       // Smart simulated vector term-overlap matching

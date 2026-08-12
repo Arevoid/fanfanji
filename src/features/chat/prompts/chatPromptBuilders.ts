@@ -1,4 +1,6 @@
 import type { CharacterPromptProjection } from "../../../domain/prompt/characterPromptProjector";
+import { CHARACTER_LANGUAGE_POLICY } from "../../../domain/prompt/characterPromptProjector";
+import { formatUserKnowledgeBoundary } from "../../../domain/prompt/userKnowledgeBoundary";
 import { LIVING_HUMAN_PROMPT } from "../../../utils/livingPrompt";
 import { assembleChatInstructions } from "./chatInstructionAssembler";
 import { CHARACTER_MEDIA_USAGE_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "./chatPromptPolicy";
@@ -8,6 +10,8 @@ export function finalizeCharacterChatSystemInstruction(input: {
   characterProjection: CharacterPromptProjection;
   characterDescriptionText: string;
   diagnosticLabel: "direct chat prompt" | "regenerate prompt";
+  finalPersonaRules?: readonly string[];
+  finalLanguageInstruction: string;
 }): string {
   const assembly = assembleChatInstructions(input.instructions, [
     { ...input.characterProjection.description, content: input.characterDescriptionText },
@@ -17,14 +21,23 @@ export function finalizeCharacterChatSystemInstruction(input: {
   if (assembly.diagnostics.duplicateBlockIds.length || assembly.diagnostics.duplicateSourceIds.length || assembly.diagnostics.duplicateContentBlockIds.length) {
     console.warn(`[${input.diagnosticLabel}] duplicate blocks removed`, assembly.diagnostics);
   }
-  return assembly.systemInstruction;
+  const personaRuleReminder = input.finalPersonaRules?.length
+    ? `\n\n[本轮常驻角色规则]\n${input.finalPersonaRules.join("\n\n").slice(0, 1800)}`
+    : "";
+  return `${assembly.systemInstruction}\n\n${input.characterProjection.expressionAnchor.content}${personaRuleReminder}\n\n---\n\n${input.finalLanguageInstruction}`;
 }
 
-export function buildGroupChatSystemInstruction(input: { userName: string; groupName: string; worldContext: string; memberDefinitions: string }): string {
+export function buildGroupChatSystemInstruction(input: { userName: string; userBio?: string; groupName: string; worldContext: string; memberDefinitions: string }): string {
   return `你正在扮演微信群聊中的多位群成员（AI角色），正在与机主“${input.userName}”在群名为“${input.groupName}”的群组中进行互动。${input.worldContext}
 
 以下是微信群聊成员的设定档案：
 ${input.memberDefinitions}
+
+User Profile (interacting with the group):
+- Nickname: ${input.userName}
+- Personality/Bio: ${input.userBio || ""}
+
+${formatUserKnowledgeBoundary()}
 
 【群聊互动核心原则】：
 【成员私密认知访问规则】每个 [MEMBER_PRIVATE_CONTEXT] 只属于标签中指定的 speaker。生成其他成员的发言时，把该区块视为不存在；其他成员不能提及或回应其中的私聊事实。只有已经出现在“群聊最近历史消息”里的公开内容才是全员可见事实。
@@ -39,11 +52,13 @@ ${input.memberDefinitions}
    - 每条发言都可以回应机主，或回应历史中另一位成员刚刚说过的话。成员之间的接话、赞同、反驳、打趣和追问都应基于真实群聊历史、人设、世界书和明确关系。
    - 同一成员可以连续发送 2 至 3 条短消息，例如先回应再补充，或发出一句后被另一位成员接话再继续；每一条都必须独立使用自己的 [SENDER_NAME: 名字] 标记。
    - 不要为了“多人”而编造成员之间不存在的熟识、共同经历或关系；没有足够上下文时宁可让该成员保持沉默。
-6. 🚨【中国标点与格式规范】：
-   - 微信聊天简短而随意，请保持口语化、极度真实的微信聊天风格。
-   - 不要输出大段的长篇大论，尽量简短有力。
+6. 🚨【标点与格式规范】：
+   - 每个成员的口语或书面程度、长短、标点、气泡数量都服从其各自人设；不得把全员统一成简短随意的聊天模板。
    - 不要使用任何小说式的“旁白、场景描写、动作心理括号（如 '(笑)' 或 '（叹气）'）”。群聊里只能输出他们作为真人打字发在微信群里的文本。
-7. 🚨【特殊媒体克制使用】：日常群聊默认使用普通文字。除非成员人设或可用世界书明确偏好、当前语境确实需要声音或即时反应、或用户明确要求，否则不要输出语音或表情包标记；不要连续无理由发送特殊消息。
+7. 🚨【特殊媒体角色化使用】：各成员是否使用普通文字、语音、emoji 或表情包以及频率，服从该成员自己的明确习惯和当前语境；不得对全员套用同一默认频率。只需确保特殊消息格式有效，不要为了展示功能强迫使用。
+
+${CHARACTER_LANGUAGE_POLICY}
+群聊中每位成员必须分别依据自己的角色资料决定输出语言，不能把一位成员的国籍或语言设定套用给其他成员。
 
 【🚨🚨🚨 极其严格的输出格式规则】：
 你必须按照以下格式输出成员的发言。请确保在每条发言的前一行，用且仅用 \`[SENDER_NAME: 角色名字]\` 指定发送者。不要输出任何其他 markdown 标记，不要输出 JSON 块。
@@ -77,7 +92,13 @@ export function buildProactiveChatSystemInstruction(input: {
   userName: string; userBio: string; worldBook: string; timeContext: string;
   knowledgeBoundary: string; truthPrompt: string; conversationGuidance: string;
   taskPrompt: string; instructionsPrompt: string;
+  expressionAnchor: string;
+  finalPersonaRules?: readonly string[];
+  finalLanguageInstruction: string;
 }): string {
+  const personaRuleReminder = input.finalPersonaRules?.length
+    ? `\n\n[本轮常驻角色规则]\n${input.finalPersonaRules.join("\n\n").slice(0, 1800)}`
+    : "";
   return `${LIVING_HUMAN_PROMPT}
 
 ---
@@ -93,10 +114,17 @@ User Profile (interacting with you):
 - Nickname: ${input.userName}
 - Personality/Bio: ${input.userBio}
 
+${formatUserKnowledgeBoundary()}
+
 ${input.worldBook ? `[相关世界书背景设定]\n${input.worldBook}\n\n${WORLD_BOOK_CONTEXT_PRIORITY}\n\n` : ""}${input.timeContext}${input.knowledgeBoundary}${input.truthPrompt}\n\n${input.conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 ${input.taskPrompt}
 
 ${input.instructionsPrompt}
 
-发送前确认：回复内容、称呼、主动程度、话量和情感方向都与上方唯一的人设块一致。`;
+[发送前角色一致性确认]
+${input.expressionAnchor}${personaRuleReminder}
+
+---
+
+${input.finalLanguageInstruction}`;
 }

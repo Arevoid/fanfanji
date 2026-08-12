@@ -6,10 +6,10 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, UserSettings, WorldBookEntry } from "../types";
-import { apiChat, apiExtractMemories } from "../utils/apiHelper";
+import { apiChat, apiExtractMemoriesWithModelFallback } from "../utils/apiHelper";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { createPendingOfflineHandoff, filterOfflineExtractedFacts, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
+import { createOfflineStoryHandoffMemory, createPendingOfflineHandoff, filterOfflineExtractedFacts, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
 import { getLatestWorldBookEntries } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
@@ -31,6 +31,8 @@ import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { collectOfflineWorldBookContext, formatOfflineWorldBookEntries } from "../features/offline/prompts/offlineWorldBookContext";
 import { applyOfflineStoryRegeneration, prepareOfflineStoryRegeneration } from "../domain/offlineStory/offlineStoryRegeneration";
 import { createOfflineGroupParticipantMemories } from "../features/offline/services/offlineGroupMemorySync";
+import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
+import { remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -342,7 +344,7 @@ export default function AppOffline({
     };
     const updated = [...customPresets, newPreset];
     setCustomPresets(updated);
-    localStorage.setItem("offline_custom_style_presets", JSON.stringify(updated));
+    writeJson("offline_custom_style_presets", updated);
     
     // Select the new preset
     setSettingsStylePresetId(newPreset.id);
@@ -357,7 +359,7 @@ export default function AppOffline({
 
     const updated = customPresets.filter((item) => item.id !== preset.id);
     setCustomPresets(updated);
-    localStorage.setItem("offline_custom_style_presets", JSON.stringify(updated));
+    writeJson("offline_custom_style_presets", updated);
     setSettingsStylePresetId("none");
     setSettingsStylePromptName("");
     setSettingsStylePromptContent("");
@@ -387,7 +389,7 @@ export default function AppOffline({
   );
   const editingMessage = (Array.isArray(activeStory?.messages) ? activeStory.messages : []).find((message) => message.id === editingMessageId) || null;
   const readingStyle = {
-    "--offline-reading-font-size": `${readingPreferences.fontSize}px`,
+    "--offline-reading-font-size": `calc(${readingPreferences.fontSize}px * var(--app-font-scale, 1))`,
     "--offline-reading-letter-spacing": `${readingPreferences.letterSpacing}em`,
     "--offline-reading-line-height": String(readingPreferences.lineHeight),
     "--offline-reading-paragraph-gap": `${readingPreferences.paragraphSpacing}px`,
@@ -439,15 +441,15 @@ export default function AppOffline({
     activeStoryRef.current = story;
     setActiveStory(story);
     if (story.relationId) {
-      localStorage.setItem(getOfflineModeStorageKey(story.relationId), "true");
-      localStorage.setItem(getOfflineStoryStorageKey(story.relationId), story.id);
+      writeString(getOfflineModeStorageKey(story.relationId), "true");
+      writeString(getOfflineStoryStorageKey(story.relationId), story.id);
     }
   };
 
   const clearOfflineSession = (story: OfflineStory) => {
     if (story.relationId) {
-      localStorage.removeItem(getOfflineStoryStorageKey(story.relationId));
-      localStorage.setItem(getOfflineModeStorageKey(story.relationId), "false");
+      removeStoredValue(getOfflineStoryStorageKey(story.relationId));
+      writeString(getOfflineModeStorageKey(story.relationId), "false");
     }
   };
 
@@ -459,9 +461,21 @@ export default function AppOffline({
   const needsMissingSummaryRepair = (story: OfflineStory) =>
     Boolean(story.archivedAt || story.memorySyncStatus === "synced") && !hasOfflineStorySummary(story, memories);
 
+  const needsUninformativeSummaryRepair = (story: OfflineStory) => {
+    const summaryMarker = getOfflineStorySummaryMarker(story);
+    return memories.some((memory) =>
+      isOfflineStoryHandoffMemory(memory, story)
+      && memory.content.includes(summaryMarker)
+      && memory.content.includes("双方有过线下互动；具体动作、场景和演出对白不作为线上记忆"),
+    );
+  };
+
   const shouldSyncStoryMemory = (story: OfflineStory) =>
     story.mode === "continue"
-    && (shouldAutoSyncOnlineContinuation(story) || needsLegacyHandoffRepair(story) || needsMissingSummaryRepair(story));
+    && (shouldAutoSyncOnlineContinuation(story)
+      || needsLegacyHandoffRepair(story)
+      || needsMissingSummaryRepair(story)
+      || needsUninformativeSummaryRepair(story));
 
   const finalizeStoryBeforeLeaving = async (story: OfflineStory): Promise<OfflineStory> => {
     let completedStory = story;
@@ -616,8 +630,8 @@ export default function AppOffline({
     };
 
     saveActiveStorySnapshot(newStory);
-    localStorage.setItem(getOfflineModeStorageKey(relationship.id), "true");
-    localStorage.setItem(getOfflineStoryStorageKey(relationship.id), newStory.id);
+    writeString(getOfflineModeStorageKey(relationship.id), "true");
+    writeString(getOfflineStoryStorageKey(relationship.id), newStory.id);
     setShowCreateModal(false);
 
     // Reset fields
@@ -680,7 +694,11 @@ export default function AppOffline({
     }
     const repairingLegacyHandoff = needsLegacyHandoffRepair(story);
     const repairingMissingSummary = needsMissingSummaryRepair(story);
-    if (!hasUnsyncedOfflineMemoryProgress(story) && !repairingLegacyHandoff && !repairingMissingSummary) {
+    const repairingUninformativeSummary = needsUninformativeSummaryRepair(story);
+    if (!hasUnsyncedOfflineMemoryProgress(story)
+      && !repairingLegacyHandoff
+      && !repairingMissingSummary
+      && !repairingUninformativeSummary) {
       showToast("当前进展已经同步，无需重复处理");
       return story;
     }
@@ -788,6 +806,21 @@ export default function AppOffline({
       let extractedMemories: MemoryItem[] = [];
       let confirmedFacts: string[] = [];
       let acceptedOfflineClaims: KnowledgeClaim[] = [];
+      let usedSafeFallback = false;
+      const createSafeFallback = () => {
+        usedSafeFallback = true;
+        extractedMemories = [createOfflineStoryHandoffMemory({
+          story,
+          sourceMessages,
+          characterId: story.characterId,
+          relationId: story.relationId,
+          characterName: character.name,
+          id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: Date.now(),
+          marker: "summary",
+          includeConfirmedExcerpts: true,
+        })];
+      };
       try {
         const result = await MemoryService.extractMemories({
           character,
@@ -814,19 +847,29 @@ export default function AppOffline({
           formatContent: (items, formatOptions) => `${isDelicate
             ? `${formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)}\n[${syncMarker}]\n【事实索引（系统）】\n${items.map((item) => `- ${item}`).join("\n")}`
             : `${formatExtractedMemorySummary(headerLabel, items)}\n[${syncMarker}]`}`,
-        }, apiExtractMemories);
-        if (result.apiError) throw new Error(result.apiError);
-        if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
-          throw new Error("Offline story knowledge persistence failed");
+        }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
+        if (result.apiError) {
+          console.warn("Offline memory extraction APIs unavailable; using a deterministic safe handoff:", result.apiError);
+          createSafeFallback();
+        } else {
+          if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
+            throw new Error("Offline story knowledge persistence failed");
+          }
+          acceptedOfflineClaims = result.acceptedClaims;
+          confirmedFacts = result.acceptedClaims
+            .filter((claim) => claim.status === "active"
+              && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
+            .map((claim) => claim.statement);
+          extractedMemories = result.extractedMemories;
+          if (extractedMemories.length === 0) {
+            console.warn("Offline memory extraction returned no usable facts; using a deterministic safe handoff.");
+            createSafeFallback();
+          }
         }
-        acceptedOfflineClaims = result.acceptedClaims;
-        confirmedFacts = result.acceptedClaims
-          .filter((claim) => claim.status === "active"
-            && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
-          .map((claim) => claim.statement);
-        extractedMemories = result.extractedMemories;
       } catch (error) {
-        console.warn("Offline memory extraction unavailable; keeping the story retryable:", error);
+        if (error instanceof Error && error.message === "Offline story knowledge persistence failed") throw error;
+        console.warn("Offline memory extraction unavailable; using a deterministic safe handoff:", error);
+        createSafeFallback();
       }
 
       if (extractedMemories.length === 0) {
@@ -837,6 +880,9 @@ export default function AppOffline({
       // legacy generic fallbacks or prior batches; neither should accumulate.
       const retainedMemories = memories.filter((memory) => !isOfflineStoryHandoffMemory(memory, story));
       const mergedMemories = MemoryService.mergeMemories(retainedMemories, extractedMemories);
+      if (!hasOfflineStorySummary(story, mergedMemories)) {
+        throw new Error("Offline story summary merge verification failed");
+      }
       const persisted = onPersistMemories
         ? await onPersistMemories(mergedMemories)
         : (onSaveMemories(mergedMemories), true);
@@ -865,7 +911,9 @@ export default function AppOffline({
           recordedAt: now,
         });
       }
-      showToast("线下剧情摘要已同步到当前角色");
+      showToast(usedSafeFallback
+        ? "提炼接口未返回可用摘要，已保存可核对的安全剧情摘要"
+        : "线下剧情摘要已同步到当前角色");
       return syncedStory;
     } catch (error) {
       console.error("Failed to sync offline story memories:", error);
@@ -970,19 +1018,14 @@ export default function AppOffline({
         ? updatedStory.messages.slice(0, -1)
         : updatedStory.messages;
 
-      const historyContext = msgsForHistory.map(m => {
-        if (m.sender === "user") {
-          return {
-            role: "user",
-            text: m.isNarration ? `(客观旁白) ${m.content}` : `我: “${m.content}”`
-          };
-        } else {
-          return {
-            role: "model",
-            text: m.content
-          };
-        }
-      });
+      const historyContext = msgsForHistory.flatMap((message) => serializeMessageToPromptTurns(message, {
+        mode: "history",
+        userName: settings.name,
+        characterName: selectedChar.name,
+      }).map((turn) => ({
+        role: turn.role,
+        text: message.isNarration ? `(客观旁白) ${turn.text}` : turn.role === "user" ? `我: “${turn.text}”` : turn.text,
+      })));
 
       // We can collect worldbook blocks for all story characters
       const storyCharsList = updatedStory.characterIds && updatedStory.characterIds.length > 0 
@@ -993,7 +1036,11 @@ export default function AppOffline({
 
       const worldBookScanText = [
         text || "",
-        ...updatedStory.messages.slice(-10).map((message) => message.content),
+        ...updatedStory.messages.slice(-10).map((message) => serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: settings.name,
+          characterName: selectedChar.name,
+        })),
       ].filter(Boolean).join("\n");
       const scopedRelationship = updatedStory.relationId
         ? relationships.find((relation) => relation.id === updatedStory.relationId)
@@ -1167,7 +1214,8 @@ ${wbPrompts}\n`;
         const lines = importedOnlineMessages.map((message) => {
           const senderCharacter = storyCharsList.find((character) =>
             character.id === message.senderId || character.id === message.characterId);
-          return `- ${message.sender === "user" ? settings.name : (senderCharacter?.remark || senderCharacter?.name || selectedChar?.name || "Character")}: ${message.content}`;
+          const senderName = message.sender === "user" ? settings.name : (senderCharacter?.remark || senderCharacter?.name || selectedChar?.name || "Character");
+          return `- ${senderName}: ${serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: senderName })}`;
         }).join("\n");
         sysPrompt += `\n\n【互通的线上最新对话记忆（Online Chat Context）】：
 以下是各位参与角色最近在微信（线上聊天）中的最新真实对话。这些是你们当下关系的最新现状与真实记忆。请确保线下小说剧本的走向与其认知保持连贯和融合，避免发生剧情上的冲突：
@@ -1742,7 +1790,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
   background-color: transparent !important;
 }
 .offline-msg-content {
-  font-size: 15px !important;
+  font-size: calc(15px * var(--app-font-scale, 1)) !important;
   color: #3f3f46 !important;
   line-height: 1.8 !important;
   letter-spacing: 0.05em !important;

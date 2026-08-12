@@ -16,7 +16,7 @@ export function ForumShareCard({
         event.stopPropagation();
         onOpen();
       }}
-      className="w-[230px] overflow-hidden rounded-2xl border border-slate-200/80 bg-white text-left shadow-sm transition-transform active:scale-[0.98]"
+      className="chat-message--forum-share w-[230px] overflow-hidden rounded-2xl border border-slate-200/80 bg-white text-left shadow-sm transition-transform active:scale-[0.98]"
       aria-label={`打开论坛帖子：${snapshot.title}`}
     >
       <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5">

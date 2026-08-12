@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../src/features/chat/services/messageFactory";
-import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
+import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
 
 const clean = (text: string) => cleanAiReplyText(text, false);
 
@@ -29,11 +29,13 @@ assert.equal(stripInternalDeliveryMarkers("催什么催\n[消息发送时间：2
 assert.equal(stripInternalDeliveryMarkers("第一句\n[消息发送于 2026-08-02 18:11]\n第二句"), "第一句\n\n第二句");
 assert.equal(stripInternalDeliveryMarkers("角色回复\n[历史时间：2026年8月2日 15:25]\n下一句"), "角色回复\n\n下一句");
 assert.equal(stripInternalDeliveryMarkers("角色回复\n[当前时间：2026年8月2日 19:48]\n下一句"), "角色回复\n\n下一句");
+assert.equal(stripInternalDeliveryMarkers("角色回复\n[时间：2026-08-11 23:42]\n下一句"), "角色回复\n\n下一句");
 assert.equal(stripInternalDeliveryMarkers("角色回复\n[2026-08-02 19:48]\n下一句"), "角色回复\n\n下一句");
 assert.equal(stripInternalDeliveryMarkers("第一句\n[第2秒]\n第二句"), "第一句\n\n第二句");
 assert.equal(stripInternalDeliveryMarkers("剧情发生在第2秒"), "剧情发生在第2秒");
 assert.equal(stripInternalDeliveryMarkers("那就15:10见\n今天[15:10]到"), "那就15:10见\n今天[15:10]到");
 assert.deepEqual(splitAiReplyBubbles(clean("第一句\n[15:10]\n第二句\n[15:10]"), false), ["第一句", "第二句"]);
+assert.deepEqual(splitAiReplyBubbles(clean("第一句\n[时间：2026-08-11 23:42]\n第二句"), false), ["第一句", "第二句"]);
 assert.equal(isInternalDeliveryMarkerOnly("[15:10]"), true);
 assert.equal(isInternalDeliveryMarkerOnly("15:10见"), false);
 
@@ -49,5 +51,32 @@ assert.equal(isTransferMarkup("[微信转账]|1|x"), true);
 assert.deepEqual(parseCallRecord("[通话记录]|语音通话|00:02|%5B%5D"), { callType: "语音通话", status: "completed", direction: "outgoing", duration: "00:02", transcript: [] });
 const cancelledCall = createCallRecordMarkup({ callType: "语音通话", status: "cancelled", direction: "incoming", duration: "00:00", transcript: [] });
 assert.deepEqual(parseCallRecord(cancelledCall), { callType: "语音通话", status: "cancelled", direction: "incoming", duration: "00:00", transcript: [] });
+assert.equal(formatCallRecordHistory(cancelledCall, { userName: "小林", characterName: "范千" }), "[语音通话，范千发起，已取消]");
+const completedCall = createCallRecordMarkup({
+  callType: "语音通话",
+  status: "completed",
+  direction: "outgoing",
+  duration: "02:43",
+  transcript: [
+    { id: "call-u1", sender: "user", content: "小狗过来让我摸摸头", timestamp: 1 },
+    { id: "call-c1", sender: "character", content: "我这儿还有事", timestamp: 2 },
+  ],
+});
+assert.equal(
+  formatCallRecordHistory(completedCall, { userName: "小林", characterName: "范千" }),
+  "[已完成语音通话，小林发起，时长 02:43。这是与后续消息连续的真实通话记录]\n小林：小狗过来让我摸摸头\n范千：我这儿还有事",
+);
+assert.equal(
+  formatCallRecordHistory(completedCall, { userName: "小林", characterName: "范千", includeTranscript: false }),
+  "[已完成语音通话，小林发起，时长 02:43。这是与后续消息连续的真实通话记录]",
+);
+assert.deepEqual(expandCallRecordHistory(completedCall, 99), [
+  { role: "user", text: "小狗过来让我摸摸头", timestamp: 1 },
+  { role: "model", text: "我这儿还有事", timestamp: 2 },
+]);
+assert.deepEqual(expandCallRecordHistory(cancelledCall, 99, { userName: "小林", characterName: "范千" }), [
+  { role: "model", text: "[语音通话，范千发起，已取消]", timestamp: 99 },
+]);
+assert.equal(formatCallRecordHistory("普通文字"), null);
 
 console.log("Chat message services: status-aware call records and fixed acceptance checks passed");

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
-import { apiChat, apiExtractMemories, apiTranslate } from "../utils/apiHelper";
-import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
+import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../utils/apiHelper";
+import { readJson, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
+import { readArray } from "../core/storage/repositories/repositoryUtils";
+import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
@@ -19,10 +21,13 @@ import { getWorldBookLocationReferences } from "../domain/worldbook/locationRefe
 import { stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
-import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
+import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectInterveningOfflineHandoff, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
-import { projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
-import { CHARACTER_MEDIA_USAGE_RULES, MEDIA_EVENT_PERSONA_RESPONSE_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
+import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
+import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
+import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
+import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
+import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
 import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
@@ -32,6 +37,7 @@ import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
+import { formatUserKnowledgeBoundary } from "../domain/prompt/userKnowledgeBoundary";
 import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
 import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
 import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
@@ -48,11 +54,17 @@ import { generateCharacterImage } from "../features/chat/services/characterImage
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
+import { getChatTypingScopeKey, getVisibleChatTyping, setChatScopeCharacterOverride, setChatScopeTyping, type ChatTypingScopeState } from "../features/chat/services/chatTypingScope";
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
 import { useChatAttachmentState } from "../features/chat/hooks/useChatAttachmentState";
-import { createChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
+import { resolveActiveChatStylePreset } from "../features/chat/styles/chatStylePreset";
+import { COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE } from "../features/chat/styles/chatThemeTemplate";
+import { ChatSettingsSwitch as SettingsSwitch } from "../features/chat/components/ChatSettingsSwitch";
+import { ChatAvatar as RenderAvatar } from "../features/chat/components/ChatAvatar";
+import { StoredChatImage } from "../features/chat/components/StoredChatImage";
+import { createChatRuntimeContext, type ChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
 import { attachDirectScope, isMessageInDirectScope, resolveDirectInteractionScope, toDirectChatRuntimeContext, type MessageMutationScope } from "../features/chat/context/directInteractionScope";
 import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
 import { removeCharacterTruthForRelations } from "../features/characterKnowledge/services/characterTruthCleanupService";
@@ -161,7 +173,7 @@ import {
 } from "lucide-react";
 
 import { getSpeechForText } from "../utils/minimaxTts";
-import { buildCharacterTtsOptions, getTtsProvider, resolveTtsCharacter } from "../features/voice/ttsConfig";
+import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, resolveTtsCharacter, shouldQueueCallSpeech } from "../features/voice/ttsConfig";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -182,602 +194,11 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
 
-const CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面：设置页、档案馆及其他应用不会应用本样式。 */
-/* ==================== 主题变量 ==================== */
-#conv-screen {
-  /* 页面与消息 */
-  --chat-page-bg: var(--app-bg);
-  --chat-header-bg: var(--surface);
-  --chat-message-list-bg: var(--app-bg);
-  --chat-text: var(--text-primary);
-  --chat-muted-text: var(--text-secondary);
-  --chat-divider: var(--divider);
-
-  /* 气泡边框：可切换 solid / dashed / dotted，不使用超大圆角值。 */
-  --chat-bubble-border: var(--border);
-  --chat-bubble-border-width: 1px;
-  --chat-bubble-border-style: solid;
-  /* 需要虚线时改为：--chat-bubble-border-style: dashed; */
-
-  /* 底部输入栏容器 */
-  --chat-composer-bg: var(--surface);
-  --chat-composer-text: var(--text-primary);
-  --chat-composer-border: var(--border);
-  --chat-composer-border-width: 1px;
-  --chat-composer-radius: var(--radius-xl);
-  --chat-composer-shadow: none;
-
-  /* 文本输入框 */
-  --chat-input-bg: var(--input-bg);
-  --chat-input-text: var(--text-primary);
-  --chat-input-placeholder: var(--input-placeholder);
-  --chat-input-border: var(--border);
-  --chat-input-border-width: 1px;
-  --chat-input-radius: var(--radius-sm);
-  --chat-input-shadow: none;
-  --chat-input-focus-border: var(--accent);
-  --chat-input-focus-shadow: 0 0 0 2px var(--focus-ring);
-
-  /* 加号、仅发送、发送并回复按钮 */
-  --chat-button-border: var(--border);
-  --chat-button-border-width: 1px;
-  --chat-button-radius: var(--radius-full);
-  --chat-button-shadow: none;
-  --chat-attach-bg: var(--button-secondary-bg);
-  --chat-attach-text: var(--button-secondary-text);
-  --chat-attach-hover-bg: var(--surface-raised);
-  --chat-attach-hover-text: var(--button-secondary-text);
-  --chat-send-only-bg: var(--button-secondary-bg);
-  --chat-send-only-text: var(--button-secondary-text);
-  --chat-send-only-hover-bg: var(--surface-raised);
-  --chat-send-only-hover-text: var(--button-secondary-text);
-  --chat-send-bg: var(--button-primary-bg);
-  --chat-send-text: var(--button-primary-text);
-  --chat-send-border: var(--button-primary-bg);
-  --chat-send-hover-bg: var(--button-primary-hover-bg);
-  --chat-send-hover-text: var(--button-primary-text);
-  --chat-send-hover-border: var(--button-primary-hover-bg);
-  --chat-button-disabled-bg: var(--button-disabled-bg);
-  --chat-button-disabled-text: var(--button-disabled-text);
-  --chat-button-disabled-border: var(--button-disabled-border);
-  --chat-button-disabled-opacity: 0.4;
-}
-
-/* ==================== 页面结构 ==================== */
-.chat-page { background: var(--chat-page-bg); color: var(--chat-text); }
-.chat-page__background { background: var(--chat-page-bg); }
-.cv-header,
-.chat-header,
-.header { background: var(--chat-header-bg); color: var(--chat-text); }
-.cv-header .back-btn,
-.cv-header .menu-btn { background: transparent; color: var(--chat-text); }
-.header-title { color: var(--chat-text); }
-.header-title-avatar,
-.user-avatar,
-.ai-avatar { border-radius: 50%; }
-.header-title-name { color: var(--chat-text); }
-.character-status { color: var(--accent); }
-.cv-back-icon,
-.cv-menu-icon { color: var(--chat-text); }
-
-/* 消息滚动区域、时间戳与消息元数据 */
-.cv-messages-list { background: var(--chat-message-list-bg); color: var(--chat-text); }
-.chat-timestamp { color: var(--chat-muted-text); }
-.chat-timestamp__label { background: var(--surface-muted); color: var(--chat-muted-text); }
-.msg-meta-header { color: var(--chat-muted-text); }
-.msg-meta-name,
-.msg-meta-date,
-.msg-meta-time { color: var(--chat-muted-text); }
-.msg-meta-divider { border-color: var(--chat-divider); }
-
-/* ==================== 消息气泡与分组 ==================== */
-.cv-bubble,
-.message-bubble,
-.message-content { color: var(--chat-text); }
-.chat-bubble-self { background: var(--button-primary-bg); color: var(--button-primary-text); }
-.chat-bubble-other { background: var(--surface-raised); color: var(--chat-text); }
-.chat-bubble-self,
-.chat-bubble-other,
-.voice-message-bar,
-.transfer-card,
-.received-transfer-card {
-  border: var(--chat-bubble-border-width) var(--chat-bubble-border-style) var(--chat-bubble-border);
-  border-radius: 14px;
-  box-shadow: none;
-}
-
-/* 同一发送者连续消息：首条有尾巴和装饰，中间/末尾不输出尾巴。 */
-.msg-group-top.chat-bubble-self,
-.msg-group-top.chat-bubble-other { border-radius: 14px; }
-.msg-group-middle.chat-bubble-self,
-.msg-group-middle.chat-bubble-other {
-  border-radius: 4px;
-}
-.msg-group-bottom.chat-bubble-self,
-.msg-group-bottom.chat-bubble-other {
-  border-top-left-radius: 4px;
-  border-top-right-radius: 4px;
-  border-bottom-left-radius: 14px;
-  border-bottom-right-radius: 14px;
-}
-
-/* ==================== Portal 尾巴 ==================== */
-/* .bubble-tip 是空的 Portal 节点；请自行定义形状、尺寸、颜色和位置。 */
-.cv-bubble-tip-portal-layer,
-.cv-bubble-tip-portal { pointer-events: none; overflow: visible; }
-.bubble-tip { position: absolute; z-index: 10; }
-.bubble-tip.self-tip { /* 我方消息右上角 */ }
-.bubble-tip.other-tip { /* 对方消息左上角 */ }
-/* 示例：双层圆点尾巴（按需取消注释并修改）
-.bubble-tip.self-tip,
-.bubble-tip.other-tip {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--surface);
-}
-.bubble-tip.self-tip { right: -8px; top: 0; }
-.bubble-tip.other-tip { left: -8px; top: 0; }
-.bubble-tip::after {
-  content: "";
-  display: block;
-  width: 8px;
-  height: 8px;
-  margin: 4px;
-  border-radius: 50%;
-  background: currentColor;
-}
-*/
-
-/* ==================== 气泡四角装饰 ==================== */
-/* 每组第一条消息才输出 bubble-deco；素材、尺寸、偏移全部由用户 CSS 决定。 */
-.bubble-deco-wrapper { position: relative; overflow: visible; }
-.bubble-deco {
-  position: absolute;
-  z-index: 20;
-  overflow: visible;
-  pointer-events: none;
-}
-/* 示例：使用图片装饰（按需修改 URL 和角落位置）
-.bubble-deco {
-  width: 48px;
-  height: 48px;
-  right: -20px;
-  top: -20px;
-  background: url("装饰图片URL") center / contain no-repeat;
-}
-*/
-
-/* ==================== 引用消息 ==================== */
-.message-quote-reply-wrapper,
-.message-quote-reply-wrapper--self,
-.message-quote-reply-wrapper--other { color: var(--chat-text); }
-.message-quote__header,
-.message-quote__content,
-.message-quote__reply-body { color: inherit; }
-
-/* ==================== 底部输入栏 ==================== */
-.cv-footer,
-.chat-input-area { color: var(--chat-composer-text); }
-.chat-composer--default,
-.chat-composer--floating,
-.chat-composer--liquid {
-  background: var(--chat-composer-bg);
-  border: var(--chat-composer-border-width) solid var(--chat-composer-border);
-  border-radius: var(--chat-composer-radius);
-  box-shadow: var(--chat-composer-shadow);
-}
-.chat-composer__form { color: var(--chat-composer-text); }
-.chat-input,
-.chat-composer__input {
-  background: var(--chat-input-bg);
-  color: var(--chat-input-text);
-  border: var(--chat-input-border-width) solid var(--chat-input-border);
-  border-radius: var(--chat-input-radius);
-  box-shadow: var(--chat-input-shadow);
-}
-.chat-input::placeholder,
-.chat-composer__input::placeholder { color: var(--chat-input-placeholder); }
-.chat-input:focus,
-.chat-composer__input:focus {
-  border-color: var(--chat-input-focus-border);
-  box-shadow: var(--chat-input-focus-shadow);
-}
-.chat-composer__button,
-.chat-composer__send-button {
-  border: var(--chat-button-border-width) solid var(--chat-button-border);
-  border-radius: var(--chat-button-radius);
-  box-shadow: var(--chat-button-shadow);
-  color: currentColor;
-}
-.chat-composer__attach-button,
-.cv-func-btn,
-.toggle-tools-btn {
-  background: var(--chat-attach-bg);
-  color: var(--chat-attach-text);
-}
-.chat-composer__attach-button:hover,
-.chat-composer__attach-button.chat-composer__button--open {
-  background: var(--chat-attach-hover-bg);
-  color: var(--chat-attach-hover-text);
-}
-.chat-composer__send-only-button,
-.cv-send-only-btn {
-  background: var(--chat-send-only-bg);
-  color: var(--chat-send-only-text);
-}
-.chat-composer__send-only-button:hover:not(:disabled) {
-  background: var(--chat-send-only-hover-bg);
-  color: var(--chat-send-only-hover-text);
-}
-.chat-composer__send-reply-button,
-.send-button {
-  background: var(--chat-send-bg);
-  color: var(--chat-send-text);
-  border-color: var(--chat-send-border);
-}
-.chat-composer__send-reply-button:hover:not(:disabled),
-.send-button:hover:not(:disabled) {
-  background: var(--chat-send-hover-bg);
-  color: var(--chat-send-hover-text);
-  border-color: var(--chat-send-hover-border);
-}
-.chat-composer__button:disabled {
-  background: var(--chat-button-disabled-bg);
-  color: var(--chat-button-disabled-text);
-  border-color: var(--chat-button-disabled-border);
-  opacity: var(--chat-button-disabled-opacity);
-}
-.chat-composer__button svg,
-.cv-plus-icon svg,
-.cv-send-only-icon svg,
-.cv-send-reply-icon svg {
-  color: currentColor;
-  stroke: currentColor;
-}
-.chat-composer__send-reply-button svg,
-.cv-send-reply-icon svg { fill: currentColor; }
-.chat-composer__attachment-panel { color: var(--chat-composer-text); }
-
-/* ==================== 自定义图标 ==================== */
-/* 隐藏默认 SVG 后填入图片 URL；url() 内不要留多余空格。 */
-.cv-back-icon svg { display: none; }
-.cv-back-icon { background: url("返回按钮图片URL") center / contain no-repeat; }
-.cv-menu-icon svg { display: none; }
-.cv-menu-icon { background: url("菜单按钮图片URL") center / contain no-repeat; }
-.cv-plus-icon svg { display: none; }
-.cv-plus-icon { background: url("加号按钮图片URL") center / contain no-repeat; }
-.cv-send-only-icon svg { display: none; }
-.cv-send-only-icon { background: url("仅发送按钮图片URL") center / contain no-repeat; }
-.cv-send-reply-icon svg { display: none; }
-.cv-send-reply-icon { background: url("发送回复按钮图片URL") center / contain no-repeat; }
-`;
-
-const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置页和其他应用不会应用本样式。 */
-/* 返回按钮和更多按钮已经默认使用透明底板，无需额外隐藏圆形背景。 */
-
-/* ==================== 主题变量 ==================== */
-#conv-screen {
-  --chat-page-bg: var(--app-bg);
-  --chat-header-bg: var(--surface);
-  --chat-message-list-bg: var(--app-bg);
-  --chat-text: var(--text-primary);
-  --chat-muted-text: var(--text-secondary);
-  --chat-divider: var(--divider);
-  --chat-user-bg: var(--button-primary-bg);
-  --chat-user-text: var(--button-primary-text);
-  --chat-ai-bg: var(--surface-raised);
-  --chat-ai-text: var(--text-primary);
-  /* 支持 solid / dashed / dotted */
-  --chat-bubble-border: var(--border);
-  --chat-bubble-border-width: 1px;
-  --chat-bubble-border-style: solid;
-  --chat-composer-bg: var(--surface);
-  --chat-composer-text: var(--text-primary);
-  --chat-composer-border: var(--border);
-  --chat-composer-border-width: 1px;
-  --chat-composer-radius: var(--radius-xl);
-  --chat-composer-shadow: none;
-  --chat-input-bg: var(--input-bg);
-  --chat-input-text: var(--text-primary);
-  --chat-input-placeholder: var(--input-placeholder);
-  --chat-input-border: var(--border);
-  --chat-input-border-width: 1px;
-  --chat-input-radius: var(--radius-sm);
-  --chat-input-shadow: none;
-  --chat-input-focus-border: var(--accent);
-  --chat-input-focus-shadow: 0 0 0 2px var(--focus-ring);
-  --chat-button-border: var(--border);
-  --chat-button-border-width: 1px;
-  --chat-button-radius: var(--radius-full);
-  --chat-button-shadow: none;
-  --chat-attach-bg: var(--button-secondary-bg);
-  --chat-attach-text: var(--button-secondary-text);
-  --chat-attach-hover-bg: var(--surface-raised);
-  --chat-attach-hover-text: var(--button-secondary-text);
-  --chat-send-only-bg: var(--button-secondary-bg);
-  --chat-send-only-text: var(--button-secondary-text);
-  --chat-send-only-hover-bg: var(--surface-raised);
-  --chat-send-only-hover-text: var(--button-secondary-text);
-  --chat-send-bg: var(--button-primary-bg);
-  --chat-send-text: var(--button-primary-text);
-  --chat-send-border: var(--button-primary-bg);
-  --chat-send-hover-bg: var(--button-primary-hover-bg);
-  --chat-send-hover-text: var(--button-primary-text);
-  --chat-send-hover-border: var(--button-primary-hover-bg);
-}
-
-/* ==================== 页面与壁纸 ==================== */
-/* .chat-page 是实际聊天容器，不要写成 #conv-screen .chat-page。 */
-.chat-page {
-  background: var(--chat-page-bg);
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-attachment: fixed;
-  color: var(--chat-text);
-}
-.cv-header,
-.chat-header,
-.header { background: var(--chat-header-bg); color: var(--chat-text); }
-.header-title,
-.header-title-name { color: var(--chat-text); }
-.header-title-avatar,
-.user-avatar,
-.ai-avatar { border-radius: 50%; }
-.character-status { color: var(--accent); }
-
-/* ==================== 消息区域 ==================== */
-.cv-messages-list { background: var(--chat-message-list-bg); color: var(--chat-text); }
-.chat-timestamp,
-.chat-timestamp__label,
-.msg-meta-header,
-.msg-meta-name,
-.msg-meta-date,
-.msg-meta-time { color: var(--chat-muted-text); }
-.chat-timestamp__label { background: var(--surface-muted); }
-.msg-meta-divider { border-color: var(--chat-divider); }
-
-/* ==================== 气泡 ==================== */
-.chat-bubble-self {
-  background: var(--chat-user-bg);
-  color: var(--chat-user-text);
-  border: var(--chat-bubble-border-width) var(--chat-bubble-border-style) var(--chat-bubble-border);
-  border-radius: 14px;
-  box-shadow: none;
-}
-.chat-bubble-self * { color: var(--chat-user-text); }
-.chat-bubble-other {
-  background: var(--chat-ai-bg);
-  color: var(--chat-ai-text);
-  border: var(--chat-bubble-border-width) var(--chat-bubble-border-style) var(--chat-bubble-border);
-  border-radius: 14px;
-  box-shadow: none;
-}
-.chat-bubble-other * { color: var(--chat-ai-text); }
-.voice-message-bar.chat-bubble-self,
-.transfer-card { background: var(--chat-user-bg); color: var(--chat-user-text); }
-.voice-message-bar.chat-bubble-self *,
-.transfer-card * { color: var(--chat-user-text); }
-.voice-message-bar.chat-bubble-other,
-.received-transfer-card { background: var(--chat-ai-bg); color: var(--chat-ai-text); }
-.voice-message-bar.chat-bubble-other *,
-.received-transfer-card * { color: var(--chat-ai-text); }
-
-/* 连续消息分组：只有 top 渲染尾巴和装饰。 */
-.msg-group-top.chat-bubble-self,
-.msg-group-top.chat-bubble-other { border-radius: 14px; }
-.msg-group-middle.chat-bubble-self,
-.msg-group-middle.chat-bubble-other { border-radius: 4px; }
-.msg-group-bottom.chat-bubble-self,
-.msg-group-bottom.chat-bubble-other {
-  border-top-left-radius: 4px;
-  border-top-right-radius: 4px;
-  border-bottom-left-radius: 14px;
-  border-bottom-right-radius: 14px;
-}
-
-/* ==================== Portal 尾巴与气泡装饰 ==================== */
-/* 尾巴没有默认视觉样式，形状、大小、颜色和位置由用户 CSS 决定。 */
-.cv-bubble-tip-portal-layer,
-.cv-bubble-tip-portal { pointer-events: none; overflow: visible; }
-.bubble-tip { position: absolute; z-index: 10; }
-.bubble-deco-wrapper { position: relative; overflow: visible; }
-.bubble-deco { position: absolute; z-index: 20; overflow: visible; pointer-events: none; }
-
-/* ==================== 引用消息 ==================== */
-.message-quote-reply-wrapper,
-.message-quote-reply-wrapper--self,
-.message-quote-reply-wrapper--other { color: var(--chat-text); }
-.message-quote__header,
-.message-quote__content,
-.message-quote__reply-body { color: inherit; }
-
-/* ==================== 底部输入栏 ==================== */
-.cv-footer,
-.chat-input-area { color: var(--chat-composer-text); }
-.chat-composer--default,
-.chat-composer--floating,
-.chat-composer--liquid {
-  background: var(--chat-composer-bg);
-  border: var(--chat-composer-border-width) solid var(--chat-composer-border);
-  border-radius: var(--chat-composer-radius);
-  box-shadow: var(--chat-composer-shadow);
-}
-.chat-input,
-.chat-composer__input {
-  background: var(--chat-input-bg);
-  color: var(--chat-input-text);
-  border: var(--chat-input-border-width) solid var(--chat-input-border);
-  border-radius: var(--chat-input-radius);
-  box-shadow: var(--chat-input-shadow);
-}
-.chat-input::placeholder,
-.chat-composer__input::placeholder { color: var(--chat-input-placeholder); }
-.chat-input:focus,
-.chat-composer__input:focus {
-  border-color: var(--chat-input-focus-border);
-  box-shadow: var(--chat-input-focus-shadow);
-}
-
-/* ==================== 底部按钮 ==================== */
-.chat-composer__button,
-.chat-composer__send-button {
-  border: var(--chat-button-border-width) solid var(--chat-button-border);
-  border-radius: var(--chat-button-radius);
-  box-shadow: var(--chat-button-shadow);
-}
-.chat-composer__attach-button,
-.cv-func-btn,
-.toggle-tools-btn { background: var(--chat-attach-bg); color: var(--chat-attach-text); }
-.chat-composer__attach-button:hover,
-.chat-composer__button--open { background: var(--chat-attach-hover-bg); color: var(--chat-attach-hover-text); }
-.chat-composer__send-only-button,
-.cv-send-only-btn { background: var(--chat-send-only-bg); color: var(--chat-send-only-text); }
-.chat-composer__send-only-button:hover:not(:disabled) { background: var(--chat-send-only-hover-bg); color: var(--chat-send-only-hover-text); }
-.chat-composer__send-reply-button,
-.send-button { background: var(--chat-send-bg); color: var(--chat-send-text); border-color: var(--chat-send-border); }
-.chat-composer__send-reply-button:hover:not(:disabled),
-.send-button:hover:not(:disabled) { background: var(--chat-send-hover-bg); color: var(--chat-send-hover-text); border-color: var(--chat-send-hover-border); }
-.chat-composer__button:disabled { background: var(--button-disabled-bg); color: var(--button-disabled-text); opacity: 0.4; }
-
-/* ==================== 可选图片按钮 ==================== */
-/* 返回按钮和更多按钮默认已是透明底板，无需配置。 */
-.cv-plus-icon svg,
-.cv-send-only-icon svg,
-.cv-send-reply-icon svg { display: none; }
-.cv-plus-icon { background: url("加号按钮图片URL") center / contain no-repeat; }
-.cv-send-only-icon { background: url("仅发送按钮图片URL") center / contain no-repeat; }
-.cv-send-reply-icon { background: url("发送回复按钮图片URL") center / contain no-repeat; }
-`;
-
-/* The legacy template remains referenced only to keep old persisted code compatible. */
-void CHARACTER_CSS_EXAMPLE_TEMPLATE;
-
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "image", label: "图片" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },
   { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
   { key: "location", label: "位置" }, { key: "call", label: "通话" }, { key: "plus", label: "加号" }, { key: "send", label: "发送" },
 ];
-
-type ChatStylePreset = "default" | "floating-cute" | "liquid-glass";
-
-/**
- * `default` is the inherited setting, not a character-level visual override.
- * Existing characters persisted it explicitly, so treating it as an override
- * prevented the global liquid-glass selection from ever reaching chat pages.
- */
-export const resolveActiveChatStylePreset = (
-  characterPreset: ChatStylePreset | undefined,
-  globalPreset: ChatStylePreset | undefined,
-): ChatStylePreset =>
-  characterPreset && characterPreset !== "default"
-    ? characterPreset
-    : (globalPreset || "default");
-
-const SettingsSwitch = ({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-}) => (
-  <button
-    type="button"
-    role="switch"
-    aria-checked={checked}
-    aria-label={label}
-    onClick={() => onChange(!checked)}
-    className={`relative inline-flex h-6 w-[42px] shrink-0 items-center rounded-full border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 focus-visible:ring-offset-2 ${
-      checked ? "bg-neutral-950" : "bg-[#E5E5EA]"
-    }`}
-  >
-    <span
-      className={`absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-transform duration-200 ${
-        checked ? "translate-x-[18px]" : "translate-x-0"
-      }`}
-    />
-  </button>
-);
-
-const RenderAvatar = ({ 
-  src, 
-  alt, 
-  name, 
-  className, 
-  onClick 
-}: { 
-  src: string; 
-  alt: string; 
-  name: string; 
-  className: string; 
-  onClick?: () => void 
-}) => {
-  const [failed, setFailed] = useState(false);
-  
-  const isEmoji = !src || (!src.startsWith("http") && !src.startsWith("data:") && !src.startsWith("/") && !src.startsWith("."));
-  
-  if (failed || isEmoji) {
-    const cleanName = (name || "👤").replace(/[\s\p{Emoji}\p{Extended_Pictographic}]+/gu, "").trim();
-    const firstChar = cleanName ? cleanName.charAt(0) : (name ? name.charAt(0) : "👤");
-    
-    // Pick a deterministic background color based on name
-    const colors = [
-      "bg-rose-100 text-rose-700 border-rose-200",
-      "bg-blue-100 text-blue-700 border-blue-200",
-      "bg-amber-100 text-amber-700 border-amber-200",
-      "bg-emerald-100 text-emerald-700 border-emerald-200",
-      "bg-indigo-100 text-indigo-700 border-indigo-200",
-      "bg-violet-100 text-violet-700 border-violet-200",
-      "bg-teal-100 text-teal-700 border-teal-200",
-      "bg-slate-100 text-slate-700 border-slate-200"
-    ];
-    let hash = 0;
-    for (let i = 0; i < (name || "").length; i++) {
-      hash = (name || "").charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const colorClass = colors[Math.abs(hash) % colors.length];
-
-    return (
-      <div 
-        onClick={onClick}
-        className={`${className} flex items-center justify-center font-bold text-sm border select-none cursor-pointer overflow-hidden ${colorClass}`}
-      >
-        {isEmoji && src ? (
-          <span className="text-lg leading-none">{src}</span>
-        ) : (
-          <span className="text-[13px] tracking-tight">{firstChar}</span>
-        )}
-      </div>
-    );
-  }
-  
-  return (
-    <img 
-      src={src} 
-      alt={alt} 
-      onError={() => setFailed(true)}
-      onClick={onClick}
-      className={className}
-    />
-  );
-};
-
-const StoredChatImage = ({ assetId, alt, generated = false }: { assetId: string; alt: string; generated?: boolean }) => {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let objectUrl: string | null = null;
-    imageAssetDb.getImage(assetId).then((blob) => {
-      if (!blob) return;
-      objectUrl = URL.createObjectURL(blob);
-      setUrl(objectUrl);
-    }).catch((error) => console.warn("Failed to load chat image asset:", error));
-    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [assetId]);
-  return url ? <img src={url} alt={alt} className={`max-w-[160px] rounded-lg object-cover cursor-zoom-in bg-stone-100 ${generated ? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"}`} /> : <div className="h-24 w-28 animate-pulse rounded-lg bg-slate-100" />;
-};
 
 interface AppChatProps {
   characters: Character[];
@@ -876,8 +297,49 @@ export default function AppChat({
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [audioLoadingMessageId, setAudioLoadingMessageId] = useState<string | null>(null);
   const [activeTtsAudio, setActiveTtsAudio] = useState<HTMLAudioElement | null>(null);
-  const callSpeechQueueRef = useRef<Message[]>([]);
+  const callSpeechQueueRef = useRef<Array<{ message: Message; resolve: () => void; generation: number; revealSubtitle: () => void }>>([]);
   const isCallSpeechPlayingRef = useRef(false);
+  const activeCallSpeechResolveRef = useRef<(() => void) | null>(null);
+  const callTtsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const callTtsObjectUrlRef = useRef<string | null>(null);
+  const callSpeechGenerationRef = useRef(0);
+
+  // Mobile browsers only allow later asynchronous call audio when an element
+  // has first been played from the user's call/accept gesture. Reuse that same
+  // element for every synthesized reply in the call.
+  const unlockCallTtsPlayback = () => {
+    if (typeof Audio === "undefined") return;
+    const silentWav = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAACAgICA";
+    const audio = callTtsAudioRef.current || new Audio();
+    callTtsAudioRef.current = audio;
+    audio.onended = null;
+    audio.onerror = null;
+    audio.src = silentWav;
+    audio.preload = "auto";
+    void audio.play().then(() => {
+      audio.pause();
+      audio.currentTime = 0;
+    }).catch((error) => {
+      console.warn("Call audio unlock failed:", error);
+    });
+  };
+
+  const resetCallTtsPlayback = () => {
+    const audio = callTtsAudioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.onended = null;
+      audio.onerror = null;
+      audio.removeAttribute("src");
+      audio.load();
+    }
+    if (callTtsObjectUrlRef.current) {
+      URL.revokeObjectURL(callTtsObjectUrlRef.current);
+      callTtsObjectUrlRef.current = null;
+    }
+    callTtsAudioRef.current = null;
+    setActiveTtsAudio(null);
+  };
 
   // Serial Playback Queue Manager
   const playNextMessageInQueue = (currentId: string) => {
@@ -887,11 +349,45 @@ export default function AppChat({
   };
 
   // TTS Trigger Speech Function
-  const triggerMessageSpeech = async (msg: Message, isQueuedCallSpeech = false) => {
+  const triggerMessageSpeech = async (
+    msg: Message,
+    isQueuedCallSpeech = false,
+    callSpeechGeneration = callSpeechGenerationRef.current,
+    revealCallSubtitle?: () => void,
+  ) => {
+    let objectUrl: string | null = null;
+    let callSubtitleRevealed = false;
+    const revealCallSubtitleOnce = () => {
+      if (!isQueuedCallSpeech || callSubtitleRevealed) return;
+      callSubtitleRevealed = true;
+      revealCallSubtitle?.();
+    };
+    const isCancelledCallSpeech = () => isQueuedCallSpeech && callSpeechGeneration !== callSpeechGenerationRef.current;
+    const releaseObjectUrl = () => {
+      if (!objectUrl) return;
+      URL.revokeObjectURL(objectUrl);
+      if (callTtsObjectUrlRef.current === objectUrl) callTtsObjectUrlRef.current = null;
+      objectUrl = null;
+    };
+    let queuedCallSpeechFinished = false;
+    const finishQueuedCallSpeechOnce = () => {
+      if (!isQueuedCallSpeech || queuedCallSpeechFinished) return;
+      queuedCallSpeechFinished = true;
+      finishQueuedCallSpeech();
+    };
+
     // Guard: Prevent non-voice messages from being synthesized/played in standard chat layout
-    const isVoice = msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage);
-    if (!isOfflineModeActive && !isVoice) {
+    const isVoice = Boolean(msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage));
+    if (!canPlayTtsMessage({ isOfflineModeActive, isVoiceMessage: isVoice, isQueuedCallSpeech })) {
       console.warn("Speech synthesis blocked: Message is not a voice message in chat layout");
+      revealCallSubtitleOnce();
+      return;
+    }
+
+    if (msg.sender === "character" && !settings.enableMiniMaxTts) {
+      console.info("Speech synthesis skipped: global TTS switch is off");
+      revealCallSubtitleOnce();
+      finishQueuedCallSpeechOnce();
       return;
     }
 
@@ -951,13 +447,7 @@ export default function AppChat({
     let ttsProviderName = "MiniMax";
 
     try {
-      let userSettings: any = {};
-      try {
-        const saved = localStorage.getItem("phone_settings");
-        if (saved) userSettings = JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
+      const userSettings = settings;
       ttsProviderName = getTtsProvider(userSettings) === "mossland" ? "Mossland" : "MiniMax";
 
       const msgChar = resolveTtsCharacter(characters, msg.characterId, msg.senderId);
@@ -974,38 +464,57 @@ export default function AppChat({
         .trim();
 
       if (!cleanText) {
+        revealCallSubtitleOnce();
         setPlayingMessageId(null);
         setAudioLoadingMessageId(null);
-        if (isQueuedCallSpeech) finishQueuedCallSpeech();
+        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
         else playNextMessageInQueue(msg.id);
         return;
       }
 
       const blob = await getSpeechForText(cleanText, ttsOptions);
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
+      if (isCancelledCallSpeech()) return;
+      objectUrl = URL.createObjectURL(blob);
+      if (isQueuedCallSpeech) callTtsObjectUrlRef.current = objectUrl;
+      const audio = isQueuedCallSpeech
+        ? (callTtsAudioRef.current || new Audio())
+        : new Audio();
+      if (isQueuedCallSpeech) callTtsAudioRef.current = audio;
+      audio.onended = null;
+      audio.onerror = null;
+      audio.src = objectUrl;
+      audio.preload = "auto";
       
       setActiveTtsAudio(audio);
       setAudioLoadingMessageId(null);
 
       audio.onended = () => {
-        if (isQueuedCallSpeech) finishQueuedCallSpeech();
+        releaseObjectUrl();
+        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
         else playNextMessageInQueue(msg.id);
       };
 
       audio.onerror = (e) => {
         console.warn("Audio playback error:", e);
+        releaseObjectUrl();
         setPlayingMessageId(null);
         setAudioLoadingMessageId(null);
-        if (isQueuedCallSpeech) finishQueuedCallSpeech();
+        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
       };
 
-      audio.play();
+      const playback = audio.play();
+      // Reveal the subtitle in the same event turn that starts audio playback,
+      // instead of exposing the text during the preceding network synthesis.
+      revealCallSubtitleOnce();
+      await playback;
     } catch (err: any) {
       console.warn("TTS generation failed:", err);
+      releaseObjectUrl();
+      if (isCancelledCallSpeech()) return;
+      revealCallSubtitleOnce();
       setPlayingMessageId(null);
       setAudioLoadingMessageId(null);
-      if (isQueuedCallSpeech) finishQueuedCallSpeech();
+      if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
       const detail = err instanceof Error ? err.message.replace(/\s+/g, " ").trim().slice(0, 120) : "";
       showToast(detail || `语音合成失败，请确认 ${ttsProviderName} 设置正确！`);
     }
@@ -1013,22 +522,34 @@ export default function AppChat({
 
   const playNextQueuedCallSpeech = () => {
     if (isCallSpeechPlayingRef.current) return;
-    const nextMessage = callSpeechQueueRef.current.shift();
-    if (!nextMessage) return;
+    const nextJob = callSpeechQueueRef.current.shift();
+    if (!nextJob) return;
     isCallSpeechPlayingRef.current = true;
-    triggerMessageSpeech(nextMessage, true);
+    activeCallSpeechResolveRef.current = nextJob.resolve;
+    triggerMessageSpeech(nextJob.message, true, nextJob.generation, nextJob.revealSubtitle);
   };
 
   const finishQueuedCallSpeech = () => {
+    const resolve = activeCallSpeechResolveRef.current;
+    activeCallSpeechResolveRef.current = null;
     isCallSpeechPlayingRef.current = false;
     setPlayingMessageId(null);
     setActiveTtsAudio(null);
+    resolve?.();
     window.setTimeout(playNextQueuedCallSpeech, 0);
   };
 
-  const enqueueCallSpeech = (msg: Message) => {
-    callSpeechQueueRef.current.push(msg);
+  const enqueueCallSpeech = (msg: Message, revealSubtitle: () => void): Promise<void> => new Promise((resolve) => {
+    callSpeechQueueRef.current.push({ message: msg, resolve, generation: callSpeechGenerationRef.current, revealSubtitle });
     playNextQueuedCallSpeech();
+  });
+
+  const clearCallSpeechQueue = () => {
+    callSpeechGenerationRef.current += 1;
+    activeCallSpeechResolveRef.current?.();
+    activeCallSpeechResolveRef.current = null;
+    callSpeechQueueRef.current.splice(0).forEach((job) => job.resolve());
+    isCallSpeechPlayingRef.current = false;
   };
 
   // Visibility and Cleanup Effects
@@ -1106,18 +627,25 @@ export default function AppChat({
     // the call record after hang-up, never mixed into the normal online timeline.
     if (isCallActive) {
       const subtitleContent = getCallTranscriptText(msg.content || "");
-      setCallTranscript((prev) => [...prev, {
-        id: msg.id,
-        sender: msg.sender,
-        content: subtitleContent,
-        timestamp: msg.timestamp,
-      }]);
+      let subtitleCommitted = false;
+      const commitSubtitleOnce = () => {
+        if (subtitleCommitted) return;
+        subtitleCommitted = true;
+        setCallTranscript((prev) => [...prev, {
+          id: msg.id,
+          sender: msg.sender,
+          content: subtitleContent,
+          timestamp: msg.timestamp,
+        }]);
+      };
 
-      if (msg.sender === "character" && subtitleContent) {
+      if (settings.enableMiniMaxTts && shouldQueueCallSpeech(msg.sender, subtitleContent)) {
         // TTS remains automatic during calls, but the call UI and saved transcript
-        // always contain plain subtitles rather than voice-message markup.
-        enqueueCallSpeech({ ...msg, content: subtitleContent });
+        // always contain plain subtitles rather than voice-message markup. Reveal
+        // each character subtitle only when its audio begins playback.
+        return enqueueCallSpeech({ ...msg, content: subtitleContent }, commitSubtitleOnce);
       }
+      commitSubtitleOnce();
       return;
     }
 
@@ -1173,18 +701,12 @@ export default function AppChat({
   }, []);
 
   // Initiated chats state to satisfy: unless user initiates chat or proactive message received, don't show thread
-  const [initiatedChatIds, setInitiatedChatIds] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem("phone_initiated_chat_ids");
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [initiatedChatIds, setInitiatedChatIds] = useState<string[]>(() =>
+    readArray<string>("phone_initiated_chat_ids", []).value);
 
   useEffect(() => {
     try {
-      localStorage.setItem("phone_initiated_chat_ids", JSON.stringify(initiatedChatIds));
+      writeJson("phone_initiated_chat_ids", initiatedChatIds);
     } catch (e) {
       console.error(e);
     }
@@ -1199,18 +721,12 @@ export default function AppChat({
   }, [activeChatCharId, activeChatRelationId, initiatedChatIds]);
 
   // Unread messages tracking
-  const [lastReadTimestamps, setLastReadTimestamps] = useState<Record<string, number>>(() => {
-    try {
-      const raw = localStorage.getItem("phone_last_read_timestamps");
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [lastReadTimestamps, setLastReadTimestamps] = useState<Record<string, number>>(() =>
+    readJson<Record<string, number>>("phone_last_read_timestamps", {}).value);
 
   useEffect(() => {
     try {
-      localStorage.setItem("phone_last_read_timestamps", JSON.stringify(lastReadTimestamps));
+      writeJson("phone_last_read_timestamps", lastReadTimestamps);
     } catch (e) {
       console.error(e);
     }
@@ -1315,6 +831,9 @@ export default function AppChat({
     relationship: activeRelationship,
     isGroupChat: Boolean(activeCharacter?.isGroupChat),
   });
+  const isActiveChatScopeValid = Boolean(activeCharacter && (activeCharacter.isGroupChat
+    ? !activeChatRelationId
+    : activeDirectScope));
   const activeRuntimeContext = activeDirectScope
     ? toDirectChatRuntimeContext(activeDirectScope)
     : createChatRuntimeContext({
@@ -1420,6 +939,36 @@ export default function AppChat({
       currentOnlineAt,
     });
   };
+  const getInterveningOfflineHandoff = (currentOnlineAt?: number) => {
+    if (!currentOnlineAt || !activeRelationship?.id) return undefined;
+    const currentDate = new Date(currentOnlineAt);
+    const currentDayStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
+    const previousOnlineAt = [...currentChatMessages]
+      .filter((message) => message.timestamp < currentDayStart)
+      .sort((left, right) => right.timestamp - left.timestamp)[0]?.timestamp ?? 0;
+    return selectInterveningOfflineHandoff({
+      stories: offlineStories,
+      memories: memories || [],
+      relationId: activeRelationship.id,
+      after: previousOnlineAt,
+      before: currentOnlineAt,
+    });
+  };
+  const getOfflineTimelineStoriesBetween = (previousAt: number | undefined, currentAt: number): OfflineStory[] => {
+    if (!previousAt || !activeRelationship?.id || activeCharacter?.isGroupChat) return [];
+    return offlineStories
+      .filter((story) => story.relationId === activeRelationship.id)
+      .filter((story) => hasOfflineStorySummary(story, memories || []))
+      .filter((story) => {
+        const occurredAt = story.onlineHandoff?.endedAt ?? story.archivedAt ?? story.lastMemorySyncAt ?? story.updatedAt;
+        return occurredAt > previousAt && occurredAt <= currentAt;
+      })
+      .sort((left, right) => {
+        const leftAt = left.onlineHandoff?.endedAt ?? left.archivedAt ?? left.lastMemorySyncAt ?? left.updatedAt;
+        const rightAt = right.onlineHandoff?.endedAt ?? right.archivedAt ?? right.lastMemorySyncAt ?? right.updatedAt;
+        return leftAt - rightAt;
+      });
+  };
   const activeStylePreset = resolveActiveChatStylePreset(
     activeCharacter?.chatStylePreset,
     settings.globalChatStylePreset,
@@ -1509,13 +1058,14 @@ export default function AppChat({
         ? message.relationId === activeRelationship.id
         : message.characterId === groupId && activeCharacter?.isGroupChat,
       );
-      const latestOfflineMemory = relationId
+      const interveningOfflineHandoff = relationId ? getInterveningOfflineHandoff(triggerMessage.timestamp) : undefined;
+      const latestOfflineMemory = interveningOfflineHandoff?.memory || (relationId
         ? selectFreshOfflineHandoffMemory({
           memories: memories || [],
           relationId,
           queryText: triggerMessage.content,
         })
-        : undefined;
+        : undefined);
       const pendingOfflineStory = relationId ? getPendingOfflineHandoff() : undefined;
       const offlineContinuityContext = pendingOfflineStory
         ? buildPendingOfflineTimelineHandoff(
@@ -1645,7 +1195,7 @@ export default function AppChat({
     saveDiaryTranslations(diaryCleanup.translations);
     setRedPacketStatuses((previous) => {
       const next = removePaymentStatusesByRelation(previous, relationId);
-      localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(next));
+      writeJson(RED_PACKET_STATUSES_KEY, next);
       return next;
     });
     onDeleteRelationshipMusic?.(relationId);
@@ -1686,8 +1236,8 @@ export default function AppChat({
         memberIds: group.memberIds?.filter((memberId) => memberId !== friendId),
       }));
 
-    localStorage.removeItem(getOfflineModeStorageKey(relationId));
-    localStorage.removeItem(getOfflineStoryStorageKey(relationId));
+    removeStoredValue(getOfflineModeStorageKey(relationId));
+    removeStoredValue(getOfflineStoryStorageKey(relationId));
     proactiveMessageInFlightRef.current.delete(relationId);
     setInitiatedChatIds((previous) => previous.filter((id) => id !== relationId));
     setLastReadTimestamps((previous) => {
@@ -1732,6 +1282,16 @@ export default function AppChat({
       setActiveChatCharId(null);
     }
   }, [activeChatCharId, activeCharacter, characters, setActiveChatCharId]);
+
+  // The relationship owns a direct conversation. If legacy navigation ever
+  // updates only the displayed character, restore the character from that
+  // relationship before rendering so one contact can never label another
+  // contact's history with its own name and avatar.
+  useEffect(() => {
+    if (!activeRelationship || !activeCharacter || activeCharacter.isGroupChat) return;
+    const relationshipCharacterId = resolveCanonicalCharacterId(activeRelationship.characterId, characters);
+    if (relationshipCharacterId !== activeCharacter.id) setActiveChatCharId(relationshipCharacterId);
+  }, [activeRelationship?.id, activeRelationship?.characterId, activeCharacter?.id, activeCharacter?.isGroupChat, characters, setActiveChatCharId]);
 
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
@@ -1846,7 +1406,7 @@ export default function AppChat({
       const current = previous[activeIdentityId] || 0;
       const nextValue = typeof update === "function" ? update(current) : update;
       const next = { ...previous, [activeIdentityId]: nextValue };
-      localStorage.setItem(IDENTITY_WALLET_BALANCES_KEY, JSON.stringify(next));
+      writeJson(IDENTITY_WALLET_BALANCES_KEY, next);
       return next;
     });
   };
@@ -1869,8 +1429,22 @@ export default function AppChat({
   }, [isEditingProfile, settings]);
 
   // Inputs
-  const [isTyping, setIsTyping] = useState(false);
-  const [typingCharacterOverride, setTypingCharacterOverride] = useState<Character | null>(null);
+  // Reply requests can finish after the user has opened another conversation.
+  // Keep their typing state attached to the captured conversation instead of
+  // relabelling a global boolean with whichever contact is currently visible.
+  const activeTypingScopeKey = getChatTypingScopeKey(activeRuntimeContext);
+  const [typingByScope, setTypingByScope] = useState<ChatTypingScopeState<Character>>({});
+  const setIsTyping = (isTyping: boolean) => {
+    const capturedScopeKey = activeTypingScopeKey;
+    setTypingByScope((previous) => setChatScopeTyping(previous, capturedScopeKey, isTyping));
+  };
+  const setTypingCharacterOverride = (character: Character | null) => {
+    const capturedScopeKey = activeTypingScopeKey;
+    setTypingByScope((previous) => setChatScopeCharacterOverride(previous, capturedScopeKey, character));
+  };
+  const visibleTypingState = getVisibleChatTyping<Character>(typingByScope, activeTypingScopeKey);
+  const isTyping = Boolean(visibleTypingState);
+  const typingCharacterOverride = visibleTypingState?.characterOverride || null;
   const [manualLocationText, setManualLocationText] = useState("");
   const [, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
   const [sentGreetings, setSentGreetings] = useState<string[]>([]);
@@ -1964,8 +1538,8 @@ export default function AppChat({
     }
     
     if (activeRelationship) {
-      localStorage.setItem(getOfflineModeStorageKey(activeRelationship.id), "true");
-      localStorage.setItem(getOfflineStoryStorageKey(activeRelationship.id), newStory.id);
+      writeString(getOfflineModeStorageKey(activeRelationship.id), "true");
+      writeString(getOfflineStoryStorageKey(activeRelationship.id), newStory.id);
     }
     
     showToast("已无痛切换到线下故事模式");
@@ -1996,7 +1570,7 @@ export default function AppChat({
     })
     .catch(err => {
       console.error("Translate message failed:", err);
-      showToast("翻译失败，请检查 API 配置");
+      showToast(err instanceof Error ? err.message : "翻译失败，请检查 API 配置");
     });
   };
 
@@ -2130,7 +1704,7 @@ export default function AppChat({
   const updateRedPacketStatus = (message: Message, status: RedPacketStatus) => {
     setRedPacketStatuses(prev => {
       const next = writeRedPacketStatus(prev, message, status);
-      localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(next));
+      writeJson(RED_PACKET_STATUSES_KEY, next);
       return next;
     });
   };
@@ -2182,7 +1756,7 @@ export default function AppChat({
 
     if (changed) {
       setRedPacketStatuses(updatedStatuses);
-      localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(updatedStatuses));
+      writeJson(RED_PACKET_STATUSES_KEY, updatedStatuses);
       if (refundAmountTotal > 0) {
         setWalletBalance(prev => {
           const next = prev + refundAmountTotal;
@@ -2204,14 +1778,16 @@ export default function AppChat({
   const [memoNotes, setMemoNotes] = useState<any[]>([]);
   const [activeMenuMsg, setActiveMenuMsg] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isMultiSelectDeleteMode, setIsMultiSelectDeleteMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
   const [voicePlayed, setVoicePlayed] = useState<Record<string, boolean>>({});
   const [voiceTranscribed, setVoiceTranscribed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     activeTtsAudio?.pause();
     if (voiceTimer) clearInterval(voiceTimer);
-    callSpeechQueueRef.current = [];
-    isCallSpeechPlayingRef.current = false;
+    clearCallSpeechQueue();
+    resetCallTtsPlayback();
     setActiveTtsAudio(null);
     setPlayingMessageId(null);
     setAudioLoadingMessageId(null);
@@ -2224,6 +1800,8 @@ export default function AppChat({
     setShowTransferDetailModal(false);
     setShowAttachPanel(false);
     setActiveAttachModal(null);
+    setIsMultiSelectDeleteMode(false);
+    setSelectedMessageIds(new Set());
   }, [activeIdentityId, activeChatRelationId, activeChatCharId]);
 
   const [selectedFileNote, setSelectedFileNote] = useState<{ title: string; content: string } | null>(null);
@@ -2245,13 +1823,8 @@ export default function AppChat({
   const commentLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressCommentClickRef = useRef(false);
 
-  const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("phone_moment_translations") || "{}");
-    } catch {
-      return {};
-    }
-  });
+  const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() =>
+    readJson<Record<string, string>>("phone_moment_translations", {}).value);
 
   const [momentFavorites, setMomentFavorites] = useState<{
     id: string;
@@ -2260,37 +1833,29 @@ export default function AppChat({
     authorAvatar: string;
     content: string;
     timestamp: number;
-  }[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("phone_moment_favorites") || "[]");
-    } catch {
-      return [];
-    }
-  });
+  }[]>(() => readArray<{
+    id: string;
+    momentId: string;
+    authorName: string;
+    authorAvatar: string;
+    content: string;
+    timestamp: number;
+  }>("phone_moment_favorites", []).value);
 
   const [favedTab, setFavedTab] = useState<"chats" | "moments">("chats");
 
   // Sync favorites & translations to localStorage when updated
   useEffect(() => {
-    localStorage.setItem("phone_moment_translations", JSON.stringify(momentTranslations));
+    writeJson("phone_moment_translations", momentTranslations);
   }, [momentTranslations]);
 
   useEffect(() => {
-    localStorage.setItem("phone_moment_favorites", JSON.stringify(momentFavorites));
+    writeJson("phone_moment_favorites", momentFavorites);
   }, [momentFavorites]);
 
   useEffect(() => {
     if (activeAttachModal === "file") {
-      const raw = localStorage.getItem("phone_memo_notes");
-      if (raw) {
-        try {
-          setMemoNotes(JSON.parse(raw));
-        } catch (e) {
-          setMemoNotes([]);
-        }
-      } else {
-        setMemoNotes([]);
-      }
+      setMemoNotes(readArray("phone_memo_notes", []).value);
     }
   }, [activeAttachModal]);
 
@@ -2304,7 +1869,7 @@ export default function AppChat({
     if (activeTab === "moments") {
       const now = Date.now();
       setLastViewedMomentsTime(now);
-      localStorage.setItem("phone_last_viewed_moments_time", now.toString());
+      writeString("phone_last_viewed_moments_time", now.toString());
     }
   }, [activeTab, moments]);
 
@@ -2504,9 +2069,9 @@ export default function AppChat({
     if (activeAttachModal !== "calling" || !voiceCallRelationId) return;
     if (isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) return;
 
+    clearCallSpeechQueue();
     if (activeTtsAudio) activeTtsAudio.pause();
-    callSpeechQueueRef.current = [];
-    isCallSpeechPlayingRef.current = false;
+    resetCallTtsPlayback();
     setCallingStatus("ended");
     setCallingInputText("");
     setActiveAttachModal(null);
@@ -2522,6 +2087,9 @@ export default function AppChat({
 
   const beginVoiceCall = (incoming: boolean) => {
     if (!activeCharacter || activeCharacter.isGroupChat || !activeVoiceCallScope) return;
+    clearCallSpeechQueue();
+    resetCallTtsPlayback();
+    if (!incoming) unlockCallTtsPlayback();
     setIsIncomingCall(incoming);
     setVoiceCallRelationId(activeVoiceCallScope.relationId);
     setCallingStatus("ringing");
@@ -2535,6 +2103,8 @@ export default function AppChat({
 
   const finishVoiceCall = (requestedStatus: VoiceCallStatus) => {
     if (!activeChatCharId || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
+      clearCallSpeechQueue();
+      resetCallTtsPlayback();
       setActiveAttachModal(null);
       setVoiceCallRelationId(null);
       return;
@@ -2567,9 +2137,9 @@ export default function AppChat({
     if (isIncomingCall && status !== "completed") {
       updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallRejectionPatch(Date.now()));
     }
+    clearCallSpeechQueue();
     if (activeTtsAudio) activeTtsAudio.pause();
-    callSpeechQueueRef.current = [];
-    isCallSpeechPlayingRef.current = false;
+    resetCallTtsPlayback();
     setCallingStatus("ended");
     setCallingInputText("");
     setActiveAttachModal(null);
@@ -2672,21 +2242,26 @@ export default function AppChat({
 
       // Create a readable history for the AI, showing the user's name or character names as senders
       const historyText = slicedMsgs.map((m) => {
-        const textImageDescription = parseTextImageDescription(m.content);
-        const content = textImageDescription ? `[文字图：${textImageDescription}]` : m.content;
+        const senderChar = m.sender === "character" ? groupMembers.find(c => c.id === m.senderId) : undefined;
+        const senderName = m.sender === "user"
+          ? settings.name
+          : senderChar ? (senderChar.remark || senderChar.name) : (m.senderId || "成员");
+        const content = serializeMessageContentForPrompt(m, {
+          mode: "history",
+          userName: settings.name,
+          characterName: senderName,
+        });
         if (m.sender === "user") {
           return `${settings.name} (机主): ${content}`;
         } else {
-          const senderChar = groupMembers.find(c => c.id === m.senderId);
-          const senderName = senderChar ? (senderChar.remark || senderChar.name) : (m.senderId || "成员");
           return `${senderName}: ${content}`;
         }
       }).join("\n");
 
       // Scan context for World Book triggers in group chat
       const scanContextParts = [
-        userMsg ? userMsg.content : "",
-        ...slicedMsgs.slice(-10).map(m => m.content)
+        userMsg ? serializeMessageContentForPrompt(userMsg, { mode: "history", userName: settings.name }) : "",
+        ...slicedMsgs.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
@@ -2749,7 +2324,7 @@ ${memberWbText}`;
 
       // The first request is a public router only. Its generated text is never
       // displayed; only the selected, verified member identities are used.
-      const routerSystemInstruction = buildGroupChatSystemInstruction({ userName: settings.name, groupName: activeCharacter.name, worldContext: groupWbText, memberDefinitions: publicMembersDefText });
+      const routerSystemInstruction = buildGroupChatSystemInstruction({ userName: settings.name, userBio: settings.bio, groupName: activeCharacter.name, worldContext: groupWbText, memberDefinitions: publicMembersDefText });
       const promptMessage = buildGroupChatTaskMessage(historyText, Boolean(userMsg));
       const routerResult = await generateGroupChatTurn({
         prompt: {
@@ -2778,12 +2353,23 @@ ${memberWbText}`;
           publicRoster: groupMembers.map((candidate) => candidate.name),
           privateContext: memberPrivateContext,
         });
-        const memberSystemInstruction = buildGroupChatSystemInstruction({
+        const memberLanguageInstruction = formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
+          member,
+          [
+            publicDefinition,
+            ...getVisibleWorldBookEntries(worldBookEntries || [], member.id, {
+              scenario: "group",
+              characterId: member.id,
+            }).map((entry) => `${entry.title}\n${entry.content}`),
+          ],
+        ));
+        const memberSystemInstruction = `${buildGroupChatSystemInstruction({
           userName: settings.name,
+          userBio: settings.bio,
           groupName: activeCharacter.name,
           worldContext: groupWbText,
           memberDefinitions,
-        });
+        })}\n\n---\n\n${memberLanguageInstruction}`;
         const memberPrompt = `${buildGroupChatTaskMessage(sameTurnPublicHistory, Boolean(userMsg))}\n\n【单成员生成】本次请求只允许 ${member.name} 发言。可以保持沉默；若发言，每一条都必须使用 [SENDER_NAME: ${member.name}]，不得代替其他成员输出。`;
         const isolatedDepthInjections = new Map(groupWbBlocks.at_depth.map((entry) => [entry.sourceId, entry]));
         (memberAtDepthInjections.get(member.id) || []).forEach((entry) => isolatedDepthInjections.set(entry.sourceId, entry));
@@ -2807,7 +2393,7 @@ ${memberWbText}`;
         if (memberResult.messages.length > 0) {
           sameTurnPublicHistory = [
             sameTurnPublicHistory,
-            ...memberResult.messages.map((message) => `${member.remark || member.name}: ${message.content}`),
+            ...memberResult.messages.map((message) => `${member.remark || member.name}: ${serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: member.remark || member.name })}`),
           ].filter(Boolean).join("\n");
         }
       }
@@ -2914,14 +2500,23 @@ ${memberWbText}`;
     lastUserMsg: Message | null,
     recentMsgs: Message[],
     bubbleIndex: number,
-    bubbleText: string
+    bubbleText: string,
+    replyContext: ChatRuntimeContext,
   ): boolean => {
+    if (!settings.enableMiniMaxTts) return false;
+    if (!replyContext.characterId || !replyContext.relationId || !replyContext.conversationId || replyContext.isGroup) return false;
     return shouldAutomaticallyConvertTextToVoice({
       character,
       lastUserMessage: lastUserMsg,
       recentMessages: recentMsgs,
       bubbleIndex,
       bubbleText,
+      scope: {
+        characterId: replyContext.characterId,
+        relationId: replyContext.relationId,
+        conversationId: replyContext.conversationId,
+        userIdentityId: replyContext.userIdentityId,
+      },
     });
   };
 
@@ -2929,8 +2524,14 @@ ${memberWbText}`;
     userMsg: Message | null,
     customHistoryOverride?: Message[],
     cognitiveContext?: CharacterCognitiveContext,
+    replyContext: ChatRuntimeContext = activeRuntimeContext,
   ) => {
     setIsTyping(true);
+    const callTurnGeneration = activeAttachModal === "calling" && callingStatus === "connected"
+      ? callSpeechGenerationRef.current
+      : null;
+    const isCancelledCallTurn = () => callTurnGeneration !== null
+      && callTurnGeneration !== callSpeechGenerationRef.current;
     // Resolve toggles from the latest props for every send. A queued callback
     // may have been created by an earlier render, so its captured character
     // must never decide the next prompt or output filtering.
@@ -2992,41 +2593,43 @@ ${memberWbText}`;
       const msgsForHistory = (userMsg && finalMsgs.length > 0 && finalMsgs[finalMsgs.length - 1].id === userMsg.id)
         ? finalMsgs.slice(0, -1)
         : finalMsgs;
-      const isSameLocalDay = (left: number, right: number) => {
-        const leftDate = new Date(left);
-        const rightDate = new Date(right);
-        return leftDate.getFullYear() === rightDate.getFullYear()
-          && leftDate.getMonth() === rightDate.getMonth()
-          && leftDate.getDate() === rightDate.getDate();
-      };
       const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
       // With time awareness enabled, the first message on a new calendar day
       // starts a fresh live session. Yesterday's tail remains stored, but it is
       // no longer sent as the topic that the model should answer right now.
-      const isCrossDayNewSession = turnSettings.enableTimeAwareness
-        && Boolean(userMsg && latestHistoryMessage)
-        && !isSameLocalDay(userMsg!.timestamp, latestHistoryMessage.timestamp);
-      const slicedMsgs = msgsForHistory.slice(-limit);
-      const requestTime = new Date();
-
-      const history = slicedMsgs.map((m) => {
-        let contentText = m.content;
-        const textImageDescription = parseTextImageDescription(contentText);
-        if (textImageDescription) {
-          contentText = `[文字图：${textImageDescription}]`;
-        } else if (contentText.startsWith("[语音]|")) {
-          const parts = contentText.split("|");
-          const secs = parts[1] || "5";
-          const voiceText = parts.slice(2).join("|") || "";
-          contentText = voiceText ? `[语音: "${voiceText}" (${secs}秒)]` : `[语音: ${secs}秒]`;
-        }
-        return {
-          role: m.sender === "user" ? "user" : "model",
-          text: turnSettings.enableTimeAwareness
-            ? formatHistoricalMessageForPrompt(contentText, m.timestamp, requestTime)
-            : contentText,
-        };
+      const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
+        enableTimeAwareness: turnSettings.enableTimeAwareness,
+        currentMessageAt: userMsg?.timestamp,
+        latestHistoryMessageAt: latestHistoryMessage?.timestamp,
       });
+      const requestTime = new Date();
+      const historyPartition = partitionDirectChatHistoryByCurrentDay({
+        messages: msgsForHistory,
+        currentMessageAt: userMsg?.timestamp,
+        enableTimeAwareness: turnSettings.enableTimeAwareness,
+      });
+      const slicedMsgs = historyPartition.liveMessages.slice(-limit);
+      const historicalReferenceLines = historyPartition.historicalMessages.map((message) => {
+        const speaker = message.sender === "user" ? "用户" : activeCharacter.name;
+        const content = serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: settings.name,
+          characterName: activeCharacter.name,
+          includeCallTranscript: false,
+        }).replace(/\s+/gu, " ").trim().slice(0, 240);
+        return `- ${new Date(message.timestamp).toLocaleString("zh-CN", { hour12: false })}｜${speaker}：${content}`;
+      });
+      const crossDayHistoricalReference = buildCrossDayHistoricalReferencePrompt(historicalReferenceLines);
+
+      const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
+          userName: settings.name,
+          characterName: activeCharacter.name,
+        }).map((turn) => ({
+          role: turn.role,
+          text: turnSettings.enableTimeAwareness
+            ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
+            : turn.text,
+        })));
 
       let timeLogString = "";
       if (turnSettings.enableTimeAwareness) {
@@ -3048,15 +2651,13 @@ ${memberWbText}`;
           
           const fullTimeStr = `${y}-${mo}-${d} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
           const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
-          let contentSnippet = m.content;
-          if (contentSnippet.startsWith("[语音]|")) {
-            const parts = contentSnippet.split("|");
-            const secs = parts[1] || "5";
-            const voiceText = parts.slice(2).join("|") || "";
-            contentSnippet = voiceText ? `[语音消息: "${voiceText}" (${secs}秒)]` : `[语音消息: ${secs}秒]`;
-          } else if (contentSnippet.length > 25) {
-            contentSnippet = contentSnippet.slice(0, 25) + "...";
-          }
+          let contentSnippet = serializeMessageContentForPrompt(m, {
+            mode: "history",
+            userName: settings.name,
+            characterName: activeCharacter.name,
+            includeCallTranscript: false,
+          });
+          if (contentSnippet.length > 80) contentSnippet = contentSnippet.slice(0, 80) + "...";
           
           timeLogLines.push(`- ${senderName}: "${contentSnippet}" (发送于: ${fullTimeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`);
         });
@@ -3075,24 +2676,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 2. Third-person narrator descriptions, actions, and scenery should be rich, detailed, complete, and immersive, so as to create a vivid novel-like narrative. (第三人称旁白、场景及动作心理描写应当丰富、生动且完整，以塑造出极具沉浸感的小说式氛围)。
 3. Do NOT wrap descriptions or actions in parentheses like (微笑), （叹气）, (物理动作); instead, write them as normal, beautiful narrative prose sentences and separate them from spoken dialogue using standard line breaks (换行处理，不要加任何括号).
 4. You must ONLY use Chinese double quotes “ ” to enclose actual spoken dialogue (口语/说话内容) by ${activeCharacter.name}. NEVER use quotes for thoughts, descriptions, emphasis, or words within third-person narration! This is extremely important so the user's system can correctly parse dialogue bubbles.`
-        : `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
-Reply length, initiative, warmth, restraint, and emotional intensity must follow the character profile and the current conversation. Keep the wording natural and conversational without imposing a universally cold, brief, caring, or agreeable style.
-Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
-Do NOT say you are an AI or Gemini, unless that is your explicit character人设.
-Show the character through what they say, not by explaining their own persona. For an ordinary greeting or short message, do not manufacture a dramatic scenario, claim an unconfirmed shared history, or narrate that you are “acting cool/talkative”; simply respond as this person would to this user.
-
-🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
-1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
-2. [🚨 RED PACKET CAPABILITY / 对方发红包设定]: You have the capability to send WeChat red packets (微信红包) to the user as a cute gesture, appreciation, surprise, or interactive response. To send a red packet, output a single separate line matching the format exactly: "[红包]|金额|祝福语" (e.g. "[红包]|8.88|天天开心" or "[红包]|5.20|一生一世"). You can mix normal conversational dialogue messages and red packets. E.g. "给你塞个小红包，要开心哦！\n[红包]|6.66|天天开心".
-${turnSettings.disableBracketActions
-  ? `3. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
-4. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${activeCharacter.name}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`
-  : `3. If your character's backstory, personality card, or World Book entries naturally utilize parenthesized action descriptions or physical gestures (e.g., "(微笑)", "（叹气）", "*摸摸头*"), you are encouraged to output them inside brackets/parentheses to maintain realistic roleplay expressiveness. Keep them spontaneous, descriptive, and emotionally rich.`
-}`;
-
-      if (!isOfflineModeActive && turnSettings.disableBracketActions) {
-        mainPromptText += `\n4. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks. Maintain natural, realistic, text-message style dialogue.`;
-      }
+        : buildDirectChatMainPrompt({
+          characterName: activeCharacter.name,
+          disableBracketActions: turnSettings.disableBracketActions,
+        });
 
       const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
       let characterDescriptionText = characterProjection.description.content;
@@ -3106,33 +2693,23 @@ ${turnSettings.disableBracketActions
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：短期聊天记录已按用户限制截断；需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
+      if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
 
-      const normalizeTopicText = (value: string) => value
-        .replace(/\[[^\]]*\]/g, " ")
-        .replace(/[\s\p{P}\p{S}]+/gu, "")
-        .toLowerCase();
-      const currentTopicText = normalizeTopicText(userMsg?.content || "");
-      const recentCallTopicText = normalizeTopicText(
-        callTranscript.slice(-8).map((item) => item.content).join(" ")
-      );
-      const toTopicUnits = (value: string) => {
-        if (value.length < 2) return value ? [value] : [];
-        return Array.from(new Set(Array.from({ length: value.length - 1 }, (_, index) => value.slice(index, index + 2))));
-      };
-      const topicUnits = toTopicUnits(currentTopicText);
-      const sharedTopicUnits = topicUnits.filter((unit) => recentCallTopicText.includes(unit)).length;
-      const topicOverlap = topicUnits.length > 0 ? sharedTopicUnits / topicUnits.length : 1;
-      const callTopicShiftDetected = isConnectedVoiceCall
-        && callTranscript.length >= 2
-        && currentTopicText.length >= 4
-        && topicOverlap < 0.28;
-      const shouldLoadLongTermMemory = (!isConnectedVoiceCall || callTopicShiftDetected)
-        && !isCrossDayNewSession;
+      const currentMessageContextText = userMsg
+        ? serializeMessageContentForPrompt(userMsg, { mode: "history", userName: settings.name, characterName: activeCharacter.name })
+        : "";
+
+      const callTopicShiftDetected = detectCallTopicShift({
+        isConnectedVoiceCall,
+        userText: currentMessageContextText,
+        callTranscript,
+      });
+      const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
 
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = shouldLoadLongTermMemory
-        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: userMsg ? userMsg.content : "", existingMemories: memories || [], limit: topK, scenario: "chat" })
+        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, scenario: "chat" })
         : [];
       const truthRetrieval = activeRelationship
         ? retrieveTruthForPrivatePrompt({
@@ -3142,7 +2719,7 @@ ${turnSettings.disableBracketActions
             userIdentityId: activeRelationship.userIdentityId,
             conversationId: activeRelationship.conversationId,
           },
-          queryText: userMsg?.content || "",
+          queryText: currentMessageContextText,
           limit: topK,
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
@@ -3163,10 +2740,11 @@ ${turnSettings.disableBracketActions
       // A continuation synchronized while leaving the offline app is an explicit
       // handoff. Surface the newest one on the immediate return to online chat,
       // even when a short greeting is too vague for semantic retrieval.
-      const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
+      const interveningOfflineHandoff = getInterveningOfflineHandoff(userMsg?.timestamp);
+      const latestOfflineContinuationMemory = interveningOfflineHandoff?.memory || selectFreshOfflineHandoffMemory({
         memories: memories || [],
         relationId: activeRelationship?.id,
-        queryText: userMsg?.content,
+        queryText: currentMessageContextText,
       });
       pendingOfflineHandoffForReply = getPendingOfflineHandoff();
       if (pendingOfflineHandoffForReply) {
@@ -3192,6 +2770,7 @@ ${turnSettings.disableBracketActions
       const userProfileText = `User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
+      const userKnowledgeBoundary = formatUserKnowledgeBoundary();
       const relationshipContext = characterProjection.relationship?.content || "";
       const chatPromptContext = cognitiveContext
         ? buildChatPromptContext(cognitiveContext, {
@@ -3206,7 +2785,7 @@ ${turnSettings.disableBracketActions
       const cognitivePromptBlock = formatChatPromptContext(chatPromptContext);
       const musicContext = activeRelationship && userMsg
         ? buildRelationMusicContext({
-          userText: userMsg.content,
+          userText: currentMessageContextText,
           ownerIdentityId: activeRelationship.userIdentityId,
           relationId: activeRelationship.id,
           tracks: musicTracks,
@@ -3236,8 +2815,8 @@ ${turnSettings.disableBracketActions
 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
-        userMsg ? userMsg.content : "",
-        ...currentChatMessages.slice(-10).map(m => m.content)
+        currentMessageContextText,
+        ...currentChatMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
@@ -3263,109 +2842,26 @@ ${turnSettings.disableBracketActions
 
       // 1.2 Red Packet Reaction Prompt
       if (isRedPacket && userMsg) {
-        const [_, amountStr, greetingStr] = userMsg.content.split("|");
-        const amount = amountStr || "8.88";
-        const greeting = greetingStr || "恭喜发财，万事如意";
-        assembledInstructions.push(`[🚨 特别行为指令：你刚刚收到了一个来自用户的微信红包！ 🚨]
-你作为扮演的角色，刚刚在微信里收到了用户给你发来的红包！
-- 红包金额：¥${amount}
-- 红包留言：“${greeting}”
-
-【行为及回复规则】：
-1. 你已经拆开并领取了这个红包；只把金额和留言当作确定事实。
-2. 角色可以感谢、调侃、迟疑、拒绝后续类似行为或作出其他反应，具体选择完全服从角色卡、既定关系和当前语境，不默认开心、感激、撒娇或亲密。
-3. 只输出角色真正会发送的微信消息，不要提及“系统”“格式”或“指令”。`);
+        assembledInstructions.push(buildRedPacketReactionPrompt(userMsg.content));
       }
 
-      if (isCrossDayNewSession) {
-        assembledInstructions.push(`[NEW-DAY CONVERSATION BOUNDARY]
-The user's newest message starts a fresh conversation on a different calendar day. Yesterday's unfinished exchange is closed historical context, not the topic currently being continued.
-Answer only the user's newest message as today's opening. Do not resume, answer, or elaborate on yesterday's last topic unless the user explicitly mentions it again.`);
+      if (isCrossDayNewSession || historyPartition.hasCrossDayHistory) {
+        assembledInstructions.push(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT);
       }
 
       // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
       if (turnSettings.enableTimeAwareness) {
-        const timeStr = formatLocalTimeContext(requestTime);
-        assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
-当前现实物理世界的时间是：${timeStr}。
-
-以下是最近几条聊天消息的精确发送时间记录，请作为你判断时间流逝的客观依据：
-${timeLogString}
-
-【重要时间感知规则】：
-0. 【避免时间模板】：时间信息首先用于避免把先后、跨天和间隔判断错。除非用户问到时间、跨天/长间隔确实改变当前语义，或角色人设本就会在此时主动提及，不要因为当前是中午、饭点、深夜等自动发起“吃饭／睡觉／天气”话题，也不要把时间当成通用寒暄。
-1. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
-   - 对比任何两条消息时，必须同时校验：年、月、日、时、分，不能只对比时分。
-   - 两条消息不在同一天（跨天了）：必须判定为“长时间间隔”，视作很久以前的消息，你绝对不能说“刚才给你发了/刚发过”！
-   - 两条消息同一天、间隔小于 5 分钟：判定为近期/短时间连续。
-   - 两条消息同一天、间隔超过 5 分钟：判定为有一段时间没发（不属于短时间连续）。
-   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天。是否问候、如何问候必须服从角色人设和双方关系，不能统一强制礼貌或亲密。
-   - 如果上一条消息距今已过去数小时或数天，只在当前消息确实需要时体现时间流逝；不要强制追问行程、表达想念或套用固定寒暄。
-2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
-3. 【🚨 极其重要】：上方时间仅是内部推理元数据，不是要发送给用户的内容。禁止在回复中输出或复述任何时间标签、时间戳、时钟气泡或前缀，包括但不限于 \`[发送时间: ...]\`、\`[15:10]\`、\`【15:10】\`。如果需要自然提到时间，只能把它写进完整对话句子中。回复必须保持干净，只输出角色真正要说的话。`);
+        assembledInstructions.push(buildTimeAwarenessPrompt(requestTime, timeLogString));
       }
 
       // Voice timing is only relevant to a voice-related turn. Including it on
       // every ordinary text reply needlessly dilutes the role and relationship
       // anchor in the prompt.
-      const isVoiceRelatedTurn = Boolean(
-        userMsg && (
-          userMsg.isVoiceMessage ||
-          userMsg.content.startsWith("[语音]") ||
-          userMsg.content.startsWith("[语音通话]")
-        )
-      );
-      let voiceIntervalPrompt = "";
-      const lastCharVoiceMsg = isVoiceRelatedTurn ? [...slicedMsgs]
-        .reverse()
-        .find(m => m.sender === "character" && (m.content.startsWith("[语音]") || m.isVoiceMessage)) : undefined;
-
-      if (lastCharVoiceMsg) {
-        const nowMs = Date.now();
-        const lastVoiceMs = lastCharVoiceMsg.timestamp;
-        const lastVoiceDate = new Date(lastVoiceMs);
-        const nowDate = new Date(nowMs);
-        
-        const isSameDay = lastVoiceDate.getFullYear() === nowDate.getFullYear() &&
-                          lastVoiceDate.getMonth() === nowDate.getMonth() &&
-                          lastVoiceDate.getDate() === nowDate.getDate();
-        
-        const diffMinutes = (nowMs - lastVoiceMs) / (60 * 1000);
-        
-        let voiceIntervalLabel = "";
-        let isLastVoiceOld = false;
-        
-        if (!isSameDay) {
-          voiceIntervalLabel = "上一条语音消息是昨天或更早以前发送的（跨天长间隔，很久以前的消息）。";
-          isLastVoiceOld = true;
-        } else if (diffMinutes < 5) {
-          voiceIntervalLabel = `上一条语音消息是在同一天内发送的，并且仅间隔了 ${Math.round(diffMinutes)} 分钟（同一天、间隔小于 5 分钟，判定为近期/短时间内连续）。`;
-          isLastVoiceOld = false;
-        } else {
-          voiceIntervalLabel = `上一条语音消息是在同一天内发送的，但已间隔了 ${Math.round(diffMinutes)} 分钟（同一天、间隔超过 5 分钟，判定为有一段时间没发）。`;
-          isLastVoiceOld = true;
-        }
-
-        const lastVoiceTextPart = lastCharVoiceMsg.content.startsWith("[语音]|")
-          ? lastCharVoiceMsg.content.split("|").slice(2).join("|")
-          : lastCharVoiceMsg.content;
-
-        voiceIntervalPrompt = `[🚨 语音发送间隔及剧情记忆规则]
-- 你（${activeCharacter.name}）上一次给用户发语音消息是在: ${new Date(lastVoiceMs).toLocaleString("zh-CN", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-- 上一条语音消息的内容是: "${lastVoiceTextPart.length > 30 ? lastVoiceTextPart.slice(0, 30) + "..." : lastVoiceTextPart}"
-- **当前计算的时间关系**: ${voiceIntervalLabel}
-
-【AI 剧情记忆判定及语音回复行为规则（最高执行优先级）】:
-${isLastVoiceOld 
-  ? `1. 【跨天长间隔/长间隔判定】: 上一条语音已经是较早的历史，不能以“刚发过一条”作为当前反应依据。是否发送、迟疑或拒绝以及具体口吻，完全服从角色人设、当前场合和双方关系。`
-  : `1. 【同一天短时间连续索要】: 上一条语音确实刚发送不久，角色可以把这一事实纳入反应；是否调侃、拒绝或继续发送以及具体口吻，完全服从角色人设。`
-}
-2. 聊天历史中带有“居中分割时间标签”的分割条是视觉上的日期和时间断层标识，请通过它们辅助区分跨天长间隔。`;
-      } else if (isVoiceRelatedTurn) {
-        voiceIntervalPrompt = `[🚨 语音发送间隔及剧情记忆规则]
-- 你（${activeCharacter.name}）在当前的历史聊天中还没有给用户发送过语音消息。
-- 不得声称“刚给你发过”。是否配合、迟疑或拒绝以及具体语气，完全服从角色人设、当前场合和双方关系。`;
-      }
+      const voiceIntervalPrompt = buildVoiceIntervalPrompt({
+        characterName: activeCharacter.name,
+        currentMessage: userMsg,
+        recentMessages: slicedMsgs,
+      });
       if (voiceIntervalPrompt) {
         assembledInstructions.push(voiceIntervalPrompt);
       }
@@ -3395,16 +2891,13 @@ ${isLastVoiceOld
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
+      assembledInstructions.push(userKnowledgeBoundary);
+      assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
 
       // Recent dialogue is already present in the role-correct history. Do not
       // copy it into a system block: duplicate user wording encourages parroting
       // and can swap first-person ownership on short replies.
-      assembledInstructions.push(`[CURRENT-SCENE CONTINUITY]
-Treat recently established activities, locations, physical conditions, possessions, promises, and relationship facts in the conversation history as true and still in effect.
-- Never silently replace one activity with another. For example, if you just said you were sweaty from running, do not later say you just returned from cycling.
-- If the activity, location, or situation really changes, first make the transition explicit and plausible (including time passing where needed). Do not call the new activity "just now" unless the transition has been established.
-- When the history is unclear, avoid inventing a new concrete activity. Continue the existing topic or ask naturally instead.
-- This continuity rule applies to every message in a multi-bubble reply as well.`);
+      assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
 
       // 7. Before Chat History entries
       const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
@@ -3429,90 +2922,40 @@ Treat recently established activities, locations, physical conditions, possessio
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers1 = stickerGroups.flatMap(g => g.stickers);
       if (activeAttachModal === "calling") {
-        assembledInstructions.push(`[语音电话输出规则]
-你正在和用户进行实时语音电话。只输出适合直接说出口的纯文字台词。
-禁止发送表情包、贴图、图片、红包、转账、文件、位置或任何方括号附件标记；不要输出“[表情]”“[图片]”等描述。`);
-        assembledInstructions.push(`[VOICE CALL MEMORY ROUTING]
-1. Routing order: answer the user's newest sentence using the current call transcript and short online-chat lead-in before consulting older context.
-2. Do not repeat, paraphrase, or restart an answer already spoken during this call. Compare against your recent call lines and add only new information or a natural follow-up.
-3. Long-term archived memory is ${callTopicShiftDetected ? "available because the user shifted to a different topic; use only directly relevant facts" : "not loaded for this turn; stay with short-term live context"}.
-4. Never force an old memory into the conversation merely because it exists. If the user's meaning is unclear, ask a brief natural question instead of replaying an earlier answer.`);
+        assembledInstructions.push(...buildVoiceCallPrompts(callTopicShiftDetected));
       } else if (allStickers1.length > 0 && /^\[表情\]\|/.test(userMsg?.content || "")) {
         const stickerListStr = allStickers1.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
-        assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
-用户刚刚发送了表情包；只有在符合上方频率限制、且表情包本身能表达即时反应、且不重复文字内容时，才可以单独一行发送表情包。除此之外不要使用任何表情包。
-发送表情包的格式必须完全符合以下严格语法格式：
-[表情]|表情名称|图片URL
-
-以下是你可以无缝调用的自定义表情包列表（每一行对应一个表情包，你可以直接【一字不差地复制】下面的格式并输出它）：
-${stickerListStr}
-
-【强制输出规则】：
-1. 绝对不允许胡编乱造不存在的表情包名称或图片URL！你只能从上面给出的列表中挑选！
-2. 发送时格式必须极其严格：[表情]|名称|URL。不能有任何多余的字符。
-3. 不要为了显示功能或凑热闹而发送表情包；不适合时只发送普通文字即可。`);
+        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr));
       }
 
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
-      const systemInstruction = finalizeCharacterChatSystemInstruction({ instructions: assembledInstructions, characterProjection, characterDescriptionText, diagnosticLabel: "direct chat prompt" });
+      const systemInstruction = finalizeCharacterChatSystemInstruction({
+        instructions: assembledInstructions,
+        characterProjection,
+        characterDescriptionText,
+        diagnosticLabel: "direct chat prompt",
+        finalPersonaRules: wbBlocks.allTriggered
+          .filter((entry) => entry.purpose === "persona_rule")
+          .map((entry) => `【${entry.title}】\n${entry.content}`),
+        finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
+          activeCharacter,
+          getVisibleWorldBookEntries(worldBookEntries || [], activeChatCharId || "", {
+            scenario: "chat",
+            characterId: activeRelationship?.characterId || activeChatCharId || undefined,
+            userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
+            relationId: activeRelationship?.id,
+          }).map((entry) => `${entry.title}\n${entry.content}`),
+        )),
+      });
 
       // Custom tool/attachment format descriptions for character context
-      let promptMessage = userMsg ? userMsg.content : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
-      if (promptMessage.startsWith("data:image/")) {
-        promptMessage = `[发送图片/照片] 我给你发送了一张照片。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (parseTextImageDescription(promptMessage)) {
-        const description = parseTextImageDescription(promptMessage)!;
-        promptMessage = `[发送文字图] 我发送了一张不含真实图片、仅用文字描述画面的文字图，描述内容是：“${description}”。请把它当作我主动分享的画面描述来回应，不要声称看到了真实照片。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[红包]")) {
-        const parts = promptMessage.split("|");
-        const amount = parts[1] || "8.88";
-        const greeting = parts[2] || "恭喜发财，万事如意";
-        promptMessage = `[发送红包] 我给你发送了一个金额为 ${amount} 元的微信红包，祝福语是：“${greeting}”。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[位置]")) {
-        const parts = promptMessage.split("|");
-        const loc = parts[1] || "位置";
-        promptMessage = `[发送位置] 我给你分享了一个微信位置：[${loc}]。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[音乐]")) {
-        const parts = promptMessage.split("|");
-        const title = parts[1] || "音乐";
-        promptMessage = `[分享音乐] 我给你分享了一首音乐：《${title}》。这是一次线上音乐分享聊天。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}
-禁止为了回应这次分享而补写地点、动作或双方共同场景，也不要新增未提供的现场状态。`;
-      } else if (promptMessage.startsWith("[文件]")) {
-        const parts = promptMessage.split("|");
-        const title = parts[1] || "无标题";
-        const fileContentRaw = parts[2] || "";
-        let decodedContent = "";
-        try {
-          decodedContent = decodeURIComponent(fileContentRaw);
-        } catch (e) {
-          decodedContent = fileContentRaw;
-        }
-        promptMessage = `[分享文件] 我给你分享了一篇备忘录笔记，标题是《${title}》，内容如下：\n"""\n${decodedContent}\n"""\n请针对标题和具体内容回应。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[视频通话]")) {
-        const parts = promptMessage.split("|");
-        const status = parts[1] || "已结束";
-        promptMessage = `[视频通话结束] 刚才我们进行了视频通话（通话状态：${status}）。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[语音通话]")) {
-        const parts = promptMessage.split("|");
-        const status = parts[1] || "已结束";
-        promptMessage = `[语音通话结束] 刚才我们进行了语音通话（通话状态：${status}）。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-      } else if (promptMessage.startsWith("[语音]|")) {
-        const parts = promptMessage.split("|");
-        const secs = parts[1] || "5";
-        const voiceText = parts.slice(2).join("|") || "";
-        if (voiceText) {
-          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒），语音对应的文字内容是：“${voiceText}”。请针对语音中的实际内容回应。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-        } else {
-          promptMessage = `[发送语音消息] 我给你发送了一条语音消息（时长：${secs}秒），但没有提供可确认的文字内容。不得脑补语音的具体内容或预设我的语气；可以按已知上下文自然承接，信息不足时按角色习惯询问。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
-        }
-      } else if (promptMessage.startsWith("[表情]|")) {
-        const parts = promptMessage.split("|");
-        const stickerName = parts[1] || "表情";
-        promptMessage = `[发送表情包] 我给你发送了一个表达当下状态或心情的表情包，名称是：“${stickerName}”。
-【重要表情包处理规则】：
-这个表情包只是我正常聊天时随性表达的状态、心情、气场或情绪。你【绝对不一定要】针对这个表情包特意进行点评、中断我们之前正在进行的话题、或者刻意为了回复这个表情而说多余的话（例如不要说“你发了个表情包”、“你表情包真多”这类废话）。
-请你根据我们正在聊天的上下文话题或我们之前的对话脉络【极其自然、顺畅地继续对话】。如果当下适合，你也可以顺应氛围跟着发一个你自己的表情包，或者在文字对话里自然带过，保持微信好友日常聊天和斗图的真实、轻松感。`;
-      }
+      const promptMessage = userMsg
+        ? serializeMessageContentForPrompt(userMsg, {
+          mode: "current",
+          userName: settings.name,
+          characterName: activeCharacter.name,
+        })
+        : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
 
       const data = await requestDirectChatTurn({
         prompt: { scenario: "direct-chat", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
@@ -3594,7 +3037,7 @@ ${stickerListStr}
             rawText: data.text,
             disableBracketActions: turnSettings.disableBracketActions,
             keepPeriods,
-            characterId: activeChatCharId,
+            context: replyContext,
             allowEmoji: mayCharacterUseEmoji({
               latestUserMessage: userMsg?.content,
               recentCharacterMessages: currentChatMessages
@@ -3604,7 +3047,7 @@ ${stickerListStr}
             createId: (idx) => `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
             currentTime: () => Date.now(),
             transformBubble: (bubbleText, idx) => {
-              const isVoice = activeAttachModal !== "calling" && shouldConvertBubbleToVoice(activeCharacter, userMsg, messages, idx, bubbleText);
+              const isVoice = activeAttachModal !== "calling" && shouldConvertBubbleToVoice(turnCharacter, userMsg, messages, idx, bubbleText, replyContext);
               if (!isVoice) return bubbleText;
               const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
               return `[语音]|${secs}|${bubbleText}`;
@@ -3613,6 +3056,7 @@ ${stickerListStr}
           const createdMessages: Message[] = [];
           
           for (let idx = 0; idx < replyCandidates.messages.length; idx++) {
+            if (isCancelledCallTurn()) break;
             const charMsg = replyCandidates.messages[idx];
             const bubbleText = replyCandidates.bubbleTexts[idx];
             
@@ -3620,11 +3064,17 @@ ${stickerListStr}
             const chars = bubbleText.length;
             const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
             await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
+            if (isCancelledCallTurn()) break;
             
             charMsg.timestamp = Date.now();
-            onSendMessage(charMsg);
+            const callSpeechCompletion = onSendMessage(charMsg);
             createdMessages.push(charMsg);
             setIsTyping(false);
+
+            // In a voice call, keep subtitles and speech in lockstep: show one
+            // bubble, play it completely, then allow the next bubble to appear.
+            if (callSpeechCompletion) await callSpeechCompletion;
+            if (isCancelledCallTurn()) break;
             
             if (idx < replyCandidates.messages.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
@@ -3648,16 +3098,17 @@ ${stickerListStr}
           });
         }
       } else {
-        const errMsg: Message = {
+        if (isCancelledCallTurn()) return;
+        const errMsg = createCharacterTextMessage({
           id: (Date.now() + 1).toString(),
-          characterId: activeChatCharId,
-          sender: "character",
+          context: replyContext,
           content: `⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`,
           timestamp: Date.now(),
-        };
+        });
         onSendMessage(errMsg);
       }
     } catch (err: any) {
+      if (isCancelledCallTurn()) return;
       const errMsgStr = err?.message || "";
       const isQuotaOrKeyError = errMsgStr.toLowerCase().includes("api_key") || 
                                 errMsgStr.toLowerCase().includes("key") || 
@@ -3667,15 +3118,14 @@ ${stickerListStr}
                                 errMsgStr.toLowerCase().includes("400") ||
                                 errMsgStr.toLowerCase().includes("invalid");
 
-      const errMsg: Message = {
+      const errMsg = createCharacterTextMessage({
         id: (Date.now() + 1).toString(),
-        characterId: activeChatCharId,
-        sender: "character",
-        content: isQuotaOrKeyError 
+        context: replyContext,
+        content: isQuotaOrKeyError
           ? `⚠️ [连接错误]：智能体响应失败 (${errMsgStr})。请检查 API Key 是否正确、是否过期或余额不足。`
           : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`,
         timestamp: Date.now(),
-      };
+      });
       onSendMessage(errMsg);
     } finally {
       setIsTyping(false);
@@ -3744,8 +3194,8 @@ ${stickerListStr}
       }
     },
     generateGroupReply: generateResponseForGroupChat,
-    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext }) =>
-      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext),
+    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext, context }) =>
+      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext, context),
   });
 
   const chatSideEffectController = createChatSideEffectController({
@@ -3886,6 +3336,35 @@ ${stickerListStr}
     onDeleteMessage?.(messageId, targetMessage);
   };
 
+  const startMultiSelectDelete = (initialMessageId: string) => {
+    setActiveMenuMsg(null);
+    setSelectedMessageIds(new Set([initialMessageId]));
+    setIsMultiSelectDeleteMode(true);
+  };
+
+  const toggleMultiSelectedMessage = (messageId: string) => {
+    setSelectedMessageIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  };
+
+  const exitMultiSelectDelete = () => {
+    setIsMultiSelectDeleteMode(false);
+    setSelectedMessageIds(new Set());
+  };
+
+  const deleteSelectedMessages = () => {
+    const selectedMessages = currentChatMessages.filter((message) => selectedMessageIds.has(message.id));
+    if (!selectedMessages.length) return;
+    if (!window.confirm(`确定删除选中的 ${selectedMessages.length} 条消息吗？删除后无法恢复。`)) return;
+    selectedMessages.forEach((message) => deleteMessageAndLinkedImage(message.id));
+    exitMultiSelectDelete();
+    showToast(`已删除 ${selectedMessages.length} 条消息`);
+  };
+
   const clearMessagesAndLinkedArtifacts = (characterId: string, relationId?: string) => {
     const removedMessages = messages.filter((message) => relationId
       ? message.relationId === relationId
@@ -3902,7 +3381,7 @@ ${stickerListStr}
     if (relationId) {
       setRedPacketStatuses((previous) => {
         const next = removePaymentStatusesForMessages(removePaymentStatusesByRelation(previous, relationId), removedMessages);
-        localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(next));
+        writeJson(RED_PACKET_STATUSES_KEY, next);
         return next;
       });
     }
@@ -4063,7 +3542,7 @@ ${stickerListStr}
       }
     } catch (err) {
       console.error("Translate moment failed:", err);
-      showToast("翻译失败，请检查 API 配置");
+      showToast(err instanceof Error ? err.message : "翻译失败，请检查 API 配置");
     }
   };
 
@@ -4224,23 +3703,57 @@ ${stickerListStr}
       
       // Exclude lastUserMsg from the history parameter since it is sent as the main message parameter.
       const msgsForHistory = previousMessages.filter(m => m.id !== lastUserMsg.id);
-      const slicedMsgs = msgsForHistory.slice(-limit);
+      const turnSettings = resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter);
+      const currentMessageContextText = serializeMessageContentForPrompt(lastUserMsg, {
+        mode: "history",
+        userName: settings.name,
+        characterName: activeCharacter.name,
+      });
+      const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
+      const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
+        enableTimeAwareness: turnSettings.enableTimeAwareness,
+        currentMessageAt: lastUserMsg.timestamp,
+        latestHistoryMessageAt: latestHistoryMessage?.timestamp,
+      });
+      const isConnectedVoiceCall = activeAttachModal === "calling" && callingStatus === "connected";
+      const callTopicShiftDetected = detectCallTopicShift({
+        isConnectedVoiceCall,
+        userText: currentMessageContextText,
+        callTranscript,
+      });
+      const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
 
       // Map history with timestamps for time awareness
       const requestTime = new Date();
-      const history = slicedMsgs.map((m) => {
-        const textImageDescription = parseTextImageDescription(m.content);
-        const content = textImageDescription ? `[文字图：${textImageDescription}]` : m.content;
-        return {
-          role: m.sender === "user" ? "user" : "model",
-          text: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness
-            ? formatHistoricalMessageForPrompt(content, m.timestamp, requestTime)
-            : content,
-        };
+      const historyPartition = partitionDirectChatHistoryByCurrentDay({
+        messages: msgsForHistory,
+        currentMessageAt: lastUserMsg.timestamp,
+        enableTimeAwareness: turnSettings.enableTimeAwareness,
       });
+      const slicedMsgs = historyPartition.liveMessages.slice(-limit);
+      const historicalReferenceLines = historyPartition.historicalMessages.map((message) => {
+        const speaker = message.sender === "user" ? "用户" : activeCharacter.name;
+        const content = serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: settings.name,
+          characterName: activeCharacter.name,
+          includeCallTranscript: false,
+        }).replace(/\s+/gu, " ").trim().slice(0, 240);
+        return `- ${new Date(message.timestamp).toLocaleString("zh-CN", { hour12: false })}｜${speaker}：${content}`;
+      });
+      const crossDayHistoricalReference = buildCrossDayHistoricalReferencePrompt(historicalReferenceLines);
+      const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
+          userName: settings.name,
+          characterName: activeCharacter.name,
+        }).map((turn) => ({
+          role: turn.role,
+          text: turnSettings.enableTimeAwareness
+            ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
+            : turn.text,
+        })));
 
       let timeLogString = "";
-      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
+      if (turnSettings.enableTimeAwareness) {
         timeLogString = slicedMsgs.map((m) => {
           const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
             month: "long",
@@ -4250,28 +3763,21 @@ ${stickerListStr}
             hour12: false
           });
           const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
-          const snippet = m.content.length > 20 ? m.content.slice(0, 20) + "..." : m.content;
+          let snippet = serializeMessageContentForPrompt(m, {
+            mode: "history",
+            userName: settings.name,
+            characterName: activeCharacter.name,
+            includeCallTranscript: false,
+          });
+          if (snippet.length > 80) snippet = snippet.slice(0, 80) + "...";
           return `- ${senderName}: "${snippet}" (发送于: ${timeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`;
         }).join("\n");
       }
 
-      // Construct system instructions
-      let mainPromptText = `You are playing the role of "${activeCharacter.name}" in a WeChat chat.
-Reply length, initiative, warmth, restraint, and emotional intensity must follow the character profile and the current conversation. Keep the wording natural and conversational without imposing a universally cold, brief, caring, or agreeable style.
-Incorporate your background, age, and personality traits organically. Speak in Chinese. Maintain character role-play thoroughly.
-Do NOT say you are an AI or Gemini.
-
-🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
-1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
-${resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions
-  ? `2. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
-3. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${activeCharacter.name}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`
-  : `2. If your character's backstory, personality card, or World Book entries naturally utilize parenthesized action descriptions or physical gestures (e.g., "(微笑)", "（叹气）", "*摸摸头*"), you are encouraged to output them inside brackets/parentheses to maintain realistic roleplay expressiveness. Keep them spontaneous, descriptive, and emotionally rich.`
-}`;
-
-      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions) {
-        mainPromptText += `\n4. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
-      }
+      const mainPromptText = buildDirectChatMainPrompt({
+        characterName: activeCharacter.name,
+        disableBracketActions: turnSettings.disableBracketActions,
+      });
 
       const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
       const characterDescriptionText = characterProjection.description.content;
@@ -4279,6 +3785,7 @@ ${resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).d
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
+      if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
 
       // Add OOC comment correction as high priority instruction
       characterContextText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
@@ -4288,7 +3795,9 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // Recall memories
       const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: lastUserMsg.content, existingMemories: memories || [], limit: topK, scenario: "chat" });
+      const relevantMemories = shouldLoadLongTermMemory
+        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, scenario: "chat" })
+        : [];
       const truthRetrieval = activeRelationship
         ? retrieveTruthForPrivatePrompt({
           scope: {
@@ -4297,7 +3806,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
             userIdentityId: activeRelationship.userIdentityId,
             conversationId: activeRelationship.conversationId,
           },
-          queryText: lastUserMsg.content,
+          queryText: currentMessageContextText,
           limit: topK,
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
@@ -4315,10 +3824,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         characterContextText += formatTruthRetrievalForPrompt(truthRetrieval);
       }
 
-      const latestOfflineContinuationMemory = selectFreshOfflineHandoffMemory({
+      const interveningOfflineHandoff = getInterveningOfflineHandoff(lastUserMsg.timestamp);
+      const latestOfflineContinuationMemory = interveningOfflineHandoff?.memory || selectFreshOfflineHandoffMemory({
         memories: memories || [],
         relationId: activeRelationship?.id,
-        queryText: lastUserMsg.content,
+        queryText: currentMessageContextText,
       });
       pendingOfflineHandoffForReply = getPendingOfflineHandoff();
       if (pendingOfflineHandoffForReply) {
@@ -4340,15 +3850,45 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const userProfileText = `User Profile:
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
+      const userKnowledgeBoundary = formatUserKnowledgeBoundary();
       const relationshipContext = characterProjection.relationship?.content || "";
 
       const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextForOnlineChat();
+      const musicContext = activeRelationship
+        ? buildRelationMusicContext({
+          userText: currentMessageContextText,
+          ownerIdentityId: activeRelationship.userIdentityId,
+          relationId: activeRelationship.id,
+          tracks: musicTracks,
+          identityStates: identityMusicStates,
+          relationshipStates: relationshipMusicStates,
+        })
+        : "";
+      const forumContext = activeRelationship
+        ? buildRelationForumContext({
+          ownerIdentityId: activeRelationship.userIdentityId,
+          relationId: activeRelationship.id,
+          conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
+          messages: previousMessages,
+          shares: loadForumShares().value,
+          threads: loadForumThreads().value,
+        })
+        : "";
+      const diaryContext = activeRelationship
+        ? buildRelationDiaryContext({
+          ownerIdentityId: activeRelationship.userIdentityId,
+          relationId: activeRelationship.id,
+          conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
+          messages: previousMessages,
+          shares: loadDiaryShares().value,
+        })
+        : "";
 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
-        lastUserMsg ? lastUserMsg.content : "",
-        ...previousMessages.slice(-10).map(m => m.content)
+        currentMessageContextText,
+        ...previousMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
 
@@ -4368,24 +3908,29 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // 1. Main Prompt
       assembledInstructions.push(mainPromptText);
+      if (musicContext) assembledInstructions.push(musicContext);
+      if (forumContext) assembledInstructions.push(forumContext);
+      if (diaryContext) assembledInstructions.push(diaryContext);
+
+      if (isRedPacketMarkup(lastUserMsg.content)) {
+        assembledInstructions.push(buildRedPacketReactionPrompt(lastUserMsg.content));
+      }
+
+      if (isCrossDayNewSession || historyPartition.hasCrossDayHistory) {
+        assembledInstructions.push(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT);
+      }
 
       // 1.5 Time awareness prompt if enabled
-      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
-        const timeStr = formatLocalTimeContext(requestTime);
-        assembledInstructions.push(`[🚨 当前实时物理时间感知同步]
-当前现实物理世界的时间是：${timeStr}。
-
-以下是最近几条聊天消息的精确发送时间记录，请作为你判断时间流逝的客观依据：
-${timeLogString}
-
-【重要时间感知规则】：
-0. 【避免时间模板】：时间信息首先用于避免把先后、跨天和间隔判断错。除非用户问到时间、跨天/长间隔确实改变当前语义，或角色人设本就会在此时主动提及，不要因为当前是中午、饭点、深夜等自动发起“吃饭／睡觉／天气”话题，也不要把时间当成通用寒暄。
-1. 【精准判断时间跨度与间隔】：请通过上方的发送时间记录，精准识别出消息与消息之间间隔了多久。
-   - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天，你绝对要表现得像过完一夜睡醒后的真人一样，礼貌或亲密地回以“早安”或“早呀”！
-   - 如果上一条消息距今已过去数小时或数天，请根据时间长度，在语气和对话脉络中自然流露出时间流逝感（如“你今天一整天都在忙吗”、“好几天没见你发消息了”等）。
-2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
-3. 【🚨 极其重要】：上方时间仅是内部推理元数据，不是要发送给用户的内容。禁止在回复中输出或复述任何时间标签、时间戳、时钟气泡或前缀，包括但不限于 \`[发送时间: ...]\`、\`[15:10]\`、\`【15:10】\`。如果需要自然提到时间，只能把它写进完整对话句子中。回复必须保持干净，只输出角色真正要说的话。`);
+      if (turnSettings.enableTimeAwareness) {
+        assembledInstructions.push(buildTimeAwarenessPrompt(requestTime, timeLogString));
       }
+
+      const voiceIntervalPrompt = buildVoiceIntervalPrompt({
+        characterName: activeCharacter.name,
+        currentMessage: lastUserMsg,
+        recentMessages: slicedMsgs,
+      });
+      if (voiceIntervalPrompt) assembledInstructions.push(voiceIntervalPrompt);
 
       // 2. After Main Prompt entries
       const afterMainWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_main_prompt");
@@ -4417,18 +3962,21 @@ ${timeLogString}
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
+      assembledInstructions.push(userKnowledgeBoundary);
+      assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
+      assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
 
       // 7. Before Chat History entries
       const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
       if (beforeHistoryWorldBook) assembledInstructions.push(beforeHistoryWorldBook);
 
       // 8. WeChat Moments Context memory
-      if (momentsContextRegen) {
+      if (momentsContextRegen && shouldLoadLongTermMemory) {
         assembledInstructions.push(momentsContextRegen);
       }
 
       // 8.5 Offline stories context memory
-      if (offlineStoriesContextRegen) {
+      if (offlineStoriesContextRegen && shouldLoadLongTermMemory) {
         assembledInstructions.push(offlineStoriesContextRegen);
       }
 
@@ -4438,31 +3986,44 @@ ${timeLogString}
 
       // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
       const allStickers2 = stickerGroups.flatMap(g => g.stickers);
-      if (allStickers2.length > 0) {
+      if (activeAttachModal === "calling") {
+        assembledInstructions.push(...buildVoiceCallPrompts(callTopicShiftDetected));
+      } else if (allStickers2.length > 0 && /^\[表情\]\|/.test(lastUserMsg.content)) {
         const stickerListStr = allStickers2.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
-        assembledInstructions.push(`[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
-你作为扮演角色，现在可以在符合上方特殊媒体使用规则时使用我的自定义表情包来回复我。只有表情包本身能表达即时反应、且不重复文字内容时，才可以单独一行发送表情包。
-发送表情包的格式必须完全符合以下严格语法格式：
-[表情]|表情名称|图片URL
-
-以下是你可以无缝调用的自定义表情包列表（每一行对应一个表情包，你可以直接【一字不差地复制】下面的格式并输出它）：
-${stickerListStr}
-
-【强制输出规则】：
-1. 绝对不允许胡编乱造不存在的表情包名称或图片URL！你只能从上面给出的列表中挑选！
-2. 发送时格式必须极其严格：[表情]|名称|URL。不能有任何多余的字符。
-3. 不要为了显示功能或凑热闹而发送表情包；不适合时只发送普通文字即可。`);
+        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr));
       }
 
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
-      const systemInstruction = finalizeCharacterChatSystemInstruction({ instructions: assembledInstructions, characterProjection, characterDescriptionText, diagnosticLabel: "regenerate prompt" });
+      const systemInstruction = finalizeCharacterChatSystemInstruction({
+        instructions: assembledInstructions,
+        characterProjection,
+        characterDescriptionText,
+        diagnosticLabel: "regenerate prompt",
+        finalPersonaRules: wbBlocks.allTriggered
+          .filter((entry) => entry.purpose === "persona_rule")
+          .map((entry) => `【${entry.title}】\n${entry.content}`),
+        finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
+          activeCharacter,
+          getVisibleWorldBookEntries(worldBookEntries || [], activeChatCharId || "", {
+            scenario: "chat",
+            characterId: activeRelationship?.characterId || activeChatCharId || undefined,
+            userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
+            relationId: activeRelationship?.id,
+          }).map((entry) => `${entry.title}\n${entry.content}`),
+        )),
+      });
 
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+      const promptMessage = serializeMessageContentForPrompt(lastUserMsg, {
+        mode: "current",
+        userName: settings.name,
+        characterName: activeCharacter.name,
+      });
       const { data, candidates: replyCandidates } = await generateRegeneratedChatTurn({
-        prompt: { scenario: "regenerate", message: lastUserMsg.content, history, systemInstruction, historyInjections: wbBlocks.at_depth },
+        prompt: { scenario: "regenerate", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
         settings,
         candidateContext: {
-          disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
+          disableBracketActions: turnSettings.disableBracketActions,
           keepPeriods,
           characterId: activeChatCharId,
           allowEmoji: false,
@@ -4703,7 +4264,7 @@ ${stickerListStr}
         formatContent: (items, formatOptions) => isDelicate
           ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
           : formatExtractedMemorySummary(headerLabel, items),
-      }, apiExtractMemories);
+      }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
       if (result.apiError) {
         console.error("Extract memory API error:", result.apiError);
         return -1;
@@ -4792,7 +4353,7 @@ ${stickerListStr}
     proactiveMessageInFlightRef.current.add(relationId);
     try {
       let instructionsPrompt = `Instructions:
-1. Speak in Chinese. Maintain character role-play thoroughly.
+1. Follow the character's configured language and nationality according to the character language policy. Maintain character role-play thoroughly.
 2. Use a natural WeChat style. Reply length, warmth, initiative, and emotional intensity must follow the character profile and relationship.
 3. This is an initiator message. Let the character decide whether to share, ask, tease, express affection, stay restrained, or use another natural opening; do not default to caretaking or a generic check-in.
 4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
@@ -4804,7 +4365,7 @@ ${stickerListStr}
       const charMsgs = messagesRef.current.filter((message) => message.relationId === relationId);
       const recentConversation = analyzeRecentConversation(charMsgs, friend.id);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
-      const scanText = charMsgs.slice(-10).map(m => m.content).join("\n");
+      const scanText = charMsgs.slice(-10).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: friend.name })).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, scanText, {
         scenario: "chat",
         characterId: relationship.characterId,
@@ -4823,7 +4384,7 @@ ${stickerListStr}
           userIdentityId: relationship.userIdentityId,
           conversationId: relationship.conversationId,
         },
-        queryText: recentConversation.recentMessages.slice(-2).map((message) => message.content).join(" "),
+        queryText: recentConversation.recentMessages.slice(-2).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: friend.name })).join(" "),
         limit: recallSettings?.recallCount || 5,
         claims: loadKnowledgeClaims().value,
         summaries: loadConversationSummaries().value,
@@ -4856,14 +4417,37 @@ ${stickerListStr}
         conversationGuidance,
         taskPrompt,
         instructionsPrompt,
+        expressionAnchor: proactiveCharacterProjection.expressionAnchor.content,
+        finalPersonaRules: wbBlocks.allTriggered
+          .filter((entry) => entry.purpose === "persona_rule")
+          .map((entry) => `【${entry.title}】\n${entry.content}`),
+        finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
+          friend,
+          getVisibleWorldBookEntries(worldBookEntries || [], friend.id, {
+            scenario: "chat",
+            characterId: relationship.characterId,
+            userIdentityId: relationship.userIdentityId,
+            relationId: relationship.id,
+          }).map((entry) => `${entry.title}\n${entry.content}`),
+        )),
       });
 
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((friend.personality || "") + (friend.backstory || ""));
+      const proactiveReplyContext = createChatRuntimeContext({
+        characterId: relationship.characterId,
+        relationId: relationship.id,
+        conversationId: relationship.conversationId || getConversationId(relationship.id),
+        userIdentityId: relationship.userIdentityId,
+      });
       const proactiveResult = await generateProactiveChatTurn({
         prompt: {
           scenario: "proactive-message",
           message: "(你主动给用户发送了一条信息)",
-          history: recentConversation.recentMessages.map((message) => ({ role: message.sender === "user" ? "user" : "model", text: message.content })),
+          history: recentConversation.recentMessages.flatMap((message) => serializeMessageToPromptTurns(message, {
+            mode: "history",
+            userName: settings.name,
+            characterName: friend.name,
+          }).map((turn) => ({ role: turn.role, text: turn.text }))),
           systemInstruction,
           historyInjections: wbBlocks.at_depth,
         },
@@ -4875,7 +4459,7 @@ ${stickerListStr}
         currentTime: (idx) => backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
         cognitiveContext,
         transformBubble: (bubbleText, idx) => {
-          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText);
+          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText, proactiveReplyContext);
           if (!isVoice) return bubbleText;
           const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
           return `[语音]|${secs}|${bubbleText}`;
@@ -4996,10 +4580,13 @@ ${stickerListStr}
           const systemInstruction = `Your task: Write a short, natural comment on the Moment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
 1. The comment must be brief, extremely natural, and fit the character and current relationship context supplied by the Moment Prompt Adapter.
-2. Keep it under 35 characters. Speak in Chinese.
+2. Keep it under 35 characters and follow the character language policy below.
 3. No OOC, no narrative brackets like (微笑), just the direct comment text.
 4. You may naturally reference confirmed shared experiences or relationship facts from the supplied context, but never invent them or mention another relationship or user identity.
 ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
+${CHARACTER_LANGUAGE_POLICY}
+
+${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 `;
 
           const composedPrompt = PromptComposer.compose({
@@ -5097,10 +4684,13 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
         const systemInstruction = `Your task: Write a short, extremely natural WeChat reply/comment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
 1. The reply must be brief, lively, extremely natural, and match the character and current relationship context supplied by the Moment Prompt Adapter.
-2. Keep it under 35 characters. Speak in Chinese.
+2. Keep it under 35 characters and follow the character language policy below.
 3. Speak directly to the user without formal prefixes. Do not write narrative actions or brackets like "(害羞)", just output the comment text.
 4. You may naturally reference only confirmed material from this supplied relationship context. Never invent shared experiences or use another relationship's information.
 ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
+${CHARACTER_LANGUAGE_POLICY}
+
+${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 `;
 
         const composedPrompt = PromptComposer.compose({
@@ -5160,7 +4750,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
       const systemInstruction = `Your task: Write a WeChat Moment post from the character's scoped life context supplied by the Moment Prompt Adapter.
 🚨 [CRITICAL WECHAT MOMENT RULES]:
 1. The post must fit the character and may draw on confirmed material from this exact relationship, including confirmed offline experiences and relationship progress.
-2. The post content must be natural, engaging, and in Chinese.
+2. The post content must be natural, engaging, and use the final output language specified below.
 3. Vary the form and length: a one-line fragment (5-30 Chinese characters), a short thought (20-60), or a concrete life record (60-160). Do not force every post into the same paragraph length or literary style.
 4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, or talk like an AI. Just output the text of the Moment post.
 5. Moments do not support chat stickers or sticker links. Never output [表情]、[表情]|名称|URL、blob: URL, sticker names, or chat attachment markup. Use post text, with only the dedicated final "(配图：...)" text-image line permitted by rule 7.
@@ -5169,6 +4759,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
 9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the supplied feed history. Prefer a specific detail from the scoped context over generic weather, tiredness, coffee, work, or vague feelings.
 10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or AI-inferred events. If there is no fresh scoped topic, output exactly "SKIP" and nothing else.
+
+${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 `;
 
       const composedPrompt = PromptComposer.compose({
@@ -5197,6 +4789,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
         relationContext,
         relationWorldKnowledge,
       });
+      if (generated.blockedReason === "prohibited-content") {
+        // Automatic Moments are optional background content. A provider safety
+        // rejection should silently skip this post instead of asking the user
+        // to rewrite the character or World Book for a non-essential feature.
+        return;
+      }
       if (generated.moment) {
         onAddMoment(generated.moment);
         const topic = compactTopicHint([generated.moment.content]);
@@ -5518,7 +5116,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
       </Modal>
       
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
-      {activeChatCharId && activeCharacter ? (
+      {activeChatCharId && activeCharacter && isActiveChatScopeValid ? (
         <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"} data-user-chat-css={hasUserCustomChatCss ? "active" : "inactive"} data-chat-settings-open={isShowingCardModal ? "true" : "false"}>
             <div
               id="api-chat-screen"
@@ -5704,21 +5302,17 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
               ${!isLiquidGlass ? (settings.bubbleBorderEnabled ? `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self {
                   border: ${settings.bubbleBorderWidth !== undefined ? settings.bubbleBorderWidth : 1}px solid ${settings.selfBubbleBorderColor || '#27272a'} !important;
                 }
                 #conv-screen .chat-bubble-other,
-                #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
                   border: ${settings.bubbleBorderWidth !== undefined ? settings.bubbleBorderWidth : 1}px solid ${settings.otherBubbleBorderColor || '#e4e4e7'} !important;
                 }
               ` : `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self,
                 #conv-screen .chat-bubble-other,
-                #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
                   border: none !important;
                 }
@@ -5731,14 +5325,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                  stylesheet. */
               ${!isLiquidGlass && !hasUserCustomChatCss && settings.selfBubbleRadius !== undefined ? `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self {
                   border-radius: ${settings.selfBubbleRadius}px !important;
                 }
               ` : ""}
               ${!isLiquidGlass && !hasUserCustomChatCss && settings.otherBubbleRadius !== undefined ? `
                 #conv-screen .chat-bubble-other,
-                #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
                   border-radius: ${settings.otherBubbleRadius}px !important;
                 }
@@ -5746,7 +5338,6 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
               ${!isLiquidGlass && settings.otherBubbleBg ? `
                 #conv-screen .chat-bubble-other,
-                #conv-screen .received-transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-other {
                   background-color: ${getBubbleBackgroundStyle(settings.otherBubbleBg, settings.otherBubbleOpacity !== undefined ? settings.otherBubbleOpacity : 100)} !important;
                   background-image: none !important;
@@ -5755,12 +5346,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
               ${!isLiquidGlass && settings.otherBubbleColor ? `
                 #conv-screen .chat-bubble-other,
-                #conv-screen .chat-bubble-other *,
-                #conv-screen .received-transfer-card,
-                #conv-screen .received-transfer-card *,
-                #conv-screen .voice-message-bar.chat-bubble-other,
-                #conv-screen .voice-message-bar.chat-bubble-other * {
-                  color: ${settings.otherBubbleColor};
+                #conv-screen .voice-message-bar.chat-bubble-other {
+                  color: ${settings.otherBubbleColor} !important;
                 }
               ` : ''}
 
@@ -5774,13 +5361,17 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                     settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
                     settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
                   )
-                  : "var(--button-primary-bg)"};
+                  : settings.selfBubbleBg
+                    ? getBubbleBackgroundStyle(settings.selfBubbleBg, settings.selfBubbleOpacity ?? 100)
+                    : "var(--button-primary-bg)"};
                 --chat-ai-bg: ${isLiquidGlass
                   ? getBubbleBackgroundStyle(
                     settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
                     settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
                   )
-                  : "var(--surface-raised)"};
+                  : settings.otherBubbleBg
+                    ? getBubbleBackgroundStyle(settings.otherBubbleBg, settings.otherBubbleOpacity ?? 100)
+                    : "var(--surface-raised)"};
                 --chat-user-text: ${isLiquidGlass
                   ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
                   : settings.selfBubbleColor || "var(--button-primary-text)"};
@@ -5791,7 +5382,6 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
               ${!isLiquidGlass && settings.selfBubbleBg ? `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .transfer-card,
                 #conv-screen .voice-message-bar.chat-bubble-self {
                   background-color: ${getBubbleBackgroundStyle(settings.selfBubbleBg, settings.selfBubbleOpacity !== undefined ? settings.selfBubbleOpacity : 100)} !important;
                   background-image: none !important;
@@ -5800,12 +5390,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
 
               ${!isLiquidGlass && settings.selfBubbleColor ? `
                 #conv-screen .chat-bubble-self,
-                #conv-screen .chat-bubble-self *,
-                #conv-screen .transfer-card,
-                #conv-screen .transfer-card *,
-                #conv-screen .voice-message-bar.chat-bubble-self,
-                #conv-screen .voice-message-bar.chat-bubble-self * {
-                  color: ${settings.selfBubbleColor};
+                #conv-screen .voice-message-bar.chat-bubble-self {
+                  color: ${settings.selfBubbleColor} !important;
                 }
               ` : ''}
 
@@ -5974,7 +5560,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   border: 1px solid rgba(255, 255, 255, 0.6) !important;
                 }
                 .cv-header .header-title-name {
-                  font-size: 11px !important;
+                  font-size: calc(11px * var(--app-font-scale, 1)) !important;
                   font-weight: 800 !important;
                   letter-spacing: 0.08em !important;
                   text-transform: uppercase !important;
@@ -5995,7 +5581,6 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
  
                 /* 3. 聊天气泡 (Chat Bubbles) - 强效覆盖，解决圆角/背景色被 Tailwind 和 App.tsx 覆盖的问题 */
                 #conv-screen.style-liquid-glass .chat-bubble-self,
-                #conv-screen.style-liquid-glass .transfer-card,
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self,
                 .phone-screen-container .style-liquid-glass .chat-bubble-self,
                 .style-liquid-glass .chat-bubble-self {
@@ -6016,21 +5601,19 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   border-radius: ${settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS}px !important;
                   color: ${settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                   padding: 11px 16px !important;
-                  font-size: 12px !important;
+                  font-size: calc(12px * var(--app-font-scale, 1)) !important;
                   font-weight: 600 !important;
                   line-height: 1.4 !important;
                   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
                 }
-                #conv-screen.style-liquid-glass .chat-bubble-self *,
-                #conv-screen.style-liquid-glass .transfer-card *,
-                #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-self *,
-                .phone-screen-container .style-liquid-glass .chat-bubble-self *,
-                .style-liquid-glass .chat-bubble-self * {
+                #conv-screen.style-liquid-glass .chat-bubble-self > .chat-message--voice-wave,
+                #conv-screen.style-liquid-glass .chat-bubble-self > .chat-message--voice-duration,
+                #conv-screen.style-liquid-glass .chat-bubble-self > .chat-message--call-icon,
+                #conv-screen.style-liquid-glass .chat-bubble-self > .chat-message--call-duration {
                   color: ${settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                 }
 
                 #conv-screen.style-liquid-glass .chat-bubble-other,
-                #conv-screen.style-liquid-glass .received-transfer-card,
                 #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other,
                 .phone-screen-container .style-liquid-glass .chat-bubble-other,
                 .style-liquid-glass .chat-bubble-other {
@@ -6051,16 +5634,15 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   border-radius: ${settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS}px !important;
                   color: ${settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                   padding: 11px 16px !important;
-                  font-size: 12px !important;
+                  font-size: calc(12px * var(--app-font-scale, 1)) !important;
                   font-weight: 600 !important;
                   line-height: 1.4 !important;
                   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04) !important;
                 }
-                #conv-screen.style-liquid-glass .chat-bubble-other *,
-                #conv-screen.style-liquid-glass .received-transfer-card *,
-                #conv-screen.style-liquid-glass .voice-message-bar.chat-bubble-other *,
-                .phone-screen-container .style-liquid-glass .chat-bubble-other *,
-                .style-liquid-glass .chat-bubble-other * {
+                #conv-screen.style-liquid-glass .chat-bubble-other > .chat-message--voice-wave,
+                #conv-screen.style-liquid-glass .chat-bubble-other > .chat-message--voice-duration,
+                #conv-screen.style-liquid-glass .chat-bubble-other > .chat-message--call-icon,
+                #conv-screen.style-liquid-glass .chat-bubble-other > .chat-message--call-duration {
                   color: ${settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR} !important;
                 }
  
@@ -6070,14 +5652,14 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 }
                 .msg-meta-name {
                   color: #3f3f46 !important;
-                  font-size: 9px !important;
+                  font-size: calc(9px * var(--app-font-scale, 1)) !important;
                   font-weight: 800 !important;
                   letter-spacing: 0.08em !important;
                   margin-bottom: 2px !important;
                 }
                 .msg-meta-date, .msg-meta-time {
                   color: #71717a !important;
-                  font-size: 9px !important;
+                  font-size: calc(9px * var(--app-font-scale, 1)) !important;
                   font-weight: 500 !important;
                   letter-spacing: 0.02em !important;
                   display: inline-block !important;
@@ -6143,7 +5725,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   height: 42px !important;
                   backdrop-filter: blur(20px) saturate(190%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  font-size: 11px !important;
+                  font-size: calc(11px * var(--app-font-scale, 1)) !important;
                   font-weight: 700 !important;
                   letter-spacing: 0.04em !important;
                   padding-left: 16px !important;
@@ -6219,8 +5801,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 }
                 #conv-screen.style-liquid-glass .chat-composer__attachment-panel > * > span {
                   color: #334155 !important;
-                  font-size: 10px !important;
-                  line-height: 14px !important;
+                  font-size: calc(10px * var(--app-font-scale, 1)) !important;
+                  line-height: calc(14px * var(--app-font-scale, 1)) !important;
                   white-space: nowrap !important;
                 }
                 .cv-footer .cv-send-reply-icon svg {
@@ -7168,7 +6750,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
           )}
 
           {/* Active Chat Messages body */}
-          <div className={`chat-content-scope chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} flex min-h-0 flex-1 flex-col`}>
+          <div className={`chat-content-scope chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} relative flex min-h-0 flex-1 flex-col`}>
           <MessageList
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
@@ -7180,6 +6762,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
               WebkitOverflowScrolling: "touch",
             }}
             renderMessage={(msg, idx) => {
+              const previousVisibleMessage = idx > 0 ? visibleChatMessages[idx - 1] : undefined;
+              const interveningOfflineStories = getOfflineTimelineStoriesBetween(previousVisibleMessage?.timestamp, msg.timestamp);
               // Calculate WeChat timestamp divider
               let showWeChatDivider = false;
               let dividerText = "";
@@ -7205,16 +6789,75 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                 }
               }
 
+              const wrapSelectableMessage = (messageElement: React.ReactElement) => {
+                if (!isMultiSelectDeleteMode) return messageElement;
+                const isSelected = selectedMessageIds.has(msg.id);
+                return (
+                  <div
+                    key={`selectable-${msg.id}`}
+                    className="chat-message-selection-row flex w-full items-center gap-2"
+                    onClickCapture={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      toggleMultiSelectedMessage(msg.id);
+                    }}
+                    onPointerDownCapture={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onContextMenuCapture={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      toggleMultiSelectedMessage(msg.id);
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label={isSelected ? "取消选择消息" : "选择消息"}
+                      aria-pressed={isSelected}
+                      className={`chat-message-selection-toggle ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                        isSelected
+                          ? "border-neutral-950 bg-neutral-950 text-white"
+                          : "border-stone-300 bg-white/90 text-transparent"
+                      }`}
+                    >
+                      <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                    </button>
+                    <div className="min-w-0 flex-1">{messageElement}</div>
+                  </div>
+                );
+              };
+
               const wrapMessageWithDivider = (messageElement: React.ReactElement) => {
-                if (!showWeChatDivider) return messageElement;
+                const selectableMessage = wrapSelectableMessage(messageElement);
+                if (!showWeChatDivider && interveningOfflineStories.length === 0) return selectableMessage;
                 return (
                   <React.Fragment key={`msg-group-${msg.id}`}>
-                    <div className="w-full flex justify-center my-3.5 select-none animate-fade-in chat-timestamp" id={`timestamp-divider-${msg.id}`}>
-                      <div className="bg-black/5 dark:bg-white/10 text-[#888888] dark:text-stone-400 text-[11.5px] px-2.5 py-0.5 rounded-[4px] tracking-wide font-normal chat-timestamp__label">
-                        {dividerText}
+                    {interveningOfflineStories.map((story) => {
+                      const occurredAt = story.onlineHandoff?.endedAt ?? story.archivedAt ?? story.lastMemorySyncAt ?? story.updatedAt;
+                      const eventDate = new Date(occurredAt);
+                      const eventTime = eventDate.toLocaleString("zh-CN", {
+                        month: "numeric",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                      });
+                      return (
+                        <div key={`offline-timeline-${story.id}`} className="chat-offline-timeline-event w-full flex justify-center my-3.5 select-none animate-fade-in">
+                          <div className="chat-offline-timeline-event__label bg-black/5 dark:bg-white/10 text-[#777] dark:text-stone-300 text-[11.5px] px-2.5 py-1 rounded-[4px] tracking-wide font-normal">
+                            {eventTime} · 线下见面 · 《{story.title}》
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {showWeChatDivider && (
+                      <div className="w-full flex justify-center my-3.5 select-none animate-fade-in chat-timestamp" id={`timestamp-divider-${msg.id}`}>
+                        <div className="bg-black/5 dark:bg-white/10 text-[#888888] dark:text-stone-400 text-[11.5px] px-2.5 py-0.5 rounded-[4px] tracking-wide font-normal chat-timestamp__label">
+                          {dividerText}
+                        </div>
                       </div>
-                    </div>
-                    {messageElement}
+                    )}
+                    {selectableMessage}
                   </React.Fragment>
                 );
               };
@@ -7222,7 +6865,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
               if (isOfflineModeActive) {
                 // 1. Narration (centered divider with grey text and dashed line)
                 if (msg.isNarration) {
-                  return (
+                  return wrapSelectableMessage(
                     <div 
                       key={msg.id}
                       className="w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed text-[#a1a3a8] border-b border-dashed border-slate-100/60 dark:border-slate-800/60 transition-all cursor-pointer"
@@ -7235,13 +6878,13 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                       <div className="max-w-[90%] mx-auto font-normal tracking-wide select-text">
                         {msg.content}
                       </div>
-                    </div>
+                    </div>,
                   );
                 }
 
                 // 2. Character lines & descriptions (beautiful book paragraph layout, NO bubble, NO avatar)
                 if (msg.sender === "character") {
-                  return (
+                  return wrapSelectableMessage(
                     <div 
                       key={msg.id}
                       className="w-full text-left my-4 px-1 py-1 group/novel relative select-text transition-all duration-200 hover:bg-slate-50/10 dark:hover:bg-stone-800/20 rounded-lg cursor-pointer pr-10"
@@ -7278,12 +6921,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                           <Volume2 className="w-3.5 h-3.5 text-indigo-500" />
                         )}
                       </button>
-                    </div>
+                    </div>,
                   );
                 }
 
                 // 3. User spoken dialogue ("我的发言", beautiful center-right soft grey bubble)
-                return (
+                return wrapSelectableMessage(
                   <div 
                     key={msg.id}
                     className="w-full flex justify-end my-4 group relative select-text cursor-pointer"
@@ -7298,7 +6941,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                         {msg.content}
                       </p>
                     </div>
-                  </div>
+                  </div>,
                 );
               }
 
@@ -7394,7 +7037,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                       <div className="max-w-full">
                       {msg.diaryShareId ? (() => {
                         const share = diarySharesForCurrentIdentity.find((item) => item.id === msg.diaryShareId && item.messageId === msg.id && item.targetRelationId === msg.relationId && item.conversationId === msg.conversationId);
-                        return share ? <div className="w-[210px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-sm"><div className="flex items-center gap-2 text-xs font-bold"><BookOpen size={15}/>日记分享</div><p className="mt-2 text-[11px] text-[var(--text-secondary)]">{share.snapshot.authorName} · {new Date(share.snapshot.occurredAt).toLocaleDateString("zh-CN")}</p><p className="mt-2 line-clamp-3 text-xs leading-5">{share.snapshot.body}</p></div> : <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">日记分享已不可用</div>;
+                        return share ? <div className="chat-message--diary-share w-[210px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-sm"><div className="flex items-center gap-2 text-xs font-bold"><BookOpen size={15}/>日记分享</div><p className="mt-2 text-[11px] text-[var(--text-secondary)]">{share.snapshot.authorName} · {new Date(share.snapshot.occurredAt).toLocaleDateString("zh-CN")}</p><p className="mt-2 line-clamp-3 text-xs leading-5">{share.snapshot.body}</p></div> : <div className="chat-message--diary-share rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">日记分享已不可用</div>;
                       })() : msg.forumShareId ? (() => {
                         const share = forumSharesForCurrentIdentity.find((item) =>
                           item.id === msg.forumShareId
@@ -7407,7 +7050,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                             onOpen={() => onOpenForumShare?.(share.id)}
                           />
                         ) : (
-                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                          <div className="chat-message--forum-share rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
                             论坛分享已不可用
                           </div>
                         );
@@ -7417,7 +7060,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                         <img
                           src={msg.content}
                           alt="chat-pic"
-                          className="max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
+                          className="chat-message--image max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
                         />
                       ) : parseTextImageDescription(msg.content) ? (() => {
                         const description = parseTextImageDescription(msg.content)!;
@@ -7425,7 +7068,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                           <button
                             type="button"
                             onClick={() => setViewingImageDescription(description)}
-                            className="w-[210px] min-h-32 rounded-2xl border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-sm"
+                            className="chat-message--text-image w-[210px] min-h-32 rounded-2xl border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-sm"
                           >
                             <ImageIcon className="mb-4 h-4 w-4 text-[var(--media-placeholder-text)]" />
                             <p className="line-clamp-3 text-xs leading-relaxed text-[var(--text-primary)]">{description}</p>
@@ -7438,7 +7081,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                         const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s => s.name === stickerName);
                         const displayUrl = foundSticker ? foundSticker.url : stickerUrl;
                         return (
-                          <div className="max-w-[130px] rounded-xl overflow-hidden relative select-none">
+                          <div className="chat-message--sticker max-w-[130px] rounded-xl overflow-hidden relative select-none">
                             <img
                               src={displayUrl}
                               alt={stickerName}
@@ -7460,11 +7103,11 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                           <button
                             type="button"
                             onClick={() => { if (canOpenDetail) setCallRecordDetail(callRecord); }}
-                            className={`inline-flex items-center gap-1.5 px-3 py-2 shadow-sm cv-bubble message-bubble relative ${bubbleStyle} ${messageGroupClass} ${canOpenDetail ? "transition-transform active:scale-[0.98]" : "cursor-default"}`}
+                            className={`chat-message--call inline-flex items-center gap-1.5 px-3 py-2 shadow-sm cv-bubble message-bubble relative ${bubbleStyle} ${messageGroupClass} ${canOpenDetail ? "transition-transform active:scale-[0.98]" : "cursor-default"}`}
                             title={canOpenDetail ? "查看通话内容" : resultLabel}
                           >
-                            <Phone className="w-3.5 h-3.5 shrink-0" />
-                            <span className="text-xs font-medium whitespace-nowrap">{resultLabel}</span>
+                            <Phone className="chat-message--call-icon w-3.5 h-3.5 shrink-0" />
+                            <span className="chat-message--call-duration text-xs font-medium whitespace-nowrap">{resultLabel}</span>
                             <span className="sr-only">{callRecord.callType}</span>
                           </button>
                         );
@@ -7562,7 +7205,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                                   triggerMessageSpeech(msg);
                                   setVoicePlayed((prev) => ({ ...prev, [msg.id]: true }));
                                 }}
-                                className={`flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape} ${messageGroupClass}`}
+                                className={`chat-message--voice flex items-center gap-2 px-3 py-1.5 shadow-sm cv-bubble message-bubble voice-message-bar cursor-pointer select-none transition-all duration-200 hover:shadow-md active:scale-[0.98] relative ${bubbleBgAndShape} ${messageGroupClass}`}
                                 style={{ width: `${80 + duration * 6.5}px`, minWidth: "95px", maxWidth: "220px" }}
                               >
                                 {/* Left element: Play/Pause/Speaker icon */}
@@ -7575,7 +7218,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                                 </div>
 
                                 {/* Middle element: Sound Wave Pattern */}
-                                <div className="flex-1 flex items-end justify-center gap-[2px] h-5 px-1 overflow-hidden pb-[1px]">
+                                <div className="chat-message--voice-wave flex-1 flex items-end justify-center gap-[2px] h-5 px-1 overflow-hidden pb-[1px]">
                                   {waveBars.map((barHeight, idx) => {
                                     const delay = idx * 80;
                                     const scaledHeight = Math.max(3, Math.round(barHeight * 0.7));
@@ -7598,7 +7241,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                                 </div>
 
                                 {/* Duration display */}
-                                <span className="font-sans text-[11px] font-bold text-current opacity-70 shrink-0">
+                                <span className="chat-message--voice-duration font-sans text-[11px] font-bold text-current opacity-70 shrink-0">
                                   {formattedDuration}
                                 </span>
                                 {/* WeChat unplayed red dot at the top-right corner of the capsule */}
@@ -7627,7 +7270,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                             {/* Transcription Display - Rendered exactly like a regular text bubble below matching Image 2 */}
                             {voiceTranscribed[msg.id] && (
                               <div 
-                                className={`px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble mt-0.5 max-w-[240px] ${
+                                className={`chat-message--text chat-message--voice-transcript px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble mt-0.5 max-w-[240px] ${
                                   isSelf
                                     ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
                                     : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
@@ -7639,7 +7282,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                           </div>
                         );
                       })() : (
-                        <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"}` : `px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                        <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"}` : `chat-message--text px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                           isSelf
                             ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
                             : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
@@ -7652,7 +7295,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                                 <div className="message-quote text-left text-[11px]">
                                   <div className="message-quote__content px-3 py-2">{quoteReply.content}</div>
                                 </div>
-                                <div className={`message-quote__reply-body px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                                <div className={`chat-message--text message-quote__reply-body px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                                   isSelf
                                     ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self pr-6")
                                     : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other border border-slate-100 pr-6")
@@ -7819,6 +7462,31 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
            <div ref={chatEndRef} />
           </MessageList>
 
+          {isMultiSelectDeleteMode && (
+            <div className="chat-multi-select-toolbar absolute inset-x-0 bottom-0 z-[85] border-t border-stone-200/80 bg-white/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)] backdrop-blur-xl">
+              <div className="mx-auto flex max-w-md items-center gap-3">
+                <button
+                  type="button"
+                  onClick={exitMultiSelectDelete}
+                  className="flex-1 rounded-xl border border-stone-200 bg-white py-2.5 text-xs font-bold text-stone-600 active:bg-stone-100"
+                >
+                  取消
+                </button>
+                <div className="min-w-16 text-center text-xs font-bold text-stone-500">
+                  已选 {selectedMessageIds.size} 条
+                </div>
+                <button
+                  type="button"
+                  onClick={deleteSelectedMessages}
+                  disabled={selectedMessageIds.size === 0}
+                  className="flex-1 rounded-xl bg-red-500 py-2.5 text-xs font-bold text-white active:bg-red-600 disabled:opacity-40"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          )}
+
           <BubbleTipPortalLayer enabled={!isShowingCardModal && activeBubbleTailEnabled} />
 
           {showImageGenerator && (
@@ -7924,11 +7592,11 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   : "bg-slate-50 border-t border-slate-100"
               }`}>
                 {/* 1. 相册 (Album) */}
-                <label className="flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                <label className="chat-attachment-item chat-attachment-item--album flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("image")} className="w-4 h-4"><ImageIcon className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">相册</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">相册</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -7953,9 +7621,9 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   />
                 </label>
 
-                <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="flex-1 flex flex-col items-center justify-center group min-w-10" title="发送文字图">
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><Camera className="w-4 h-4 text-slate-700" /></div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">文字图</span>
+                <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="chat-attachment-item chat-attachment-item--text-image flex-1 flex flex-col items-center justify-center group min-w-10" title="发送文字图">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><Camera className="w-4 h-4 text-slate-700" /></div>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">文字图</span>
                 </button>
 
                 {/* 2. 红包 (Red Packet) */}
@@ -7967,12 +7635,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                     setActiveAttachModal("redpacket");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--red-packet flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("redPacket")} className="w-4 h-4"><Gift className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
                 </button>
 
                 {/* 3. 语音 (Voice) */}
@@ -7983,12 +7651,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                     setActiveAttachModal("voice");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--voice flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("voice")} className="w-4 h-4"><Mic className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
                 </button>
 
                 {/* 5. 电话 (Phone) */}
@@ -7997,12 +7665,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                   onClick={() => {
                     beginVoiceCall(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--call flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("call")} className="w-4 h-4"><Phone className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
                 </button>
 
                 {/* 7. 位置 (Location) */}
@@ -8012,12 +7680,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                     setActiveAttachModal("location");
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--location flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("location")} className="w-4 h-4"><MapPin className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
                 </button>
 
                 {/* 8. 表情 (Emoji) */}
@@ -8027,12 +7695,12 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                     setShowStickerSelector(true);
                     setShowAttachPanel(false);
                   }}
-                  className="flex-1 flex flex-col items-center justify-center group min-w-10"
+                  className="chat-attachment-item chat-attachment-item--sticker flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("sticker")} className="w-4 h-4"><Smile className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
                 </button>
               </AttachmentMenu>
             )}
@@ -8707,6 +8375,7 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
                       {/* Accept (Incoming Call) */}
                       <button
                         onClick={() => {
+                          unlockCallTtsPlayback();
                           setCallingStatus("connected");
                           setCallStartTime(Date.now());
                         }}
@@ -10578,20 +10247,36 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
       )}
 
       {/* Long Press Bubble Context Menu */}
-      {activeMenuMsg && (
+      {activeMenuMsg && (() => {
+        const visualViewport = window.visualViewport;
+        const viewportTop = visualViewport?.offsetTop ?? 0;
+        const viewportLeft = visualViewport?.offsetLeft ?? 0;
+        const viewportHeight = visualViewport?.height ?? window.innerHeight;
+        const viewportWidth = visualViewport?.width ?? window.innerWidth;
+        const viewportBottom = viewportTop + viewportHeight;
+        const spaceAbove = menuPosition.y - viewportTop;
+        const spaceBelow = viewportBottom - menuPosition.y;
+        const shouldOpenUpward = spaceBelow < Math.min(360, viewportHeight * 0.55) && spaceAbove > spaceBelow;
+        const menuWidth = Math.min(176, viewportWidth - 20);
+        const menuLeft = Math.max(viewportLeft + 10, Math.min(viewportLeft + viewportWidth - menuWidth - 10, menuPosition.x - menuWidth / 2));
+        return (
         <div 
           className="fixed inset-0 z-50 bg-black/10 flex items-center justify-center backdrop-blur-[1px]"
           onClick={() => setActiveMenuMsg(null)}
           onContextMenu={(e) => { e.preventDefault(); setActiveMenuMsg(null); }}
         >
           <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[140px] text-stone-800 space-y-1"
+            initial={{ opacity: 0, scale: 0.95, y: shouldOpenUpward ? 6 : -6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="chat-bubble-context-menu overflow-y-auto bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 text-stone-800 space-y-1"
             style={{
               position: "absolute",
-              top: Math.max(10, Math.min(window.innerHeight - 220, menuPosition.y - 10)),
-              left: Math.max(10, Math.min(window.innerWidth - 160, menuPosition.x - 70)),
+              width: menuWidth,
+              maxHeight: Math.max(160, viewportHeight - 20),
+              top: shouldOpenUpward ? undefined : Math.max(viewportTop + 10, menuPosition.y + 8),
+              bottom: shouldOpenUpward ? Math.max(10, window.innerHeight - menuPosition.y + 8) : undefined,
+              left: menuLeft,
+              transformOrigin: shouldOpenUpward ? "bottom center" : "top center",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -10619,16 +10304,25 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
             </button>
 
             {onDeleteMessage && (
-              <button
-                onClick={() => {
-                  deleteMessageAndLinkedImage(activeMenuMsg.id);
-                  setActiveMenuMsg(null);
-                }}
-                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-stone-500" />
-                <span>删除</span>
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    deleteMessageAndLinkedImage(activeMenuMsg.id);
+                    setActiveMenuMsg(null);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-stone-500" />
+                  <span>删除</span>
+                </button>
+                <button
+                  onClick={() => startMultiSelectDelete(activeMenuMsg.id)}
+                  className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <Check className="w-3.5 h-3.5 text-stone-500" />
+                  <span>多选删除</span>
+                </button>
+              </>
             )}
 
             <button
@@ -10705,7 +10399,8 @@ ${MOMENT_CHARACTER_EXPRESSION_PROMPT}
             )}
           </motion.div>
         </div>
-      )}
+        );
+      })()}
 
       {/* OOC Comment Modal */}
       {showOocCommentModal && (

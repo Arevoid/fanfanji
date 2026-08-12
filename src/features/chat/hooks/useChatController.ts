@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Character, Message, OfflineStory } from "../../../types";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 import {
@@ -54,6 +54,7 @@ export function useChatController({
 }: UseChatControllerOptions) {
   const [chatInputText, setChatInputText] = useState("");
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
+  const replyInFlightRef = useRef(false);
 
   const scopeKey = runtimeContext.isGroup
     ? `group:${runtimeContext.groupId || runtimeContext.characterId || ""}:${runtimeContext.conversationId || ""}`
@@ -100,52 +101,57 @@ export function useChatController({
   // Handle Send Message and Trigger AI reply
   const handleSendAndReply = async (event?: FormEvent) => {
     if (event) event.preventDefault();
-    if (!activeChatCharId || !activeCharacter) return;
+    if (!activeChatCharId || !activeCharacter || replyInFlightRef.current) return;
+    replyInFlightRef.current = true;
 
-    if (!chatInputText.trim()) {
-      // If user input is empty, trigger AI response directly (continue the story)
-      generateResponseForUserMessage(null, currentChatMessages);
-      return;
+    try {
+      if (!chatInputText.trim()) {
+        // If user input is empty, trigger AI response directly (continue the story)
+        await generateResponseForUserMessage(null, currentChatMessages);
+        return;
+      }
+
+      const rawUserRequest = chatInputText.trim();
+      const pendingImageRequest = !isOfflineModeActive
+        ? getPendingExplicitImageRequest(rawUserRequest, currentChatMessages)
+        : null;
+      const shouldGenerateExplicitImage = Boolean(pendingImageRequest);
+      const safeQuotedMessage = quotedMessage && quoteBelongsToRuntime(quotedMessage) ? quotedMessage : null;
+      const userMsgText = safeQuotedMessage && activeCharacter
+        ? formatQuotedChatInput(rawUserRequest, safeQuotedMessage, activeCharacter)
+        : rawUserRequest;
+      if (quotedMessage) setQuotedMessage(null);
+      setChatInputText("");
+
+      const userMessage = createChatUserMessage({
+        context: runtimeContext,
+        content: userMsgText,
+        isOfflineModeActive,
+        isInputNarration,
+      });
+      onSendMessage(userMessage);
+
+      // An explicit image request is an image-only turn: the real image must be
+      // persisted before any character text is allowed.
+      if (shouldGenerateExplicitImage) {
+        await generateAndSendCharacterImage("explicit-user-text", pendingImageRequest!);
+        return;
+      }
+
+      const updatedOfflineMessages = appendChatUserMessageToOfflineStory({
+        userMessage,
+        isOfflineModeActive,
+        activeOfflineStoryId,
+        offlineStories,
+        onSaveOfflineStory,
+      });
+      const history = isOfflineModeActive && activeOfflineStoryId && onSaveOfflineStory
+        ? (updatedOfflineMessages || currentChatMessages)
+        : [...currentChatMessages, userMessage];
+      await generateResponseForUserMessage(userMessage, history);
+    } finally {
+      replyInFlightRef.current = false;
     }
-
-    const rawUserRequest = chatInputText.trim();
-    const pendingImageRequest = !isOfflineModeActive
-      ? getPendingExplicitImageRequest(rawUserRequest, currentChatMessages)
-      : null;
-    const shouldGenerateExplicitImage = Boolean(pendingImageRequest);
-    const safeQuotedMessage = quotedMessage && quoteBelongsToRuntime(quotedMessage) ? quotedMessage : null;
-    const userMsgText = safeQuotedMessage && activeCharacter
-      ? formatQuotedChatInput(rawUserRequest, safeQuotedMessage, activeCharacter)
-      : rawUserRequest;
-    if (quotedMessage) setQuotedMessage(null);
-    setChatInputText("");
-
-    const userMessage = createChatUserMessage({
-      context: runtimeContext,
-      content: userMsgText,
-      isOfflineModeActive,
-      isInputNarration,
-    });
-    onSendMessage(userMessage);
-
-    // An explicit image request is an image-only turn: the real image must be
-    // persisted before any character text is allowed.
-    if (shouldGenerateExplicitImage) {
-      await generateAndSendCharacterImage("explicit-user-text", pendingImageRequest!);
-      return;
-    }
-
-    const updatedOfflineMessages = appendChatUserMessageToOfflineStory({
-      userMessage,
-      isOfflineModeActive,
-      activeOfflineStoryId,
-      offlineStories,
-      onSaveOfflineStory,
-    });
-    const history = isOfflineModeActive && activeOfflineStoryId && onSaveOfflineStory
-      ? (updatedOfflineMessages || currentChatMessages)
-      : [...currentChatMessages, userMessage];
-    generateResponseForUserMessage(userMessage, history);
   };
 
   return {

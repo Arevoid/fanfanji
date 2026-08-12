@@ -249,90 +249,12 @@ export const parseTextToWorldBookEntries = (text: string, filename: string): Wor
   }];
 };
 
-export function splitTextToOfflineSegments(text: string): { content: string; isNarration: boolean }[] {
-  if (!text) return [];
-  const segments: { content: string; isNarration: boolean }[] = [];
-  
-  // Normalize line breaks and remove duplicate spaces
-  let processedText = text.replace(/\r\n/g, "\n").trim();
-  
-  // Clean up any double empty parentheses or brackets if they happen to appear
-  processedText = processedText.replace(/\(\s*\)|（\s*）/g, "").trim();
-
-  const hasQuotes = /[“\"「『‘'”」』’']/.test(processedText);
-
-  // This regex matches:
-  // 1. Parenthesized/bracketed blocks: (...) or （...） or [...] or 【...】 or *...*
-  // 2. Quoted blocks: “...” or 「...」 or 『...』 or "..." or '...'
-  const regex = /(\([^)]+\)|（[^）]+）|\[[^\]]+\]|【[^】]+】|\*[^*]+\*|[“"「『‘'][^”"」』’']+[”"」』’'])/g;
-  
-  let match;
-  let lastIndex = 0;
-  
-  while ((match = regex.exec(processedText)) !== null) {
-    const matchText = match[0];
-    const matchIndex = match.index;
-    
-    // Process any text between the last match and the current match
-    if (matchIndex > lastIndex) {
-      const betweenText = processedText.substring(lastIndex, matchIndex).trim();
-      if (betweenText) {
-        // Clean up trailing colons or dialogue indicators
-        const cleanText = betweenText.replace(/^[a-zA-Z0-9_\u4e00-\u9fa5]+\s*[:：]\s*/, "").replace(/[:：]\s*$/, "").trim();
-        if (cleanText) {
-          // If there are quotes elsewhere in the response, plain text outside quotes is narration.
-          // Otherwise, plain text defaults to dialogue in a bubble!
-          segments.push({ content: cleanText, isNarration: hasQuotes });
-        }
-      }
-    }
-    
-    // Process the match itself
-    let trimmedMatch = matchText.trim();
-    const isParenthesized = (
-      (trimmedMatch.startsWith("(") && trimmedMatch.endsWith(")")) ||
-      (trimmedMatch.startsWith("（") && trimmedMatch.endsWith("）")) ||
-      (trimmedMatch.startsWith("[") && trimmedMatch.endsWith("]")) ||
-      (trimmedMatch.startsWith("【") && trimmedMatch.endsWith("】")) ||
-      (trimmedMatch.startsWith("*") && trimmedMatch.endsWith("*"))
-    );
-    
-    if (isParenthesized) {
-      // Strip the parentheses
-      const cleanContent = trimmedMatch.substring(1, trimmedMatch.length - 1).trim();
-      if (cleanContent) {
-        segments.push({ content: cleanContent, isNarration: true });
-      }
-    } else {
-      // It's a quoted block, strip quotes
-      const cleanContent = trimmedMatch.substring(1, trimmedMatch.length - 1).trim();
-      if (cleanContent) {
-        segments.push({ content: cleanContent, isNarration: false });
-      }
-    }
-    
-    lastIndex = regex.lastIndex;
-  }
-  
-  // Process any remaining text after the last match
-  if (lastIndex < processedText.length) {
-    const remainingText = processedText.substring(lastIndex).trim();
-    if (remainingText) {
-      const cleanText = remainingText.replace(/^[a-zA-Z0-9_\u4e00-\u9fa5]+\s*[:：]\s*/, "").replace(/[:：]\s*$/, "").trim();
-      if (cleanText) {
-        segments.push({ content: cleanText, isNarration: hasQuotes });
-      }
-    }
-  }
-  
-  return segments;
-}
-
 export function cleanOnlineMessage(text: string, disableBracketActions: boolean): string {
   if (!text) return "";
   
-  // Strip any accidental "[发送时间: ...]" prefixes from the model output
-  let processedText = text.replace(/\[\s*发送时间\s*:\s*[^\]]+\]/gi, "").trim();
+  // Strip accidental hidden date-time metadata, including model-shortened
+  // variants such as "[时间：2026-08-11 23:42]".
+  let processedText = text.replace(/\[\s*(?:历史发送时间|历史时间|当前时间|本地时间|现实时间|时间戳|消息时间|发送时间|时间)\s*[:：]\s*[^\]]*(?:\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}\s*[-/]\s*\d{1,2}\s*[-/]\s*\d{1,2})[^\]]*(?:\d{1,2}\s*[:：]\s*\d{2})[^\]]*\]/gi, "").trim();
   
   // Clean up any double empty parentheses or brackets if they happen to appear
   processedText = processedText.replace(/\(\s*\)|（\s*）/g, "").trim();

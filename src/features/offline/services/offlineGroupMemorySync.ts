@@ -2,6 +2,7 @@ import type { Character, MemoryItem, Message, OfflineStory } from "../../../type
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { findRelationshipForCanonicalCharacter } from "../../../domain/relationship/characterRelationship";
 import { getOfflineStorySummaryMarker } from "../../../domain/memory/offlineMemorySync";
+import { serializeMessageContentForPrompt } from "../../chat/prompts/messagePromptSerializer";
 
 export function createOfflineGroupParticipantMemories(input: {
   story: OfflineStory;
@@ -16,7 +17,7 @@ export function createOfflineGroupParticipantMemories(input: {
   if (input.sourceMessages.length === 0) return [];
   const participantNames = input.participants.map((character) => character.remark || character.name).join("、");
   const transcript = input.sourceMessages.map((message) =>
-    `${message.sender === "user" ? (input.userName || "用户") : "多人剧情"}：${message.content.trim()}`,
+    `${message.sender === "user" ? (input.userName || "用户") : "多人剧情"}：${serializeMessageContentForPrompt(message, { mode: "history", userName: input.userName })}`,
   ).filter((line) => !line.endsWith("：")).join("\n");
   if (!transcript) return [];
   const content = `【多人线下剧本：${input.story.title}】\n参与者：${input.userName || "用户"}、${participantNames}\n${transcript.slice(-12000)}\n[${getOfflineStorySummaryMarker(input.story)}]`;

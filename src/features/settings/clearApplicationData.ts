@@ -2,6 +2,7 @@ import { audioDb } from "../../utils/audioDb";
 import { imageAssetDb } from "../../utils/imageAssetDb";
 import { stickerDb } from "../../utils/stickerDb";
 import { offlineStoryDb } from "../../core/storage/offlineStoryDb";
+import { fontAssetDb } from "../../utils/fontAssetDb";
 
 type ClearableStorage = Pick<Storage, "clear">;
 type ClearableCacheStorage = Pick<CacheStorage, "keys" | "delete">;
@@ -23,6 +24,7 @@ function getDefaultDependencies(): ClearApplicationDataDependencies {
       () => imageAssetDb.clearAll(),
       () => stickerDb.clearAll(),
       () => offlineStoryDb.clearAll(),
+      () => fontAssetDb.clearAll(),
     ],
   };
 }

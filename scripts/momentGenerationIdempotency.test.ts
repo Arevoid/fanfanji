@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -13,10 +14,12 @@ Object.defineProperty(globalThis, "window", { value: { localStorage }, configura
 
 const { requestCharacterMomentOnce } = await import("../src/features/moments/services/momentGenerator");
 const {
+  BLOCKED_MOMENT_RETRY_COOLDOWN_MS,
   getCharacterMomentTaskKey,
   recordDeletedCharacterMoment,
   resetMomentGenerationRuntimeForTests,
 } = await import("../src/features/moments/services/momentGenerationGuard");
+assert.equal(BLOCKED_MOMENT_RETRY_COOLDOWN_MS, 3 * 60 * 60 * 1000, "安全拦截必须静默冷却 3 小时");
 const { loadMomentGenerationTasks } = await import("../src/core/storage/repositories/momentGenerationRepository");
 const { loadMoments, saveMoments } = await import("../src/core/storage/repositories/momentRepository");
 
@@ -68,6 +71,31 @@ assert.equal(loadMomentGenerationTasks().value[getCharacterMomentTaskKey(charact
 const repeatedSkip = await requestCharacterMomentOnce(skipInput);
 assert.equal(repeatedSkip.skipped, true, "当天跳过后再次进入不应重复请求 AI");
 assert.equal(apiCalls, 3);
+
+const blockedRelationId = "relation-blocked";
+let blockedNow = fixedNow;
+let blockedApiCalls = 0;
+const blockedInput = () => ({
+  ...input(),
+  relationId: blockedRelationId,
+  now: () => blockedNow,
+  requestAi: async () => {
+    blockedApiCalls += 1;
+    throw new Error('自定义 API 接口请求失败 (400): request blocked by Gemini API: PROHIBITED_CONTENT');
+  },
+});
+const firstBlocked = await requestCharacterMomentOnce(blockedInput());
+assert.equal(firstBlocked.blockedReason, "prohibited-content");
+const blockedTaskKey = getCharacterMomentTaskKey(character.id, new Date(blockedNow), blockedRelationId);
+assert.equal(loadMomentGenerationTasks().value[blockedTaskKey]?.status, "blocked");
+await requestCharacterMomentOnce(blockedInput());
+assert.equal(blockedApiCalls, 1, "内容安全拦截后不得每分钟重复请求");
+blockedNow += BLOCKED_MOMENT_RETRY_COOLDOWN_MS;
+await requestCharacterMomentOnce(blockedInput());
+assert.equal(blockedApiCalls, 2, "内容修正后应允许在冷却结束时重新尝试");
+
+const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+assert.doesNotMatch(appChatSource, /\[动态内容被拦截\]/, "自动动态被内容安全拦截时必须静默跳过");
 
 assert.equal(saveMoments([first.moment!]).success, true);
 assert.equal(recordDeletedCharacterMoment(first.moment!, new Date(fixedNow + 1)), true);

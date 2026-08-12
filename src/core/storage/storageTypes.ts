@@ -1,4 +1,14 @@
-export type StorageErrorKind = "unavailable" | "read" | "parse" | "write" | "remove";
+export type StorageErrorKind =
+  | "unavailable"
+  | "read"
+  | "parse"
+  | "serialize"
+  | "validation"
+  | "quota"
+  | "write"
+  | "remove"
+  | "verification"
+  | "rollback";
 
 export interface StorageResult<T> {
   value: T;

@@ -20,7 +20,9 @@ import {
   Volume2,
   Monitor,
   Moon,
-  Sun
+  Sun,
+  Type as TypeIcon,
+  Link
 } from "lucide-react";
 
 import {
@@ -36,6 +38,18 @@ import { notifyAppearanceSettingsChanged } from "../features/theme/appearanceRep
 import { useTheme } from "../features/theme/ThemeProvider";
 import { sanitizeAppearanceSettings, type ThemeMode } from "../features/theme/theme";
 import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
+import { fontAssetDb } from "../utils/fontAssetDb";
+import {
+  buildFontFaceSource,
+  DEFAULT_GLOBAL_FONT_SIZE,
+  getFontFileExtension,
+  getFontFormatHint,
+  GLOBAL_FONT_ASSET_ID,
+  MAX_GLOBAL_FONT_SIZE,
+  MIN_GLOBAL_FONT_SIZE,
+  sanitizeGlobalFontSize,
+  sanitizeGlobalFontUrl,
+} from "../features/theme/globalTypography";
 import {
   getSettingsBackTarget,
   getSettingsHeaderTitle,
@@ -81,7 +95,7 @@ interface AppSettingsProps {
   /** The style actually used by the last/current chat, including character overrides. */
   bubbleStylePreset?: "default" | "floating-cute" | "liquid-glass";
   presets: StylePreset[];
-  onSaveSettings: (update: UserSettingsUpdate) => void;
+  onSaveSettings: (update: UserSettingsUpdate) => boolean;
   onSavePreset: (preset: StylePreset) => void;
   onDeletePreset: (id: string) => void;
   onClose: () => void;
@@ -134,9 +148,11 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
 .cv-header { background: var(--chat-header-bg); }
 .cv-messages-list { background: var(--chat-message-list-bg); }
 .chat-bubble-self { background: var(--chat-user-bg); color: var(--chat-user-text); border: 1px solid var(--chat-bubble-border); border-radius: 14px; }
-.chat-bubble-self * { color: var(--chat-user-text); }
 .chat-bubble-other { background: var(--chat-ai-bg); color: var(--chat-ai-text); border: 1px solid var(--chat-bubble-border); border-radius: 14px; }
-.chat-bubble-other * { color: var(--chat-ai-text); }
+.chat-message--voice-wave,
+.chat-message--voice-duration,
+.chat-message--call-icon,
+.chat-message--call-duration { color: currentColor; }
 .chat-composer--default,
 .chat-composer--floating,
 .chat-composer--liquid { background: var(--chat-composer-bg); }
@@ -480,6 +496,10 @@ export default function AppSettings({
   const [chatIcons, setChatIcons] = useState<ChatIconOverrides>(() => sanitizeChatIcons(settings.chatIcons));
   const [showHomeButton, setShowHomeButton] = useState(!!settings.showHomeButton);
   const [hideStatusBar, setHideStatusBar] = useState(!!settings.hideStatusBar);
+  const [globalFontSize, setGlobalFontSize] = useState(() => sanitizeGlobalFontSize(settings.globalFontSize));
+  const [globalFontUrlDraft, setGlobalFontUrlDraft] = useState(settings.globalFontUrl || "");
+  const [fontOperationPending, setFontOperationPending] = useState(false);
+  const [fontOperationMessage, setFontOperationMessage] = useState<string | null>(null);
   const [showBackupExportOptions, setShowBackupExportOptions] = useState(false);
   const [isClearingApplicationData, setIsClearingApplicationData] = useState(false);
   const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
@@ -491,6 +511,11 @@ export default function AppSettings({
   const [hideAppNames, setHideAppNames] = useState(!!settings.hideAppNames);
   const [desktopAppTextColor, setDesktopAppTextColor] = useState(settings.desktopAppTextColor || "#000000");
   const [desktopIconMode, setDesktopIconMode] = useState<"light" | "dark">(settings.desktopIconMode || "dark");
+
+  useEffect(() => {
+    setGlobalFontSize(sanitizeGlobalFontSize(settings.globalFontSize));
+    setGlobalFontUrlDraft(settings.globalFontUrl || "");
+  }, [settings.globalFontSize, settings.globalFontUrl]);
 
   // Beginner-friendly manual styling states
   const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
@@ -945,8 +970,8 @@ export default function AppSettings({
     alert("图片 API 设置已保存。");
   };
 
-  const handleSave = (updatedFields: Partial<UserSettings>) => {
-    onSaveSettings((previous) => {
+  const handleSave = (updatedFields: Partial<UserSettings>): boolean => {
+    return onSaveSettings((previous) => {
       const updatedIdentities = (previous.identities || []).map(idty => {
         if (idty.id === (previous.activeIdentityId || "identity-1")) {
           return {
@@ -966,6 +991,119 @@ export default function AppSettings({
         identities: updatedIdentities
       };
     });
+  };
+
+  const validateFontSource = async (source: string, formatHint?: string | null): Promise<void> => {
+    if (typeof FontFace === "undefined") return;
+    const previewFace = new FontFace("Fanfan Font Validation", buildFontFaceSource(source, formatHint));
+    await previewFace.load();
+  };
+
+  const handleGlobalFontFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const extension = getFontFileExtension(file.name);
+    if (!extension) {
+      setFontOperationMessage("仅支持 TTF、OTF、WOFF 和 WOFF2 字体文件。");
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      setFontOperationMessage("字体文件不能超过 25MB。");
+      return;
+    }
+
+    setFontOperationPending(true);
+    setFontOperationMessage("正在校验并保存字体…");
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      await validateFontSource(objectUrl, getFontFormatHint(file.name));
+      const previousFont = await fontAssetDb.getFont(GLOBAL_FONT_ASSET_ID).catch(() => null);
+      await fontAssetDb.saveFont(GLOBAL_FONT_ASSET_ID, file);
+      const fontName = file.name.replace(/\.[^.]+$/, "") || "自定义字体";
+      const saved = handleSave({
+        globalFontSource: "upload",
+        globalFontName: fontName,
+        globalFontAssetId: GLOBAL_FONT_ASSET_ID,
+        globalFontUrl: "",
+        customFontName: "",
+        customFontData: "",
+      });
+      if (!saved) {
+        if (previousFont) await fontAssetDb.saveFont(GLOBAL_FONT_ASSET_ID, previousFont);
+        else await fontAssetDb.deleteFont(GLOBAL_FONT_ASSET_ID);
+        setFontOperationMessage("字体设置保存失败，原字体已保留。请检查设备存储空间后重试。");
+        return;
+      }
+      setGlobalFontUrlDraft("");
+      setFontOperationMessage(`已应用字体：${fontName}`);
+    } catch (error) {
+      console.error("Unable to import the selected font:", error);
+      setFontOperationMessage("字体文件无法读取或格式无效，请更换文件后重试。");
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+      setFontOperationPending(false);
+    }
+  };
+
+  const handleApplyGlobalFontUrl = async () => {
+    const url = sanitizeGlobalFontUrl(globalFontUrlDraft);
+    if (!url) {
+      setFontOperationMessage("请输入有效的 HTTP 或 HTTPS 字体直链。");
+      return;
+    }
+    setFontOperationPending(true);
+    setFontOperationMessage("正在验证字体直链…");
+    try {
+      await validateFontSource(url, getFontFormatHint(url));
+      const rawName = url.split("/").pop()?.split(/[?#]/, 1)[0] || "网络字体";
+      let decodedName = rawName;
+      try { decodedName = decodeURIComponent(rawName); } catch { /* Keep the safe URL segment. */ }
+      const inferredName = decodedName.replace(/\.[^.]+$/, "") || "网络字体";
+      const saved = handleSave({
+        globalFontSource: "url",
+        globalFontName: inferredName,
+        globalFontUrl: url,
+        globalFontAssetId: "",
+        customFontName: "",
+        customFontData: "",
+      });
+      if (!saved) {
+        setFontOperationMessage("字体直链设置保存失败，请检查设备存储空间后重试。");
+        return;
+      }
+      await fontAssetDb.deleteFont(GLOBAL_FONT_ASSET_ID).catch(() => undefined);
+      setGlobalFontUrlDraft(url);
+      setFontOperationMessage(`已应用字体：${inferredName}`);
+    } catch (error) {
+      console.error("Unable to load the font URL:", error);
+      setFontOperationMessage("字体直链无法加载。请确认链接指向字体文件，并允许跨域访问。");
+    } finally {
+      setFontOperationPending(false);
+    }
+  };
+
+  const handleResetGlobalFont = async () => {
+    setFontOperationPending(true);
+    try {
+      const saved = handleSave({
+        globalFontSource: "default",
+        globalFontName: "",
+        globalFontUrl: "",
+        globalFontAssetId: "",
+        customFontName: "",
+        customFontData: "",
+      });
+      if (!saved) {
+        setFontOperationMessage("默认字体设置保存失败，请检查设备存储空间后重试。");
+        return;
+      }
+      await fontAssetDb.deleteFont(GLOBAL_FONT_ASSET_ID).catch(() => undefined);
+      setGlobalFontUrlDraft("");
+      setFontOperationMessage("已恢复系统默认字体。");
+    } finally {
+      setFontOperationPending(false);
+    }
   };
 
   const updateChatIcon = (key: ChatIconKey, value: string) => {
@@ -2902,6 +3040,111 @@ export default function AppSettings({
           {activeTab === "system_config" && (
             <div className="space-y-4 text-left" data-system-settings>
               <div className="settings-section-header">系统偏好</div>
+              <div className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm space-y-5" data-global-typography-settings>
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-slate-100 text-slate-700">
+                    <TypeIcon className="h-4.5 w-4.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-bold tracking-wide text-slate-800">全局字体</h4>
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">上传字体文件或粘贴字体直链，保存后会立即应用到整个应用。</p>
+                    <p className="mt-1 truncate text-[10px] font-semibold text-slate-600">
+                      当前：{settings.globalFontSource === "upload" || settings.globalFontSource === "url"
+                        ? settings.globalFontName || "自定义字体"
+                        : "系统默认字体"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className={`flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[10px] font-bold text-slate-700 transition-colors hover:bg-slate-100 ${fontOperationPending ? "pointer-events-none opacity-50" : ""}`}>
+                    <Upload className="h-3.5 w-3.5" />
+                    上传字体文件
+                    <input
+                      type="file"
+                      accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2,application/font-woff,application/font-sfnt"
+                      className="hidden"
+                      disabled={fontOperationPending}
+                      onChange={handleGlobalFontFile}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={fontOperationPending || (!settings.globalFontAssetId && !settings.globalFontUrl)}
+                    onClick={() => void handleResetGlobalFont()}
+                    className="min-h-10 rounded-[14px] border border-slate-200 bg-white px-3 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    恢复默认字体
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="relative min-w-0 flex-1">
+                      <Link className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="url"
+                        value={globalFontUrlDraft}
+                        onChange={(event) => setGlobalFontUrlDraft(event.target.value)}
+                        onKeyDown={(event) => { if (event.key === "Enter") void handleApplyGlobalFontUrl(); }}
+                        placeholder="粘贴 TTF / OTF / WOFF / WOFF2 字体直链"
+                        className="h-10 w-full rounded-[14px] border border-slate-200 bg-slate-50 pl-9 pr-3 text-[10px] text-slate-700 outline-none transition-colors focus:border-slate-400"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={fontOperationPending || !globalFontUrlDraft.trim()}
+                      onClick={() => void handleApplyGlobalFontUrl()}
+                      className="h-10 shrink-0 rounded-[14px] bg-neutral-950 px-4 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      应用
+                    </button>
+                  </div>
+                  <p className="text-[9px] leading-relaxed text-slate-400">支持 TTF、OTF、WOFF、WOFF2，上传文件最大 25MB。网络字体服务器需要允许跨域访问。</p>
+                  {fontOperationMessage && <p className="rounded-[10px] bg-slate-50 px-3 py-2 text-[10px] leading-relaxed text-slate-600" role="status">{fontOperationMessage}</p>}
+                </div>
+
+                <div className="border-t border-slate-100 pt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-bold tracking-wide text-slate-800">全局字体大小</h4>
+                      <p className="mt-1 text-[10px] text-slate-400">页面会按同一比例重新排版和适应。</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGlobalFontSize(DEFAULT_GLOBAL_FONT_SIZE);
+                        handleSave({ globalFontSize: DEFAULT_GLOBAL_FONT_SIZE });
+                      }}
+                      className="shrink-0 rounded-[10px] bg-slate-100 px-2.5 py-1.5 text-[10px] font-bold text-slate-600"
+                    >
+                      默认
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-bold text-slate-400">小</span>
+                    <input
+                      type="range"
+                      min={MIN_GLOBAL_FONT_SIZE}
+                      max={MAX_GLOBAL_FONT_SIZE}
+                      step={1}
+                      value={globalFontSize}
+                      aria-label="全局字体大小"
+                      onChange={(event) => {
+                        const next = sanitizeGlobalFontSize(event.target.value);
+                        setGlobalFontSize(next);
+                        handleSave({ globalFontSize: next });
+                      }}
+                      className="h-1 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-neutral-950"
+                    />
+                    <span className="text-[10px] font-bold text-slate-400">大</span>
+                    <span className="w-9 shrink-0 text-right font-mono text-[10px] font-bold text-slate-700">{globalFontSize}px</span>
+                  </div>
+                  <div className="rounded-[14px] border border-slate-100 bg-slate-50 px-4 py-3 text-center text-sm text-slate-700" style={{ fontFamily: "var(--app-font-family)" }}>
+                    饭饭机 Aa 123 · 字体预览
+                  </div>
+                </div>
+              </div>
               {/* Floating Home Button Settings */}
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <div className="flex items-center justify-between">

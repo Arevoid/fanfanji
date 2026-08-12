@@ -1,18 +1,5 @@
 import { audioDb } from "./audioDb";
-
-export const MINIMAX_DEFAULT_VOICES = [
-  { id: "female-shaonv", name: "甜美少女 (女)", gender: "female" },
-  { id: "female-qn-jiaochen", name: "娇嗔可人 (女)", gender: "female" },
-  { id: "female-qn-yujie", name: "高冷御姐 (女)", gender: "female" },
-  { id: "female-qn-shuangkuai", name: "爽快大姐 (女)", gender: "female" },
-  { id: "female-qn-ruomei", name: "柔美温婉 (女)", gender: "female" },
-  { id: "male-qn-qingse", name: "青涩青年 (男)", gender: "male" },
-  { id: "male-qn-shaonian", name: "阳光少年 (男)", gender: "male" },
-  { id: "male-qn-chaoku", name: "潮酷青年 (男)", gender: "male" },
-  { id: "male-qn-badao", name: "霸道总裁 (男)", gender: "male" },
-  { id: "presenter_female", name: "播音女声 (女)", gender: "female" },
-  { id: "presenter_male", name: "播音男声 (男)", gender: "male" },
-];
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./fetchWithTimeout";
 
 /**
  * Filter out dialogue actions in brackets / parentheticals or asterisks.
@@ -97,9 +84,6 @@ export interface TtsOptions {
   forceDirectTts?: boolean;
 }
 
-/** @deprecated Use TtsOptions. Kept for source compatibility. */
-export type MiniMaxTtsOptions = TtsOptions;
-
 /**
  * Perform a single segment TTS synthesis
  */
@@ -114,7 +98,7 @@ export async function fetchSingleTtsSegment(
     if (!apiKey) throw new Error("请先填写 Mossland API Key");
     if (!voiceId) throw new Error("请先为角色填写 Mossland Voice ID");
 
-    const response = await fetch("/api/mossland-tts", {
+    const response = await fetchWithTimeout("/api/mossland-tts", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -126,7 +110,7 @@ export async function fetchSingleTtsSegment(
         text,
         voiceId,
       }),
-    });
+    }, API_REQUEST_TIMEOUTS.speechSynthesis);
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Mossland 合成失败 (${response.status}): ${errorText}`);
@@ -140,7 +124,9 @@ export async function fetchSingleTtsSegment(
   const pitch = options.pitch !== undefined ? options.pitch : 0;
   const model = options.model || "speech-2.8-hd";
 
-  const isDirectCall = !!(options.forceDirectTts || (options.apiKey && options.groupId));
+  // Prefer the app proxy so browser CORS policy does not decide whether TTS
+  // works. Direct provider access remains available only as an explicit opt-in.
+  const isDirectCall = options.forceDirectTts === true;
   
   let url = "/api/minimax-tts";
   const headers: Record<string, string> = {
@@ -190,11 +176,11 @@ export async function fetchSingleTtsSegment(
     };
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
-  });
+  }, API_REQUEST_TIMEOUTS.speechSynthesis);
 
   if (!response.ok) {
     const textErr = await response.text();
@@ -321,35 +307,4 @@ export async function getSpeechForText(
   }
 
   return mergedBlob;
-}
-
-/**
- * Request audio playback permission on mobile browsers
- */
-export function initAudioContextPermission(): Promise<boolean> {
-  return new Promise((resolve) => {
-    // Standard AudioContext unlocking sequence
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) {
-      resolve(false);
-      return;
-    }
-    const ctx = new AudioContextClass();
-    if (ctx.state === "suspended") {
-      const unlock = () => {
-        ctx.resume().then(() => {
-          cleanUp();
-          resolve(true);
-        });
-      };
-      const cleanUp = () => {
-        document.removeEventListener("click", unlock);
-        document.removeEventListener("touchstart", unlock);
-      };
-      document.addEventListener("click", unlock);
-      document.addEventListener("touchstart", unlock);
-    } else {
-      resolve(true);
-    }
-  });
 }

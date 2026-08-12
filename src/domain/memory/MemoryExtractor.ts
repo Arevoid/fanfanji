@@ -4,6 +4,7 @@ import { evaluateKnowledgeWrite } from "../characterKnowledge/knowledgeWritePoli
 import { normalizeExtractedKnowledgeCandidate } from "../../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { isDuplicateMemory } from "./MemoryDeduplicator";
 import type { MemoryExtractionApi, MemoryExtractionContext, MemoryExtractionResult } from "./memoryTypes";
+import { serializeMessageContentForPrompt } from "../../features/chat/prompts/messagePromptSerializer";
 
 const hasTruthScope = (context: MemoryExtractionContext): boolean => Boolean(
   context.relationId?.trim()
@@ -23,7 +24,10 @@ export async function extractMemories(
   const history = context.recentMessages.map((message) => ({
     id: message.id,
     role: message.sender === "user" ? "user" as const : "model" as const,
-    text: message.content,
+    text: serializeMessageContentForPrompt(message, {
+      mode: "history",
+      characterName: context.character.name,
+    }),
   }));
   const data = await extractApi({
     history,
@@ -39,6 +43,18 @@ export async function extractMemories(
     templateType: context.templateType,
     ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
+
+  // API adapters return an empty array alongside their error so callers can
+  // keep a stable response shape. Preserve the error before interpreting that
+  // empty array as an honest "no durable facts" extraction.
+  if (data.error) {
+    return {
+      extractedMemories: [],
+      acceptedClaims: [],
+      rejectedCandidateCount: 0,
+      apiError: data.error,
+    };
+  }
 
   const rawItems = Array.isArray(data.candidates) ? data.candidates : data.items;
   if (!Array.isArray(rawItems)) {
@@ -94,7 +110,12 @@ export async function extractMemories(
     const sourceMessages = payload.sourceMessageIds
       .map((id) => context.recentMessages.find((message) => message.id === id))
       .filter(isMessage);
-    const quotedMessage = sourceMessages.find((message) => message.content.includes(payload.evidenceQuote));
+    const quotedMessage = sourceMessages.find((message) =>
+      message.content.includes(payload.evidenceQuote)
+      || serializeMessageContentForPrompt(message, {
+        mode: "history",
+        characterName: context.character.name,
+      }).includes(payload.evidenceQuote));
     if (!quotedMessage) {
       rejectedCandidateCount += 1;
       return;

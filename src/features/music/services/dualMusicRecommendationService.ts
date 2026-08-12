@@ -7,6 +7,7 @@ import type {
   UserSettings,
 } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
+import { serializeMessageContentForPrompt } from "../../chat/prompts/messagePromptSerializer";
 
 export interface MusicRecommendationResult {
   trackId: string;
@@ -90,7 +91,7 @@ Relationship: ${input.relationship.relationship}
 Do not infer shared scenes or private facts that are not present in the scoped context below.
 
 Recent direct-chat context:
-${relationMessages.map((message) => `${message.sender}: ${message.content}`).join("\n")}
+${relationMessages.map((message) => `${message.sender}: ${serializeMessageContentForPrompt(message, { mode: "history", characterName: input.character.name })}`).join("\n")}
 
 Relevant relation memories:
 ${relationMemories.map((memory) => `- ${memory.content}`).join("\n")}

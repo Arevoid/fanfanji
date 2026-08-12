@@ -1,5 +1,6 @@
 import type { Character, MemoryItem, Moment } from "../../../types";
 import type { apiChat } from "../../../utils/apiHelper";
+import { isProhibitedContentError } from "../../../utils/apiHelper";
 import type { MomentPublicCognitiveContext } from "../../../domain/momentCognitive/momentPublicCognitiveTypes";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { CognitivePromptWorldSetting } from "../../characterCognitive/promptAdapters/types";
@@ -9,6 +10,7 @@ import { assessMomentUniqueness, isMomentSkipResponse } from "./momentUniqueness
 import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
 import {
   claimCharacterMomentGeneration,
+  completeBlockedCharacterMomentGeneration,
   completeCharacterMomentGeneration,
   completeSkippedCharacterMomentGeneration,
   releaseCharacterMomentGeneration,
@@ -164,6 +166,7 @@ export async function requestCharacterMomentOnce(input: Parameters<typeof reques
   moment?: Moment;
   memory?: MemoryItem;
   skipped?: boolean;
+  blockedReason?: "prohibited-content";
 }> {
   const timestamp = (input.now || Date.now)();
   const generatedAt = new Date(timestamp);
@@ -182,6 +185,10 @@ export async function requestCharacterMomentOnce(input: Parameters<typeof reques
     }
     return result;
   } catch (error) {
+    if (isProhibitedContentError(error)) {
+      completeBlockedCharacterMomentGeneration(taskKey, input.character.id, input.relationId, generatedAt);
+      return { skipped: true, blockedReason: "prohibited-content" };
+    }
     releaseCharacterMomentGeneration(taskKey);
     throw error;
   }

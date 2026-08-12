@@ -4,9 +4,10 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
-import { buildKnowledgeExtractionPrompt, parseKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
-import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
+import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
+import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./src/utils/fetchWithTimeout";
 
 dotenv.config();
 
@@ -88,13 +89,17 @@ async function startServer() {
         };
 
         const messagesPayload = [];
-        if (systemInstruction) {
-          messagesPayload.push({ role: "system", content: systemInstruction });
+        const openAiPrompt = prepareOpenAiPromptTransport(history, systemInstruction);
+        if (openAiPrompt.systemInstruction) {
+          messagesPayload.push({ role: "system", content: openAiPrompt.systemInstruction });
         }
-        if (history && Array.isArray(history)) {
-          for (const h of history) {
+        if (openAiPrompt.history.length > 0) {
+          for (const h of openAiPrompt.history) {
             messagesPayload.push(toOpenAiHistoryEntry(h));
           }
+        }
+        if (openAiPrompt.finalSystemInstruction) {
+          messagesPayload.push({ role: "system", content: openAiPrompt.finalSystemInstruction });
         }
         messagesPayload.push({ role: "user", content: message });
 
@@ -105,11 +110,11 @@ async function startServer() {
           stream: streamCompatible || false
         };
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers,
           body: JSON.stringify(bodyPayload)
-        });
+        }, API_REQUEST_TIMEOUTS.textGeneration);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -258,12 +263,9 @@ ${referencesText}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -277,7 +279,7 @@ ${referencesText}
             ],
             temperature: 0.6
           })
-        });
+        }, API_REQUEST_TIMEOUTS.memoryTask);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -354,12 +356,9 @@ ${historyText}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -373,7 +372,7 @@ ${historyText}
             ],
             temperature: 0.5
           })
-        });
+        }, API_REQUEST_TIMEOUTS.memoryTask);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -441,69 +440,46 @@ ${historyText}
         scenario,
       });
 
-      let aiText = "";
-
-      // 1. Custom endpoint
-      if (apiEndpoint && apiEndpoint.trim()) {
-        let endpointUrl = apiEndpoint.trim();
-        if (!endpointUrl.endsWith("/chat/completions")) {
-          endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
+      const generateExtractionText = async (promptText: string, temperature: number): Promise<string> => {
+        if (apiEndpoint && apiEndpoint.trim()) {
+          let endpointUrl = apiEndpoint.trim();
+          if (!endpointUrl.endsWith("/chat/completions")) endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
+          const responseFetch = await fetchWithTimeout(endpointUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKeyValue}` },
+            body: JSON.stringify({
+              model: model || "deepseek-v4-flash",
+              messages: [
+                { role: "system", content: "你是结构化长期知识提取器。只输出可验证的 JSONL，不要解释。" },
+                { role: "user", content: promptText },
+              ],
+              temperature,
+            }),
+          }, API_REQUEST_TIMEOUTS.memoryTask);
+          if (!responseFetch.ok) {
+            const errorText = await responseFetch.text();
+            throw new Error(`中转接口提取失败 (${responseFetch.status}): ${errorText || "服务器未响应"}`);
+          }
+          const dataFetch = await responseFetch.json();
+          return dataFetch.choices?.[0]?.message?.content || "";
         }
-
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
-
-        const responseFetch = await fetch(endpointUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKeyValue}`
-          },
-          body: JSON.stringify({
-            model: targetModel,
-            messages: [
-              { role: "system", content: "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供精确 sourceMessageIds 和原文 evidenceQuote。" },
-              { role: "user", content: prompt }
-            ],
-            temperature: 0.5
-          })
-        });
-
-        if (!responseFetch.ok) {
-          const errorText = await responseFetch.text();
-          return res.status(responseFetch.status).json({
-            error: `中转接口提取失败 (${responseFetch.status}): ${errorText || "服务器未响应"}`
-          });
-        }
-
-        const dataFetch = await responseFetch.json();
-        aiText = dataFetch.choices?.[0]?.message?.content || "";
-      } else {
-        // 2. Default Gemini API
-        const ai = new GoogleGenAI({
-          apiKey: apiKeyValue,
-          httpOptions: {
-            headers: {
-              "User-Agent": "aistudio-build",
-            },
-          },
-        });
-
+        const ai = new GoogleGenAI({ apiKey: apiKeyValue, httpOptions: { headers: { "User-Agent": "aistudio-build" } } });
         const response = await ai.models.generateContent({
           model: model || "gemini-3.5-flash",
-          contents: prompt,
-          config: {
-            temperature: 0.5,
-          },
+          contents: promptText,
+          config: { temperature },
         });
+        return response.text || "";
+      };
 
-        aiText = response.text || "";
-      }
-
-      const candidates = parseKnowledgeExtractionOutput(aiText, new Set(safeHistory.map((item) => item.id)));
-      res.json({ text: aiText, items: candidates, candidates });
+      const aiText = await generateExtractionText(prompt, 0.5);
+      const repaired = await parseOrRepairKnowledgeExtractionOutput({
+        rawText: aiText,
+        allowedMessageIds: new Set(safeHistory.map((item) => item.id)),
+        originalPrompt: prompt,
+        repair: (repairPrompt) => generateExtractionText(repairPrompt, 0.2),
+      });
+      res.json({ text: repaired.text, items: repaired.candidates, candidates: repaired.candidates, repaired: repaired.repaired });
     } catch (error: any) {
       console.error("Extract Memories Error:", error);
       res.status(500).json({ error: error.message || "提取记忆发生异常，请稍后再试。" });
@@ -542,12 +518,9 @@ ${text}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -561,7 +534,7 @@ ${text}
             ],
             temperature: 0.3
           })
-        });
+        }, API_REQUEST_TIMEOUTS.textGeneration);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -616,7 +589,7 @@ ${text}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -628,7 +601,7 @@ ${text}
             temperature: 0.1,
             max_tokens: 5
           })
-        });
+        }, API_REQUEST_TIMEOUTS.connectionTest);
 
         if (responseFetch.ok) {
           const dataFetch = await responseFetch.json();
@@ -705,12 +678,12 @@ ${text}
         baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
         const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : (baseUrl + "/models");
 
-        const responseFetch = await fetch(modelsUrl, {
+        const responseFetch = await fetchWithTimeout(modelsUrl, {
           method: "GET",
           headers: {
             "Authorization": `Bearer ${apiKeyValue}`
           }
-        });
+        }, API_REQUEST_TIMEOUTS.modelList);
         if (responseFetch.ok) {
           const data = await responseFetch.json();
           const parsed = parseModels(data);
@@ -721,7 +694,7 @@ ${text}
       } else if (apiKeyValue) {
         // Dynamically query Gemini models list if we have a key
         const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKeyValue}`;
-        const responseFetch = await fetch(modelsUrl);
+        const responseFetch = await fetchWithTimeout(modelsUrl, undefined, API_REQUEST_TIMEOUTS.modelList);
         if (responseFetch.ok) {
           const data = await responseFetch.json();
           const parsed = parseModels(data);
@@ -731,32 +704,9 @@ ${text}
         }
       }
 
-      // Default models fallback
-      res.json({
-        success: true,
-        models: [
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-1.5-flash",
-          "gemini-1.5-pro",
-          "deepseek-chat",
-          "deepseek-reasoner",
-          "deepseek-v3"
-        ]
-      });
+      res.status(502).json({ success: false, error: "接口没有返回可用的模型列表。" });
     } catch (err: any) {
-      res.json({
-        success: true,
-        models: [
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-1.5-flash",
-          "gemini-1.5-pro",
-          "deepseek-chat",
-          "deepseek-reasoner",
-          "deepseek-v3"
-        ]
-      });
+      res.status(502).json({ success: false, error: err?.message || "模型列表获取失败。" });
     }
   });
 
@@ -806,11 +756,11 @@ ${text}
         },
       };
 
-      const responseFetch = await fetch(url, {
+      const responseFetch = await fetchWithTimeout(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-      });
+      }, API_REQUEST_TIMEOUTS.speechSynthesis);
 
       if (!responseFetch.ok) {
         const errText = await responseFetch.text();
