@@ -1,7 +1,7 @@
 import { assertImageGenerationTrigger } from "../features/chat/services/imageGenerationIntent";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "../server/imageProtocolAdapters";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "../server/mosslandTts";
-import { buildKnowledgeExtractionPrompt, parseKnowledgeExtractionOutput } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
+import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { buildTranslationPrompt, callTextProvider, fetchTextModels, TextApiError } from "../server/textProtocolAdapters";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 
@@ -128,8 +128,13 @@ export default {
           history, templateType: body.templateType === "delicate" ? "delicate" : "refined", scenario: body.scenario === "offline" ? "offline" : undefined,
         });
         const text = await callTextProvider(textInput(body, prompt, "你是长期记忆提取器，严格按要求输出结构化候选。", 0.5));
-        const candidates = parseKnowledgeExtractionOutput(text, new Set(history.map((item) => String(item.id))));
-        return json({ text, items: candidates, candidates });
+        const repaired = await parseOrRepairKnowledgeExtractionOutput({
+          rawText: text,
+          allowedMessageIds: new Set(history.map((item) => String(item.id))),
+          originalPrompt: prompt,
+          repair: (repairPrompt) => callTextProvider(textInput(body, repairPrompt, "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。", 0.2)),
+        });
+        return json({ text: repaired.text, items: repaired.candidates, candidates: repaired.candidates, repaired: repaired.repaired });
       } catch (error) { return textErrorResponse(error, "记忆提取失败。"); }
     }
 

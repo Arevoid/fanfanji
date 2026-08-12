@@ -2,7 +2,7 @@
 
 import {
   buildKnowledgeExtractionPrompt,
-  parseKnowledgeExtractionOutput,
+  parseOrRepairKnowledgeExtractionOutput,
   type ExtractedKnowledgeCandidatePayload,
   type KnowledgeExtractionHistoryItem,
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
@@ -529,8 +529,23 @@ export async function apiExtractMemories(params: {
       });
 
       const aiText = result.text || "";
-      const candidates = parseKnowledgeExtractionOutput(aiText, new Set(params.history.map((item) => item.id)));
-      return { text: aiText, items: candidates, candidates };
+      const repaired = await parseOrRepairKnowledgeExtractionOutput({
+        rawText: aiText,
+        allowedMessageIds: new Set(params.history.map((item) => item.id)),
+        originalPrompt: prompt,
+        repair: async (repairPrompt) => (await directClientChat({
+          message: repairPrompt,
+          history: [],
+          apiKey: params.apiKey,
+          model: params.model,
+          apiEndpoint: params.apiEndpoint,
+          apiTemperature: 0.2,
+          systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
+            ? "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。"
+            : undefined,
+        })).text || "",
+      });
+      return { text: repaired.text, items: repaired.candidates, candidates: repaired.candidates };
     } catch (fallbackErr) {
       console.error("Direct extract memories fallback failed:", fallbackErr);
       return {
