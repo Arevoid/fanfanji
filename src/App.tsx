@@ -21,7 +21,7 @@ import { loadConversationSummaries, saveConversationSummaries, retractConversati
 import { loadBehaviorCorrections, saveBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
 import { loadCharacterKnowledgeMigrationState, saveCharacterKnowledgeMigrationState } from "./core/storage/repositories/characterKnowledgeMigrationRepository";
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
-import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
+import { loadScheduleStore } from "./core/storage/repositories/scheduleRepository";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
@@ -51,7 +51,7 @@ import { isTransparencyPreservedImage } from "./utils/pngParser";
 import { DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
 import { messageMatchesMutationScope, type MessageMutationScope } from "./features/chat/context/directInteractionScope";
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, removePaymentStatusesForMessages, type RedPacketStatusMap } from "./features/chat/services/paymentScope";
-import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
+import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
 import { 
   AlbumWidget, 
   CalendarAlbumWidget,
@@ -134,6 +134,7 @@ const loadAppStore = () => import("./components/AppStore");
 const loadAppSettings = () => import("./components/AppSettings");
 const loadAppMemory = () => import("./components/AppMemory");
 const loadAppOffline = () => import("./components/AppOffline");
+const loadAppSchedule = () => import("./components/AppSchedule");
 
 const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   chat: loadAppChat,
@@ -147,6 +148,7 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   settings: loadAppSettings,
   memory: loadAppMemory,
   offline: loadAppOffline,
+  schedule: loadAppSchedule,
 };
 
 const IDLE_PRELOAD_APP_IDS = ["archives", "worldbook", "notes", "store", "settings"] as const;
@@ -167,6 +169,7 @@ const AppStore = React.lazy(loadAppStore);
 const AppSettings = React.lazy(loadAppSettings);
 const AppMemory = React.lazy(loadAppMemory);
 const AppOffline = React.lazy(loadAppOffline);
+const AppSchedule = React.lazy(loadAppSchedule);
 
 function LazyAppBoundary({ children }: React.PropsWithChildren) {
   return (
@@ -416,7 +419,7 @@ export default function App() {
 
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => readArray<MusicPlaylist>("phone_music_playlists", []).value);
 
-  const [calendarEvents] = useState<CalendarEvent[]>(() => loadCalendarEvents([]).value);
+  const [scheduleStore] = useState(() => loadScheduleStore().value);
 
   const [worldBookEntries, setWorldBookEntries] = useState<WorldBookEntry[]>(() => loadWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES).value);
 
@@ -446,7 +449,6 @@ export default function App() {
   const messagesPersistenceReady = useRef(false);
   const momentsPersistenceReady = useRef(false);
   const presetsPersistenceReady = useRef(false);
-  const calendarPersistenceReady = useRef(false);
   const worldBookPersistenceReady = useRef(false);
   const memoriesPersistenceReady = useRef(false);
   const skipNextMemoriesPersistenceRef = useRef(false);
@@ -695,7 +697,7 @@ export default function App() {
         // Keep the safe defaults when a legacy value is malformed.
       }
     }
-    const filtered = parsed.filter(id => id !== "schedule");
+    const filtered = parsed;
     if (!filtered.includes("notes")) {
       filtered.push("notes");
     }
@@ -907,7 +909,7 @@ export default function App() {
     }
 
     items = items
-      .filter((item) => item.id !== "schedule" && !(item.widgetType === "album" && item.size === "1x4"))
+      .filter((item) => !(item.widgetType === "album" && item.size === "1x4"))
       .map((item) => item.widgetType === "album" && item.size === "2x4"
         ? { ...item, widgetType: "calendar-album" }
         : item);
@@ -1824,15 +1826,6 @@ export default function App() {
   }, [playlists]);
 
   useEffect(() => {
-    if (!calendarPersistenceReady.current) {
-      calendarPersistenceReady.current = true;
-      return;
-    }
-    const result = saveCalendarEvents(calendarEvents);
-    if (!result.success) console.error("Failed to save calendar events to localStorage:", result.error);
-  }, [calendarEvents]);
-
-  useEffect(() => {
     if (!worldBookPersistenceReady.current) {
       worldBookPersistenceReady.current = true;
       return;
@@ -2294,10 +2287,6 @@ export default function App() {
     });
   };
 
-  // Calendar Schedule handlers
-
-
-
   // Music Handlers
   const handleAddMusicTrack = (track: MusicTrack) => {
     setTracks((prev) => [...prev, track]);
@@ -2491,6 +2480,11 @@ export default function App() {
       id: "offline",
       name: "线下",
       icon: AppIcons.offline(),
+    },
+    {
+      id: "schedule",
+      name: "日程",
+      icon: AppIcons.schedule(),
     },
     {
       id: "settings",
@@ -3711,6 +3705,15 @@ export default function App() {
                 {activeApp === "notes" && (
                   <LazyAppBoundary>
                     <AppNotes
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {activeApp === "schedule" && (
+                  <LazyAppBoundary>
+                    <AppSchedule
+                      entries={scheduleStore.entries}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

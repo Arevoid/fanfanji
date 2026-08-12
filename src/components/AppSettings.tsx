@@ -161,7 +161,7 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
 `;
 
 const BACKUP_KEYS = [
-  "phone_calendar_events",
+  "phone_schedule_v1",
   "phone_characters",
   "phone_characters_v3",
   "phone_homescreen_items",

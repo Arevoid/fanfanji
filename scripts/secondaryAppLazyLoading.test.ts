@@ -18,6 +18,7 @@ for (const component of [
   "AppSettings",
   "AppMemory",
   "AppOffline",
+  "AppSchedule",
 ]) {
   assert.match(appSource, new RegExp(`const ${component} = React\\.lazy\\(load${component}\\)`));
   assert.doesNotMatch(appSource, new RegExp(`import ${component} from`));

@@ -592,14 +592,6 @@ export interface MusicPlaylist {
   tracks: string[]; // Track IDs
 }
 
-export interface CalendarEvent {
-  id: string;
-  date: string; // YYYY-MM-DD
-  title: string;
-  description?: string;
-  isDone: boolean;
-}
-
 export type WorldBookScope =
   | { kind: "global" }
   | { kind: "character"; characterId: string }

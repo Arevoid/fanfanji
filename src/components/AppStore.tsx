@@ -81,6 +81,17 @@ const APPS_LIST: AppItem[] = [
     description: "清爽纯净的本地记事与日程待办工具，支持多栏笔记管理及每日待办，与桌面代办小组件完全同步，助您轻松打理生活与灵感。"
   },
   {
+    id: "schedule",
+    name: "日程",
+    category: "线下约定与时间安排",
+    icon: "📅",
+    iconBg: "bg-sky-500",
+    rating: 4.9,
+    reviews: "全新",
+    size: "3.2 MB",
+    description: "集中查看与好友确认的线下见面安排。首个版本仅展示线下约定，普通待办与经期记录将在后续版本逐步开放。"
+  },
+  {
     id: "diary",
     name: "日记",
     category: "生活记录与私密书写",
