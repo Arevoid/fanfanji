@@ -10,6 +10,7 @@ import {
   CURRENT_SCENE_CONTINUITY_PROMPT,
   detectCallTopicShift,
   NEW_DAY_CONVERSATION_BOUNDARY_PROMPT,
+  shouldUseCrossDayHistoryBoundary,
 } from "../src/features/chat/prompts/directChatTurnPrompt";
 
 const mainPrompt = buildDirectChatMainPrompt({ characterName: "测试角色", disableBracketActions: false });
@@ -24,8 +25,21 @@ assert.match(timePrompt, /不能统一强制礼貌或亲密/);
 assert.match(timePrompt, /不要强制追问行程、表达想念/);
 assert.doesNotMatch(timePrompt, /绝对要表现得像过完一夜/);
 
-assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /Do not resume/);
+assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /dated historical reference/);
+assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /answer, explain, postpone, update, or naturally continue/);
+assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /must never be reinterpreted relative to today/);
+assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /outcome may be unknown/);
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /Never silently replace one activity/);
+assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /not automatically still pending forever/);
+assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /I'm away travelling/);
+assert.doesNotMatch(CURRENT_SCENE_CONTINUITY_PROMPT, /promises, and relationship facts.*still in effect/);
+assert.match(timePrompt, /历史消息里的“明天／今晚／下周”/);
+assert.match(timePrompt, /有关联就连贯回应新旧信息/);
+const oldMessageAt = new Date("2026-07-15T22:44:00+08:00").getTime();
+const currentMessageAt = new Date("2026-08-12T14:19:00+08:00").getTime();
+assert.equal(shouldUseCrossDayHistoryBoundary({ enableTimeAwareness: true, currentMessageAt, latestHistoryMessageAt: oldMessageAt }), true);
+assert.equal(shouldUseCrossDayHistoryBoundary({ enableTimeAwareness: false, currentMessageAt, latestHistoryMessageAt: oldMessageAt }), false);
+assert.equal(shouldUseCrossDayHistoryBoundary({ enableTimeAwareness: true, currentMessageAt, latestHistoryMessageAt: currentMessageAt - 60_000 }), false);
 assert.match(buildRedPacketReactionPrompt("[红包]|6.66|开心"), /¥6\.66/);
 assert.match(buildRedPacketReactionPrompt("[红包]|6.66|开心"), /开心/);
 assert.match(buildStickerResponsePrompt("[表情]|笑|url"), /\[表情\]\|笑\|url/);
@@ -81,6 +95,7 @@ assert.equal((appChatSource.match(/if \(musicContext\) assembledInstructions\.pu
 assert.equal((appChatSource.match(/if \(forumContext\) assembledInstructions\.push\(forumContext\)/g) || []).length, 2);
 assert.equal((appChatSource.match(/if \(diaryContext\) assembledInstructions\.push\(diaryContext\)/g) || []).length, 2);
 assert.equal((appChatSource.match(/NEW_DAY_CONVERSATION_BOUNDARY_PROMPT/g) || []).length >= 3, true);
+assert.equal((appChatSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 2, "send and regeneration must share cross-day history routing");
 assert.equal((appChatSource.match(/buildVoiceCallPrompts\(callTopicShiftDetected\)/g) || []).length, 2);
 
 console.log("Direct chat turn prompt parity tests passed");

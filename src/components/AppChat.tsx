@@ -26,7 +26,7 @@ import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
 import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
-import { buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT } from "../features/chat/prompts/directChatTurnPrompt";
+import { buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
@@ -2562,20 +2562,15 @@ ${memberWbText}`;
       const msgsForHistory = (userMsg && finalMsgs.length > 0 && finalMsgs[finalMsgs.length - 1].id === userMsg.id)
         ? finalMsgs.slice(0, -1)
         : finalMsgs;
-      const isSameLocalDay = (left: number, right: number) => {
-        const leftDate = new Date(left);
-        const rightDate = new Date(right);
-        return leftDate.getFullYear() === rightDate.getFullYear()
-          && leftDate.getMonth() === rightDate.getMonth()
-          && leftDate.getDate() === rightDate.getDate();
-      };
       const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
       // With time awareness enabled, the first message on a new calendar day
       // starts a fresh live session. Yesterday's tail remains stored, but it is
       // no longer sent as the topic that the model should answer right now.
-      const isCrossDayNewSession = turnSettings.enableTimeAwareness
-        && Boolean(userMsg && latestHistoryMessage)
-        && !isSameLocalDay(userMsg!.timestamp, latestHistoryMessage.timestamp);
+      const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
+        enableTimeAwareness: turnSettings.enableTimeAwareness,
+        currentMessageAt: userMsg?.timestamp,
+        latestHistoryMessageAt: latestHistoryMessage?.timestamp,
+      });
       const slicedMsgs = msgsForHistory.slice(-limit);
       const requestTime = new Date();
 
@@ -3668,16 +3663,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         characterName: activeCharacter.name,
       });
       const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
-      const isSameLocalDay = (left: number, right: number) => {
-        const leftDate = new Date(left);
-        const rightDate = new Date(right);
-        return leftDate.getFullYear() === rightDate.getFullYear()
-          && leftDate.getMonth() === rightDate.getMonth()
-          && leftDate.getDate() === rightDate.getDate();
-      };
-      const isCrossDayNewSession = turnSettings.enableTimeAwareness
-        && Boolean(latestHistoryMessage)
-        && !isSameLocalDay(lastUserMsg.timestamp, latestHistoryMessage.timestamp);
+      const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
+        enableTimeAwareness: turnSettings.enableTimeAwareness,
+        currentMessageAt: lastUserMsg.timestamp,
+        latestHistoryMessageAt: latestHistoryMessage?.timestamp,
+      });
       const isConnectedVoiceCall = activeAttachModal === "calling" && callingStatus === "connected";
       const callTopicShiftDetected = detectCallTopicShift({
         isConnectedVoiceCall,

@@ -2,15 +2,34 @@ import type { Message } from "../../../types";
 import { formatLocalTimeContext } from "../../../domain/prompt/timeContext";
 
 export const NEW_DAY_CONVERSATION_BOUNDARY_PROMPT = `[NEW-DAY CONVERSATION BOUNDARY]
-The user's newest message starts a fresh conversation on a different calendar day. Yesterday's unfinished exchange is closed historical context, not the topic currently being continued.
-Answer only the user's newest message as today's opening. Do not resume, answer, or elaborate on yesterday's last topic unless the user explicitly mentions it again.`;
+Time awareness is enabled, and the user's newest message was sent on a later calendar date than the preceding chat history.
+- Treat the earlier messages as dated historical reference, not automatically as a live unfinished turn happening now.
+- First understand how the newest message relates to that history. It may answer, explain, postpone, update, or naturally continue an earlier topic even without repeating its keywords. In that case, respond to the combined meaning naturally.
+- Do not mechanically resume an older topic when the newest message is unrelated, and do not ignore the newest message in order to continue an expired or irrelevant thread.
+- Relative dates in an old message stay anchored to that message's send date. An old “tomorrow”, “tonight”, or “next week” must never be reinterpreted relative to today.
+- When a promised date has passed, it is only a past agreement whose outcome may be unknown. Do not assume it is still pending, move it to a new future date, or claim to still be waiting for that old “tomorrow”. If it becomes relevant, acknowledge naturally that the stated date has already passed.`;
 
 export const CURRENT_SCENE_CONTINUITY_PROMPT = `[CURRENT-SCENE CONTINUITY]
-Treat recently established activities, locations, physical conditions, possessions, promises, and relationship facts in the conversation history as true and still in effect.
+Treat recently established activities, locations, physical conditions, possessions, and relationship facts in the conversation history as context, while respecting any supplied timestamps and later updates.
 - Never silently replace one activity with another. For example, if you just said you were sweaty from running, do not later say you just returned from cycling.
 - If the activity, location, or situation really changes, first make the transition explicit and plausible (including time passing where needed). Do not call the new activity "just now" unless the transition has been established.
-- When the history is unclear, avoid inventing a new concrete activity. Continue the existing topic or ask naturally instead.
+- A plan or promise is not automatically still pending forever. When time-awareness metadata says its target date has passed, preserve it only as a past agreement with an unknown outcome unless later messages confirm what happened.
+- Interpret the newest user message in context rather than demanding a literal question-and-answer format. A reply such as “I'm away travelling” can explain why a gift has not been received and can naturally support both concerns: the trip and handling the gift later.
+- When the history is unclear, avoid inventing a new concrete activity. Continue the genuinely related context or ask naturally instead.
 - This continuity rule applies to every message in a multi-bubble reply as well.`;
+
+export function shouldUseCrossDayHistoryBoundary(input: {
+  enableTimeAwareness: boolean;
+  currentMessageAt?: number;
+  latestHistoryMessageAt?: number;
+}): boolean {
+  if (!input.enableTimeAwareness || !input.currentMessageAt || !input.latestHistoryMessageAt) return false;
+  const current = new Date(input.currentMessageAt);
+  const previous = new Date(input.latestHistoryMessageAt);
+  return current.getFullYear() !== previous.getFullYear()
+    || current.getMonth() !== previous.getMonth()
+    || current.getDate() !== previous.getDate();
+}
 
 export function buildDirectChatMainPrompt(input: {
   characterName: string;
@@ -56,6 +75,8 @@ ${timeLogString}
    - 两条消息同一天、间隔超过 5 分钟：判定为有一段时间没发（不属于短时间连续）。
    - 特别注意：如果前一条消息说的是“晚安要睡了”，而最新一句话是几小时后的清晨，这说明已经隔了一个晚上，开启了新的一天。是否问候、如何问候必须服从角色人设和双方关系，不能统一强制礼貌或亲密。
    - 如果上一条消息距今已过去数小时或数天，只在当前消息确实需要时体现时间流逝；不要强制追问行程、表达想念或套用固定寒暄。
+   - 历史消息里的“明天／今晚／下周”等相对时间，只能以该条消息的发送日期为基准。目标日期已经过去时，它只能表示一项过去的约定或计划，结果未知；禁止把它平移成当前日期之后的新“明天／今晚／下周”，也禁止默认角色至今仍在等待。
+   - 跨日期后的最新消息可能是在解释、更新、推迟或自然承接旧话题，不要求用户重复旧话题关键词。先判断真实语义联系：有关联就连贯回应新旧信息；无关联才不要机械恢复旧话题。始终不能为了续旧话题而忽略用户刚刚表达的内容。
 2. 【自然融合，绝不机械重复时间】：请极度自然地融合这一时间感，像真实生活在此时此地的人一样表现。
 3. 【🚨 极其重要】：上方时间仅是内部推理元数据，不是要发送给用户的内容。禁止在回复中输出或复述任何时间标签、时间戳、时钟气泡或前缀，包括但不限于 \`[发送时间: ...]\`、\`[15:10]\`、\`【15:10】\`。如果需要自然提到时间，只能把它写进完整对话句子中。回复必须保持干净，只输出角色真正要说的话。`;
 }

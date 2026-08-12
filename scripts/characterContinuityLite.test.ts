@@ -57,6 +57,13 @@ assert.ok(describeHistoricalRelativeTime("明天一起吃饭", wednesday, friday
 const thursday = new Date(2026, 6, 23, 12, 0);
 assert.ok(describeHistoricalRelativeTime("明天见", wednesday, thursday).includes("就是今天，仍可能有效"));
 assert.ok(formatHistoricalMessageForPrompt("明天一起吃饭", wednesday, friday).includes("历史发送时间"));
+for (const localizedTomorrow of ["明日会おう", "내일 만나자", "See you tomorrow"]) {
+  const localizedDescription = describeHistoricalRelativeTime(localizedTomorrow, wednesday, friday);
+  assert.ok(localizedDescription.includes("2026年7月23日星期四"), `${localizedTomorrow} should stay anchored to its send date`);
+  assert.ok(localizedDescription.includes("已过去"), `${localizedTomorrow} should be marked expired`);
+}
+assert.ok(describeHistoricalRelativeTime("来週また話そう", wednesday, new Date(2026, 7, 12)).includes("已过去"));
+assert.ok(describeHistoricalRelativeTime("오늘 밤 전화할게", wednesday, friday).includes("已过去"));
 
 const offlineExtraction = await MemoryService.extractMemories({
   character: { id: characterId, name: "A", avatar: "", personality: "", backstory: "" },
