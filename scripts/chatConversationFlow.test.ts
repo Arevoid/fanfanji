@@ -41,8 +41,8 @@ assert.equal(question.state, "needs-follow-up");
 
 const guidance = formatChatConversationFlowGuidance(completed);
 assert.match(guidance, /naturally-completed/);
-assert.match(guidance, /three or more consecutive turns/);
-assert.match(guidance, /character's own voice/);
+assert.match(guidance, /diagnostics, not a universal limit/);
+assert.match(guidance, /this specific character naturally would/);
 assert.equal(guidance.includes("relationId"), false);
 assert.equal(guidance.includes("Memory"), false);
 

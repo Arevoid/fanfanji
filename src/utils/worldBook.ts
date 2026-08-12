@@ -69,7 +69,12 @@ export function buildWorldBookSystemBlocks(
 
   for (const entry of visibleWorldBookEntries) {
     let isTriggered = false;
-    if (entry.triggerType === "constant") {
+    // Persona rules describe a character's stable voice and behavior. They are
+    // always present for their matching scope; keyword misses must never make a
+    // character temporarily lose their own speech habits.
+    if (entry.purpose === "persona_rule") {
+      isTriggered = true;
+    } else if (entry.triggerType === "constant") {
       isTriggered = true;
     } else if (entry.triggerType === "vector") {
       // Smart simulated vector term-overlap matching

@@ -20,7 +20,7 @@ const projection = projectCharacterPrompt({
 
 assert.doesNotMatch(projection.description.content, new RegExp(personality), "description must not duplicate personality");
 assert.match(projection.personality.content, new RegExp(personality), "personality must be preserved verbatim");
-assert.match(projection.personality.content, /不得因为“自然”“简短”或“活人感”而变得冷淡|不得无故变成冷淡、敷衍/);
+assert.match(projection.personality.content, /任何“活人感”、自然聊天、媒体使用、回复长度或通用建议都只是软参考/);
 assert.match(projection.relationship?.content || "", /不得因默认状态为 friend 而削弱/);
 assert.match(CHARACTER_PERSONA_PROTECTION, /角色卡的明确设定为准/);
 assert.match(CHARACTER_LANGUAGE_POLICY, /明确指定.*说话语言/);
@@ -64,6 +64,27 @@ const fullProjection = projectCharacterPrompt({
 }, "partner");
 assert.match(fullProjection.personality.content, /线上会黏着 user 直球说话/, "the imported role card must not be truncated");
 
+const stickyA = projectCharacterPrompt({
+  id: "sticky-a",
+  name: "黏人甲",
+  personality: "黏人直球的话痨，会叫 user 姐姐，口癖是‘快理我嘛’，爱连续发短句。",
+  backstory: "",
+  references: [{ id: "ref-a", title: "语言规范", content: "聊天习惯：喜欢用感叹号，绝不使用礼貌客服句。\n无关剧情：住在海边。" }],
+});
+const stickyB = projectCharacterPrompt({
+  id: "sticky-b",
+  name: "黏人乙",
+  personality: "黏人但嘴硬寡言，称呼 user 为笨蛋，习惯一句话说完，不撒娇。",
+  backstory: "",
+  references: [{ id: "ref-b", title: "说话方式", content: "口癖：‘随你’。聊天时不用感叹号。\n无关剧情：喜欢蓝色。" }],
+});
+assert.match(stickyA.personality.content, /参考资料中提炼的稳定表达特征/);
+assert.match(stickyA.personality.content, /喜欢用感叹号/);
+assert.doesNotMatch(stickyA.personality.content, /住在海边/, "irrelevant reference plot must not be copied into the speech profile");
+assert.notEqual(stickyA.expressionAnchor.content, stickyB.expressionAnchor.content, "similar archetypes must keep distinct final voice anchors");
+assert.match(stickyA.expressionAnchor.content, /快理我嘛/);
+assert.match(stickyB.expressionAnchor.content, /随你/);
+
 const entry = (id: string, title: string, triggerType: WorldBookEntry["triggerType"]): WorldBookEntry => ({
   id,
   title,
@@ -87,13 +108,17 @@ const matchedBlocks = buildWorldBookSystemBlocks([
 ], "character-a", "要不要去第三食堂", { scenario: "chat", characterId: "character-a" });
 assert.match(matchedBlocks.formattedAll, /第三食堂/, "keyword entries must activate from recent context");
 
+const personaRule = { ...entry("voice", "专属口癖", "keys"), purpose: "persona_rule" as const, keywords: "永不命中的关键词" };
+const personaBlocks = buildWorldBookSystemBlocks([personaRule], "character-a", "你好", { scenario: "chat", characterId: "character-a" });
+assert.match(personaBlocks.formattedAll, /专属口癖/, "persona_rule must remain active even when its keyword does not match");
+
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const chatPromptBuilderSource = readFileSync(new URL("../src/features/chat/prompts/chatPromptBuilders.ts", import.meta.url), "utf8");
 const messagePromptSerializerSource = readFileSync(new URL("../src/features/chat/prompts/messagePromptSerializer.ts", import.meta.url), "utf8");
 assert.match(chatSource, /projectCharacterPrompt\(activeCharacter, activeRelationship\?\.relationship\)/);
 assert.match(chatPromptBuilderSource, /assembleChatInstructions\(input\.instructions/);
 assert.match(chatSource, /slice\(-10\)/, "World Book activation must scan roughly ten recent messages");
-assert.doesNotMatch(chatSource, /buildStableRoleAnchor/);
+assert.match(chatPromptBuilderSource, /expressionAnchor/, "a role-specific anchor must follow shared guidance");
 assert.doesNotMatch(chatSource, /includeAllVisibleEntries: true/, "direct chat must not inject every visible World Book entry");
 assert.doesNotMatch(chatSource, /Do not force warmth/, "base chat prompt must not bias every role toward coldness");
 assert.doesNotMatch(chatSource, /Keep replies concise, warm/, "proactive chat must not force a warm and brief persona");

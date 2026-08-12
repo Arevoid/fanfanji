@@ -2887,6 +2887,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         characterProjection,
         characterDescriptionText,
         diagnosticLabel: "direct chat prompt",
+        finalPersonaRules: wbBlocks.allTriggered
+          .filter((entry) => entry.purpose === "persona_rule")
+          .map((entry) => `【${entry.title}】\n${entry.content}`),
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           activeCharacter,
           getVisibleWorldBookEntries(worldBookEntries || [], activeChatCharId || "", {
@@ -3908,6 +3911,9 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         characterProjection,
         characterDescriptionText,
         diagnosticLabel: "regenerate prompt",
+        finalPersonaRules: wbBlocks.allTriggered
+          .filter((entry) => entry.purpose === "persona_rule")
+          .map((entry) => `【${entry.title}】\n${entry.content}`),
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           activeCharacter,
           getVisibleWorldBookEntries(worldBookEntries || [], activeChatCharId || "", {
@@ -4323,6 +4329,10 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         conversationGuidance,
         taskPrompt,
         instructionsPrompt,
+        expressionAnchor: proactiveCharacterProjection.expressionAnchor.content,
+        finalPersonaRules: wbBlocks.allTriggered
+          .filter((entry) => entry.purpose === "persona_rule")
+          .map((entry) => `【${entry.title}】\n${entry.content}`),
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           friend,
           getVisibleWorldBookEntries(worldBookEntries || [], friend.id, {

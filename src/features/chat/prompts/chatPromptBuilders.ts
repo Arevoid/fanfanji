@@ -10,6 +10,7 @@ export function finalizeCharacterChatSystemInstruction(input: {
   characterProjection: CharacterPromptProjection;
   characterDescriptionText: string;
   diagnosticLabel: "direct chat prompt" | "regenerate prompt";
+  finalPersonaRules?: readonly string[];
   finalLanguageInstruction: string;
 }): string {
   const assembly = assembleChatInstructions(input.instructions, [
@@ -20,7 +21,10 @@ export function finalizeCharacterChatSystemInstruction(input: {
   if (assembly.diagnostics.duplicateBlockIds.length || assembly.diagnostics.duplicateSourceIds.length || assembly.diagnostics.duplicateContentBlockIds.length) {
     console.warn(`[${input.diagnosticLabel}] duplicate blocks removed`, assembly.diagnostics);
   }
-  return `${assembly.systemInstruction}\n\n---\n\n${input.finalLanguageInstruction}`;
+  const personaRuleReminder = input.finalPersonaRules?.length
+    ? `\n\n[本轮常驻角色规则]\n${input.finalPersonaRules.join("\n\n").slice(0, 1800)}`
+    : "";
+  return `${assembly.systemInstruction}\n\n${input.characterProjection.expressionAnchor.content}${personaRuleReminder}\n\n---\n\n${input.finalLanguageInstruction}`;
 }
 
 export function buildGroupChatSystemInstruction(input: { userName: string; userBio?: string; groupName: string; worldContext: string; memberDefinitions: string }): string {
@@ -49,10 +53,9 @@ ${formatUserKnowledgeBoundary()}
    - 同一成员可以连续发送 2 至 3 条短消息，例如先回应再补充，或发出一句后被另一位成员接话再继续；每一条都必须独立使用自己的 [SENDER_NAME: 名字] 标记。
    - 不要为了“多人”而编造成员之间不存在的熟识、共同经历或关系；没有足够上下文时宁可让该成员保持沉默。
 6. 🚨【标点与格式规范】：
-   - 微信聊天简短而随意，请保持口语化、极度真实的微信聊天风格。
-   - 不要输出大段的长篇大论，尽量简短有力。
+   - 每个成员的口语或书面程度、长短、标点、气泡数量都服从其各自人设；不得把全员统一成简短随意的聊天模板。
    - 不要使用任何小说式的“旁白、场景描写、动作心理括号（如 '(笑)' 或 '（叹气）'）”。群聊里只能输出他们作为真人打字发在微信群里的文本。
-7. 🚨【特殊媒体克制使用】：日常群聊默认使用普通文字。除非成员人设或可用世界书明确偏好、当前语境确实需要声音或即时反应、或用户明确要求，否则不要输出语音或表情包标记；不要连续无理由发送特殊消息。
+7. 🚨【特殊媒体角色化使用】：各成员是否使用普通文字、语音、emoji 或表情包以及频率，服从该成员自己的明确习惯和当前语境；不得对全员套用同一默认频率。只需确保特殊消息格式有效，不要为了展示功能强迫使用。
 
 ${CHARACTER_LANGUAGE_POLICY}
 群聊中每位成员必须分别依据自己的角色资料决定输出语言，不能把一位成员的国籍或语言设定套用给其他成员。
@@ -89,8 +92,13 @@ export function buildProactiveChatSystemInstruction(input: {
   userName: string; userBio: string; worldBook: string; timeContext: string;
   knowledgeBoundary: string; truthPrompt: string; conversationGuidance: string;
   taskPrompt: string; instructionsPrompt: string;
+  expressionAnchor: string;
+  finalPersonaRules?: readonly string[];
   finalLanguageInstruction: string;
 }): string {
+  const personaRuleReminder = input.finalPersonaRules?.length
+    ? `\n\n[本轮常驻角色规则]\n${input.finalPersonaRules.join("\n\n").slice(0, 1800)}`
+    : "";
   return `${LIVING_HUMAN_PROMPT}
 
 ---
@@ -113,7 +121,8 @@ ${input.taskPrompt}
 
 ${input.instructionsPrompt}
 
-发送前确认：回复内容、称呼、主动程度、话量和情感方向都与上方唯一的人设块一致。
+[发送前角色一致性确认]
+${input.expressionAnchor}${personaRuleReminder}
 
 ---
 

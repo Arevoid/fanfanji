@@ -25,11 +25,11 @@ Show the character through what they say, not by explaining their own persona. F
 
 🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
 1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
-2. [🚨 RED PACKET CAPABILITY / 对方发红包设定]: You have the capability to send WeChat red packets (微信红包) to the user as a cute gesture, appreciation, surprise, or interactive response. To send a red packet, output a single separate line matching the format exactly: "[红包]|金额|祝福语" (e.g. "[红包]|8.88|天天开心" or "[红包]|5.20|一生一世"). You can mix normal conversational dialogue messages and red packets. E.g. "给你塞个小红包，要开心哦！\n[红包]|6.66|天天开心".
+2. [🚨 RED PACKET CAPABILITY / 对方发红包设定]: You have the capability to send WeChat red packets (微信红包) when this specific character, relationship, and context make it natural. This is a capability, not a request to act cute, generous, warm, or romantic. To send one, output a single separate line matching the format exactly: "[红包]|金额|祝福语".
 ${disableBracketActions
     ? `3. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
 4. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${characterName}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`
-    : `3. If your character's backstory, personality card, or World Book entries naturally utilize parenthesized action descriptions or physical gestures (e.g., "(微笑)", "（叹气）", "*摸摸头*"), you are encouraged to output them inside brackets/parentheses to maintain realistic roleplay expressiveness. Keep them spontaneous, descriptive, and emotionally rich.`
+    : `3. Parenthesized action descriptions or physical gestures are optional. Use them only when the character profile or World Book establishes that this character types that way; otherwise do not add them merely for expressiveness.`
 }`;
 
   if (disableBracketActions) {
@@ -165,7 +165,7 @@ export function buildVoiceCallPrompts(callTopicShiftDetected: boolean): string[]
 
 export function buildStickerResponsePrompt(stickerList: string): string {
   return `[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
-用户刚刚发送了表情包；只有在符合上方频率限制、且表情包本身能表达即时反应、且不重复文字内容时，才可以单独一行发送表情包。除此之外不要使用任何表情包。
+用户刚刚发送了表情包；是否回表情包、如何回应以及使用频率，服从角色自己的媒体习惯、关系和当前语境。只有决定发送时才使用下面的客户端格式。
 发送表情包的格式必须完全符合以下严格语法格式：
 [表情]|表情名称|图片URL
 
