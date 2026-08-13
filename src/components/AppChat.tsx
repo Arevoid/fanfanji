@@ -37,7 +37,9 @@ import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/servic
 import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage, buildProactiveChatSystemInstruction, finalizeCharacterChatSystemInstruction } from "../features/chat/prompts/chatPromptBuilders";
 import { buildProactiveOfflineInvitationPrompt } from "../features/chat/prompts/proactiveOfflineInvitationPrompt";
+import { buildProactiveOfflineResponsePrompt } from "../features/chat/prompts/proactiveOfflineResponsePrompt";
 import { parseProactiveOfflineInvitationDirective } from "../features/chat/services/proactiveOfflineInvitationProtocol";
+import { applyProactiveOfflineResponse, parseProactiveOfflineResponseDirective } from "../features/chat/services/proactiveOfflineResponseProtocol";
 import { deriveProactiveOfflineContextEvidence } from "../features/chat/services/proactiveOfflineContext";
 import { buildGroupMemberPrivateContext, buildIsolatedGroupMemberDefinitions } from "../features/chat/prompts/groupMemberPrivateContext";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
@@ -2571,6 +2573,12 @@ ${memberWbText}`;
     const turnCharacter = latestActiveCharacterRef.current || activeCharacter;
     const turnRelationship = latestActiveRelationshipRef.current;
     const turnSettings = resolveChatTurnSettings(turnCharacter);
+    const pendingProactiveOfflineAppointment = turnRelationship && userMsg?.sender === "user"
+      ? appointments.find((appointment) => appointment.relationId === turnRelationship.id
+        && appointment.characterId === turnRelationship.characterId
+        && appointment.userIdentityId === turnRelationship.userIdentityId
+        && (appointment.status === "awaiting_user" || appointment.status === "negotiating"))
+      : undefined;
     let proactiveOfflineAllowedModes: AppointmentMode[] = [];
     if (turnRelationship
       && !replyContext.isGroup
@@ -2989,6 +2997,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }));
       }
+      if (pendingProactiveOfflineAppointment) {
+        assembledInstructions.push(buildProactiveOfflineResponsePrompt({
+          appointment: pendingProactiveOfflineAppointment,
+          now: Date.now(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }));
+      }
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       const systemInstruction = finalizeCharacterChatSystemInstruction({
         instructions: assembledInstructions,
@@ -3024,6 +3039,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       });
 
       if (data && data.text) {
+        const proactiveOfflineResponseParse = parseProactiveOfflineResponseDirective({
+          text: data.text,
+          appointment: pendingProactiveOfflineAppointment,
+          latestUserText: userMsg?.sender === "user" ? userMsg.content : "",
+          now: Date.now(),
+        });
+        data.text = proactiveOfflineResponseParse.visibleText;
         const proactiveOfflineParse = parseProactiveOfflineInvitationDirective({
           text: data.text,
           allowedModes: proactiveOfflineAllowedModes,
@@ -3150,6 +3172,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
           if (createdMessages.length > 0) {
             recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
+            if (proactiveOfflineResponseParse.directive && pendingProactiveOfflineAppointment && userMsg) {
+              const updatedAppointment = applyProactiveOfflineResponse({
+                appointment: pendingProactiveOfflineAppointment,
+                directive: proactiveOfflineResponseParse.directive,
+                userMessageId: userMsg.id,
+                characterMessageId: createdMessages[0].id,
+                now: createdMessages[0].timestamp,
+              });
+              if (!updatedAppointment || !onSaveAppointment?.(updatedAppointment)) {
+                console.warn("Proactive offline response could not be persisted.");
+              }
+            }
             if (proactiveOfflineParse.directive && turnRelationship) {
               const saved = persistProactiveOfflineInvitation({
                 relationship: turnRelationship,
