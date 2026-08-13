@@ -49,6 +49,7 @@ export const storageKeys = {
   offlineStories: "phone_offline_stories",
   memoryVaultSettings: "phone_memory_vault_settings",
   scheduleStore: "phone_schedule_v1",
+  readingStore: "phone_reading_store_v1",
   presets: "phone_presets",
   dataSchemaVersion: "phone_data_schema_version",
   offlineModeActive: (relationId: string) => `offline_mode_active_${relationId}`,

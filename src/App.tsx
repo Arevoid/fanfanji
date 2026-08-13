@@ -106,6 +106,7 @@ import { useForumActivityEngine } from "./features/forum/hooks/useForumActivityE
 import { shouldSeedScheduleForFreshInstall } from "./features/home/freshInstallPolicy";
 import {
   BookOpen,
+  BookOpenText,
   Bookmark,
   CalendarDays,
   Cloud,
@@ -138,6 +139,7 @@ const loadAppSettings = () => import("./components/AppSettings");
 const loadAppMemory = () => import("./components/AppMemory");
 const loadAppOffline = () => import("./components/AppOffline");
 const loadAppSchedule = () => import("./components/AppSchedule");
+const loadAppReading = () => import("./components/AppReading");
 
 const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   chat: loadAppChat,
@@ -152,6 +154,7 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   memory: loadAppMemory,
   offline: loadAppOffline,
   schedule: loadAppSchedule,
+  reading: loadAppReading,
 };
 
 const IDLE_PRELOAD_APP_IDS = ["archives", "worldbook", "notes", "store", "settings"] as const;
@@ -173,6 +176,7 @@ const AppSettings = React.lazy(loadAppSettings);
 const AppMemory = React.lazy(loadAppMemory);
 const AppOffline = React.lazy(loadAppOffline);
 const AppSchedule = React.lazy(loadAppSchedule);
+const AppReading = React.lazy(loadAppReading);
 
 function LazyAppBoundary({ children }: React.PropsWithChildren) {
   return (
@@ -197,6 +201,7 @@ const AppIcons = {
   settings: (className = "w-6 h-6") => <SettingsIcon className={className} strokeWidth={1.8} />,
   forum: (className = "w-6 h-6") => <Images className={className} strokeWidth={1.8} />,
   schedule: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
+  reading: (className = "w-6 h-6") => <BookOpenText className={className} strokeWidth={1.8} />,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.8} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.8} />,
@@ -2512,6 +2517,11 @@ export default function App() {
       icon: AppIcons.schedule(),
     },
     {
+      id: "reading",
+      name: "阅读",
+      icon: AppIcons.reading(),
+    },
+    {
       id: "settings",
       name: "设置",
       icon: AppIcons.settings(),
@@ -3748,6 +3758,15 @@ export default function App() {
                         setActiveChatRelationId(relationId);
                         setActiveApp("chat");
                       }}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {activeApp === "reading" && (
+                  <LazyAppBoundary>
+                    <AppReading
+                      userIdentityId={activeIdentityId}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

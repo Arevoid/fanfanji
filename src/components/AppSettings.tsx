@@ -1366,6 +1366,7 @@ export default function AppSettings({
     { key: "worldbook", label: "世界书" },
     { key: "music", label: "音乐" },
     { key: "schedule", label: "日程" },
+    { key: "reading", label: "阅读" },
     { key: "forum", label: "论坛" },
     { key: "notes", label: "备忘录" },
     { key: "memory", label: "记忆书" },

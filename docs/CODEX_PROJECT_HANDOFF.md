@@ -130,7 +130,8 @@ domain Builder / Policy
 - 音频/TTS 缓存：`src/utils/audioDb.ts`；
 - 表情包：`src/utils/stickerDb.ts`；
 - 上传字体：`src/utils/fontAssetDb.ts`；
-- 大型线下故事：`src/core/storage/offlineStoryDb.ts`。
+- 大型线下故事：`src/core/storage/offlineStoryDb.ts`；
+- 阅读应用原始小说正文：`src/core/storage/readingAssetDb.ts`。
 
 元数据留在普通仓储，Blob 留在 IndexedDB。删除实体时也要删除关联 Blob。
 
@@ -665,7 +666,7 @@ Node 路由在 `server.ts`，Cloudflare 对应路由在 `src/cloudflare/worker.t
 - 大 Blob 使用 IndexedDB；
 - 系统清理要同时清 localStorage、sessionStorage、Cache Storage 和全部二进制 DB。
 
-`src/features/settings/clearApplicationData.ts` 已统一清理音频、图片、表情、线下故事和字体 DB。新增新的 IndexedDB 时，必须把 clearer 加进去。
+`src/features/settings/clearApplicationData.ts` 已统一清理音频、图片、表情、线下故事、字体和阅读正文 DB。新增新的 IndexedDB 时，必须把 clearer 加进去。
 
 ## 12. 最近的重要修改（2026-08-11 至 2026-08-13）
 
@@ -712,6 +713,19 @@ Node 路由在 `server.ts`，Cloudflare 对应路由在 `src/cloudflare/worker.t
 - 日程到期可进入线下并由邀请方开启第一幕；
 - 完成线下后约定状态变为历史；
 - 日程只为全新用户默认加入桌面，老用户布局不变。
+
+### 12.5 阅读应用基础（Round 1～3）
+
+- 产品基线位于 `docs/READING_APP_PRODUCT_BASELINE.md`，技术边界位于 `docs/READING_APP_TECHNICAL_DESIGN.md`；
+- 已建立 `src/domain/reading/` 的书籍、章节、稳定段落锚点、进度、标注、偏好与完整关系作用域模型；
+- 私人阅读统一按 `userIdentityId + bookId` 隔离，未来共读必须继续校验 `readingRoomId + relationId + characterId + conversationId`；
+- 元数据键为 `phone_reading_store_v1`，原始 TXT/Markdown 正文 Blob 位于 `FanfanjiReadingDB`；
+- 阅读字体只保存全局 `fontAssetId` 引用；阅读应用已完成懒加载、默认图标、商店卡、自定义图标和桌面渲染接入；
+- “阅读”对新老用户均不默认安装，只能通过应用商店主动安装；卸载只移除入口，不删除阅读数据；
+- 第一阶段只做 TXT/Markdown 和上下滚动，AI 分析、EPUB 与左右翻页不得提前混入。
+- Round 3 已接入本地文件导入：UTF-8/UTF-16/GB18030 解码、正文 SHA-256、同身份重复检测、跨身份隔离、IndexedDB Blob 写入与元数据失败回滚。
+- 导入时正文会规范化为 UTF-8 Blob；元数据仓库不可读时拒绝写入，避免以安全空值覆盖原始损坏数据。
+- 当前阅读页已能展示当前身份的本地书架和导入反馈，但尚未实现章节解析与正文阅读。
 
 ## 13. 新增 AI 应用时的强制流程
 

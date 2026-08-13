@@ -92,6 +92,17 @@ const APPS_LIST: AppItem[] = [
     description: "集中查看与好友确认的线下见面安排。首个版本仅展示线下约定，普通待办与经期记录将在后续版本逐步开放。"
   },
   {
+    id: "reading",
+    name: "阅读",
+    category: "本地阅读与 AI 好友共读",
+    icon: "📚",
+    iconBg: "bg-stone-700",
+    rating: 5.0,
+    reviews: "全新",
+    size: "4.1 MB",
+    description: "将 TXT 或 Markdown 小说保存在本地，后续可邀请一位 AI 好友共读、评论和讨论，并开启独立记忆的穿书故事。"
+  },
+  {
     id: "diary",
     name: "日记",
     category: "生活记录与私密书写",
