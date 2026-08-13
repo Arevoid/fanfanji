@@ -1,5 +1,5 @@
-import { getReadingCoStory, loadReadingCoStoryStore, saveReadingCoStory, saveReadingCoStoryStore } from "../../../core/storage/repositories/readingCoStoryRepository";
-import type { ReadingCoStoryActionMode, ReadingCoStoryScope, ReadingCoStoryState, ReadingCoStoryTurn, ReadingStoryAiActionResult } from "../../../domain/reading/coStoryTypes";
+import { getReadingCoStory, listReadingCoStorySaves, listReadingCoStoryTurns, loadReadingCoStoryStore, saveReadingCoStory, saveReadingCoStorySave, saveReadingCoStoryStore } from "../../../core/storage/repositories/readingCoStoryRepository";
+import type { ReadingCoStoryActionMode, ReadingCoStorySave, ReadingCoStoryScope, ReadingCoStoryState, ReadingCoStoryTurn, ReadingStoryAiActionResult } from "../../../domain/reading/coStoryTypes";
 import type { ReadingStoryLength } from "../../../domain/reading/storyTypes";
 import { evaluateReadingStoryAiAction, ReadingCoStoryPolicyError } from "./readingCoStoryPolicy";
 
@@ -73,6 +73,22 @@ export function resolveReadingCoStoryApproval(input: { scope: ReadingCoStoryScop
   const next = { ...story, pendingApproval: undefined, activeActor: "user" as const, updatedAt: now };
   persist(saveReadingCoStoryStore({ ...replaceStory(loaded.value, next), turns: [...loaded.value.turns, turn] }), next);
   return next;
+}
+
+export function createReadingCoStorySave(input: { scope: ReadingCoStoryScope; label: string; now?: number }): ReadingCoStorySave {
+  const story = getReadingCoStory(input.scope);
+  if (!story) throw new ReadingCoStoryError("存档对应的共同故事不存在", "missing");
+  const turn = listReadingCoStoryTurns(input.scope).at(-1);
+  if (!turn) throw new ReadingCoStoryError("没有可保存的共同故事回合", "invalid");
+  const save: ReadingCoStorySave = { ...input.scope, id: createId("co-story-save"), turnId: turn.turnId, label: text(input.label, 300) || "手动存档", state: structuredClone(story), createdAt: input.now ?? Date.now() };
+  return persist(saveReadingCoStorySave(save), save);
+}
+
+export function loadReadingCoStorySave(input: { scope: ReadingCoStoryScope; saveId: string; now?: number }): ReadingCoStoryState {
+  const save = listReadingCoStorySaves(input.scope).find((candidate) => candidate.id === input.saveId);
+  if (!save) throw new ReadingCoStoryError("共同故事存档不存在", "missing");
+  const restored = { ...structuredClone(save.state), updatedAt: input.now ?? Date.now() };
+  return persist(saveReadingCoStory(restored), restored);
 }
 
 export function getCoStory(scope: ReadingCoStoryScope): ReadingCoStoryState | undefined { return getReadingCoStory(scope); }

@@ -1,5 +1,5 @@
 import { normalizeReadingCoStoryStore } from "../../../domain/reading/coStoryNormalization";
-import { createEmptyReadingCoStoryStore, type ReadingCoStoryScope, type ReadingCoStoryState, type ReadingCoStoryStore, type ReadingCoStoryTurn } from "../../../domain/reading/coStoryTypes";
+import { createEmptyReadingCoStoryStore, type ReadingCoStorySave, type ReadingCoStoryScope, type ReadingCoStoryState, type ReadingCoStoryStore, type ReadingCoStoryTurn } from "../../../domain/reading/coStoryTypes";
 import { readJson, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
@@ -12,3 +12,5 @@ export function getReadingCoStory(scope: ReadingCoStoryScope): ReadingCoStorySta
 export function saveReadingCoStory(story: ReadingCoStoryState): StorageWriteResult { const store = loadReadingCoStoryStore().value; return saveReadingCoStoryStore({ ...store, stories: [...store.stories.filter((candidate) => !sameScope(candidate, story)), story] }); }
 export function listReadingCoStoryTurns(scope: ReadingCoStoryScope): ReadingCoStoryTurn[] { return loadReadingCoStoryStore().value.turns.filter((turn) => sameScope(turn, scope)).sort((left, right) => left.turnIndex - right.turnIndex); }
 export function saveReadingCoStoryTurn(turn: ReadingCoStoryTurn): StorageWriteResult { const store = loadReadingCoStoryStore().value; return saveReadingCoStoryStore({ ...store, turns: [...store.turns.filter((candidate) => !(candidate.turnId === turn.turnId && sameScope(candidate, turn))), turn] }); }
+export function listReadingCoStorySaves(scope: ReadingCoStoryScope): ReadingCoStorySave[] { return loadReadingCoStoryStore().value.saves.filter((save) => sameScope(save, scope)).sort((left, right) => right.createdAt - left.createdAt); }
+export function saveReadingCoStorySave(save: ReadingCoStorySave): StorageWriteResult { const store = loadReadingCoStoryStore().value; return saveReadingCoStoryStore({ ...store, saves: [...store.saves.filter((candidate) => !(candidate.id === save.id && sameScope(candidate, save))), save] }); }

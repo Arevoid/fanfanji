@@ -84,6 +84,14 @@ export interface ReadingCoStoryTurn extends ReadingCoStoryScope {
   createdAt: number;
 }
 
+export interface ReadingCoStorySave extends ReadingCoStoryScope {
+  id: string;
+  turnId: string;
+  label: string;
+  state: ReadingCoStoryState;
+  createdAt: number;
+}
+
 export interface ReadingStoryAiActionResult {
   action: string;
   rationale: string;
@@ -96,6 +104,7 @@ export interface ReadingCoStoryStore {
   version: typeof READING_CO_STORY_STORE_VERSION;
   stories: ReadingCoStoryState[];
   turns: ReadingCoStoryTurn[];
+  saves: ReadingCoStorySave[];
 }
 
-export const createEmptyReadingCoStoryStore = (): ReadingCoStoryStore => ({ version: READING_CO_STORY_STORE_VERSION, stories: [], turns: [] });
+export const createEmptyReadingCoStoryStore = (): ReadingCoStoryStore => ({ version: READING_CO_STORY_STORE_VERSION, stories: [], turns: [], saves: [] });

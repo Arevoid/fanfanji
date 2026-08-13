@@ -85,5 +85,14 @@ export function normalizeReadingCoStoryStore(value: unknown): ReadingCoStoryStor
       createdAt: Number(item.createdAt) || Date.now(),
     })).filter((item) => item.turnId && item.coStoryId && item.narrative && ["user", "ai_friend", "system"].includes(String(item.actor)) && ["user", "ai_friend", "shared"].includes(String(item.perspective)) && ["low", "major"].includes(String(item.risk)))
     : [];
-  return { version: READING_CO_STORY_STORE_VERSION, stories: stories as ReadingCoStoryStore["stories"], turns: turns as ReadingCoStoryStore["turns"] };
+  const normalizedStories = stories as ReadingCoStoryStore["stories"];
+  const saves = Array.isArray(source.saves)
+    ? source.saves.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).filter(scopeValid).map((item) => {
+      const state = normalizedStories.find((story) => story.userIdentityId === text(item.userIdentityId, 200) && story.coStoryId === text(item.coStoryId, 200) && story.relationId === text(item.relationId, 200) && story.characterId === text(item.characterId, 200));
+      const rawState = item.state && typeof item.state === "object" && !Array.isArray(item.state) ? item.state as Record<string, unknown> : undefined;
+      const savedState = rawState ? normalizeReadingCoStoryStore({ version: READING_CO_STORY_STORE_VERSION, stories: [rawState], turns: [], saves: [] }).stories[0] : state;
+      return savedState ? { userIdentityId: text(item.userIdentityId, 200), coStoryId: text(item.coStoryId, 200), relationId: text(item.relationId, 200), characterId: text(item.characterId, 200), id: text(item.id, 200), turnId: text(item.turnId, 200), label: text(item.label, 300) || "手动存档", state: savedState, createdAt: Number(item.createdAt) || Date.now() } : undefined;
+    }).filter((item): item is NonNullable<typeof item> => Boolean(item?.id && item.turnId))
+    : [];
+  return { version: READING_CO_STORY_STORE_VERSION, stories: normalizedStories, turns: turns as ReadingCoStoryStore["turns"], saves };
 }

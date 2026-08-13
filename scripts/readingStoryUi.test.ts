@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const view = readFileSync(new URL("../src/components/reading/ReadingStoryView.tsx", import.meta.url), "utf8");
+const playShell = readFileSync(new URL("../src/components/reading/ReadingStoryPlayShell.tsx", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/components/AppReading.tsx", import.meta.url), "utf8");
 const generation = readFileSync(new URL("../src/features/reading/story/readingStoryGeneration.ts", import.meta.url), "utf8");
 const coStoryView = readFileSync(new URL("../src/components/reading/ReadingCoStoryView.tsx", import.meta.url), "utf8");
 const coStoryGeneration = readFileSync(new URL("../src/features/reading/story/readingCoStoryGeneration.ts", import.meta.url), "utf8");
 assert.match(view, /故事正文/);
-assert.match(view, /下一步选项/);
+assert.match(playShell, /下一步怎么走/);
 assert.match(view, /输入你的行动/);
-assert.match(view, /档案/);
+assert.match(view, /角色/);
 assert.match(view, /情报/);
 assert.match(view, /读档/);
 assert.match(app, /setReadingStoryBookId/);
