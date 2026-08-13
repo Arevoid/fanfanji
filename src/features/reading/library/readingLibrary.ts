@@ -130,6 +130,22 @@ export function updateReadingBookDetails(
   return updated;
 }
 
+export function updateReadingBookCover(
+  input: { userIdentityId: string; bookId: string; coverUrl?: string },
+  dependencies: ReadingLibraryDependencies = defaultDependencies,
+): ReadingBook {
+  const store = requireStore(dependencies);
+  const book = findScopedBook(store, input.userIdentityId, input.bookId);
+  const coverUrl = input.coverUrl?.trim();
+  if (coverUrl && !coverUrl.startsWith("data:image/")) throw new ReadingLibraryError("save-failed", "书籍封面必须是本地图片");
+  const updated = { ...book, coverUrl: coverUrl || undefined, updatedAt: dependencies.now() };
+  saveOrThrow(dependencies, {
+    ...store,
+    books: store.books.map((candidate) => candidate.userIdentityId === input.userIdentityId && candidate.id === input.bookId ? updated : candidate),
+  });
+  return updated;
+}
+
 export function setReadingBookArchived(
   userIdentityId: string,
   bookId: string,

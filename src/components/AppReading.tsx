@@ -34,6 +34,7 @@ import {
   retryReadingAssetCleanup,
   setReadingBookArchived,
   updateReadingBookDetails,
+  updateReadingBookCover,
 } from "../features/reading/library/readingLibrary";
 import ReadingReader from "./reading/ReadingReader";
 import ReadingStoryView from "./reading/ReadingStoryView";
@@ -43,7 +44,7 @@ import { createAiReadingRoom, ReadingCoReadingError } from "../features/reading/
 import { getAiReadingState, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
 import { advanceAiReadingToParagraph, AiReadingBoundaryError } from "../features/reading/coReading/aiReadingBoundary";
 import { createUserReadingComment, listReadingComments, startReadingDiscussion, ReadingCoReadingContentError } from "../features/reading/coReading/readingCoReadingContent";
-import { getReadingBookBible, listReadingAnalysisTasks } from "../core/storage/repositories/readingAnalysisRepository";
+import { getReadingBookBible, listReadingAnalysisEntities, listReadingAnalysisTasks } from "../core/storage/repositories/readingAnalysisRepository";
 import { createReadingAnalysisTask, startReadingAnalysisTask, saveBookBible, ReadingAnalysisError } from "../features/reading/analysis/readingAnalysis";
 import type { ReadingBookBible } from "../domain/reading/analysisTypes";
 import { listReadingStories } from "../core/storage/repositories/readingStoryRepository";
@@ -59,6 +60,12 @@ import {
   type ReadingShelfSort,
 } from "../features/reading/navigation/readingNavigation";
 import ReadingBookCover from "./reading/ReadingBookCover";
+import ReadingBookActionSheet, { type ReadingBookAction } from "./reading/ReadingBookActionSheet";
+import ReadingStorySetupWizard from "./reading/ReadingStorySetupWizard";
+import type { ReadingStorySetupDraft } from "../features/reading/story/readingStorySetup";
+import { describeReadingStoryIdentity } from "../features/reading/story/readingStorySetup";
+import { commitReadingStoryTurn, createReadingStory } from "../features/reading/story/readingStory";
+import { createReadingCoStory, createReadingCoStoryOpening } from "../features/reading/story/readingCoStory";
 
 interface AppReadingProps {
   userIdentityId: string;
@@ -79,6 +86,10 @@ const formatDate = (timestamp: number): string => new Intl.DateTimeFormat("zh-CN
 export default function AppReading({ userIdentityId, settings, characters = [], relationships = [], onClose }: AppReadingProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const archiveInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
+  const suppressBookClickRef = useRef(false);
   const [books, setBooks] = useState<ReadingBook[]>([]);
   const [chapters, setChapters] = useState<ReadingChapter[]>([]);
   const [progress, setProgress] = useState<ReadingProgress[]>([]);
@@ -100,6 +111,10 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
   const [readingCoStoryBookId, setReadingCoStoryBookId] = useState<string | null>(null);
   const [initialStoryId, setInitialStoryId] = useState<string | undefined>();
   const [initialCoStoryId, setInitialCoStoryId] = useState<string | undefined>();
+  const [actionBookId, setActionBookId] = useState<string | null>(null);
+  const [quickEditBookId, setQuickEditBookId] = useState<string | null>(null);
+  const [coverBookId, setCoverBookId] = useState<string | null>(null);
+  const [storySetupBookId, setStorySetupBookId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -143,6 +158,9 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
   const selectedBookBible = useMemo(() => selectedBook ? getReadingBookBible({ userIdentityId, bookId: selectedBook.id }) : undefined, [analysisRefreshToken, selectedBook, userIdentityId]);
   const selectedRoom = rooms.find((room) => room.readingRoomId === selectedRoomId) || null;
   const inviteBook = books.find((book) => book.id === inviteBookId) || null;
+  const actionBook = books.find((book) => book.id === actionBookId) || null;
+  const quickEditBook = books.find((book) => book.id === quickEditBookId) || null;
+  const storySetupBook = books.find((book) => book.id === storySetupBookId) || null;
   const availableFriends = relationships
     .filter((relationship) => relationship.userIdentityId === userIdentityId)
     .map((relationship) => ({ relationship, character: characters.find((character) => character.id === relationship.characterId) }))
@@ -194,6 +212,145 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
       showError(error, "章节解析失败");
     } finally {
       setIsWorking(false);
+    }
+  };
+
+  const openBookReader = async (book: ReadingBook) => {
+    if (book.status === "archived") {
+      setNotice({ tone: "info", text: "请先把这本书移回书架再阅读。" });
+      return;
+    }
+    setIsWorking(true);
+    setNotice(null);
+    try {
+      await ensureReadingBookParsed(userIdentityId, book.id);
+      refreshLibrary();
+      setReadingBookId(book.id);
+    } catch (error) {
+      showError(error, "章节解析失败");
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
+  const clearBookLongPress = () => {
+    if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+    longPressStartRef.current = null;
+  };
+
+  const startBookLongPress = (book: ReadingBook, event: React.PointerEvent) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    clearBookLongPress();
+    suppressBookClickRef.current = false;
+    longPressStartRef.current = { x: event.clientX, y: event.clientY };
+    longPressTimerRef.current = window.setTimeout(() => {
+      suppressBookClickRef.current = true;
+      setActionBookId(book.id);
+      navigator.vibrate?.(18);
+      clearBookLongPress();
+    }, 520);
+  };
+
+  const moveBookLongPress = (event: React.PointerEvent) => {
+    const start = longPressStartRef.current;
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) clearBookLongPress();
+  };
+
+  const handleBookCardClick = (book: ReadingBook) => {
+    clearBookLongPress();
+    if (suppressBookClickRef.current) {
+      suppressBookClickRef.current = false;
+      return;
+    }
+    void openBookReader(book);
+  };
+
+  const handleBookAction = (action: ReadingBookAction) => {
+    if (!actionBook) return;
+    const book = actionBook;
+    setActionBookId(null);
+    if (action === "edit") {
+      setQuickEditBookId(book.id);
+      setTitleDraft(book.title);
+      setAuthorDraft(book.author || "");
+      setDescriptionDraft(book.description || "");
+    } else if (action === "cover") {
+      setCoverBookId(book.id);
+      window.setTimeout(() => coverInputRef.current?.click(), 0);
+    } else if (action === "co_read") {
+      setInviteBookId(book.id);
+    } else {
+      setStorySetupBookId(book.id);
+    }
+  };
+
+  const saveQuickBookDetails = () => {
+    if (!quickEditBook) return;
+    try {
+      updateReadingBookDetails({ userIdentityId, bookId: quickEditBook.id, title: titleDraft, author: authorDraft, description: descriptionDraft });
+      refreshLibrary();
+      setQuickEditBookId(null);
+      setNotice({ tone: "success", text: "书籍资料已保存。" });
+    } catch (error) {
+      showError(error, "书籍资料保存失败");
+    }
+  };
+
+  const handleCoverSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    const bookId = coverBookId;
+    setCoverBookId(null);
+    if (!file || !bookId) return;
+    if (!file.type.startsWith("image/")) {
+      setNotice({ tone: "error", text: "请选择 JPG、PNG、WEBP 等图片文件。" });
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      setNotice({ tone: "error", text: "封面图片不能超过 4 MB。" });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => setNotice({ tone: "error", text: "封面读取失败，请重新选择。" });
+    reader.onload = () => {
+      try {
+        updateReadingBookCover({ userIdentityId, bookId, coverUrl: typeof reader.result === "string" ? reader.result : undefined });
+        refreshLibrary();
+        setNotice({ tone: "success", text: "书籍封面已更新。" });
+      } catch (error) {
+        showError(error, "封面保存失败");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const createStoryFromSetup = (draft: ReadingStorySetupDraft) => {
+    if (!storySetupBook) return;
+    const book = storySetupBook;
+    const makeId = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+    const identityDescription = describeReadingStoryIdentity(draft.user);
+    try {
+      if (draft.mode === "solo") {
+        const story = createReadingStory({ scope: { userIdentityId, storyId: makeId("story") }, title: `穿书：《${book.title}》`, bookId: book.id, entryMode: draft.user.entryMode, length: draft.length, characterName: draft.user.name, characterRole: identityDescription, goals: draft.user.goal ? [draft.user.goal] : [] });
+        commitReadingStoryTurn({ scope: story, result: { narrative: `当《${book.title}》的文字在眼前重新排列，你以“${draft.user.name}”的身份踏进了故事。原有情节仍在远处运转，而你的第一个选择即将改变这条支线。`, dialogue: [], choices: [{ id: "a", label: "先观察周围，确认自己所在的位置与时间" }, { id: "b", label: "寻找一位原故事人物，试探剧情进展" }, { id: "c", label: "检查自己的身份、物品和当前目标" }, { id: "d", label: "按自己的想法行动" }], stateChanges: [identityDescription], discoveredIntel: [], taskChanges: draft.user.goal ? [draft.user.goal] : [], relationshipChanges: [], currentLocation: "故事入口", currentTime: "故事开始", chapterProgress: 0.05, shouldEndChapter: false } });
+        setStorySetupBookId(null);
+        setInitialStoryId(story.storyId);
+        setReadingStoryBookId(book.id);
+      } else {
+        const friendOption = availableFriends.find((item) => item.relationship.id === draft.relationId);
+        if (!friendOption || !draft.friend) throw new Error("没有找到选择的 AI 好友");
+        const friendDescription = describeReadingStoryIdentity(draft.friend);
+        const story = createReadingCoStory({ scope: { userIdentityId, coStoryId: makeId("co-story"), relationId: friendOption.relationship.id, characterId: friendOption.character.id }, title: `共同穿书：《${book.title}》`, universeStoryId: book.id, length: draft.length, userCharacterName: draft.user.name, userCharacterRole: identityDescription, userEntryMode: draft.user.entryMode, userOriginalCharacterId: draft.user.originalCharacterId, userGoals: draft.user.goal ? [draft.user.goal] : [], aiFriend: { relationId: friendOption.relationship.id, characterId: friendOption.character.id, displayName: friendOption.character.name, characterName: draft.friend.name, characterRole: friendDescription, entryMode: draft.friend.entryMode, originalCharacterId: draft.friend.originalCharacterId, personaSummary: [friendOption.character.personality, friendOption.character.backstory, draft.friend.persona, draft.friend.goal ? `当前目标：${draft.friend.goal}` : ""].filter(Boolean).join("\n"), knownIntel: [], knownTurnIds: [] } });
+        createReadingCoStoryOpening({ scope: story, narrative: `你和 ${friendOption.character.name} 同时穿过《${book.title}》的书页，却以各自选择的身份落在故事之中。你只知道自己眼前的情景；TA 也会依据人设和独立情报行动，不会替你作出重大决定。`, choices: [{ id: "a", label: "先与 TA 确认彼此身份和已知信息" }, { id: "b", label: "分头观察环境，再交换发现" }, { id: "c", label: "沿着原故事线寻找关键人物" }, { id: "d", label: "提出一个完全不同的行动" }] });
+        setStorySetupBookId(null);
+        setInitialCoStoryId(story.coStoryId);
+        setReadingCoStoryBookId(book.id);
+      }
+      refreshLibrary();
+    } catch (error) {
+      setStorySetupBookId(null);
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "故事创建失败" });
     }
   };
 
@@ -482,6 +639,7 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
   if (selectedBook) {
     return (
       <div data-theme-page="reading" className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
+        <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleCoverSelected} className="hidden" aria-label="选择书籍封面图片" />
         <header className="relative z-10 flex shrink-0 items-center justify-between px-4 py-1.5">
           <button type="button" onClick={() => { setSelectedBookId(null); setNotice(null); }} aria-label="返回书架" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]">
             <ChevronLeft className="h-4 w-4" />
@@ -494,9 +652,7 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
         <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
           <div className="mx-auto w-full max-w-md space-y-4">
             <section className="flex gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
-              <div className="flex h-28 w-20 shrink-0 items-center justify-center rounded-2xl bg-[var(--button-primary-bg)] text-3xl font-black text-[var(--button-primary-text)]">
-                {selectedBook.title.trim().slice(0, 1) || "书"}
-              </div>
+              <button type="button" onClick={() => { setCoverBookId(selectedBook.id); window.setTimeout(() => coverInputRef.current?.click(), 0); }} aria-label="修改书籍封面" className="relative h-28 w-20 shrink-0 overflow-hidden rounded-2xl"><ReadingBookCover book={selectedBook} className="h-full w-full" /><span className="absolute inset-x-0 bottom-0 bg-black/55 py-1 text-center text-[9px] font-bold text-white">修改封面</span></button>
               <div className="min-w-0 flex-1 py-1">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">{selectedBook.format === "markdown" ? "Markdown" : "TXT"}</p>
                 <h2 className="mt-2 text-xl font-bold leading-7">{selectedBook.title}</h2>
@@ -514,16 +670,14 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
             )}
 
             {selectedBook.status !== "archived" && selectedChapters.length > 0 && (
-              <button type="button" onClick={() => setReadingStoryBookId(selectedBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/40 bg-amber-500/10 text-xs font-bold text-amber-200">
+              <button type="button" onClick={() => { setStorySetupBookId(selectedBook.id); setSelectedBookId(null); }} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/40 bg-amber-500/10 text-xs font-bold text-amber-200">
                 <span aria-hidden="true">✦</span>穿书：进入这本小说的故事宇宙
               </button>
             )}
 
             {selectedBook.status !== "archived" && availableFriends.length > 0 && (
-              <button type="button" onClick={() => setInviteBookId(selectedBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold"><span aria-hidden="true">👥</span>邀请一位 AI 好友共读</button>
+              <button type="button" onClick={() => { setInviteBookId(selectedBook.id); setSelectedBookId(null); }} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold"><span aria-hidden="true">👥</span>邀请一位 AI 好友共读</button>
             )}
-
-            {selectedBook.status !== "archived" && availableFriends.length > 0 && <button type="button" onClick={() => setReadingCoStoryBookId(selectedBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-cyan-300/40 bg-cyan-500/10 text-xs font-bold"><span aria-hidden="true">✦</span>和 AI 好友共同穿书</button>}
 
             <section aria-label="novel-analysis" className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
               <div className="flex items-center justify-between gap-2"><div><h2 className="text-sm font-bold">小说分析</h2><p className="mt-1 text-[10px] text-[var(--text-muted)]">按章节处理 · 可恢复 · 不发送整本正文</p></div><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px] text-[var(--text-muted)]">本地任务</span></div>
@@ -603,12 +757,13 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
         <section className="mx-auto flex w-full max-w-md flex-col gap-4">
           <input ref={fileInputRef} type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={handleFileSelected} className="hidden" aria-label="选择 TXT 或 Markdown 小说" />
           <input ref={archiveInputRef} type="file" accept=".json,.fanfan-reading.json,application/json,application/vnd.fanfanji.reading+json" onChange={handleImportArchive} className="hidden" aria-label="选择阅读归档" />
+          <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleCoverSelected} className="hidden" aria-label="选择书籍封面图片" />
           {renderNotice()}
           {rootTab === "shelf" && <>
             <div className="flex items-end justify-between"><div><p className="text-2xl font-black tracking-tight">我的书架</p><p className="mt-1 text-[11px] text-[var(--text-muted)]">{books.filter((book) => book.status !== "archived").length} 本书 · 正文仅保存在本地</p></div><SlidersHorizontal className="h-5 w-5 text-[var(--text-muted)]" /></div>
             <div className="flex gap-2 overflow-x-auto pb-1" aria-label="书架筛选">{([['all','全部'],['reading','阅读中'],['unread','未读'],['finished','已读完'],['archived','归档']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setShelfFilter(value)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold ${shelfFilter === value ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]"}`}>{label}</button>)}</div>
             <div className="flex gap-2"><label className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3"><Search className="h-4 w-4 text-[var(--text-muted)]" /><input value={shelfQuery} onChange={(event) => setShelfQuery(event.target.value)} placeholder={`搜索 ${books.length} 本书`} className="h-11 min-w-0 flex-1 bg-transparent text-xs outline-none" /></label><select aria-label="书架排序" value={shelfSort} onChange={(event) => setShelfSort(event.target.value as ReadingShelfSort)} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-2 text-xs font-bold outline-none"><option value="recent">最近</option><option value="title">书名</option><option value="progress">进度</option></select></div>
-            {visibleBooks.length > 0 ? <section aria-label="封面书架" className="grid grid-cols-3 gap-x-3 gap-y-5">{visibleBooks.map((book) => { const bookProgress = progress.find((item) => item.bookId === book.id)?.percent || 0; return <button key={`${book.userIdentityId}:${book.id}`} type="button" onClick={() => openBookDetails(book)} className="min-w-0 text-left"><ReadingBookCover book={book} className="aspect-[3/4] w-full rounded-xl shadow-md" /><h3 className="mt-2 line-clamp-2 text-xs font-bold leading-4">{book.title}</h3><p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">{book.status === "archived" ? "已归档" : bookProgress > 0 ? `${bookProgress.toFixed(1)}%` : book.author || "未读"}</p></button>; })}</section> : <div className="rounded-3xl border border-dashed border-[var(--border)] p-8 text-center"><BookMarked className="mx-auto h-6 w-6 text-[var(--text-muted)]" /><p className="mt-3 text-sm font-bold">{books.length ? "没有符合条件的书" : "把故事放进书架"}</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">支持 TXT 与 Markdown，导入和分章都在当前设备完成。</p><button type="button" disabled={isImporting} onClick={() => fileInputRef.current?.click()} className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] px-5 text-xs font-bold text-[var(--button-primary-text)]">{isImporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}导入本地小说</button></div>}
+            {visibleBooks.length > 0 ? <section aria-label="封面书架" className="grid grid-cols-3 gap-x-3 gap-y-5">{visibleBooks.map((book) => { const bookProgress = progress.find((item) => item.bookId === book.id)?.percent || 0; return <button key={`${book.userIdentityId}:${book.id}`} type="button" onPointerDown={(event) => startBookLongPress(book, event)} onPointerMove={moveBookLongPress} onPointerUp={clearBookLongPress} onPointerCancel={clearBookLongPress} onPointerLeave={clearBookLongPress} onContextMenu={(event) => { event.preventDefault(); clearBookLongPress(); suppressBookClickRef.current = true; setActionBookId(book.id); }} onClick={() => handleBookCardClick(book)} aria-label={`${book.title}，短按阅读，长按更多操作`} className="min-w-0 touch-pan-y select-none text-left"><ReadingBookCover book={book} className="aspect-[3/4] w-full rounded-xl shadow-md" /><h3 className="mt-2 line-clamp-2 text-xs font-bold leading-4">{book.title}</h3><p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">{book.status === "archived" ? "已归档" : bookProgress > 0 ? `${bookProgress.toFixed(1)}%` : book.author || "未读"}</p></button>; })}</section> : <div className="rounded-3xl border border-dashed border-[var(--border)] p-8 text-center"><BookMarked className="mx-auto h-6 w-6 text-[var(--text-muted)]" /><p className="mt-3 text-sm font-bold">{books.length ? "没有符合条件的书" : "把故事放进书架"}</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">支持 TXT 与 Markdown，导入和分章都在当前设备完成。</p><button type="button" disabled={isImporting} onClick={() => fileInputRef.current?.click()} className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] px-5 text-xs font-bold text-[var(--button-primary-text)]">{isImporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}导入本地小说</button></div>}
             <div className="grid grid-cols-2 gap-2"><button type="button" disabled={isWorking || books.length === 0} onClick={handleExportArchive} className="flex h-9 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[10px] font-bold disabled:opacity-40"><Download className="h-3.5 w-3.5" />导出阅读归档</button><button type="button" disabled={isWorking} onClick={() => archiveInputRef.current?.click()} className="flex h-9 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[10px] font-bold disabled:opacity-40"><Upload className="h-3.5 w-3.5" />恢复阅读归档</button></div>
           </>}
 
@@ -618,6 +773,9 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
         </section>
       </main>
       <nav aria-label="阅读主导航" className="grid shrink-0 grid-cols-3 border-t border-[var(--border)] bg-[var(--surface)]/95 px-5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur">{([['shelf','书架',Library],['co_reading','共读',UsersRound],['world','世界',Globe2]] as const).map(([value,label,Icon]) => <button key={value} type="button" onClick={() => setRootTab(value)} aria-current={rootTab === value ? "page" : undefined} className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-2xl text-[10px] font-bold ${rootTab === value ? "bg-[var(--surface-raised)] text-[var(--text-primary)]" : "text-[var(--text-muted)]"}`}><Icon className="h-5 w-5" strokeWidth={rootTab === value ? 2.2 : 1.6} />{label}</button>)}</nav>
+      {actionBook && <ReadingBookActionSheet book={actionBook} canInvite={availableFriends.length > 0} onAction={handleBookAction} onClose={() => setActionBookId(null)} />}
+      {quickEditBook && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center" role="dialog" aria-modal="true" aria-label={`编辑${quickEditBook.title}`} onClick={() => setQuickEditBookId(null)}><div className="w-full max-w-md space-y-3 rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-muted)]">编辑书籍信息</p><h2 className="mt-1 text-lg font-black">{quickEditBook.title}</h2></div><label className="block text-xs font-bold">书名<input value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} className="mt-2 h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-sm outline-none" /></label><label className="block text-xs font-bold">作者<input value={authorDraft} onChange={(event) => setAuthorDraft(event.target.value)} placeholder="选填" className="mt-2 h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-sm outline-none" /></label><label className="block text-xs font-bold">简介<textarea value={descriptionDraft} onChange={(event) => setDescriptionDraft(event.target.value)} placeholder="选填" rows={4} className="mt-2 w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm outline-none" /></label><button type="button" onClick={() => { setSelectedBookId(quickEditBook.id); setQuickEditBookId(null); setIsEditing(false); }} className="h-9 w-full rounded-xl border border-[var(--border)] text-[10px] font-bold text-[var(--text-secondary)]">完整书籍资料 · 目录、分析、归档与删除</button><div className="grid grid-cols-2 gap-2 pt-1"><button type="button" onClick={() => setQuickEditBookId(null)} className="h-10 rounded-xl border border-[var(--border)] text-xs font-bold">取消</button><button type="button" disabled={!titleDraft.trim()} onClick={saveQuickBookDetails} className="h-10 rounded-xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)] disabled:opacity-40">保存</button></div></div></div>}
+      {storySetupBook && <ReadingStorySetupWizard book={storySetupBook} friends={availableFriends} coreCharacters={listReadingAnalysisEntities({ userIdentityId, bookId: storySetupBook.id }, "character")} hasBookBible={Boolean(getReadingBookBible({ userIdentityId, bookId: storySetupBook.id }))} onClose={() => setStorySetupBookId(null)} onCreate={createStoryFromSetup} />}
       {inviteBook && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-4 sm:items-center" role="dialog" aria-modal="true" aria-label="邀请 AI 好友共读">
           <div className="w-full max-w-md space-y-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl">

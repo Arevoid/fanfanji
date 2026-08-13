@@ -6,6 +6,7 @@ import {
   retryReadingAssetCleanup,
   setReadingBookArchived,
   updateReadingBookDetails,
+  updateReadingBookCover,
   type ReadingLibraryDependencies,
 } from "../src/features/reading/library/readingLibrary";
 
@@ -65,6 +66,10 @@ assert.equal(store.books.find((book) => book.userIdentityId === "identity-b")?.c
 const renamedA = updateReadingBookDetails({ userIdentityId: "identity-a", bookId: "shared-book-id", title: "A 新书名", author: "作者 A" }, dependencies);
 assert.equal(renamedA.title, "A 新书名");
 assert.equal(store.books.find((book) => book.userIdentityId === "identity-b")?.title, "Book identity-b", "editing A never edits B");
+const coveredA = updateReadingBookCover({ userIdentityId: "identity-a", bookId: "shared-book-id", coverUrl: "data:image/png;base64,AAAA" }, dependencies);
+assert.match(coveredA.coverUrl || "", /^data:image\/png/);
+assert.equal(store.books.find((book) => book.userIdentityId === "identity-b")?.coverUrl, undefined, "cover update stays in the current identity");
+assert.throws(() => updateReadingBookCover({ userIdentityId: "identity-a", bookId: "shared-book-id", coverUrl: "https://example.com/cover.png" }, dependencies), /本地图片/);
 
 setReadingBookArchived("identity-a", "shared-book-id", true, dependencies);
 assert.equal(store.books.find((book) => book.userIdentityId === "identity-a")?.status, "archived");

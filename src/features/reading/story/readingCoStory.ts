@@ -11,12 +11,26 @@ const sameScope = (left: ReadingCoStoryScope, right: ReadingCoStoryScope): boole
 export class ReadingCoStoryError extends Error { constructor(message: string, public readonly code: "invalid" | "missing" | "storage" | "conflict") { super(message); this.name = "ReadingCoStoryError"; } }
 function persist<T>(result: { success: boolean; error?: string }, value: T): T { if (!result.success) throw new ReadingCoStoryError(result.error || "Co-story save failed", "storage"); return value; }
 
-export function createReadingCoStory(input: { scope: ReadingCoStoryScope; title: string; universeStoryId?: string; length: ReadingStoryLength; userCharacterName: string; userCharacterRole?: string; userGoals?: string[]; aiFriend: ReadingCoStoryState["aiFriend"]; now?: number }): ReadingCoStoryState {
+export function createReadingCoStory(input: { scope: ReadingCoStoryScope; title: string; universeStoryId?: string; length: ReadingStoryLength; userCharacterName: string; userCharacterRole?: string; userEntryMode?: ReadingCoStoryState["userEntryMode"]; userOriginalCharacterId?: string; userGoals?: string[]; aiFriend: ReadingCoStoryState["aiFriend"]; now?: number }): ReadingCoStoryState {
   if (!input.title.trim() || !input.userCharacterName.trim()) throw new ReadingCoStoryError("Co-story title and user character are required", "invalid");
   if (input.aiFriend.relationId !== input.scope.relationId || input.aiFriend.characterId !== input.scope.characterId) throw new ReadingCoStoryError("AI friend scope mismatch", "invalid");
   const now = input.now ?? Date.now();
-  const state: ReadingCoStoryState = { ...input.scope, universeStoryId: input.universeStoryId, title: text(input.title, 500), length: input.length, status: "active", currentChapter: 0, targetChapters: targetChapters[input.length], currentLocation: "Unspecified", currentTime: "Story start", userCharacterName: text(input.userCharacterName, 200), userCharacterRole: input.userCharacterRole ? text(input.userCharacterRole, 500) : undefined, userGoals: (input.userGoals || []).map((goal) => text(goal, 500)).filter(Boolean).slice(0, 30), aiFriend: { ...input.aiFriend, displayName: text(input.aiFriend.displayName, 200), characterName: text(input.aiFriend.characterName, 200), characterRole: input.aiFriend.characterRole ? text(input.aiFriend.characterRole, 500) : undefined, personaSummary: text(input.aiFriend.personaSummary, 3000), knownIntel: input.aiFriend.knownIntel.map((item) => text(item, 1000)).filter(Boolean).slice(0, 100), knownTurnIds: input.aiFriend.knownTurnIds.slice(0, 200) }, activeActor: "user", createdAt: now, updatedAt: now };
+  const state: ReadingCoStoryState = { ...input.scope, universeStoryId: input.universeStoryId, title: text(input.title, 500), length: input.length, status: "active", currentChapter: 0, targetChapters: targetChapters[input.length], currentLocation: "未设定", currentTime: "故事开始", userCharacterName: text(input.userCharacterName, 200), userCharacterRole: input.userCharacterRole ? text(input.userCharacterRole, 500) : undefined, userEntryMode: input.userEntryMode, userOriginalCharacterId: input.userOriginalCharacterId ? text(input.userOriginalCharacterId, 200) : undefined, userGoals: (input.userGoals || []).map((goal) => text(goal, 500)).filter(Boolean).slice(0, 30), aiFriend: { ...input.aiFriend, displayName: text(input.aiFriend.displayName, 200), characterName: text(input.aiFriend.characterName, 200), characterRole: input.aiFriend.characterRole ? text(input.aiFriend.characterRole, 500) : undefined, originalCharacterId: input.aiFriend.originalCharacterId ? text(input.aiFriend.originalCharacterId, 200) : undefined, personaSummary: text(input.aiFriend.personaSummary, 3000), knownIntel: input.aiFriend.knownIntel.map((item) => text(item, 1000)).filter(Boolean).slice(0, 100), knownTurnIds: input.aiFriend.knownTurnIds.slice(0, 200) }, activeActor: "user", createdAt: now, updatedAt: now };
   return persist(saveReadingCoStory(state), state);
+}
+
+export function createReadingCoStoryOpening(input: { scope: ReadingCoStoryScope; narrative: string; choices: ReadingCoStoryTurn["choices"]; now?: number }): ReadingCoStoryTurn {
+  const loaded = loadReadingCoStoryStore();
+  const story = loaded.value.stories.find((candidate) => sameScope(candidate, input.scope));
+  if (!story) throw new ReadingCoStoryError("Co-story does not exist", "missing");
+  const existing = turnsFor(loaded.value, input.scope);
+  if (existing.length) return existing[0];
+  const now = input.now ?? Date.now();
+  const turn: ReadingCoStoryTurn = { ...input.scope, turnId: createId("co-opening"), turnIndex: 0, actor: "system", perspective: "shared", narrative: text(input.narrative, 12000), dialogue: [], choices: input.choices.slice(0, 8), risk: "low", requiresUserApproval: false, visibleTo: ["user", "ai_friend"], createdAt: now };
+  if (!turn.narrative) throw new ReadingCoStoryError("Opening narrative is required", "invalid");
+  const nextStory: ReadingCoStoryState = { ...story, aiFriend: { ...story.aiFriend, knownTurnIds: [...story.aiFriend.knownTurnIds, turn.turnId] }, updatedAt: now };
+  persist(saveReadingCoStoryStore({ ...replaceStory(loaded.value, nextStory), turns: [...loaded.value.turns, turn] }), turn);
+  return turn;
 }
 
 const turnsFor = (store: ReturnType<typeof loadReadingCoStoryStore>["value"], scope: ReadingCoStoryScope): ReadingCoStoryTurn[] => store.turns.filter((turn) => sameScope(turn, scope)).sort((left, right) => left.turnIndex - right.turnIndex);

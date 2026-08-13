@@ -1,4 +1,4 @@
-import type { ReadingStoryChoice, ReadingStoryLength } from "./storyTypes";
+import type { ReadingStoryChoice, ReadingStoryEntryMode, ReadingStoryLength } from "./storyTypes";
 
 export const READING_CO_STORY_STORE_VERSION = 1 as const;
 
@@ -19,6 +19,8 @@ export interface ReadingStoryAiFriendProfile {
   displayName: string;
   characterName: string;
   characterRole?: string;
+  entryMode?: ReadingStoryEntryMode;
+  originalCharacterId?: string;
   personaSummary: string;
   knownIntel: string[];
   knownTurnIds: string[];
@@ -35,6 +37,8 @@ export interface ReadingCoStoryState extends ReadingCoStoryScope {
   currentTime: string;
   userCharacterName: string;
   userCharacterRole?: string;
+  userEntryMode?: ReadingStoryEntryMode;
+  userOriginalCharacterId?: string;
   userGoals: string[];
   aiFriend: ReadingStoryAiFriendProfile;
   activeActor: "user" | "ai_friend";

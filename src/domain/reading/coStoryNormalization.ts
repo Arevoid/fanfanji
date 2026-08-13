@@ -26,6 +26,8 @@ export function normalizeReadingCoStoryStore(value: unknown): ReadingCoStoryStor
         currentTime: text(item.currentTime, 200),
         userCharacterName: text(item.userCharacterName, 200),
         userCharacterRole: text(item.userCharacterRole, 500) || undefined,
+        userEntryMode: item.userEntryMode === "soul_wear" || item.userEntryMode === "body_wear" ? item.userEntryMode : undefined,
+        userOriginalCharacterId: text(item.userOriginalCharacterId, 200) || undefined,
         userGoals: list(item.userGoals, 30),
       aiFriend: {
           relationId: text(friend.relationId, 200),
@@ -33,6 +35,8 @@ export function normalizeReadingCoStoryStore(value: unknown): ReadingCoStoryStor
           displayName: text(friend.displayName, 200),
           characterName: text(friend.characterName, 200),
           characterRole: text(friend.characterRole, 500) || undefined,
+          entryMode: friend.entryMode === "soul_wear" || friend.entryMode === "body_wear" ? friend.entryMode : undefined,
+          originalCharacterId: text(friend.originalCharacterId, 200) || undefined,
           personaSummary: text(friend.personaSummary, 3000),
           knownIntel: list(friend.knownIntel, 100),
         knownTurnIds: list(friend.knownTurnIds, 200),
