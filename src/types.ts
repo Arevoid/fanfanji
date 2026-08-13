@@ -865,6 +865,10 @@ export interface OfflineStory {
   ifPrompt?: string;
   sourceChatId?: string; // Optional reference source
   sourceChatMsgCount?: number;
+  /** Confirmed appointment that explicitly opened this continuation. */
+  sourceAppointmentId?: string;
+  /** One-shot request for the inviting character to open the first scene. */
+  autoStartFirstAct?: boolean;
   messages: Message[];
   wordLimit?: number;
   partnerPerspective?: string;

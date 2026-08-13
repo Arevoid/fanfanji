@@ -10,6 +10,8 @@ import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proact
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
 import type { Appointment, AppointmentMode } from "../domain/schedule/scheduleTypes";
+import { getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
+import { isAppointmentReadyForOfflineEntry, startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
@@ -791,6 +793,17 @@ export default function AppChat({
   // Navigation State
   const activeRelationship = activeChatRelationId ? relationships.find((relation) => relation.id === activeChatRelationId) : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
+  const [appointmentClock, setAppointmentClock] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setAppointmentClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const readyOfflineAppointment = activeRelationship
+    ? appointments.find((appointment) => appointment.relationId === activeRelationship.id
+      && appointment.characterId === activeRelationship.characterId
+      && appointment.userIdentityId === activeRelationship.userIdentityId
+      && isAppointmentReadyForOfflineEntry(appointment, appointmentClock))
+    : undefined;
   const characterCustomChatCss = activeCharacter?.customChatCSS || activeCharacter?.customCss || "";
   // bubbleCss is the legacy preset field. Keep it as a scoped compatibility
   // source so existing user presets still work without leaking styles outside
@@ -1467,8 +1480,30 @@ export default function AppChat({
   const isOfflineModeActive = false;
   const isInputNarration = false;
   const activeOfflineStoryId = null;
-  const handleStartOfflineFromMsg = (msg: Message) => {
+  const handleStartOfflineFromMsg = (msg: Message, appointment?: Appointment) => {
     if (!activeChatCharId || !activeCharacter) return;
+    if (appointment && (!activeRelationship
+      || appointment.relationId !== activeRelationship.id
+      || appointment.characterId !== activeRelationship.characterId
+      || appointment.userIdentityId !== activeRelationship.userIdentityId)) {
+      showToast("这条线下约定不属于当前聊天关系");
+      return;
+    }
+    if (appointment) {
+      const inProgressAppointment = startAppointmentOfflineSession(appointment, Date.now());
+      if (!inProgressAppointment || !onSaveAppointment?.(inProgressAppointment)) {
+        showToast("线下约定暂时无法开始，请稍后重试");
+        return;
+      }
+      const existingStory = offlineStories.find((story) => story.sourceAppointmentId === appointment.id
+        && story.relationId === appointment.relationId);
+      if (existingStory && activeRelationship) {
+        writeString(getOfflineModeStorageKey(activeRelationship.id), "true");
+        writeString(getOfflineStoryStorageKey(activeRelationship.id), existingStory.id);
+        onNavigateToApp?.("offline");
+        return;
+      }
+    }
     
     const charName = activeCharacter.remark || activeCharacter.name;
     const offlineParticipantIds = activeCharacter.isGroupChat
@@ -1520,7 +1555,9 @@ export default function AppChat({
       conversationId: activeRelationship?.conversationId,
       // A group is only a container; the actual offline actors are its members.
       characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
-      title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
+      title: appointment
+        ? `${getCurrentAppointmentProposal(appointment)?.activity || appointment.title} - ${new Date().toLocaleDateString()}`
+        : `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: "continue",
@@ -1540,6 +1577,7 @@ export default function AppChat({
       ])) : [],
       sourceChatId: activeChatCharId,
       sourceChatMsgCount: importedMessages.length,
+      ...(appointment ? { sourceAppointmentId: appointment.id, autoStartFirstAct: true } : {}),
       importedContext,
       enableTimeAwareness: Boolean(activeCharacter.enableTimeAwareness),
       // Imported online chat is context only; the offline page starts with new story content.
@@ -7619,6 +7657,27 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
            <div ref={chatEndRef} />
           </MessageList>
+
+          {readyOfflineAppointment && !isMultiSelectDeleteMode && (
+            <div className="chat-appointment-entry mx-3 mb-2 flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 shadow-sm">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-bold text-[var(--text-primary)]">
+                  {getCurrentAppointmentProposal(readyOfflineAppointment)?.activity || readyOfflineAppointment.title}
+                </div>
+                <div className="mt-0.5 text-[10px] text-[var(--text-secondary)]">约定时间已到，可以进入线下见面</div>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded-xl bg-[var(--button-primary-bg)] px-3 py-2 text-[11px] font-bold text-[var(--button-primary-text)]"
+                onClick={() => {
+                  const sourceMessage = currentChatMessages[currentChatMessages.length - 1];
+                  if (sourceMessage) handleStartOfflineFromMsg(sourceMessage, readyOfflineAppointment);
+                }}
+              >
+                进入线下
+              </button>
+            </div>
+          )}
 
           {isMultiSelectDeleteMode && (
             <div className="chat-multi-select-toolbar absolute inset-x-0 bottom-0 z-[85] border-t border-stone-200/80 bg-white/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)] backdrop-blur-xl">

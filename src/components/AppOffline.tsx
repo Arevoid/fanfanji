@@ -33,6 +33,8 @@ import { applyOfflineStoryRegeneration, prepareOfflineStoryRegeneration } from "
 import { createOfflineGroupParticipantMemories } from "../features/offline/services/offlineGroupMemorySync";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
+import type { Appointment } from "../domain/schedule/scheduleTypes";
+import { completeAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -53,6 +55,8 @@ interface AppOfflineProps {
   activeChatCharId?: string | null;
   activeChatRelationId?: string | null;
   worldBookEntries?: WorldBookEntry[];
+  appointments?: Appointment[];
+  onSaveAppointment?: (appointment: Appointment) => boolean;
 }
 
 interface OfflineStylePreset {
@@ -97,7 +101,9 @@ export default function AppOffline({
   messages = [],
   activeChatCharId = null,
   activeChatRelationId = null,
-  worldBookEntries = []
+  worldBookEntries = [],
+  appointments = [],
+  onSaveAppointment,
 }: AppOfflineProps) {
   const selectableCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
   const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
@@ -502,6 +508,16 @@ export default function AppOffline({
       sourceMessages: handoffSourceMessages,
       now: handoffCreatedAt,
     });
+    if (completedStory.sourceAppointmentId) {
+      const appointment = appointments.find((item) => item.id === completedStory.sourceAppointmentId
+        && item.relationId === completedStory.relationId);
+      const completedAppointment = appointment
+        ? completeAppointmentOfflineSession(appointment, handoffCreatedAt)
+        : undefined;
+      if (completedAppointment && !onSaveAppointment?.(completedAppointment)) {
+        showToast("线下剧情已保存，但约定状态暂时未能更新");
+      }
+    }
     if (activeStoryRef.current?.id === completedStory.id) saveActiveStorySnapshot(completedStory);
     else onSaveOfflineStory(completedStory);
     return completedStory;
@@ -1311,6 +1327,14 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
     setActiveNodeMenuId(null);
     void handleSendMessage(undefined, true, { regenerateMessageId: messageId });
   };
+
+  useEffect(() => {
+    const story = activeStoryRef.current ?? activeStory;
+    if (!story?.autoStartFirstAct || story.messages.some((message) => !message.isImportedContext) || isGenerating) return;
+    const preparedStory = { ...story, autoStartFirstAct: false, updatedAt: Date.now() };
+    saveActiveStorySnapshot(preparedStory);
+    void handleSendMessage(undefined, true);
+  }, [activeStory?.id, activeStory?.autoStartFirstAct]);
 
   return (
     <div

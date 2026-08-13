@@ -3840,6 +3840,8 @@ export default function App() {
                       messages={messages}
                       activeChatCharId={activeChatCharId}
                       worldBookEntries={worldBookEntries}
+                      appointments={scheduleStore.appointments}
+                      onSaveAppointment={handleSaveAppointment}
                       onSaveOfflineStory={handleSaveOfflineStory}
                       onSaveRelationships={setRelationships}
                       onDeleteOfflineStory={handleDeleteOfflineStory}
