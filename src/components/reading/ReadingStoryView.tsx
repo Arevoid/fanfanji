@@ -333,7 +333,17 @@ export default function ReadingStoryView({
       </div>
     );
 
-  const latestChoices = turns.at(-1)?.choices || [];
+  const latestTurn = turns.at(-1);
+  const latestChoices = latestTurn?.choices.length
+    ? latestTurn.choices
+    : story.status === "completed"
+      ? []
+      : [
+          { id: "a", label: "观察眼前变化，确认最值得注意的线索" },
+          { id: "b", label: "主动接触在场的人，开口回应或询问" },
+          { id: "c", label: "谨慎行动，先确保自身处境安全" },
+          { id: "d", label: "按自己的想法行动或说话" },
+        ];
   const panelClass = "space-y-3 text-xs leading-6 text-white/70";
   const panels: ReadingStoryPanel[] = [
     {

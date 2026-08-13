@@ -16,7 +16,10 @@ const settings = readFileSync(
 
 assert.match(reader, /aria-label="搜索正文"/);
 assert.match(reader, /searchReadingContent\(content, searchQuery\)/);
-assert.match(reader, /onMouseUp=\{\(event\) => selectParagraphRange/);
+assert.match(reader, /onMouseUp=\{\(event\) => \{ const element = event\.currentTarget; window\.setTimeout\(\(\) => syncTextSelection/);
+assert.match(reader, /selection\.isCollapsed \|\| !selection\.toString\(\)\.trim\(\)/);
+assert.doesNotMatch(reader, /end = paragraph\.text\.length/);
+assert.match(reader, /Math\.round\(container\.scrollLeft \/ pageWidth\) \* pageWidth/);
 assert.match(reader, /navigator\.clipboard\.writeText/);
 assert.match(
   reader,

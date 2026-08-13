@@ -2002,7 +2002,7 @@ export default function AppReading({
               {visibleBooks.length > 0 ? (
                 <section
                   aria-label="封面书架"
-                  className="grid grid-cols-3 gap-x-3 gap-y-5"
+                  className="grid grid-cols-3 items-start gap-x-3 gap-y-5"
                 >
                   {visibleBooks.map((book) => {
                     const bookProgress =
@@ -2027,16 +2027,18 @@ export default function AppReading({
                         }}
                         onClick={() => handleBookCardClick(book)}
                         aria-label={`${book.title}，短按阅读，长按更多操作`}
-                        className="min-w-0 touch-pan-y select-none text-left"
+                        className="grid w-full min-w-0 grid-rows-[auto_2rem_1rem] content-start self-start touch-pan-y select-none text-left"
                       >
-                        <ReadingBookCover
-                          book={book}
-                          className="aspect-[3/4] w-full rounded-xl shadow-md"
-                        />
-                        <h3 className="mt-2 line-clamp-2 text-xs font-bold leading-4">
+                        <div data-reading-book-cover className="aspect-[3/4] w-full overflow-hidden rounded-lg shadow-md">
+                          <ReadingBookCover
+                            book={book}
+                            className="block h-full w-full rounded-none"
+                          />
+                        </div>
+                        <h3 className="mt-2 line-clamp-2 h-8 text-xs font-bold leading-4">
                           {book.title}
                         </h3>
-                        <p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">
+                        <p className="mt-1 h-4 truncate text-[10px] leading-4 text-[var(--text-muted)]">
                           {book.status === "archived"
                             ? "已归档"
                             : bookProgress > 0
@@ -2140,20 +2142,23 @@ export default function AppReading({
                   return (
                     <div
                       key={item.id}
-                      className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-3"
+                      data-reading-book-card
+                      className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3"
                     >
                       <div className="flex gap-3">
                         <div className="relative h-20 w-14 shrink-0">
-                          {book ? (
-                            <ReadingBookCover
-                              book={book}
-                              className="h-full w-full rounded-xl"
-                            />
-                          ) : (
-                            <div className="flex h-full items-center justify-center rounded-xl bg-[var(--surface-raised)] text-lg font-black">
-                              {item.bookTitle.slice(0, 1)}
-                            </div>
-                          )}
+                          <div data-reading-book-cover className="h-full w-full overflow-hidden rounded-lg">
+                            {book ? (
+                              <ReadingBookCover
+                                book={book}
+                                className="h-full w-full rounded-none"
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center rounded-none bg-[var(--surface-raised)] text-lg font-black">
+                                {item.bookTitle.slice(0, 1)}
+                              </div>
+                            )}
+                          </div>
                           <div className="absolute -bottom-1 -right-2 flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border-2 border-[var(--surface)] bg-[var(--surface-raised)] text-[10px] font-bold">
                             {item.friendAvatar ? (
                               <img
@@ -2301,7 +2306,7 @@ export default function AppReading({
                                 ? item.genre || "原创世界"
                                 : "小说穿书"}
                             </p>
-                            <h3 className="mt-2 truncate text-base font-black">
+                            <h3 className="mt-2 truncate text-base font-black !text-white" style={{ color: "#ffffff" }}>
                               {item.title}
                             </h3>
                           </div>

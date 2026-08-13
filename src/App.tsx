@@ -2685,6 +2685,14 @@ export default function App() {
           border-radius: 32px !important;
         }
 
+        /* Reading covers and co-reading cards intentionally use tighter book-like corners. */
+        .phone-screen-container [data-reading-book-cover] {
+          border-radius: 8px !important;
+        }
+        .phone-screen-container [data-reading-book-card] {
+          border-radius: 12px !important;
+        }
+
         /* 3. Strict 16px Padding & Gap of 12px */
         .phone-screen-container .p-3,
         .phone-screen-container .p-4,

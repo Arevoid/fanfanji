@@ -42,6 +42,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
   const scrollRef = useRef<HTMLElement>(null);
   const paragraphRefs = useRef(new Map<string, HTMLParagraphElement>());
   const progressTimerRef = useRef<number | null>(null);
+  const horizontalSnapTimerRef = useRef<number | null>(null);
   const currentPositionRef = useRef<VisiblePosition | null>(null);
   const restoredRef = useRef(false);
   const [content, setContent] = useState<ReadingBookContent | null>(null);
@@ -135,7 +136,8 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     const elementRect = element.getBoundingClientRect();
     if (preferences.pageMode === "horizontal") {
       const left = elementRect.left - containerRect.left + container.scrollLeft;
-      container.scrollTo({ left: Math.max(0, left - 12), behavior });
+      const pageWidth = Math.max(container.clientWidth, 1);
+      container.scrollTo({ left: Math.floor(Math.max(0, left) / pageWidth) * pageWidth, behavior });
       return;
     }
     const elementTop = elementRect.top - containerRect.top + container.scrollTop;
@@ -190,6 +192,15 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     } satisfies VisiblePosition;
   }, [flatParagraphs, preferences.pageMode]);
 
+  const snapToHorizontalPage = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const container = scrollRef.current;
+    if (!container || preferences.pageMode !== "horizontal") return;
+    const pageWidth = Math.max(container.clientWidth, 1);
+    const maximum = Math.max(0, container.scrollWidth - container.clientWidth);
+    const target = Math.min(maximum, Math.max(0, Math.round(container.scrollLeft / pageWidth) * pageWidth));
+    if (Math.abs(container.scrollLeft - target) > 1) container.scrollTo({ left: target, behavior });
+  }, [preferences.pageMode]);
+
   const handleScroll = () => {
     const position = captureVisiblePosition();
     if (!position) return;
@@ -197,10 +208,15 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     setCurrentChapterId(position.chapterId);
     if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
     progressTimerRef.current = window.setTimeout(() => persistPosition(currentPositionRef.current), 220);
+    if (preferences.pageMode === "horizontal") {
+      if (horizontalSnapTimerRef.current !== null) window.clearTimeout(horizontalSnapTimerRef.current);
+      horizontalSnapTimerRef.current = window.setTimeout(() => snapToHorizontalPage(), 140);
+    }
   };
 
   useEffect(() => () => {
     if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
+    if (horizontalSnapTimerRef.current !== null) window.clearTimeout(horizontalSnapTimerRef.current);
     persistPosition(currentPositionRef.current);
   }, [persistPosition]);
 
@@ -320,32 +336,54 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     scrollToAnchor(result.paragraph.anchor.id, "smooth", result.matchStart);
   };
 
-  const selectParagraphRange = (paragraph: ReadingParagraphView, chapterId: string, element: HTMLParagraphElement) => {
+  const clearTextSelection = useCallback(() => {
+    setActiveParagraph(null);
+    setSelectionToolbarPosition(null);
+    setToolMessage(null);
+  }, []);
+
+  const syncTextSelection = useCallback((paragraph: ReadingParagraphView, chapterId: string, element: HTMLParagraphElement) => {
     const selection = window.getSelection();
-    let start = 0;
-    let end = paragraph.text.length;
-    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
-      const range = selection.getRangeAt(0);
-      if (element.contains(range.commonAncestorContainer)) {
-        const prefix = range.cloneRange();
-        prefix.selectNodeContents(element);
-        prefix.setEnd(range.startContainer, range.startOffset);
-        start = Math.min(prefix.toString().length, paragraph.text.length);
-        end = Math.min(start + range.toString().length, paragraph.text.length);
-        const rect = range.getBoundingClientRect();
-        setSelectionToolbarPosition({
-          left: Math.min(Math.max(rect.left + rect.width / 2, 168), window.innerWidth - 168),
-          top: Math.max(8, rect.top - 70),
-        });
-      }
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !selection.toString().trim()) {
+      clearTextSelection();
+      return;
     }
-    if (start === 0 && end === paragraph.text.length) {
-      const rect = element.getBoundingClientRect();
-      setSelectionToolbarPosition({ left: Math.min(Math.max(rect.left + rect.width / 2, 168), window.innerWidth - 168), top: Math.max(8, rect.top - 70) });
+    const range = selection.getRangeAt(0);
+    if (!element.contains(range.startContainer) || !element.contains(range.endContainer)) {
+      clearTextSelection();
+      return;
     }
+    const prefix = range.cloneRange();
+    prefix.selectNodeContents(element);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    const suffix = range.cloneRange();
+    suffix.selectNodeContents(element);
+    suffix.setEnd(range.endContainer, range.endOffset);
+    const start = Math.min(prefix.toString().length, paragraph.text.length);
+    const end = Math.min(suffix.toString().length, paragraph.text.length);
+    if (end <= start) {
+      clearTextSelection();
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    setSelectionToolbarPosition({
+      left: Math.min(Math.max(rect.left + rect.width / 2, 168), window.innerWidth - 168),
+      top: Math.max(8, rect.top - 70),
+    });
     setActiveParagraph({ paragraph, chapterId, start, end });
     setToolMessage(null);
-  };
+  }, [clearTextSelection]);
+
+  useEffect(() => {
+    const dismissSelection = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-reading-selection-toolbar]")) return;
+      window.getSelection()?.removeAllRanges();
+      clearTextSelection();
+    };
+    document.addEventListener("pointerdown", dismissSelection, true);
+    return () => document.removeEventListener("pointerdown", dismissSelection, true);
+  }, [clearTextSelection]);
 
   const renderParagraphText = (paragraph: ReadingParagraphView) => {
     const highlights = annotations
@@ -395,7 +433,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
       ) : error ? (
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center"><BookOpenText className="h-8 w-8 text-[var(--text-muted)]" /><p className="mt-4 text-sm font-bold">无法打开这本书</p><p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">{error}</p></div>
       ) : (
-        <main ref={scrollRef} onScroll={handleScroll} aria-label="小说正文" className={`flex-1 scroll-smooth ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined }}>
+        <main ref={scrollRef} onScroll={handleScroll} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 scroll-smooth ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
           <article
             className={preferences.pageMode === "horizontal" ? "h-full py-8" : "mx-auto max-w-[42rem]"}
             style={preferences.pageMode === "horizontal" ? {
@@ -417,10 +455,13 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
                         else paragraphRefs.current.delete(paragraph.anchor.id);
                       }}
                       data-anchor-id={paragraph.anchor.id}
-                      onMouseUp={(event) => selectParagraphRange(paragraph, chapterView.chapter.id, event.currentTarget)}
-                      onTouchEnd={(event) => selectParagraphRange(paragraph, chapterView.chapter.id, event.currentTarget)}
-                      className={`relative rounded-md transition-colors ${annotations.some((item) => item.paragraphAnchorId === paragraph.anchor.id && item.kind === "note") ? "border-b border-dashed border-current" : ""}`}
+                      onMouseUp={(event) => { const element = event.currentTarget; window.setTimeout(() => syncTextSelection(paragraph, chapterView.chapter.id, element), 0); }}
+                      onTouchEnd={(event) => { const element = event.currentTarget; window.setTimeout(() => syncTextSelection(paragraph, chapterView.chapter.id, element), 100); }}
+                      onContextMenu={(event) => { if (!window.getSelection()?.isCollapsed) event.preventDefault(); }}
+                      className={`relative select-text rounded-md transition-colors ${annotations.some((item) => item.paragraphAnchorId === paragraph.anchor.id && item.kind === "note") ? "border-b border-dashed border-current" : ""}`}
                       style={{
+                        userSelect: "text",
+                        WebkitUserSelect: "text",
                         fontSize: preferences.fontSize,
                         lineHeight: preferences.lineHeight,
                         letterSpacing: `${preferences.letterSpacing}em`,
@@ -453,7 +494,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
       )}
 
       {activeParagraph && selectionToolbarPosition && !isTocOpen && !isSearchOpen && !isSettingsOpen && (
-        <div className="fixed z-[70] w-[336px] max-w-[calc(100vw-16px)] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 text-[var(--text-primary)] shadow-xl" style={{ left: selectionToolbarPosition.left, top: selectionToolbarPosition.top }}>
+        <div data-reading-selection-toolbar className="fixed z-[70] w-[336px] max-w-[calc(100vw-16px)] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 text-[var(--text-primary)] shadow-xl" style={{ left: selectionToolbarPosition.left, top: selectionToolbarPosition.top }}>
           <div className="grid grid-cols-6 gap-0.5">
             <button type="button" onClick={copyActiveParagraph} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Copy className="h-4 w-4" />复制</button>
             <button type="button" onClick={toggleHighlight} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Highlighter className="h-4 w-4" />高亮</button>
