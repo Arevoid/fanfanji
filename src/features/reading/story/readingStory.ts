@@ -16,7 +16,9 @@ import type {
   ReadingStoryScope,
   ReadingStoryState,
   ReadingStoryTurn,
+  ReadingStoryGenerationPreferences,
 } from "../../../domain/reading/storyTypes";
+import { DEFAULT_READING_STORY_GENERATION_PREFERENCES, normalizeReadingStoryGenerationPreferences } from "../../../domain/reading/storyGenerationPreferences";
 
 const createId = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 const targetChapters: Record<ReadingStoryLength, number> = { short: 3, medium: 8, long: 20 };
@@ -55,6 +57,7 @@ export function createReadingStory(input: { scope: ReadingStoryScope; title: str
     tasks: [],
     relationships: {},
     inventory: [],
+    generationPreferences: { ...DEFAULT_READING_STORY_GENERATION_PREFERENCES },
     createdAt: now,
     updatedAt: now,
   };
@@ -187,11 +190,11 @@ export function loadReadingStorySave(input: { scope: ReadingStoryScope; saveId: 
   return persist(saveReadingStory(save.state), save.state);
 }
 
-export function updateReadingStoryMetadata(input: { scope: ReadingStoryScope; title?: string; status?: "active" | "paused"; now?: number }): ReadingStoryState {
+export function updateReadingStoryMetadata(input: { scope: ReadingStoryScope; title?: string; status?: "active" | "paused"; generationPreferences?: Partial<ReadingStoryGenerationPreferences>; now?: number }): ReadingStoryState {
   const story = getReadingStory(input.scope);
   if (!story) throw new ReadingStoryError("故事不存在", "missing");
   if (story.status === "completed" && input.status === "active") throw new ReadingStoryError("已完成的故事不能恢复为进行中", "invalid");
-  const next = { ...story, title: input.title === undefined ? story.title : text(input.title, 500), status: input.status || story.status, updatedAt: input.now ?? Date.now() };
+  const next = { ...story, title: input.title === undefined ? story.title : text(input.title, 500), status: input.status || story.status, generationPreferences: input.generationPreferences ? normalizeReadingStoryGenerationPreferences(input.generationPreferences) : story.generationPreferences, updatedAt: input.now ?? Date.now() };
   if (!next.title) throw new ReadingStoryError("故事名称不能为空", "invalid");
   return persist(saveReadingStory(next), next);
 }

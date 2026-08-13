@@ -15,6 +15,16 @@ export interface ReadingStoryChoice {
   consequenceHint?: string;
 }
 
+export type ReadingNarrativePerspective = "first_person" | "second_person" | "third_person";
+
+export interface ReadingStoryGenerationPreferences {
+  minCharacters: number;
+  maxCharacters: number;
+  narrativeStyle: string;
+  perspective: ReadingNarrativePerspective;
+  guidance?: string;
+}
+
 export interface ReadingStoryState extends ReadingStoryScope {
   bookId?: string;
   title: string;
@@ -32,6 +42,7 @@ export interface ReadingStoryState extends ReadingStoryScope {
   tasks: string[];
   relationships: Record<string, number>;
   inventory: string[];
+  generationPreferences?: ReadingStoryGenerationPreferences;
   createdAt: number;
   updatedAt: number;
 }

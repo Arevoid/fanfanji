@@ -5,6 +5,7 @@ import {
   ListChecks,
   Save,
   ShieldAlert,
+  SlidersHorizontal,
   UserRound,
   UsersRound,
 } from "lucide-react";
@@ -32,6 +33,7 @@ import { generateReadingCoStoryTurn } from "../../features/reading/story/reading
 import ReadingStoryPlayShell, {
   type ReadingStoryPanel,
 } from "./ReadingStoryPlayShell";
+import ReadingStoryGenerationSettingsDialog from "./ReadingStoryGenerationSettingsDialog";
 
 interface FriendOption {
   relationship: CharacterRelationship;
@@ -71,6 +73,7 @@ export default function ReadingCoStoryView({
   const [userAction, setUserAction] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [isGenerationSettingsOpen, setIsGenerationSettingsOpen] = useState(false);
   const selectedSummary = stories.find((item) => item.coStoryId === selectedId);
   const story = useMemo(
     () =>
@@ -252,6 +255,16 @@ export default function ReadingCoStoryView({
       setMessage("已创建共同故事手动存档。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "存档失败");
+    }
+  };
+  const saveGenerationSettings = (generationPreferences: NonNullable<ReadingCoStoryState["generationPreferences"]>) => {
+    if (!story) return;
+    try {
+      refresh(updateReadingCoStoryMetadata({ scope: story, generationPreferences }));
+      setIsGenerationSettingsOpen(false);
+      setMessage("剧情生成设置已保存，将从下一节点开始生效。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "剧情生成设置保存失败");
     }
   };
   const loadSave = (saveId: string) => {
@@ -548,6 +561,7 @@ export default function ReadingCoStoryView({
   ];
 
   return (
+    <>
     <ReadingStoryPlayShell
       title={story.title}
       subtitle={`${story.aiFriend.displayName} · ${story.origin === "custom" ? "自建世界" : "共同穿书"}`}
@@ -569,12 +583,11 @@ export default function ReadingCoStoryView({
       headerAction={
         <button
           type="button"
-          onClick={saveStory}
-          disabled={!turns.length}
-          aria-label="保存共同故事"
-          className="flex h-9 w-9 items-center justify-center rounded-full disabled:opacity-35"
+          onClick={() => setIsGenerationSettingsOpen(true)}
+          aria-label="剧情生成设置"
+          className="flex h-9 w-9 items-center justify-center rounded-full"
         >
-          <Save className="h-4 w-4" />
+          <SlidersHorizontal className="h-4 w-4" />
         </button>
       }
       onActionChange={setUserAction}
@@ -652,5 +665,13 @@ export default function ReadingCoStoryView({
         </section>
       )}
     </ReadingStoryPlayShell>
+    {isGenerationSettingsOpen && (
+      <ReadingStoryGenerationSettingsDialog
+        value={story.generationPreferences}
+        onSave={saveGenerationSettings}
+        onClose={() => setIsGenerationSettingsOpen(false)}
+      />
+    )}
+    </>
   );
 }

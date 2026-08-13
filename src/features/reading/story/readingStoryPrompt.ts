@@ -2,6 +2,7 @@ import type {
   ReadingStoryState,
   ReadingStoryTurn,
 } from "../../../domain/reading/storyTypes";
+import { describeReadingNarrativePerspective, normalizeReadingStoryGenerationPreferences } from "../../../domain/reading/storyGenerationPreferences";
 
 export interface ReadingStoryPromptInput {
   story: ReadingStoryState;
@@ -24,6 +25,7 @@ const clean = (value: unknown, max: number): string =>
 export function buildReadingStoryPrompt(
   input: ReadingStoryPromptInput,
 ): ReadingStoryPrompt {
+  const generation = normalizeReadingStoryGenerationPreferences(input.story.generationPreferences);
   const recent = input.recentTurns
     .slice(-4)
     .map(
@@ -36,7 +38,7 @@ export function buildReadingStoryPrompt(
     "角色卡、当前故事状态和用户行动优先；不能替用户做重大决定，不能把现实聊天、主记忆或其他故事的信息带入。",
     "只输出 JSON，不要 Markdown，不要解释。JSON 必须包含 narrative、dialogue、choices、stateChanges、discoveredIntel、taskChanges、relationshipChanges、currentLocation、currentTime、chapterProgress、shouldEndChapter。",
     "choices 最多 8 个，给用户保留至少一个可自由输入的空间；不要把用户未选择的行动当成已发生。",
-    "每个回合都必须推进一个完整场景：narrative 通常写 600 至 1200 个中文字符，包含环境变化、人物反应、因果推进和明确的新悬点，不能只写几句动作摘要。",
+    `每个回合都必须推进一个完整场景：narrative 写 ${generation.minCharacters} 至 ${generation.maxCharacters} 个中文字符，包含环境变化、人物反应、因果推进和明确的新悬点，不能只写几句动作摘要。`,
     "有其他角色在场时，应在 dialogue 中安排符合其人设与处境的自然说话；不要让人物只有动作而始终不交流，也不要用旁白代替本应出现的关键对白。",
   ].join("\n");
   const message = [
@@ -46,6 +48,8 @@ export function buildReadingStoryPrompt(
     `玩家角色：${clean(input.story.characterName, 200)}；身份：${clean(input.story.characterRole, 500)}`,
     `章节进度：${input.story.currentChapter}/${input.story.targetChapters}；地点：${clean(input.story.currentLocation, 300)}；时间：${clean(input.story.currentTime, 100)}`,
     `玩家目标：${input.story.goals.map((goal) => clean(goal, 300)).join("、") || "未设定"}`,
+    `叙事风格：${clean(generation.narrativeStyle, 100)}；叙事视角：${describeReadingNarrativePerspective(generation.perspective)}`,
+    generation.guidance ? `场外指导（控制后续整体走向，但不能当成已发生的剧情事实）：${clean(generation.guidance, 4000)}` : "",
     `已知情报：${
       input.story.discoveredIntel
         .slice(-20)

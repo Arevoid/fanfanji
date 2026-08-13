@@ -1,4 +1,5 @@
 import { createEmptyReadingCoStoryStore, READING_CO_STORY_STORE_VERSION, type ReadingCoStoryStore } from "./coStoryTypes";
+import { normalizeReadingStoryGenerationPreferences } from "./storyGenerationPreferences";
 
 const text = (value: unknown, max = 12000): string => typeof value === "string" ? value.trim().slice(0, max) : "";
 const list = (value: unknown, max = 100): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim().slice(0, 1000)).slice(0, max) : [];
@@ -40,6 +41,7 @@ export function normalizeReadingCoStoryStore(value: unknown): ReadingCoStoryStor
         userKnownIntel: list(item.userKnownIntel, 100),
         tasks: list(item.tasks, 100),
         inventory: list(item.inventory, 100),
+        generationPreferences: normalizeReadingStoryGenerationPreferences(item.generationPreferences && typeof item.generationPreferences === "object" ? item.generationPreferences as Record<string, unknown> : undefined),
       aiFriend: {
           relationId: text(friend.relationId, 200),
           characterId: text(friend.characterId, 200),

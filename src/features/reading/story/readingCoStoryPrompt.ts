@@ -1,4 +1,5 @@
 import type { ReadingCoStoryState, ReadingCoStoryTurn } from "../../../domain/reading/coStoryTypes";
+import { describeReadingNarrativePerspective, normalizeReadingStoryGenerationPreferences } from "../../../domain/reading/storyGenerationPreferences";
 
 export interface ReadingCoStoryAiContext {
   persona: string;
@@ -32,6 +33,7 @@ export function buildReadingCoStoryAiActionPrompt(input: { context: ReadingCoSto
 
 export function buildReadingCoStoryTurnPrompt(input: { story: ReadingCoStoryState; turns: readonly ReadingCoStoryTurn[]; userAction: string }): { systemInstruction: string; message: string } {
   const context = projectReadingCoStoryForAi({ story: input.story, turns: input.turns });
+  const generation = normalizeReadingStoryGenerationPreferences(input.story.generationPreferences);
   return {
     systemInstruction: [
       "你是双角色互动小说主持人，负责根据用户明确提交的行动推进一个结构化共同故事回合。",
@@ -40,7 +42,7 @@ export function buildReadingCoStoryTurnPrompt(input: { story: ReadingCoStoryStat
       "只能使用提供的当前宇宙、双方已知情报和可见回合，不得读取现实主记忆、其他好友房间或其他故事分支。",
       "只输出 JSON，不要 Markdown。必须包含 narrative、dialogue、choices、friendAction、controlsUserCharacter(false)、stateChanges、userDiscoveredIntel、aiDiscoveredIntel、taskChanges、inventoryChanges、currentLocation、currentTime、chapterProgress、shouldEndChapter。",
       "choices 最多 8 个；正文不得把尚未选择的选项写成已经发生。若 AI 好友希望进行重大行动，只能在正文中提出建议，不得直接执行。",
-      "每个回合都必须推进一个完整场景：narrative 通常写 600 至 1200 个中文字符，包含环境、事件发展、双方反应、因果变化和新的选择节点，不能只返回几句动作摘要。",
+      `每个回合都必须推进一个完整场景：narrative 写 ${generation.minCharacters} 至 ${generation.maxCharacters} 个中文字符，包含环境、事件发展、双方反应、因果变化和新的选择节点，不能只返回几句动作摘要。`,
       "AI 好友不能只有行为描述。除非当前场景确实无法说话，否则 dialogue 至少包含一条 AI 好友符合人设、关系、身份和当前情境的自然台词；台词应与行动共同推动剧情。",
     ].join("\n"),
     message: JSON.stringify({
@@ -48,6 +50,7 @@ export function buildReadingCoStoryTurnPrompt(input: { story: ReadingCoStoryStat
       user: { name: input.story.userCharacterName, role: input.story.userCharacterRole, entryMode: input.story.userEntryMode, goals: input.story.userGoals, knownIntel: input.story.userKnownIntel, inventory: input.story.inventory },
       aiFriend: { name: input.story.aiFriend.characterName, role: context.role, entryMode: input.story.aiFriend.entryMode, persona: context.persona, knownIntel: context.knownIntel },
       tasks: input.story.tasks,
+      generation: { narrativeStyle: generation.narrativeStyle, perspective: describeReadingNarrativePerspective(generation.perspective), guidance: generation.guidance || "" },
       recentVisibleTurns: context.visibleRecentTurns,
       userAction: input.userAction.trim().slice(0, 2000),
     }),

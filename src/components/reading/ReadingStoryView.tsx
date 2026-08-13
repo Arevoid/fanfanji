@@ -5,6 +5,7 @@ import {
   ListChecks,
   Save,
   ScrollText,
+  SlidersHorizontal,
   UserRound,
 } from "lucide-react";
 import type { ReadingBook } from "../../domain/reading/types";
@@ -31,6 +32,7 @@ import { getReadingBookBible } from "../../core/storage/repositories/readingAnal
 import ReadingStoryPlayShell, {
   type ReadingStoryPanel,
 } from "./ReadingStoryPlayShell";
+import ReadingStoryGenerationSettingsDialog from "./ReadingStoryGenerationSettingsDialog";
 
 interface ReadingStoryViewProps {
   userIdentityId: string;
@@ -60,6 +62,7 @@ export default function ReadingStoryView({
   const [action, setAction] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isGenerationSettingsOpen, setIsGenerationSettingsOpen] = useState(false);
   const story = useMemo(
     () =>
       selectedStoryId
@@ -196,6 +199,16 @@ export default function ReadingStoryView({
       setMessage(
         error instanceof ReadingStoryError ? error.message : "存档失败",
       );
+    }
+  };
+  const saveGenerationSettings = (generationPreferences: NonNullable<ReadingStoryState["generationPreferences"]>) => {
+    if (!scope) return;
+    try {
+      refresh(updateReadingStoryMetadata({ scope, generationPreferences }));
+      setIsGenerationSettingsOpen(false);
+      setMessage("剧情生成设置已保存，将从下一节点开始生效。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "剧情生成设置保存失败");
     }
   };
   const loadSave = (saveId: string) => {
@@ -462,6 +475,7 @@ export default function ReadingStoryView({
   ];
 
   return (
+    <>
     <ReadingStoryPlayShell
       title={story.title}
       subtitle={`${story.characterName} · 单人故事`}
@@ -481,12 +495,11 @@ export default function ReadingStoryView({
       headerAction={
         <button
           type="button"
-          onClick={saveStory}
-          disabled={!turns.length}
-          aria-label="保存故事"
-          className="flex h-9 w-9 items-center justify-center rounded-full disabled:opacity-35"
+          onClick={() => setIsGenerationSettingsOpen(true)}
+          aria-label="剧情生成设置"
+          className="flex h-9 w-9 items-center justify-center rounded-full"
         >
-          <Save className="h-4 w-4" />
+          <SlidersHorizontal className="h-4 w-4" />
         </button>
       }
       onActionChange={setAction}
@@ -522,5 +535,13 @@ export default function ReadingStoryView({
         )}
       </section>
     </ReadingStoryPlayShell>
+    {isGenerationSettingsOpen && (
+      <ReadingStoryGenerationSettingsDialog
+        value={story.generationPreferences}
+        onSave={saveGenerationSettings}
+        onClose={() => setIsGenerationSettingsOpen(false)}
+      />
+    )}
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import type { ReadingStoryChoice, ReadingStoryEntryMode, ReadingStoryLength } from "./storyTypes";
+import type { ReadingStoryChoice, ReadingStoryEntryMode, ReadingStoryGenerationPreferences, ReadingStoryLength } from "./storyTypes";
 
 export const READING_CO_STORY_STORE_VERSION = 1 as const;
 
@@ -55,6 +55,7 @@ export interface ReadingCoStoryState extends ReadingCoStoryScope {
   aiFriend: ReadingStoryAiFriendProfile;
   activeActor: "user" | "ai_friend";
   pendingApproval?: ReadingCoStoryPendingApproval;
+  generationPreferences?: ReadingStoryGenerationPreferences;
   createdAt: number;
   updatedAt: number;
 }
