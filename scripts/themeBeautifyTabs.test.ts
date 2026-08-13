@@ -12,6 +12,11 @@ assert.equal((beautySection.match(/bg-\[var\(--segmented-inactive-bg\)\] text-\[
 assert.match(beautySection, /setBeautySubTab\("desktop"\)/);
 assert.match(beautySection, /setBeautySubTab\("chat"\)/);
 assert.match(beautySection, /setBeautySubTab\("preset"\)/);
+assert.equal((beautySection.match(/beauty-segment-control/g) || []).length, 3);
+assert.match(beautySection, />\s*桌面布局\s*</);
+assert.match(beautySection, />\s*聊天页面\s*</);
+assert.match(beautySection, />\s*主题预设\s*</);
+assert.doesNotMatch(beautySection, /桌面模块|聊天页面模块|主题预设模块/);
 assert.doesNotMatch(beautySection, /bg-white text-slate-900/);
 
 console.log("themeBeautifyTabs.test.ts passed");

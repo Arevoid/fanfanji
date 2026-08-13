@@ -103,7 +103,7 @@ export default function AppSchedule({ entries, appointments, characters, onOpenC
 
         <nav aria-label="日程状态筛选" className="no-scrollbar mt-4 flex gap-2 overflow-x-auto pb-1">
           {SCHEDULE_FILTERS.map((item) => (
-            <button key={item.id} type="button" onClick={() => setFilter(item.id)} aria-pressed={filter === item.id} className={`shrink-0 rounded-full border px-4 py-2 text-xs font-bold transition-colors ${filter === item.id ? "border-[var(--button-primary-bg)] bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]"}`}>
+            <button key={item.id} type="button" onClick={() => setFilter(item.id)} aria-pressed={filter === item.id} className={`schedule-filter-control shrink-0 rounded-full border font-bold transition-colors ${filter === item.id ? "border-[var(--button-primary-bg)] bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]"}`}>
               {item.label}
             </button>
           ))}

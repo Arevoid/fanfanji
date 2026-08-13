@@ -1785,35 +1785,35 @@ export default function AppSettings({
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("desktop")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
+                  className={`beauty-segment-control flex-1 font-bold rounded-[16px] transition-all ${
                     beautySubTab === "desktop"
                       ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
                       : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  桌面模块
+                  桌面布局
                 </button>
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("chat")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
+                  className={`beauty-segment-control flex-1 font-bold rounded-[16px] transition-all ${
                     beautySubTab === "chat"
                       ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
                       : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  聊天页面模块
+                  聊天页面
                 </button>
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("preset")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
+                  className={`beauty-segment-control flex-1 font-bold rounded-[16px] transition-all ${
                     beautySubTab === "preset"
                       ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
                       : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  主题预设模块
+                  主题预设
                 </button>
               </div>
 

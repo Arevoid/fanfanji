@@ -78,6 +78,7 @@ assert.match(appSource, /appointments=\{scheduleStore\.appointments\}/);
 assert.match(appSource, /setActiveChatRelationId\(relationId\)[\s\S]*setActiveApp\("chat"\)/);
 assert.match(scheduleSource, /SCHEDULE_STATUS_META\[entry\.status\]\.dotClass/);
 assert.match(scheduleSource, /aria-label="日程状态筛选"/);
+assert.match(scheduleSource, /schedule-filter-control/);
 assert.doesNotMatch(scheduleSource, /添加日程|经期|待办/);
 
 console.log("PASS schedule V1 filters, status visuals, appointment details, negotiation history, and chat navigation");
