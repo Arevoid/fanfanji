@@ -52,6 +52,7 @@ export const storageKeys = {
   readingStore: "phone_reading_store_v1",
   readingCoReadingStore: "phone_reading_co_reading_store_v1",
   readingAnalysisStore: "phone_reading_analysis_store_v1",
+  readingStoryStore: "phone_reading_story_store_v1",
   presets: "phone_presets",
   dataSchemaVersion: "phone_data_schema_version",
   offlineModeActive: (relationId: string) => `offline_mode_active_${relationId}`,
