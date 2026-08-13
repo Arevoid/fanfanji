@@ -12,6 +12,7 @@ const scope = { userIdentityId: "identity-a", storyId: "story-a" };
 const story = createReadingStory({ scope, title: "穿书测试", bookId: book.id, entryMode: "soul_wear", length: "short", characterName: "林舟", characterRole: "边城医者", goals: ["找到回去的方法"], now: 1 });
 assert.equal(story.targetChapters, 3);
 const result = validateReadingStoryTurnResult({ narrative: "你在雨夜醒来。", dialogue: [{ speaker: "守门人", text: "你是谁？" }], choices: [{ id: "a", label: "说明身份" }], stateChanges: ["进入城门"], discoveredIntel: ["城中正在戒严"], taskChanges: ["调查戒严原因"], relationshipChanges: ["守门人信任+1"], currentLocation: "城门", currentTime: "第一夜", chapterProgress: 0.6, shouldEndChapter: true });
+assert.equal(validateReadingStoryTurnResult({ narrative: "Next scene", choices: [] }).choices.length, 4, "a continuing turn always offers directions");
 const committed = commitReadingStoryTurn({ scope, result, userAction: "说明身份", now: 2 });
 assert.equal(committed.story.currentChapter, 1);
 assert.equal(listReadingStoryTurns(scope).length, 1);

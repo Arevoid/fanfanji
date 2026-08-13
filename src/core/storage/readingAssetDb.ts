@@ -1,8 +1,9 @@
 import type { ReadingBookAsset } from "../../domain/reading/types";
 
 const DB_NAME = "FanfanjiReadingDB";
-const DB_VERSION = 2;
+const DB_VERSION = 1;
 const ASSET_STORE = "assets";
+const COVER_DB_NAME = "FanfanjiReadingCoverDB";
 const COVER_STORE = "covers";
 
 function isValidAsset(asset: ReadingBookAsset): boolean {
@@ -18,21 +19,24 @@ function isValidAsset(asset: ReadingBookAsset): boolean {
 
 class ReadingAssetDB {
   private db: IDBDatabase | null = null;
+  private coverDb: IDBDatabase | null = null;
 
   private async init(): Promise<IDBDatabase> {
     if (this.db) return this.db;
     if (typeof indexedDB === "undefined") throw new Error("IndexedDB is unavailable");
 
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      let settled = false;
+      const finish = (callback: () => void) => { if (!settled) { settled = true; globalThis.clearTimeout(timer); callback(); } };
+      const timer = globalThis.setTimeout(() => finish(() => reject(new Error("Reading database open timed out"))), 8000);
+      // Do not request a version upgrade here. An older tab can otherwise block
+      // every正文 operation indefinitely on mobile browsers.
+      const request = indexedDB.open(DB_NAME);
       request.onupgradeneeded = () => {
         const database = request.result;
         if (!database.objectStoreNames.contains(ASSET_STORE)) {
           const store = database.createObjectStore(ASSET_STORE, { keyPath: "assetId" });
           store.createIndex("byIdentityAndBook", ["userIdentityId", "bookId"], { unique: false });
-        }
-        if (!database.objectStoreNames.contains(COVER_STORE)) {
-          database.createObjectStore(COVER_STORE);
         }
       };
       request.onsuccess = () => {
@@ -41,10 +45,31 @@ class ReadingAssetDB {
           this.db?.close();
           this.db = null;
         };
-        resolve(request.result);
+        finish(() => resolve(request.result));
       };
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => reject(new Error("Reading database upgrade is blocked"));
+      request.onerror = () => finish(() => reject(request.error));
+      request.onblocked = () => finish(() => reject(new Error("Reading database is blocked")));
+    });
+  }
+
+  private async initCover(): Promise<IDBDatabase> {
+    if (this.coverDb) return this.coverDb;
+    if (typeof indexedDB === "undefined") throw new Error("IndexedDB is unavailable");
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void) => { if (!settled) { settled = true; globalThis.clearTimeout(timer); callback(); } };
+      const timer = globalThis.setTimeout(() => finish(() => reject(new Error("Reading cover database open timed out"))), 8000);
+      const request = indexedDB.open(COVER_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(COVER_STORE)) request.result.createObjectStore(COVER_STORE);
+      };
+      request.onsuccess = () => {
+        this.coverDb = request.result;
+        this.coverDb.onversionchange = () => { this.coverDb?.close(); this.coverDb = null; };
+        finish(() => resolve(request.result));
+      };
+      request.onerror = () => finish(() => reject(request.error));
+      request.onblocked = () => finish(() => reject(new Error("Reading cover database is blocked")));
     });
   }
 
@@ -92,19 +117,22 @@ class ReadingAssetDB {
 
   async clearAll(): Promise<void> {
     const database = await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = database.transaction([ASSET_STORE, COVER_STORE], "readwrite");
-      transaction.objectStore(ASSET_STORE).clear();
-      transaction.objectStore(COVER_STORE).clear();
+    const coverDatabase = await this.initCover();
+    const clearStore = (target: IDBDatabase, storeName: string) => new Promise<void>((resolve, reject) => {
+      const transaction = target.transaction(storeName, "readwrite");
+      transaction.objectStore(storeName).clear();
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
+    const tasks = [clearStore(database, ASSET_STORE), clearStore(coverDatabase, COVER_STORE)];
+    if (database.objectStoreNames.contains(COVER_STORE)) tasks.push(clearStore(database, COVER_STORE));
+    await Promise.all(tasks);
   }
 
   async saveCover(bookId: string, blob: Blob): Promise<void> {
     if (!bookId || !(blob instanceof Blob) || !blob.type.startsWith("image/")) throw new Error("Invalid reading cover");
-    const database = await this.init();
+    const database = await this.initCover();
     return new Promise((resolve, reject) => {
       const transaction = database.transaction(COVER_STORE, "readwrite");
       transaction.objectStore(COVER_STORE).put(blob, bookId);
@@ -116,17 +144,29 @@ class ReadingAssetDB {
 
   async loadCover(bookId: string): Promise<Blob | null> {
     if (!bookId) return null;
-    const database = await this.init();
-    return new Promise((resolve, reject) => {
+    const database = await this.initCover();
+    const cover = await new Promise<Blob | null>((resolve, reject) => {
       const request = database.transaction(COVER_STORE, "readonly").objectStore(COVER_STORE).get(bookId);
       request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : null);
       request.onerror = () => reject(request.error);
     });
+    if (cover) return cover;
+    // One deployed build briefly stored covers in the正文 database. Move those
+    // blobs lazily so users do not lose a cover after the deadlock fix.
+    const legacyDatabase = await this.init();
+    if (!legacyDatabase.objectStoreNames.contains(COVER_STORE)) return null;
+    const legacy = await new Promise<Blob | null>((resolve, reject) => {
+      const request = legacyDatabase.transaction(COVER_STORE, "readonly").objectStore(COVER_STORE).get(bookId);
+      request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : null);
+      request.onerror = () => reject(request.error);
+    });
+    if (legacy) await this.saveCover(bookId, legacy);
+    return legacy;
   }
 
   async deleteCover(bookId: string): Promise<void> {
     if (!bookId) return;
-    const database = await this.init();
+    const database = await this.initCover();
     return new Promise((resolve, reject) => {
       const transaction = database.transaction(COVER_STORE, "readwrite");
       transaction.objectStore(COVER_STORE).delete(bookId);

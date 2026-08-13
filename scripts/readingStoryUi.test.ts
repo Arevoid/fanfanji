@@ -36,6 +36,8 @@ const coStoryGeneration = readFileSync(
 );
 assert.match(view, /故事正文/);
 assert.match(playShell, /下一步怎么走/);
+assert.match(playShell, /setChoicesExpanded\(true\)/);
+assert.match(playShell, /relative z-30 shrink-0 border-t/);
 assert.match(view, /输入你的行动/);
 assert.match(view, /角色/);
 assert.doesNotMatch(view, /label: "情报"/);

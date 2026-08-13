@@ -141,6 +141,42 @@ const formatDate = (timestamp: number): string =>
     day: "numeric",
   }).format(new Date(timestamp));
 
+async function compressReadingCover(file: File): Promise<Blob> {
+  const source = await (async (): Promise<{ width: number; height: number; draw: CanvasImageSource; close?: () => void }> => {
+    if (typeof createImageBitmap === "function") {
+      const bitmap = await createImageBitmap(file);
+      return { width: bitmap.width, height: bitmap.height, draw: bitmap, close: () => bitmap.close() };
+    }
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.onerror = () => reject(new Error("封面图片无法解码"));
+        element.src = objectUrl;
+      });
+      return { width: image.naturalWidth, height: image.naturalHeight, draw: image, close: () => URL.revokeObjectURL(objectUrl) };
+    } catch (error) {
+      URL.revokeObjectURL(objectUrl);
+      throw error;
+    }
+  })();
+  try {
+    const scale = Math.min(1, 600 / Math.max(source.width, 1), 900 / Math.max(source.height, 1));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(source.width * scale));
+    canvas.height = Math.max(1, Math.round(source.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("当前浏览器无法压缩封面");
+    context.drawImage(source.draw, 0, 0, canvas.width, canvas.height);
+    const encode = (quality: number) => new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("封面压缩失败")), "image/jpeg", quality));
+    const first = await encode(0.82);
+    return first.size > 650 * 1024 ? encode(0.66) : first;
+  } finally {
+    source.close?.();
+  }
+}
+
 export default function AppReading({
   userIdentityId,
   settings,
@@ -373,7 +409,7 @@ export default function AppReading({
     event.target.value = "";
     if (!file || isImporting) return;
     setIsImporting(true);
-    setNotice(null);
+    setNotice({ tone: "info", text: "正在读取并导入小说……" });
     try {
       let result = await importReadingFile(file, userIdentityId);
       if (result.status === "duplicate") {
@@ -522,18 +558,31 @@ export default function AppReading({
       setNotice({ tone: "error", text: "请选择 JPG、PNG、WEBP 等图片文件。" });
       return;
     }
-    if (file.size > 4 * 1024 * 1024) {
-      setNotice({ tone: "error", text: "封面图片不能超过 4 MB。" });
+    if (file.size > 15 * 1024 * 1024) {
+      setNotice({ tone: "error", text: "原图不能超过 15 MB，请先选择稍小的图片。" });
       return;
     }
     try {
-      await readingAssetDb.saveCover(bookId, file);
+      setNotice({ tone: "info", text: "正在压缩并保存封面……" });
+      const compressed = await compressReadingCover(file);
+      await readingAssetDb.saveCover(bookId, compressed);
       updateReadingBookCover({ userIdentityId, bookId, coverUrl: `reading-cover:${bookId}` });
       refreshLibrary();
       setNotice({ tone: "success", text: "书籍封面已更新。" });
     } catch (error) {
       await readingAssetDb.deleteCover(bookId).catch(() => undefined);
       showError(error, "封面保存失败");
+    }
+  };
+
+  const clearBookCover = async (book: ReadingBook) => {
+    try {
+      updateReadingBookCover({ userIdentityId, bookId: book.id, coverUrl: undefined });
+      await readingAssetDb.deleteCover(book.id).catch(() => undefined);
+      refreshLibrary();
+      setNotice({ tone: "success", text: "书籍封面已清除。" });
+    } catch (error) {
+      showError(error, "清除封面失败");
     }
   };
 
@@ -1415,23 +1464,23 @@ export default function AppReading({
         <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
           <div className="mx-auto w-full max-w-md space-y-4">
             <section className="flex gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
-              <button
-                type="button"
-                onClick={() => {
-                  setCoverBookId(selectedBook.id);
-                  window.setTimeout(() => coverInputRef.current?.click(), 0);
-                }}
-                aria-label="修改书籍封面"
-                className="relative h-28 w-20 shrink-0 overflow-hidden rounded-2xl"
-              >
-                <ReadingBookCover
-                  book={selectedBook}
-                  className="h-full w-full"
-                />
-                <span className="absolute inset-x-0 bottom-0 bg-black/55 py-1 text-center text-[9px] font-bold text-white">
-                  修改封面
-                </span>
-              </button>
+              <div className="w-20 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCoverBookId(selectedBook.id);
+                    window.setTimeout(() => coverInputRef.current?.click(), 0);
+                  }}
+                  aria-label="修改书籍封面"
+                  className="relative h-28 w-20 overflow-hidden rounded-2xl"
+                >
+                  <ReadingBookCover book={selectedBook} className="h-full w-full" />
+                  <span className="absolute inset-x-0 bottom-0 bg-black/55 py-1 text-center text-[9px] font-bold text-white">修改封面</span>
+                </button>
+                {selectedBook.coverUrl && (
+                  <button type="button" onClick={() => clearBookCover(selectedBook)} className="mt-1.5 h-7 w-full rounded-lg border border-[var(--border)] text-[9px] font-bold text-[var(--text-muted)]">清除封面</button>
+                )}
+              </div>
               <div className="min-w-0 flex-1 py-1">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                   {selectedBook.format === "markdown" ? "Markdown" : "TXT"}

@@ -47,6 +47,7 @@ export default function ReadingStoryPlayShell(
   const [panelsExpanded, setPanelsExpanded] = useState(false);
   const scrollRef = useRef<HTMLElement>(null);
   const activePanel = props.panels.find((item) => item.id === activePanelId);
+  const choicesKey = props.choices.map((choice) => `${choice.id}:${choice.label}`).join("|");
   const progress =
     props.targetChapters > 0
       ? Math.min(
@@ -60,6 +61,10 @@ export default function ReadingStoryPlayShell(
     if (!node) return;
     node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
   }, [props.notice]);
+
+  useEffect(() => {
+    if (props.choices.length) setChoicesExpanded(true);
+  }, [choicesKey, props.choices.length]);
 
   return (
     <div
@@ -98,7 +103,7 @@ export default function ReadingStoryPlayShell(
 
       <main
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto px-5 pb-56 pt-5"
+        className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-5"
       >
         <div className="mx-auto max-w-2xl">
           <div className="mb-5 flex flex-wrap items-center gap-2 text-[10px] text-white/45">
@@ -160,7 +165,7 @@ export default function ReadingStoryPlayShell(
 
       <section
         aria-label="故事行动区"
-        className="absolute inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#12100e]/97 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_35px_rgba(0,0,0,0.4)] backdrop-blur"
+        className="relative z-30 shrink-0 border-t border-white/10 bg-[#12100e]/97 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_35px_rgba(0,0,0,0.4)] backdrop-blur"
       >
         <div className="mx-auto max-w-2xl">
           {props.choices.length > 0 && (

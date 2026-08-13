@@ -59,7 +59,13 @@ export function validateReadingCoStoryTurnResult(raw: unknown): ReadingCoStoryTu
   if (value.controlsUserCharacter !== false) throw new ReadingCoStoryError("AI 不能替用户角色行动或作决定", "invalid");
   const strings = (key: string): string[] => Array.isArray(value[key]) ? (value[key] as unknown[]).filter((item): item is string => typeof item === "string" && Boolean(item.trim())).slice(0, 50).map((item) => text(item, 1000)) : [];
   const dialogue = Array.isArray(value.dialogue) ? value.dialogue.slice(0, 50).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).map((item) => ({ speaker: typeof item.speaker === "string" ? text(item.speaker, 200) : "", text: typeof item.text === "string" ? text(item.text, 2000) : "" })).filter((item) => item.speaker && item.text) : [];
-  const choices = Array.isArray(value.choices) ? value.choices.slice(0, 8).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).map((item) => ({ id: typeof item.id === "string" ? text(item.id, 100) : "", label: typeof item.label === "string" ? text(item.label, 500) : "", consequenceHint: typeof item.consequenceHint === "string" ? text(item.consequenceHint, 500) : undefined })).filter((item) => item.id && item.label) : [];
+  const parsedChoices = Array.isArray(value.choices) ? value.choices.slice(0, 8).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).map((item) => ({ id: typeof item.id === "string" ? text(item.id, 100) : "", label: typeof item.label === "string" ? text(item.label, 500) : "", consequenceHint: typeof item.consequenceHint === "string" ? text(item.consequenceHint, 500) : undefined })).filter((item) => item.id && item.label) : [];
+  const choices = parsedChoices.length ? parsedChoices : [
+    { id: "continue-observe", label: "继续观察局势，确认刚才行动造成的变化" },
+    { id: "ask-friend", label: "询问同行好友的判断" },
+    { id: "follow-goal", label: "按照当前目标推进下一步行动" },
+    { id: "free-action", label: "按自己的想法行动" },
+  ];
   return { narrative, dialogue, choices, friendAction: typeof value.friendAction === "string" ? text(value.friendAction, 2000) : "", controlsUserCharacter: false, stateChanges: strings("stateChanges"), userDiscoveredIntel: strings("userDiscoveredIntel"), aiDiscoveredIntel: strings("aiDiscoveredIntel"), taskChanges: strings("taskChanges"), inventoryChanges: strings("inventoryChanges"), currentLocation: typeof value.currentLocation === "string" ? text(value.currentLocation, 500) : "", currentTime: typeof value.currentTime === "string" ? text(value.currentTime, 200) : "", chapterProgress: Math.max(0, Math.min(1, Number(value.chapterProgress) || 0)), shouldEndChapter: Boolean(value.shouldEndChapter) };
 }
 

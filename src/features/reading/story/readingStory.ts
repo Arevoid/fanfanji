@@ -80,7 +80,7 @@ export function validateReadingStoryTurnResult(raw: unknown): ReadingStoryTurnRe
   const value = raw as Record<string, unknown>;
   const narrative = typeof value.narrative === "string" ? value.narrative.trim().slice(0, 20000) : "";
   if (!narrative) throw new ReadingStoryError("回合正文不能为空", "invalid");
-  const choices = Array.isArray(value.choices)
+  const parsedChoices = Array.isArray(value.choices)
     ? value.choices.slice(0, 8).map((choice) => {
       const item = choice as Record<string, unknown>;
       return {
@@ -90,6 +90,12 @@ export function validateReadingStoryTurnResult(raw: unknown): ReadingStoryTurnRe
       };
     }).filter((choice) => choice.id && choice.label)
     : [];
+  const choices = parsedChoices.length ? parsedChoices : [
+    { id: "continue-observe", label: "继续观察局势，确认刚才行动造成的变化" },
+    { id: "ask-present", label: "主动询问在场人物，获取更多信息" },
+    { id: "follow-goal", label: "按照当前目标推进下一步行动" },
+    { id: "free-action", label: "按自己的想法行动" },
+  ];
   const strings = (field: string): string[] => Array.isArray(value[field])
     ? (value[field] as unknown[]).filter((item): item is string => Boolean(typeof item === "string" && item.trim())).slice(0, 50).map((item) => item.trim().slice(0, 1000))
     : [];

@@ -10,6 +10,8 @@ assert.match(keysSource, /readingStore:\s*"phone_reading_store_v1"/);
 assert.match(clearSource, /readingAssetDb\.clearAll\(\)/);
 assert.match(dbSource, /createIndex\("byIdentityAndBook", \["userIdentityId", "bookId"\]/);
 assert.match(dbSource, /asset\.userIdentityId !== userIdentityId \|\| asset\.bookId !== bookId/);
+assert.match(dbSource, /indexedDB\.open\(DB_NAME\)/, "正文仓库 must open without forcing an upgrade");
+assert.match(dbSource, /FanfanjiReadingCoverDB/);
 
 const calls: string[] = [];
 await clearApplicationData({
