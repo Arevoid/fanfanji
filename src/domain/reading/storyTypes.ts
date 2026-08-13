@@ -38,6 +38,8 @@ export interface ReadingStoryState extends ReadingStoryScope {
 
 export interface ReadingStoryTurn extends ReadingStoryScope {
   id: string;
+  /** Stable client request key used to make a generation submit idempotent. */
+  requestId?: string;
   turnIndex: number;
   parentTurnId?: string;
   narrative: string;

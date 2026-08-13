@@ -14,4 +14,6 @@ assert.match(app, /setReadingStoryBookId/);
 assert.match(app, /穿书：进入这本小说的故事宇宙/);
 assert.match(generation, /validateReadingStoryTurnResult/);
 assert.match(generation, /commitReadingStoryTurn/);
+assert.match(generation, /requestId/);
+assert.match(generation, /expectedStoryUpdatedAt/);
 console.log("reading story UI integration checks passed");

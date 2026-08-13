@@ -35,7 +35,7 @@ export default function ReadingStoryView({ userIdentityId, book, settings, onClo
     if (!story || !settings || !action.trim() || isGenerating) return;
     setIsGenerating(true); setMessage("正在生成下一回合，模型只会看到当前故事状态和最近回合。");
     try {
-      const generated = await generateReadingStoryTurn({ story, userAction: action, bookTitle: book?.title, settings: { apiKey: settings.apiKey || "", selectedModel: settings.selectedModel || "", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible } });
+      const generated = await generateReadingStoryTurn({ story, userAction: action, requestId: makeId(), bookTitle: book?.title, settings: { apiKey: settings.apiKey || "", selectedModel: settings.selectedModel || "", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible } });
       setAction(""); refresh(generated.story); setMessage("新回合已生成并保存。");
     } catch (error) { setMessage(error instanceof Error ? error.message : "故事回合生成失败"); }
     finally { setIsGenerating(false); }
