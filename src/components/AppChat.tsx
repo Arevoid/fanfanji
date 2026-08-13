@@ -71,6 +71,7 @@ import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
 import { useChatAttachmentState } from "../features/chat/hooks/useChatAttachmentState";
 import { resolveActiveChatStylePreset } from "../features/chat/styles/chatStylePreset";
+import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
 import { COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE } from "../features/chat/styles/chatThemeTemplate";
 import { ChatSettingsSwitch as SettingsSwitch } from "../features/chat/components/ChatSettingsSwitch";
 import { ChatAvatar as RenderAvatar } from "../features/chat/components/ChatAvatar";
@@ -5554,23 +5555,25 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                     settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
                     settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
                   )
-                  : settings.selfBubbleBg
-                    ? getBubbleBackgroundStyle(settings.selfBubbleBg, settings.selfBubbleOpacity ?? 100)
-                    : "var(--button-primary-bg)"};
+                  : getBubbleBackgroundStyle(
+                    settings.selfBubbleBg || CLASSIC_SELF_BUBBLE_BACKGROUND,
+                    settings.selfBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY,
+                  )};
                 --chat-ai-bg: ${isLiquidGlass
                   ? getBubbleBackgroundStyle(
                     settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
                     settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
                   )
-                  : settings.otherBubbleBg
-                    ? getBubbleBackgroundStyle(settings.otherBubbleBg, settings.otherBubbleOpacity ?? 100)
-                    : "var(--surface-raised)"};
+                  : getBubbleBackgroundStyle(
+                    settings.otherBubbleBg || CLASSIC_OTHER_BUBBLE_BACKGROUND,
+                    settings.otherBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY,
+                  )};
                 --chat-user-text: ${isLiquidGlass
                   ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-                  : settings.selfBubbleColor || "var(--button-primary-text)"};
+                  : settings.selfBubbleColor || CLASSIC_SELF_BUBBLE_TEXT};
                 --chat-ai-text: ${isLiquidGlass
                   ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-                  : settings.otherBubbleColor || "var(--text-primary)"};
+                  : settings.otherBubbleColor || CLASSIC_OTHER_BUBBLE_TEXT};
               }
 
               ${!isLiquidGlass && settings.selfBubbleBg ? `

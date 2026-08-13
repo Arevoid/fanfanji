@@ -70,6 +70,7 @@ import {
   LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS,
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../features/chat/styles/liquidGlassDefaults";
+import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -521,28 +522,28 @@ export default function AppSettings({
   const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
   const [otherBubbleBg, setOtherBubbleBg] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-    : settings.otherBubbleBg || "#f4f4f5");
+    : settings.otherBubbleBg || CLASSIC_OTHER_BUBBLE_BACKGROUND);
   const [otherBubbleColor, setOtherBubbleColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-    : settings.otherBubbleColor || "#18181b");
+    : settings.otherBubbleColor || CLASSIC_OTHER_BUBBLE_TEXT);
   const [otherBubbleRadius, setOtherBubbleRadius] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
     : settings.otherBubbleRadius ?? 6);
   const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-    : settings.otherBubbleOpacity ?? 100);
+    : settings.otherBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY);
   const [selfBubbleBg, setSelfBubbleBg] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-    : settings.selfBubbleBg || "#18181b");
+    : settings.selfBubbleBg || CLASSIC_SELF_BUBBLE_BACKGROUND);
   const [selfBubbleColor, setSelfBubbleColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-    : settings.selfBubbleColor || "#ffffff");
+    : settings.selfBubbleColor || CLASSIC_SELF_BUBBLE_TEXT);
   const [selfBubbleRadius, setSelfBubbleRadius] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
     : settings.selfBubbleRadius ?? 6);
   const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-    : settings.selfBubbleOpacity ?? 100);
+    : settings.selfBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY);
   const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
   const [hideNicknames, setHideNicknames] = useState(!!settings.hideNicknames);
 
@@ -585,22 +586,22 @@ export default function AppSettings({
   useEffect(() => {
     setOtherBubbleBg(isLiquidGlassChatStyle
       ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-      : settings.otherBubbleBg || "#f4f4f5");
+      : settings.otherBubbleBg || CLASSIC_OTHER_BUBBLE_BACKGROUND);
     setOtherBubbleColor(isLiquidGlassChatStyle
       ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-      : settings.otherBubbleColor || "#18181b");
+      : settings.otherBubbleColor || CLASSIC_OTHER_BUBBLE_TEXT);
     setOtherBubbleOpacity(isLiquidGlassChatStyle
       ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-      : settings.otherBubbleOpacity ?? 100);
+      : settings.otherBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY);
     setSelfBubbleBg(isLiquidGlassChatStyle
       ? settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-      : settings.selfBubbleBg || "#18181b");
+      : settings.selfBubbleBg || CLASSIC_SELF_BUBBLE_BACKGROUND);
     setSelfBubbleColor(isLiquidGlassChatStyle
       ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-      : settings.selfBubbleColor || "#ffffff");
+      : settings.selfBubbleColor || CLASSIC_SELF_BUBBLE_TEXT);
     setSelfBubbleOpacity(isLiquidGlassChatStyle
       ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-      : settings.selfBubbleOpacity ?? 100);
+      : settings.selfBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY);
     setOtherBubbleRadius(isLiquidGlassChatStyle
       ? settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
       : settings.otherBubbleRadius ?? 6);
