@@ -4,6 +4,7 @@ import { createEmptyReadingCoStoryStore } from "../src/domain/reading/coStoryTyp
 import { createReadingCoStory, commitReadingCoStoryAiAction } from "../src/features/reading/story/readingCoStory";
 import { buildReadingCoStoryAiActionPrompt, projectReadingCoStoryForAi } from "../src/features/reading/story/readingCoStoryPrompt";
 import { ReadingCoStoryPolicyError } from "../src/features/reading/story/readingCoStoryPolicy";
+import { generateReadingCoStoryAiAction } from "../src/features/reading/story/readingCoStoryGeneration";
 
 class MemoryStorage implements Storage { private data = new Map<string, string>(); get length(): number { return this.data.size; } clear(): void { this.data.clear(); } getItem(key: string): string | null { return this.data.get(key) ?? null; } key(index: number): string | null { return [...this.data.keys()][index] ?? null; } removeItem(key: string): void { this.data.delete(key); } setItem(key: string, value: string): void { this.data.set(key, value); } }
 Object.defineProperty(globalThis, "window", { configurable: true, value: { localStorage: new MemoryStorage() } });
@@ -33,5 +34,12 @@ assert.equal(context.visibleRecentTurns.every((turn) => turn.actor === "ai_frien
 const prompt = buildReadingCoStoryAiActionPrompt({ context, mode: "ask_opinion", userRequest: "你怎么看" });
 assert.match(prompt.systemInstruction, /不能替用户角色做决定/);
 assert.match(prompt.systemInstruction, /requiresUserApproval/);
+
+const generatedStory = createReadingCoStory({ scope: { ...scope, coStoryId: "co-story-generation" }, title: "共同生成测试", length: "short", userCharacterName: "用户", aiFriend: { ...friend, knownTurnIds: [] }, now: 10 });
+let generationCalls = 0;
+const generated = await generateReadingCoStoryAiAction({ story: generatedStory, mode: "suggest", settings: { apiKey: "key", selectedModel: "model" }, aiCall: async () => { generationCalls += 1; return { text: generationCalls === 1 ? "{}" : JSON.stringify({ action: "观察风向", rationale: "先收集低风险信息", risk: "low", requiresUserApproval: false, controlsUserCharacter: false }) }; }, now: 11 });
+assert.equal(generationCalls, 2);
+assert.equal(generated.story.coStoryId, "co-story-generation");
+assert.equal(generated.attempts, 2);
 
 console.log("AI friend co-story scope, knowledge projection, and major-decision guard tests passed");

@@ -110,3 +110,34 @@ export function commitReadingCoStoryAiAction(input: {
 }
 
 export function getCoStory(scope: ReadingCoStoryScope): ReadingCoStoryState | undefined { return getReadingCoStory(scope); }
+
+export function resolveReadingCoStoryApproval(input: { scope: ReadingCoStoryScope; actionId: string; approve: boolean; now?: number }): ReadingCoStoryState {
+  const loaded = loadReadingCoStoryStore();
+  const story = loaded.value.stories.find((candidate) => candidate.userIdentityId === input.scope.userIdentityId && candidate.coStoryId === input.scope.coStoryId && candidate.relationId === input.scope.relationId && candidate.characterId === input.scope.characterId);
+  if (!story) throw new ReadingCoStoryError("共同故事不存在", "missing");
+  if (!story.pendingApproval || story.pendingApproval.actionId !== input.actionId) throw new ReadingCoStoryError("待确认行动不存在或已经处理", "invalid");
+  const now = input.now ?? Date.now();
+  const turns = loaded.value.turns.filter((turn) => turn.userIdentityId === input.scope.userIdentityId && turn.coStoryId === input.scope.coStoryId && turn.relationId === input.scope.relationId && turn.characterId === input.scope.characterId).sort((left, right) => left.turnIndex - right.turnIndex);
+  const turn: ReadingCoStoryTurn = {
+    ...input.scope,
+    turnId: createId("co-approval"),
+    turnIndex: turns.length,
+    actor: "system",
+    action: story.pendingApproval.action,
+    narrative: input.approve ? `已接受 AI 好友行动：${story.pendingApproval.action}` : `已拒绝 AI 好友行动：${story.pendingApproval.action}`,
+    dialogue: [],
+    choices: [],
+    risk: "major",
+    requiresUserApproval: false,
+    visibleTo: ["user", "ai_friend"],
+    createdAt: now,
+  };
+  const next = { ...story, pendingApproval: undefined, activeActor: "user" as const, updatedAt: now };
+  const nextStore = {
+    ...loaded.value,
+    stories: [...loaded.value.stories.filter((candidate) => !(candidate.userIdentityId === input.scope.userIdentityId && candidate.coStoryId === input.scope.coStoryId && candidate.relationId === input.scope.relationId && candidate.characterId === input.scope.characterId)), next],
+    turns: [...loaded.value.turns, turn],
+  };
+  persist(saveReadingCoStoryStore(nextStore), next);
+  return next;
+}

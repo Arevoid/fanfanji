@@ -33,6 +33,7 @@ import {
 } from "../features/reading/library/readingLibrary";
 import ReadingReader from "./reading/ReadingReader";
 import ReadingStoryView from "./reading/ReadingStoryView";
+import ReadingCoStoryView from "./reading/ReadingCoStoryView";
 import { buildReadingArchive, restoreReadingArchive, serializeReadingArchive } from "../features/reading/archive/readingArchive";
 import { createAiReadingRoom, ReadingCoReadingError } from "../features/reading/coReading/readingCoReading";
 import { getAiReadingState, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
@@ -74,6 +75,7 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [readingBookId, setReadingBookId] = useState<string | null>(null);
   const [readingStoryBookId, setReadingStoryBookId] = useState<string | null>(null);
+  const [readingCoStoryBookId, setReadingCoStoryBookId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -379,6 +381,11 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
     return <ReadingStoryView userIdentityId={userIdentityId} book={storyBook} settings={settings} onClose={() => { setReadingStoryBookId(null); refreshLibrary(); }} />;
   }
 
+  if (readingCoStoryBookId) {
+    const storyBook = books.find((book) => book.id === readingCoStoryBookId);
+    return <ReadingCoStoryView userIdentityId={userIdentityId} book={storyBook} friends={availableFriends} settings={settings} onClose={() => { setReadingCoStoryBookId(null); refreshLibrary(); }} />;
+  }
+
   if (selectedRoom) {
     const roomBook = books.find((book) => book.id === selectedRoom.bookId);
     const aiReadingState = getAiReadingState(selectedRoom);
@@ -488,6 +495,8 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
             {selectedBook.status !== "archived" && availableFriends.length > 0 && (
               <button type="button" onClick={() => setInviteBookId(selectedBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold"><span aria-hidden="true">👥</span>邀请一位 AI 好友共读</button>
             )}
+
+            {selectedBook.status !== "archived" && availableFriends.length > 0 && <button type="button" onClick={() => setReadingCoStoryBookId(selectedBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-cyan-300/40 bg-cyan-500/10 text-xs font-bold"><span aria-hidden="true">✦</span>和 AI 好友共同穿书</button>}
 
             <section aria-label="novel-analysis" className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
               <div className="flex items-center justify-between gap-2"><div><h2 className="text-sm font-bold">小说分析</h2><p className="mt-1 text-[10px] text-[var(--text-muted)]">按章节处理 · 可恢复 · 不发送整本正文</p></div><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px] text-[var(--text-muted)]">本地任务</span></div>
