@@ -32,6 +32,7 @@ import {
   updateReadingBookDetails,
 } from "../features/reading/library/readingLibrary";
 import ReadingReader from "./reading/ReadingReader";
+import ReadingStoryView from "./reading/ReadingStoryView";
 import { buildReadingArchive, restoreReadingArchive, serializeReadingArchive } from "../features/reading/archive/readingArchive";
 import { createAiReadingRoom, ReadingCoReadingError } from "../features/reading/coReading/readingCoReading";
 import { getAiReadingState, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
@@ -71,6 +72,7 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
   const [section, setSection] = useState<"library" | "archived">("library");
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [readingBookId, setReadingBookId] = useState<string | null>(null);
+  const [readingStoryBookId, setReadingStoryBookId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -371,6 +373,11 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
     return <ReadingReader userIdentityId={userIdentityId} bookId={readingBookId} onClose={() => { setReadingBookId(null); refreshLibrary(); }} />;
   }
 
+  if (readingStoryBookId) {
+    const storyBook = books.find((book) => book.id === readingStoryBookId);
+    return <ReadingStoryView userIdentityId={userIdentityId} book={storyBook} onClose={() => { setReadingStoryBookId(null); refreshLibrary(); }} />;
+  }
+
   if (selectedRoom) {
     const roomBook = books.find((book) => book.id === selectedRoom.bookId);
     const aiReadingState = getAiReadingState(selectedRoom);
@@ -468,6 +475,12 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
             {selectedBook.status !== "archived" && selectedChapters.length > 0 && (
               <button type="button" onClick={() => setReadingBookId(selectedBook.id)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] text-sm font-bold text-[var(--button-primary-text)] shadow-sm">
                 <BookOpenText className="h-4 w-4" />{selectedProgress ? `继续阅读 · ${selectedProgress.percent.toFixed(1)}%` : "开始阅读"}
+              </button>
+            )}
+
+            {selectedBook.status !== "archived" && selectedChapters.length > 0 && (
+              <button type="button" onClick={() => setReadingStoryBookId(selectedBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/40 bg-amber-500/10 text-xs font-bold text-amber-200">
+                <span aria-hidden="true">✦</span>穿书：进入这本小说的故事宇宙
               </button>
             )}
 
