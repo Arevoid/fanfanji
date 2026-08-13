@@ -99,7 +99,7 @@ export function isReadingAnnotation(value: unknown): value is ReadingAnnotation 
     && string(value.bookId)
     && string(value.chapterId)
     && string(value.paragraphAnchorId)
-    && ["bookmark", "highlight", "note"].includes(String(value.kind))
+    && ["bookmark", "highlight", "note", "edit"].includes(String(value.kind))
     && validRange
     && typeof value.textSnapshot === "string"
     && optionalString(value.color)

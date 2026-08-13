@@ -30,6 +30,9 @@ assert.match(reader, /上一章[\s\S]*下一章/);
 assert.match(reader, /pageMode === "horizontal"/);
 assert.match(reader, /overflow-x-auto overflow-y-hidden/);
 assert.match(reader, /左右翻页/);
-assert.match(reader, /复制[\s\S]*高亮[\s\S]*段评[\s\S]*书签[\s\S]*编辑[\s\S]*分享/);
+assert.match(reader, /复制[\s\S]*高亮[\s\S]*段评[\s\S]*书签[\s\S]*编辑/);
+assert.doesNotMatch(reader, />分享<|navigator\.share/);
+assert.match(reader, /handleReaderEdgeClick/);
+assert.match(reader, /和 \$\{room\.characterSnapshot\.name\} 讨论当前内容/);
 
 console.log("reading reader modes and selection toolbar tests passed");

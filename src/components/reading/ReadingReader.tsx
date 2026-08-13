@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bookmark, BookOpenText, ChevronLeft, ChevronRight, Copy, Highlighter, List, LoaderCircle, MessageCircle, Pencil, Search, Share2, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { Bookmark, BookOpenText, ChevronLeft, ChevronRight, Copy, Highlighter, List, LoaderCircle, MessageCircle, Pencil, Search, Send, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import { fontAssetDb } from "../../utils/fontAssetDb";
 import { GLOBAL_FONT_ASSET_ID } from "../../features/theme/globalTypography";
 import {
@@ -12,22 +12,33 @@ import {
 } from "../../features/reading/reader/readingReader";
 import {
   createReadingAnnotation,
+  applyReadingParagraphEdits,
   deleteReadingAnnotation,
   getReadingAnnotations,
   getReadingBookPreferences,
   saveReadingBookPreferences,
+  saveReadingParagraphEdit,
   searchReadingContent,
   toggleReadingBookmark,
   type ReadingSearchResult,
 } from "../../features/reading/tools/readingTools";
 import type { ReadingAnnotation, ReadingBookPreferences } from "../../domain/reading/types";
-import type { ReadingRoom } from "../../domain/reading/coReadingTypes";
-import { createUserReadingComment, listReadingComments, startReadingDiscussion } from "../../features/reading/coReading/readingCoReadingContent";
+import type { ReadingComment, ReadingDiscussionMessage, ReadingRoom } from "../../domain/reading/coReadingTypes";
+import type { Character, UserSettings } from "../../types";
+import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
+import { appendReadingDiscussionMessage, createAiReadingComment, createUserReadingComment, listDiscussionMessages, listReadingComments, listReadingDiscussions, startReadingDiscussion } from "../../features/reading/coReading/readingCoReadingContent";
+import { advanceAiReadingToParagraph } from "../../features/reading/coReading/aiReadingBoundary";
+import { getAiReadingState } from "../../core/storage/repositories/readingCoReadingRepository";
+import { requestReadingCompanionResponse } from "../../features/reading/coReading/readingCompanionService";
 
 interface ReadingReaderProps {
   userIdentityId: string;
   bookId: string;
   room?: ReadingRoom;
+  settings?: UserSettings;
+  character?: Character;
+  relationship?: CharacterRelationship;
+  worldBookContext?: string;
   onClose: () => void;
 }
 
@@ -38,12 +49,15 @@ interface VisiblePosition {
   scrollOffsetHint: number;
 }
 
-export default function ReadingReader({ userIdentityId, bookId, room, onClose }: ReadingReaderProps) {
+export default function ReadingReader({ userIdentityId, bookId, room, settings, character, relationship, worldBookContext, onClose }: ReadingReaderProps) {
   const scrollRef = useRef<HTMLElement>(null);
   const paragraphRefs = useRef(new Map<string, HTMLParagraphElement>());
   const progressTimerRef = useRef<number | null>(null);
   const horizontalSnapTimerRef = useRef<number | null>(null);
   const selectionSyncTimerRef = useRef<number | null>(null);
+  const aiSyncTimerRef = useRef<number | null>(null);
+  const aiRequestInFlightRef = useRef(false);
+  const lastAiSyncAnchorRef = useRef<string | null>(null);
   const currentPositionRef = useRef<VisiblePosition | null>(null);
   const restoredRef = useRef(false);
   const [content, setContent] = useState<ReadingBookContent | null>(null);
@@ -62,8 +76,27 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
   const [percent, setPercent] = useState(0);
   const [currentChapterId, setCurrentChapterId] = useState<string | null>(null);
   const [roomComments, setRoomComments] = useState(() => room ? listReadingComments(room) : []);
+  const [commentThreadAnchorId, setCommentThreadAnchorId] = useState<string | null>(null);
+  const [replyToComment, setReplyToComment] = useState<ReadingComment | null>(null);
+  const [commentReplyDraft, setCommentReplyDraft] = useState("");
+  const [isDiscussionOpen, setIsDiscussionOpen] = useState(false);
+  const [discussionId, setDiscussionId] = useState<string | null>(null);
+  const [discussionMessages, setDiscussionMessages] = useState<ReadingDiscussionMessage[]>([]);
+  const [discussionDraft, setDiscussionDraft] = useState("");
+  const [isAiResponding, setIsAiResponding] = useState(false);
 
-  useEffect(() => { setRoomComments(room ? listReadingComments(room) : []); }, [room]);
+  const refreshRoomComments = useCallback(() => setRoomComments(room ? listReadingComments(room) : []), [room]);
+
+  useEffect(() => {
+    refreshRoomComments();
+    const refresh = () => refreshRoomComments();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [refreshRoomComments]);
 
   useEffect(() => {
     let active = true;
@@ -107,8 +140,36 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     };
   }, [preferences.fontAssetId]);
 
-  const flatParagraphs = useMemo(() => content?.chapters.flatMap((chapterView) =>
-    chapterView.paragraphs.map((paragraph) => ({ paragraph, chapterId: chapterView.chapter.id }))) || [], [content]);
+  const displayContent = useMemo(() => content ? applyReadingParagraphEdits(content, annotations) : null, [annotations, content]);
+  const flatParagraphs = useMemo(() => displayContent?.chapters.flatMap((chapterView) =>
+    chapterView.paragraphs.map((paragraph) => ({ paragraph, chapterId: chapterView.chapter.id }))) || [], [displayContent]);
+
+  const maybeSyncAiCompanion = useCallback((position: VisiblePosition) => {
+    if (!room || room.status === "ended" || room.status === "declined" || room.status === "paused") return;
+    try {
+      advanceAiReadingToParagraph({ scope: room, paragraphAnchorId: position.paragraph.anchor.id });
+    } catch {
+      return;
+    }
+    if (!settings || !character || !relationship || aiRequestInFlightRef.current || lastAiSyncAnchorRef.current === position.paragraph.anchor.id) return;
+    const state = getAiReadingState(room);
+    if (!state || state.autonomousCommentFrequency === "off") return;
+    const currentIndex = flatParagraphs.findIndex((item) => item.paragraph.anchor.id === position.paragraph.anchor.id);
+    const lastIndex = state.lastCommentedAnchor ? flatParagraphs.findIndex((item) => item.paragraph.anchor.id === state.lastCommentedAnchor?.id) : -1;
+    const gap = currentIndex - lastIndex;
+    const threshold = state.autonomousCommentFrequency === "active" ? 3 : state.autonomousCommentFrequency === "moderate" ? 7 : 15;
+    if (currentIndex < 0 || gap < threshold) return;
+    lastAiSyncAnchorRef.current = position.paragraph.anchor.id;
+    aiRequestInFlightRef.current = true;
+    void requestReadingCompanionResponse({ room, character, relationship, settings, paragraph: position.paragraph, kind: "comment", autonomous: true, worldBookContext })
+      .then((response) => {
+        if (!response) return;
+        createAiReadingComment({ scope: room, authorName: room.characterSnapshot.name, targetChapterId: position.chapterId, targetParagraphAnchorId: position.paragraph.anchor.id, textSnapshot: position.paragraph.text, body: response.body, isSpoiler: response.isSpoiler });
+        refreshRoomComments();
+      })
+      .catch(() => undefined)
+      .finally(() => { aiRequestInFlightRef.current = false; });
+  }, [character, flatParagraphs, refreshRoomComments, relationship, room, settings, worldBookContext]);
 
   const persistPosition = useCallback((position: VisiblePosition | null) => {
     if (!content || !position) return;
@@ -123,10 +184,14 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
         sourceCharacterLength: content.sourceCharacterLength,
       });
       setPercent(saved.percent);
+      if (room) {
+        if (aiSyncTimerRef.current !== null) window.clearTimeout(aiSyncTimerRef.current);
+        aiSyncTimerRef.current = window.setTimeout(() => maybeSyncAiCompanion(position), 450);
+      }
     } catch {
       // Reading stays available when local progress persistence is temporarily unavailable.
     }
-  }, [bookId, content, userIdentityId]);
+  }, [bookId, content, maybeSyncAiCompanion, room, userIdentityId]);
 
   const scrollToAnchor = useCallback((anchorId: string, behavior: ScrollBehavior = "smooth", characterOffset = 0) => {
     const container = scrollRef.current;
@@ -218,6 +283,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
   useEffect(() => () => {
     if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
     if (horizontalSnapTimerRef.current !== null) window.clearTimeout(horizontalSnapTimerRef.current);
+    if (aiSyncTimerRef.current !== null) window.clearTimeout(aiSyncTimerRef.current);
     persistPosition(currentPositionRef.current);
   }, [persistPosition]);
 
@@ -238,7 +304,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
   };
 
   const currentChapterIndex = Math.max(0, content?.chapters.findIndex((chapter) => chapter.chapter.id === currentChapterId) ?? 0);
-  const searchResults = useMemo(() => content ? searchReadingContent(content, searchQuery) : [], [content, searchQuery]);
+  const searchResults = useMemo(() => displayContent ? searchReadingContent(displayContent, searchQuery) : [], [displayContent, searchQuery]);
   const refreshAnnotations = () => setAnnotations(getReadingAnnotations(userIdentityId, bookId));
   const updatePreferences = (patch: Partial<ReadingBookPreferences>) => {
     try {
@@ -281,15 +347,45 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     } catch { setToolMessage("书签保存失败"); }
   };
 
-  const addNote = () => {
+  const editActiveText = () => {
     if (!activeParagraph) return;
-    const note = window.prompt("写下这段文字旁边的笔记：", "");
-    if (!note?.trim()) return;
+    const selectedText = activeParagraph.paragraph.text.slice(activeParagraph.start, activeParagraph.end);
+    const replacement = window.prompt("编辑选中的正文（清空内容即可删除这段文字）：", selectedText);
+    if (replacement === null || replacement === selectedText) return;
     try {
-      createReadingAnnotation({ userIdentityId, bookId, chapterId: activeParagraph.chapterId, paragraph: activeParagraph.paragraph, kind: "note", note, start: activeParagraph.start, end: activeParagraph.end });
+      const revisedText = `${activeParagraph.paragraph.text.slice(0, activeParagraph.start)}${replacement}${activeParagraph.paragraph.text.slice(activeParagraph.end)}`;
+      saveReadingParagraphEdit({ userIdentityId, bookId, chapterId: activeParagraph.chapterId, paragraph: activeParagraph.paragraph, replacementText: revisedText });
       refreshAnnotations();
-      setToolMessage("笔记已保存");
-    } catch { setToolMessage("笔记保存失败"); }
+      window.getSelection()?.removeAllRanges();
+      setActiveParagraph(null);
+      setSelectionToolbarPosition(null);
+      setToolMessage("正文修改已保存到本地");
+    } catch { setToolMessage("正文修改保存失败"); }
+  };
+
+  const requestAiCommentReply = async (parent: ReadingComment, paragraph: ReadingParagraphView, chapterId: string) => {
+    if (!room || !settings || !character || !relationship) return;
+    setIsAiResponding(true);
+    try {
+      advanceAiReadingToParagraph({ scope: room, paragraphAnchorId: paragraph.anchor.id });
+      const response = await requestReadingCompanionResponse({
+        room,
+        character,
+        relationship,
+        settings,
+        paragraph,
+        kind: "discussion_reply",
+        userPrompt: `回应我的这条共读评论：${parent.body}`,
+        recentMessages: [{ author: "user", body: parent.body }],
+        worldBookContext,
+      });
+      if (response) createAiReadingComment({ scope: room, authorName: room.characterSnapshot.name, targetChapterId: chapterId, targetParagraphAnchorId: paragraph.anchor.id, textSnapshot: paragraph.text, body: response.body, parentCommentId: parent.id, isSpoiler: response.isSpoiler });
+      refreshRoomComments();
+    } catch (reason) {
+      setToolMessage(reason instanceof Error ? reason.message : "好友暂时无法回复段评");
+    } finally {
+      setIsAiResponding(false);
+    }
   };
 
   const addParagraphComment = () => {
@@ -303,38 +399,103 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
         setToolMessage("段评已保存到本书");
         return;
       }
-      createUserReadingComment({ scope: room, authorName: "我", kind: "paragraph", body, targetChapterId: activeParagraph.chapterId, targetParagraphAnchorId: activeParagraph.paragraph.anchor.id, textSnapshot: activeParagraph.paragraph.text.slice(activeParagraph.start, activeParagraph.end) });
-      setRoomComments(listReadingComments(room));
+      const comment = createUserReadingComment({ scope: room, authorName: "我", kind: "paragraph", body, targetChapterId: activeParagraph.chapterId, targetParagraphAnchorId: activeParagraph.paragraph.anchor.id, textSnapshot: activeParagraph.paragraph.text.slice(activeParagraph.start, activeParagraph.end) });
+      refreshRoomComments();
       setToolMessage("段评已保存到当前共读房间");
+      void requestAiCommentReply(comment, activeParagraph.paragraph, activeParagraph.chapterId);
     } catch { setToolMessage("段评保存失败"); }
-  };
-
-  const shareActiveText = async () => {
-    if (!activeParagraph) return;
-    const text = activeParagraph.paragraph.text.slice(activeParagraph.start, activeParagraph.end);
-    try {
-      if (navigator.share) await navigator.share({ title: content?.book.title || "小说摘录", text });
-      else await navigator.clipboard.writeText(text);
-      setToolMessage(navigator.share ? "已打开分享" : "摘录已复制，可粘贴分享");
-    } catch (error) {
-      if ((error as { name?: string })?.name !== "AbortError") setToolMessage("暂时无法分享这段文字");
-    }
-  };
-
-  const summonRoomFriend = () => {
-    if (!activeParagraph || !room || !room.settings.allowSummon) return;
-    const prompt = window.prompt(`召唤 ${room.characterSnapshot.name} 讨论这段内容：`, "你怎么看这里？");
-    if (!prompt?.trim()) return;
-    try {
-      startReadingDiscussion({ scope: room, authorName: "我", userPrompt: prompt, targetChapterId: activeParagraph.chapterId, targetParagraphAnchorId: activeParagraph.paragraph.anchor.id, frozenFragment: activeParagraph.paragraph.text.slice(activeParagraph.start, activeParagraph.end) });
-      setToolMessage(`已召唤 ${room.characterSnapshot.name}，片段仅进入当前房间`);
-    } catch { setToolMessage("召唤保存失败"); }
   };
 
   const jumpToSearchResult = (result: ReadingSearchResult) => {
     setCurrentChapterId(result.chapterId);
     setIsSearchOpen(false);
     scrollToAnchor(result.paragraph.anchor.id, "smooth", result.matchStart);
+  };
+
+  const getDiscussionParagraph = () => activeParagraph
+    ? { paragraph: activeParagraph.paragraph, chapterId: activeParagraph.chapterId }
+    : currentPositionRef.current
+      ? { paragraph: currentPositionRef.current.paragraph, chapterId: currentPositionRef.current.chapterId }
+      : flatParagraphs.find((item) => item.chapterId === currentChapterId) || flatParagraphs[0];
+
+  const openRoomDiscussion = () => {
+    if (!room) return;
+    const context = getDiscussionParagraph();
+    if (!context) return;
+    const existing = listReadingDiscussions(room).find((item) => item.targetParagraphAnchorId === context.paragraph.anchor.id && item.status !== "closed");
+    setDiscussionId(existing?.id || null);
+    setDiscussionMessages(existing ? listDiscussionMessages(room, existing.id) : []);
+    setDiscussionDraft("");
+    setIsDiscussionOpen(true);
+  };
+
+  const sendDiscussionMessage = async () => {
+    const prompt = discussionDraft.trim();
+    const context = getDiscussionParagraph();
+    if (!room || !context || !prompt || isAiResponding) return;
+    setDiscussionDraft("");
+    setIsAiResponding(true);
+    try {
+      advanceAiReadingToParagraph({ scope: room, paragraphAnchorId: context.paragraph.anchor.id });
+      let activeDiscussionId = discussionId;
+      if (!activeDiscussionId) {
+        const discussion = startReadingDiscussion({ scope: room, authorName: "我", userPrompt: prompt, targetChapterId: context.chapterId, targetParagraphAnchorId: context.paragraph.anchor.id, frozenFragment: context.paragraph.text });
+        activeDiscussionId = discussion.id;
+        setDiscussionId(discussion.id);
+      } else {
+        appendReadingDiscussionMessage({ scope: room, discussionId: activeDiscussionId, author: "user", authorName: "我", body: prompt });
+      }
+      setDiscussionMessages(listDiscussionMessages(room, activeDiscussionId));
+      if (!settings || !character || !relationship) throw new Error("请先配置 API，并确认该共读好友仍有可用人设");
+      const beforeReply = listDiscussionMessages(room, activeDiscussionId);
+      const response = await requestReadingCompanionResponse({
+        room,
+        character,
+        relationship,
+        settings,
+        paragraph: context.paragraph,
+        kind: "discussion_reply",
+        userPrompt: prompt,
+        recentMessages: beforeReply.map((message) => ({ author: message.author, body: message.body })),
+        worldBookContext,
+      });
+      if (response) appendReadingDiscussionMessage({ scope: room, discussionId: activeDiscussionId, author: "ai", authorName: room.characterSnapshot.name, body: response.body, source: response.source });
+      setDiscussionMessages(listDiscussionMessages(room, activeDiscussionId));
+    } catch (reason) {
+      setToolMessage(reason instanceof Error ? reason.message : "实时讨论暂时失败");
+    } finally {
+      setIsAiResponding(false);
+    }
+  };
+
+  const submitCommentReply = () => {
+    if (!room || !replyToComment || !commentReplyDraft.trim()) return;
+    const paragraph = flatParagraphs.find((item) => item.paragraph.anchor.id === replyToComment.targetParagraphAnchorId);
+    if (!paragraph) return;
+    try {
+      const reply = createUserReadingComment({ scope: room, authorName: "我", kind: "reply", body: commentReplyDraft, targetChapterId: paragraph.chapterId, targetParagraphAnchorId: paragraph.paragraph.anchor.id, textSnapshot: replyToComment.textSnapshot || paragraph.paragraph.text, parentCommentId: replyToComment.id });
+      setCommentReplyDraft("");
+      setReplyToComment(null);
+      refreshRoomComments();
+      void requestAiCommentReply(reply, paragraph.paragraph, paragraph.chapterId);
+    } catch { setToolMessage("评论回复保存失败"); }
+  };
+
+  const turnHorizontalPage = (direction: -1 | 1) => {
+    const container = scrollRef.current;
+    if (!container || preferences.pageMode !== "horizontal") return;
+    const pageWidth = Math.max(container.clientWidth, 1);
+    const maximum = Math.max(0, container.scrollWidth - container.clientWidth);
+    const currentPage = Math.round(container.scrollLeft / pageWidth);
+    container.scrollTo({ left: Math.min(maximum, Math.max(0, (currentPage + direction) * pageWidth)), behavior: "smooth" });
+  };
+
+  const handleReaderEdgeClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (preferences.pageMode !== "horizontal" || !window.getSelection()?.isCollapsed) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = (event.clientX - rect.left) / Math.max(rect.width, 1);
+    if (ratio <= 0.24) turnHorizontalPage(-1);
+    else if (ratio >= 0.76) turnHorizontalPage(1);
   };
 
   const clearTextSelection = useCallback(() => {
@@ -460,7 +621,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
       ) : error ? (
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center"><BookOpenText className="h-8 w-8 text-[var(--text-muted)]" /><p className="mt-4 text-sm font-bold">无法打开这本书</p><p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">{error}</p></div>
       ) : (
-        <main ref={scrollRef} onScroll={handleScroll} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 scroll-smooth ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
+        <main ref={scrollRef} onScroll={handleScroll} onClick={handleReaderEdgeClick} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 scroll-smooth ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
           <article
             className={preferences.pageMode === "horizontal" ? "h-full py-8" : "mx-auto max-w-[42rem]"}
             style={preferences.pageMode === "horizontal" ? {
@@ -470,7 +631,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
               height: "100%",
             } : undefined}
           >
-            {content?.chapters.map((chapterView) => (
+            {displayContent?.chapters.map((chapterView) => (
               <section key={chapterView.chapter.id} data-chapter-id={chapterView.chapter.id} className="mb-16">
                 <h2 className="mb-10 mt-3 text-center text-xl font-bold tracking-wide">{chapterView.chapter.title}</h2>
                 <div>
@@ -499,7 +660,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
                     >
                       {renderParagraphText(paragraph)}
                       {annotations.some((item) => item.paragraphAnchorId === paragraph.anchor.id && item.kind === "bookmark") && <Bookmark className="absolute -right-4 top-1 h-3.5 w-3.5 fill-current" aria-label="已添加书签" />}
-                      {room && roomComments.some((item) => item.targetParagraphAnchorId === paragraph.anchor.id) && <span aria-label={`${roomComments.filter((item) => item.targetParagraphAnchorId === paragraph.anchor.id).length} 条段评`} className="absolute -right-5 bottom-0 inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-current px-1 text-[8px] opacity-60">{roomComments.filter((item) => item.targetParagraphAnchorId === paragraph.anchor.id).length}</span>}
+                      {room && roomComments.some((item) => item.targetParagraphAnchorId === paragraph.anchor.id) && <button type="button" data-reading-selection-toolbar onClick={(event) => { event.stopPropagation(); setCommentThreadAnchorId(paragraph.anchor.id); }} aria-label={`查看 ${roomComments.filter((item) => item.targetParagraphAnchorId === paragraph.anchor.id).length} 条段评`} className="absolute -right-5 bottom-0 inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-current px-1 text-[8px] opacity-70">{roomComments.filter((item) => item.targetParagraphAnchorId === paragraph.anchor.id).length}</button>}
                     </p>
                   ))}
                 </div>
@@ -514,7 +675,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
         <footer className="absolute inset-x-3 bottom-3 z-20 flex h-12 items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 px-1 shadow-lg backdrop-blur text-[var(--text-primary)]">
           <button type="button" disabled={currentChapterIndex <= 0} onClick={() => jumpToChapter(currentChapterIndex - 1)} className="flex h-8 items-center gap-1 rounded-xl px-2 text-xs font-bold disabled:opacity-30"><ChevronLeft className="h-4 w-4" />上一章</button>
           <button type="button" onClick={() => setIsSearchOpen(true)} aria-label="搜索正文" className="flex h-8 w-8 items-center justify-center rounded-xl"><Search className="h-4 w-4" /></button>
-          {room ? <span className="flex max-w-20 items-center gap-1 truncate text-[10px] font-bold text-[var(--text-muted)]">{room.characterSnapshot.avatar ? <img src={room.characterSnapshot.avatar} alt="" className="h-5 w-5 rounded-full object-cover" /> : <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--surface-raised)]">{room.characterSnapshot.name.slice(0,1)}</span>}{percent.toFixed(1)}%</span> : <span className="text-[11px] tabular-nums text-[var(--text-muted)]">{percent.toFixed(1)}%</span>}
+          {room ? <button type="button" onClick={openRoomDiscussion} aria-label={`和 ${room.characterSnapshot.name} 讨论当前内容`} className="flex max-w-24 items-center gap-1 rounded-xl px-1.5 py-1 text-[10px] font-bold text-[var(--text-muted)]">{room.characterSnapshot.avatar ? <img src={room.characterSnapshot.avatar} alt="" className="h-6 w-6 rounded-full object-cover ring-2 ring-cyan-400/40" /> : <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--surface-raised)] ring-2 ring-cyan-400/40">{room.characterSnapshot.name.slice(0,1)}</span>}<span className="truncate">讨论</span></button> : <span className="text-[11px] tabular-nums text-[var(--text-muted)]">{percent.toFixed(1)}%</span>}
           <button type="button" onClick={() => setIsSettingsOpen(true)} aria-label="阅读设置" className="flex h-8 w-8 items-center justify-center rounded-xl"><SlidersHorizontal className="h-4 w-4" /></button>
           <button type="button" disabled={!content || currentChapterIndex >= content.chapters.length - 1} onClick={() => jumpToChapter(currentChapterIndex + 1)} className="flex h-8 items-center gap-1 rounded-xl px-2 text-xs font-bold disabled:opacity-30">下一章<ChevronRight className="h-4 w-4" /></button>
         </footer>
@@ -522,18 +683,62 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
 
       {activeParagraph && selectionToolbarPosition && !isTocOpen && !isSearchOpen && !isSettingsOpen && (
         <div data-reading-selection-toolbar className="fixed z-[70] w-[336px] max-w-[calc(100vw-16px)] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 text-[var(--text-primary)] shadow-xl" style={{ left: selectionToolbarPosition.left, top: selectionToolbarPosition.top }}>
-          <div className="grid grid-cols-6 gap-0.5">
+          <div className="grid grid-cols-5 gap-0.5">
             <button type="button" onClick={copyActiveParagraph} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Copy className="h-4 w-4" />复制</button>
             <button type="button" onClick={toggleHighlight} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Highlighter className="h-4 w-4" />高亮</button>
             <button type="button" onClick={addParagraphComment} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><MessageCircle className="h-4 w-4" />段评</button>
             <button type="button" onClick={toggleBookmark} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Bookmark className="h-4 w-4" />书签</button>
-            <button type="button" onClick={addNote} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Pencil className="h-4 w-4" />编辑</button>
-            <button type="button" onClick={shareActiveText} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Share2 className="h-4 w-4" />分享</button>
+            <button type="button" onClick={editActiveText} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Pencil className="h-4 w-4" />编辑</button>
           </div>
           {toolMessage && <p className="border-t border-[var(--border)] px-2 pt-2 text-center text-[10px] text-[var(--text-muted)]">{toolMessage}</p>}
           {annotations.filter((item) => item.paragraphAnchorId === activeParagraph.paragraph.anchor.id && item.kind === "note").map((item) => (
             <div key={item.id} className="mt-2 flex items-start gap-2 rounded-xl bg-[var(--surface-raised)] p-2 text-xs"><p className="min-w-0 flex-1 leading-5">{item.note}</p><button type="button" aria-label="删除笔记" onClick={() => { deleteReadingAnnotation(userIdentityId, item.id); refreshAnnotations(); }}><Trash2 className="h-3.5 w-3.5" /></button></div>
           ))}
+        </div>
+      )}
+
+      {commentThreadAnchorId && room && (
+        <div className="absolute inset-0 z-[75] flex bg-black/40" role="dialog" aria-modal="true" aria-label="共读段评">
+          <div className="mt-auto flex max-h-[76%] w-full flex-col rounded-t-[2rem] bg-[var(--surface)] text-[var(--text-primary)] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+              <div><h2 className="text-base font-bold">共读段评</h2><p className="mt-1 text-[11px] text-[var(--text-muted)]">只属于你与 {room.characterSnapshot.name} 的共读房间</p></div>
+              <button type="button" onClick={() => { setCommentThreadAnchorId(null); setReplyToComment(null); }} aria-label="关闭段评" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+              {roomComments.filter((comment) => comment.targetParagraphAnchorId === commentThreadAnchorId).map((comment) => (
+                <div key={comment.id} className={`rounded-2xl border border-[var(--border)] p-3 ${comment.author === "ai" ? "ml-5 bg-cyan-500/5" : "mr-5 bg-[var(--surface-raised)]"}`}>
+                  <div className="flex items-center justify-between gap-3"><span className="text-xs font-bold">{comment.authorName}</span><span className="text-[9px] text-[var(--text-muted)]">{comment.parentCommentId ? "回复" : "段评"}</span></div>
+                  {comment.textSnapshot && !comment.parentCommentId && <p className="mt-2 line-clamp-2 border-l-2 border-current/20 pl-2 text-[10px] leading-4 text-[var(--text-muted)]">{comment.textSnapshot}</p>}
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{comment.body}</p>
+                  <button type="button" onClick={() => { setReplyToComment(comment); setCommentReplyDraft(""); }} className="mt-2 text-[10px] font-bold text-cyan-600">回复</button>
+                </div>
+              ))}
+              {isAiResponding && <p className="py-2 text-center text-xs text-[var(--text-muted)]">{room.characterSnapshot.name} 正在读这段并回复…</p>}
+            </div>
+            {replyToComment && (
+              <div className="border-t border-[var(--border)] p-3">
+                <p className="mb-2 truncate text-[10px] text-[var(--text-muted)]">回复 {replyToComment.authorName}：{replyToComment.body}</p>
+                <div className="flex gap-2"><input autoFocus value={commentReplyDraft} onChange={(event) => setCommentReplyDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") submitCommentReply(); }} placeholder="继续讨论这条段评…" className="h-10 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-sm outline-none" /><button type="button" onClick={submitCommentReply} disabled={!commentReplyDraft.trim()} className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isDiscussionOpen && room && (
+        <div className="absolute inset-0 z-[75] flex bg-black/40" role="dialog" aria-modal="true" aria-label={`和 ${room.characterSnapshot.name} 讨论当前内容`}>
+          <div className="mt-auto flex max-h-[82%] w-full flex-col rounded-t-[2rem] bg-[var(--surface)] text-[var(--text-primary)] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+              <div className="flex min-w-0 items-center gap-3">{room.characterSnapshot.avatar ? <img src={room.characterSnapshot.avatar} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" /> : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-raised)]">{room.characterSnapshot.name.slice(0,1)}</span>}<div className="min-w-0"><h2 className="truncate text-base font-bold">和 {room.characterSnapshot.name} 聊当前内容</h2><p className="mt-0.5 text-[10px] text-[var(--text-muted)]">TA 只会读取当前已读范围与本次讨论</p></div></div>
+              <button type="button" onClick={() => setIsDiscussionOpen(false)} aria-label="关闭实时讨论" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="min-h-[12rem] flex-1 space-y-3 overflow-y-auto px-4 py-4">
+              {discussionMessages.length === 0 && <div className="rounded-2xl bg-[var(--surface-raised)] p-4 text-xs leading-5 text-[var(--text-muted)]">可以直接问 TA 对当前情节、人物或细节的看法。当前片段会被冻结在这个共读房间，不会串到其他好友。</div>}
+              {discussionMessages.map((message) => <div key={message.id} className={`max-w-[84%] rounded-2xl px-3 py-2 text-sm leading-6 ${message.author === "user" ? "ml-auto bg-[var(--text-primary)] text-[var(--surface)]" : "mr-auto bg-[var(--surface-raised)]"}`}><p className="mb-0.5 text-[9px] opacity-60">{message.authorName}</p><p className="whitespace-pre-wrap">{message.body}</p></div>)}
+              {isAiResponding && <div className="mr-auto flex items-center gap-2 rounded-2xl bg-[var(--surface-raised)] px-3 py-2 text-xs text-[var(--text-muted)]"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />{room.characterSnapshot.name} 正在回应…</div>}
+            </div>
+            <div className="flex gap-2 border-t border-[var(--border)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><textarea value={discussionDraft} onChange={(event) => setDiscussionDraft(event.target.value)} placeholder="讨论当前内容…" rows={2} className="min-h-12 min-w-0 flex-1 resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm outline-none" /><button type="button" onClick={sendDiscussionMessage} disabled={!discussionDraft.trim() || isAiResponding} className="flex h-12 w-12 items-center justify-center self-end rounded-2xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-5 w-5" /></button></div>
+          </div>
         </div>
       )}
 

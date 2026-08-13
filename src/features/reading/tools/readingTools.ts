@@ -122,6 +122,62 @@ export function createReadingAnnotation(
   return annotation;
 }
 
+const READING_EDIT_PREFIX = "__reading_edit_v1__";
+
+export function getReadingParagraphEditText(annotation: ReadingAnnotation | undefined): string | undefined {
+  if (!annotation || annotation.kind !== "edit" || !annotation.note?.startsWith(READING_EDIT_PREFIX)) return undefined;
+  return annotation.note.slice(READING_EDIT_PREFIX.length);
+}
+
+/** Stores one latest, identity-local full paragraph revision without mutating the uploaded source asset. */
+export function saveReadingParagraphEdit(
+  input: { userIdentityId: string; bookId: string; chapterId: string; paragraph: ReadingParagraphView; replacementText: string },
+  dependencies: ReadingToolDependencies = defaultDependencies,
+): ReadingAnnotation {
+  const store = requireStore(dependencies);
+  const anchor = store.paragraphAnchors.find((item) => item.userIdentityId === input.userIdentityId && item.bookId === input.bookId && item.chapterId === input.chapterId && item.id === input.paragraph.anchor.id);
+  if (!anchor) throw new Error("段落不属于当前身份下的书籍");
+  const now = dependencies.now();
+  const existing = store.annotations.find((item) => item.userIdentityId === input.userIdentityId && item.bookId === input.bookId && item.paragraphAnchorId === anchor.id && item.kind === "edit");
+  const annotation: ReadingAnnotation = {
+    id: existing?.id || dependencies.createId("reading-paragraph-edit"),
+    userIdentityId: input.userIdentityId,
+    bookId: input.bookId,
+    chapterId: input.chapterId,
+    paragraphAnchorId: anchor.id,
+    kind: "edit",
+    range: { start: 0, end: input.paragraph.text.length },
+    textSnapshot: existing?.textSnapshot || input.paragraph.text,
+    note: `${READING_EDIT_PREFIX}${input.replacementText}`,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+  save(dependencies, {
+    ...store,
+    annotations: [...store.annotations.filter((item) => !(item.userIdentityId === input.userIdentityId && item.bookId === input.bookId && item.paragraphAnchorId === anchor.id && item.kind === "edit")), annotation],
+  });
+  return annotation;
+}
+
+export function applyReadingParagraphEdits(content: ReadingBookContent, annotations: readonly ReadingAnnotation[]): ReadingBookContent {
+  const edits = new Map<string, string>();
+  annotations
+    .filter((item) => item.kind === "edit")
+    .sort((left, right) => left.updatedAt - right.updatedAt)
+    .forEach((item) => {
+      const replacement = getReadingParagraphEditText(item);
+      if (replacement !== undefined) edits.set(item.paragraphAnchorId, replacement);
+    });
+  if (edits.size === 0) return content;
+  return {
+    ...content,
+    chapters: content.chapters.map((chapterView) => ({
+      ...chapterView,
+      paragraphs: chapterView.paragraphs.map((paragraph) => edits.has(paragraph.anchor.id) ? { ...paragraph, text: edits.get(paragraph.anchor.id)! } : paragraph),
+    })),
+  };
+}
+
 export function deleteReadingAnnotation(userIdentityId: string, annotationId: string, dependencies: ReadingToolDependencies = defaultDependencies): void {
   const store = requireStore(dependencies);
   save(dependencies, { ...store, annotations: store.annotations.filter((item) => !(item.userIdentityId === userIdentityId && item.id === annotationId)) });

@@ -1117,11 +1117,33 @@ export default function AppReading({
     const readerRoom = rooms.find(
       (room) => room.readingRoomId === readingRoomReaderId,
     );
+    const readerCharacter = readerRoom
+      ? characters.find((item) => item.id === readerRoom.characterId)
+      : undefined;
+    const readerRelationship = readerRoom
+      ? relationships.find(
+          (item) =>
+            item.id === readerRoom.relationId &&
+            item.userIdentityId === userIdentityId,
+        )
+      : undefined;
+    const readerWorldBookContext = readerRoom && readerCharacter && readerRelationship
+      ? getVisibleWorldBookEntries(worldBookEntries, readerCharacter.id, {
+          scenario: "offline",
+          characterId: readerCharacter.id,
+          userIdentityId,
+          relationId: readerRelationship.id,
+        }).map((entry) => `【${entry.title}】${entry.content}`).join("\n")
+      : undefined;
     return (
       <ReadingReader
         userIdentityId={userIdentityId}
         bookId={readingBookId}
         room={readerRoom}
+        settings={settings}
+        character={readerCharacter}
+        relationship={readerRelationship}
+        worldBookContext={readerWorldBookContext}
         onClose={() => {
           setReadingBookId(null);
           setReadingRoomReaderId(null);

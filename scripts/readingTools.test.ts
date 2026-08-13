@@ -5,6 +5,8 @@ import {
   deleteReadingAnnotation,
   getReadingAnnotations,
   getReadingBookPreferences,
+  applyReadingParagraphEdits,
+  saveReadingParagraphEdit,
   saveReadingBookPreferences,
   searchReadingContent,
   toggleReadingBookmark,
@@ -53,5 +55,8 @@ assert.equal(getReadingAnnotations("identity-a", "book", dependencies).some((ite
 const content: ReadingBookContent = { book: store.books[0]!, sourceCharacterLength: 8, chapters: [{ chapter: store.chapters[0]!, paragraphs: [paragraph] }] };
 assert.equal(searchReadingContent(content, "下雨")[0]?.matchStart, 2);
 assert.equal(searchReadingContent(content, "不存在").length, 0);
+saveReadingParagraphEdit({ userIdentityId: "identity-a", bookId: "book", chapterId: "chapter", paragraph, replacementText: "今天放晴了吗" }, dependencies);
+const edited = applyReadingParagraphEdits(content, getReadingAnnotations("identity-a", "book", dependencies));
+assert.equal(edited.chapters[0]?.paragraphs[0]?.text, "今天放晴了吗", "paragraph edits persist as identity-local overlays");
 
 console.log("reading preferences, annotations and search tests passed");

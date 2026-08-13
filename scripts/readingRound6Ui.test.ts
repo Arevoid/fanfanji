@@ -15,7 +15,7 @@ const settings = readFileSync(
 );
 
 assert.match(reader, /aria-label="搜索正文"/);
-assert.match(reader, /searchReadingContent\(content, searchQuery\)/);
+assert.match(reader, /searchReadingContent\(displayContent, searchQuery\)/);
 assert.match(reader, /onMouseUp=\{\(event\) => \{ const element = event\.currentTarget; window\.setTimeout\(\(\) => syncTextSelection/);
 assert.match(reader, /selection\.isCollapsed \|\| !selection\.toString\(\)\.trim\(\)/);
 assert.doesNotMatch(reader, /end = paragraph\.text\.length/);
@@ -25,7 +25,7 @@ assert.match(
   reader,
   /createReadingAnnotation[\s\S]*kind: "highlight"[\s\S]*start: activeParagraph\.start/,
 );
-assert.match(reader, /kind: "note"[\s\S]*note, start: activeParagraph\.start/);
+assert.match(reader, /saveReadingParagraphEdit[\s\S]*replacementText: revisedText/);
 assert.match(reader, /toggleReadingBookmark/);
 assert.match(reader, /fontAssetDb\.getFont\(preferences\.fontAssetId\)/);
 assert.match(

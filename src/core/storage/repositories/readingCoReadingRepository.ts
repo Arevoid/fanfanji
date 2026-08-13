@@ -103,10 +103,16 @@ export function createReadingDiscussion(discussion: ReadingDiscussion, firstMess
   return saveCoReadingStore({ ...store, discussions: [...store.discussions, discussion], discussionMessages: [...store.discussionMessages, firstMessage] });
 }
 
-export function appendDiscussionMessage(message: ReadingDiscussionMessage): StorageWriteResult {
+export function appendDiscussionMessage(message: ReadingDiscussionMessage, status?: ReadingDiscussion["status"]): StorageWriteResult {
   if (!isValidReadingRoomScope(message)) return { success: false, error: "validation" };
   const store = loadCoReadingStore().value;
   if (!store.discussions.some((discussion) => isSameReadingRoomScope(discussion, message) && discussion.id === message.discussionId)) return { success: false, error: "missing" };
   if (store.discussionMessages.some((candidate) => isSameReadingRoomScope(candidate, message) && candidate.id === message.id)) return { success: false, error: "duplicate" };
-  return saveCoReadingStore({ ...store, discussionMessages: [...store.discussionMessages, message] });
+  return saveCoReadingStore({
+    ...store,
+    discussions: store.discussions.map((discussion) => isSameReadingRoomScope(discussion, message) && discussion.id === message.discussionId
+      ? { ...discussion, status: status ?? discussion.status, updatedAt: message.createdAt }
+      : discussion),
+    discussionMessages: [...store.discussionMessages, message],
+  });
 }

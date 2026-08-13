@@ -2,7 +2,7 @@ export const READING_STORE_VERSION = 1 as const;
 
 export type ReadingBookFormat = "txt" | "markdown";
 export type ReadingBookStatus = "importing" | "ready" | "error" | "archived";
-export type ReadingAnnotationKind = "bookmark" | "highlight" | "note";
+export type ReadingAnnotationKind = "bookmark" | "highlight" | "note" | "edit";
 
 export interface ReadingBook {
   id: string;

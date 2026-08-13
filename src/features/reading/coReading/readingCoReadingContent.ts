@@ -1,4 +1,4 @@
-import { createReadingComment, createReadingDiscussion, listDiscussionMessages, listReadingComments, listReadingDiscussions } from "../../../core/storage/repositories/readingCoReadingRepository";
+import { appendDiscussionMessage, createReadingComment, createReadingDiscussion, getAiReadingState, listDiscussionMessages, listReadingComments, listReadingDiscussions, saveAiReadingState } from "../../../core/storage/repositories/readingCoReadingRepository";
 import { loadReadingStore } from "../../../core/storage/repositories/readingRepository";
 import { buildAiReadingContext } from "./aiReadingBoundary";
 import type { ReadingComment, ReadingCommentAuthor, ReadingCommentKind, ReadingCommentSource, ReadingDiscussion, ReadingDiscussionMessage } from "../../../domain/reading/coReadingTypes";
@@ -26,6 +26,7 @@ export function createUserReadingComment(input: {
   body: string;
   targetChapterId?: string;
   targetParagraphAnchorId?: string;
+  parentCommentId?: string;
   textSnapshot?: string;
   isSpoiler?: boolean;
   now?: number;
@@ -41,6 +42,7 @@ export function createUserReadingComment(input: {
     authorName: input.authorName.trim(),
     targetChapterId: input.targetChapterId,
     targetParagraphAnchorId: input.targetParagraphAnchorId,
+    parentCommentId: input.parentCommentId,
     textSnapshot: input.textSnapshot,
     body,
     source: input.isSpoiler ? "user_revealed" : "known",
@@ -57,6 +59,8 @@ export function createAiReadingComment(input: {
   targetParagraphAnchorId: string;
   textSnapshot: string;
   body: string;
+  targetChapterId?: string;
+  parentCommentId?: string;
   isSpoiler?: boolean;
   now?: number;
 }): ReadingComment {
@@ -68,13 +72,16 @@ export function createAiReadingComment(input: {
   const source: ReadingCommentSource = projection.knownFragments.length > 0 ? "known" : projection.userRevealedSpoilers.length > 0 ? "user_revealed" : "known";
   if (!projection.knownFragments.length && !projection.userRevealedSpoilers.length) throw new ReadingCoReadingContentError("AI 不能评论尚未读到或未被用户明确分享的段落。", "spoiler");
   const now = input.now ?? Date.now();
-  return saveComment({
+  if (input.parentCommentId && !listReadingComments(input.scope).some((comment) => comment.id === input.parentCommentId)) throw new ReadingCoReadingContentError("回复的评论不存在于当前共读房间。", "scope");
+  const comment = saveComment({
     ...input.scope,
     id: createId("reading-ai-comment"),
-    kind: "paragraph",
+    kind: input.parentCommentId ? "reply" : "paragraph",
     author: "ai",
     authorName: input.authorName.trim(),
+    targetChapterId: input.targetChapterId || anchor.chapterId,
     targetParagraphAnchorId: input.targetParagraphAnchorId,
+    parentCommentId: input.parentCommentId,
     textSnapshot: input.textSnapshot,
     body,
     source,
@@ -82,6 +89,9 @@ export function createAiReadingComment(input: {
     createdAt: now,
     updatedAt: now,
   });
+  const state = getAiReadingState(input.scope);
+  if (state) saveAiReadingState({ ...state, lastCommentedAnchor: anchor, updatedAt: now });
+  return comment;
 }
 
 export function startReadingDiscussion(input: {
@@ -102,6 +112,32 @@ export function startReadingDiscussion(input: {
   const result = createReadingDiscussion(discussion, firstMessage);
   if (!result.success) throw new ReadingCoReadingContentError("召唤讨论保存失败。", result.error === "scope" ? "scope" : "storage");
   return discussion;
+}
+
+export function appendReadingDiscussionMessage(input: {
+  scope: ReadingRoomScope;
+  discussionId: string;
+  author: ReadingCommentAuthor;
+  authorName: string;
+  body: string;
+  source?: ReadingCommentSource;
+  now?: number;
+}): ReadingDiscussionMessage {
+  const body = input.body.trim();
+  if (!input.discussionId || !input.authorName.trim() || !body || body.length > 12000) throw new ReadingCoReadingContentError("讨论内容不能为空或超过 12000 字。");
+  const message: ReadingDiscussionMessage = {
+    ...input.scope,
+    id: createId("reading-discussion-message"),
+    discussionId: input.discussionId,
+    author: input.author,
+    authorName: input.authorName.trim(),
+    body,
+    source: input.source || "known",
+    createdAt: input.now ?? Date.now(),
+  };
+  const result = appendDiscussionMessage(message, input.author === "ai" ? "open" : "pending_ai");
+  if (!result.success) throw new ReadingCoReadingContentError("讨论消息保存失败。", result.error === "missing" ? "scope" : "storage");
+  return message;
 }
 
 export { listReadingComments, listReadingDiscussions, listDiscussionMessages };
