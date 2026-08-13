@@ -1,6 +1,7 @@
 import { loadReadingStore } from "../../../core/storage/repositories/readingRepository";
 import { getReadingBookBible, getReadingAnalysisTask, listReadingAnalysisEntities, listReadingAnalysisTasks, listReadingChapterSummaries, saveReadingAnalysisEntity, saveReadingAnalysisTask, saveReadingBookBible, saveReadingChapterSummary } from "../../../core/storage/repositories/readingAnalysisRepository";
 import type { ReadingAnalysisEntity, ReadingAnalysisScope, ReadingAnalysisTask, ReadingAnalysisTaskType, ReadingBookBible, ReadingChapterSummary } from "../../../domain/reading/analysisTypes";
+import type { ReadingChapterAnalysisResult } from "./readingAnalysisProtocol";
 
 const createId = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 const trim = (value: string, max: number): string => value.trim().slice(0, max);
@@ -98,6 +99,34 @@ export function saveBookBible(bible: ReadingBookBible): ReadingBookBible {
   const current = getReadingBookBible(bible);
   const next = { ...bible, version: Math.max(current?.version ?? 0, bible.version), premise: trim(bible.premise, 6000), updatedAt: Date.now() };
   return persist(saveReadingBookBible(next), next);
+}
+
+function stableEntityId(scope: ReadingAnalysisScope, kind: string, name: string): string {
+  const normalized = name.trim().toLocaleLowerCase().replace(/\s+/g, "-").slice(0, 120);
+  return `reading-entity-${scope.userIdentityId}-${scope.bookId}-${kind}-${normalized}`;
+}
+
+/** Commits one chapter result first, then advances the task checkpoint. */
+export function commitReadingChapterAnalysisResult(input: { scope: ReadingAnalysisScope; taskId: string; chapterId: string; sourceHash: string; analysisVersion: string; result: ReadingChapterAnalysisResult; now?: number }): { summary: ReadingChapterSummary; task: ReadingAnalysisTask } {
+  const task = getReadingAnalysisTask(input.scope, input.taskId);
+  if (!task) throw new ReadingAnalysisError("分析任务不存在", "missing-task");
+  if (!task.chapterIds.includes(input.chapterId)) throw new ReadingAnalysisError("结果章节不属于当前任务", "invalid-input");
+  const chapter = requireChapter(input.scope, input.chapterId);
+  const now = input.now ?? Date.now();
+  const summary: ReadingChapterSummary = { ...input.scope, id: `reading-summary-${input.scope.bookId}-${input.chapterId}-${input.analysisVersion}`, chapterId: chapter.id, chapterOrder: chapter.order, title: chapter.title, summary: trim(input.result.summary, 8000), keyPoints: input.result.keyPoints.slice(0, 30).map((item) => trim(item, 500)), sourceHash: trim(input.sourceHash, 200), analysisVersion: trim(input.analysisVersion, 100), createdAt: now, updatedAt: now };
+  if (!summary.summary || !summary.sourceHash || !summary.analysisVersion) throw new ReadingAnalysisError("分析结果缺少摘要、来源哈希或版本", "invalid-input");
+  persist(saveReadingChapterSummary(summary), summary);
+  for (const draft of input.result.entities.slice(0, 100)) {
+    const entity: ReadingAnalysisEntity = { ...input.scope, id: stableEntityId(input.scope, draft.kind, draft.name), kind: draft.kind, name: trim(draft.name, 300), aliases: draft.aliases.slice(0, 20).map((item) => trim(item, 200)), summary: trim(draft.summary, 4000), chapterIds: [chapter.id], attributes: draft.attributes, confidence: Math.min(1, Math.max(0, draft.confidence)), analysisVersion: summary.analysisVersion, createdAt: now, updatedAt: now };
+    persist(saveReadingAnalysisEntity(entity), entity);
+  }
+  const currentBible = getReadingBookBible(input.scope);
+  if (input.result.premise || input.result.worldRules || input.result.storyLines || input.result.timeline) {
+    const bible: ReadingBookBible = { ...input.scope, id: currentBible?.id || `reading-bible-${input.scope.userIdentityId}-${input.scope.bookId}`, version: (currentBible?.version || 0) + 1, analysisVersion: summary.analysisVersion, premise: trim(input.result.premise || currentBible?.premise || "章节分析尚未形成完整 premise", 6000), worldRules: input.result.worldRules || currentBible?.worldRules || [], storyLines: input.result.storyLines || currentBible?.storyLines || [], coreCharacterIds: currentBible?.coreCharacterIds || [], keyLocationIds: currentBible?.keyLocationIds || [], keyFactionIds: currentBible?.keyFactionIds || [], timeline: input.result.timeline || currentBible?.timeline || [], isUserEdited: currentBible?.isUserEdited || false, createdAt: currentBible?.createdAt || now, updatedAt: now };
+    persist(saveReadingBookBible(bible), bible);
+  }
+  const updatedTask = markReadingAnalysisCheckpoint({ scope: input.scope, taskId: input.taskId, chapterId: input.chapterId, now });
+  return { summary, task: updatedTask };
 }
 
 export { getReadingBookBible, listReadingAnalysisEntities, listReadingAnalysisTasks, listReadingChapterSummaries };
