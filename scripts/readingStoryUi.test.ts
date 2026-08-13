@@ -35,7 +35,8 @@ const coStoryGeneration = readFileSync(
   "utf8",
 );
 assert.match(view, /故事正文/);
-assert.match(playShell, /下一步怎么走/);
+assert.match(playShell, /我选择…/);
+assert.match(playShell, /\["一", "二", "三", "四", "五", "六", "七", "八"\]/);
 assert.match(playShell, /setChoicesExpanded\(true\)/);
 assert.match(playShell, /relative z-30 shrink-0 border-t/);
 assert.match(view, /输入你的行动/);
@@ -56,4 +57,5 @@ assert.match(coStoryView, /拒绝/);
 assert.match(coStoryView, /提交我的行动/);
 assert.match(coStoryView, /你的视角/);
 assert.match(coStoryGeneration, /generateReadingCoStoryAiAction/);
+assert.match(coStoryView, /turn\.dialogue\.map/);
 console.log("reading story UI integration checks passed");

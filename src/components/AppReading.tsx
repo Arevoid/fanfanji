@@ -523,6 +523,8 @@ export default function AppReading({
     } else if (action === "cover") {
       setCoverBookId(book.id);
       window.setTimeout(() => coverInputRef.current?.click(), 0);
+    } else if (action === "clear_cover") {
+      void clearBookCover(book);
     } else if (action === "co_read") {
       setInviteBookId(book.id);
     } else {

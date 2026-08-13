@@ -18,7 +18,7 @@ const shared = readFileSync(
 );
 
 assert.match(shell, /data-theme-page="reading-story-play"/);
-assert.match(shell, /下一步怎么走/);
+assert.match(shell, /我选择…/);
 assert.match(shell, /故事行动区/);
 assert.match(shell, /故事快捷面板/);
 assert.match(shell, /choicesExpanded/);

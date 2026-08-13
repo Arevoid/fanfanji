@@ -19,6 +19,6 @@ assert.match(wizard, /双人穿书/);
 assert.match(wizard, /身穿/);
 assert.match(wizard, /魂穿/);
 assert.match(wizard, /故事长度/);
-assert.match(playShell, /下一步怎么走/);
+assert.match(playShell, /我选择…/);
 
 console.log("reading refactor rounds 3-4 UI checks passed");

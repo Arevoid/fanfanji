@@ -36,6 +36,8 @@ export function buildReadingStoryPrompt(
     "角色卡、当前故事状态和用户行动优先；不能替用户做重大决定，不能把现实聊天、主记忆或其他故事的信息带入。",
     "只输出 JSON，不要 Markdown，不要解释。JSON 必须包含 narrative、dialogue、choices、stateChanges、discoveredIntel、taskChanges、relationshipChanges、currentLocation、currentTime、chapterProgress、shouldEndChapter。",
     "choices 最多 8 个，给用户保留至少一个可自由输入的空间；不要把用户未选择的行动当成已发生。",
+    "每个回合都必须推进一个完整场景：narrative 通常写 600 至 1200 个中文字符，包含环境变化、人物反应、因果推进和明确的新悬点，不能只写几句动作摘要。",
+    "有其他角色在场时，应在 dialogue 中安排符合其人设与处境的自然说话；不要让人物只有动作而始终不交流，也不要用旁白代替本应出现的关键对白。",
   ].join("\n");
   const message = [
     `故事：${clean(input.bookTitle || input.story.title, 500)}`,

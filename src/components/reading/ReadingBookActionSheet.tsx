@@ -1,9 +1,9 @@
 import React from "react";
-import { BookOpenText, ImagePlus, Pencil, Sparkles, UsersRound, X } from "lucide-react";
+import { BookOpenText, ImagePlus, Pencil, Sparkles, Trash2, UsersRound, X } from "lucide-react";
 import type { ReadingBook } from "../../domain/reading/types";
 import ReadingBookCover from "./ReadingBookCover";
 
-export type ReadingBookAction = "edit" | "cover" | "co_read" | "story";
+export type ReadingBookAction = "edit" | "cover" | "clear_cover" | "co_read" | "story";
 
 export default function ReadingBookActionSheet({ book, canInvite, onAction, onClose }: {
   book: ReadingBook;
@@ -14,6 +14,7 @@ export default function ReadingBookActionSheet({ book, canInvite, onAction, onCl
   const actions = [
     { id: "edit" as const, label: "编辑", detail: "书名、作者与简介", Icon: Pencil },
     { id: "cover" as const, label: "书籍封面", detail: "从本地选择图片", Icon: ImagePlus },
+    ...(book.coverUrl ? [{ id: "clear_cover" as const, label: "清除封面", detail: "恢复自动生成的默认封面", Icon: Trash2 }] : []),
     { id: "co_read" as const, label: "共读", detail: canInvite ? "选择一位 AI 好友" : "暂无可邀请好友", Icon: UsersRound, disabled: !canInvite },
     { id: "story" as const, label: "穿书", detail: "单人或与 AI 好友进入", Icon: Sparkles },
   ];

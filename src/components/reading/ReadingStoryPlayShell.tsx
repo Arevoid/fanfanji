@@ -176,7 +176,7 @@ export default function ReadingStoryPlayShell(
                 aria-expanded={choicesExpanded}
                 className="flex h-10 w-full items-center justify-between rounded-xl border border-amber-400/30 bg-amber-500/5 px-3 text-left text-xs font-bold text-amber-100"
               >
-                <span>下一步怎么走 · {props.choices.length} 个选项</span>
+                <span>我选择…</span>
                 {choicesExpanded ? (
                   <ChevronDown className="h-4 w-4" />
                 ) : (
@@ -197,8 +197,8 @@ export default function ReadingStoryPlayShell(
                     >
                       <span className="mr-2 font-black text-amber-300">
                         [
-                        {choice.id?.toUpperCase() ||
-                          String.fromCharCode(65 + index)}
+                        {(["一", "二", "三", "四", "五", "六", "七", "八"] as const)[index] ||
+                          `选项${index + 1}`}
                         ]
                       </span>
                       {choice.label}

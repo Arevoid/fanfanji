@@ -43,6 +43,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
   const paragraphRefs = useRef(new Map<string, HTMLParagraphElement>());
   const progressTimerRef = useRef<number | null>(null);
   const horizontalSnapTimerRef = useRef<number | null>(null);
+  const selectionSyncTimerRef = useRef<number | null>(null);
   const currentPositionRef = useRef<VisiblePosition | null>(null);
   const restoredRef = useRef(false);
   const [content, setContent] = useState<ReadingBookContent | null>(null);
@@ -373,6 +374,32 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     setActiveParagraph({ paragraph, chapterId, start, end });
     setToolMessage(null);
   }, [clearTextSelection]);
+
+  const syncSelectionFromDocument = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !selection.toString().trim()) return;
+    const range = selection.getRangeAt(0);
+    const startElement = range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
+    const paragraphElement = startElement?.closest<HTMLParagraphElement>("p[data-anchor-id]");
+    if (!paragraphElement || !scrollRef.current?.contains(paragraphElement) || !paragraphElement.contains(range.endContainer)) return;
+    const anchorId = paragraphElement.dataset.anchorId;
+    const item = flatParagraphs.find((candidate) => candidate.paragraph.anchor.id === anchorId);
+    if (item) syncTextSelection(item.paragraph, item.chapterId, paragraphElement);
+  }, [flatParagraphs, syncTextSelection]);
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      if (selectionSyncTimerRef.current !== null) window.clearTimeout(selectionSyncTimerRef.current);
+      selectionSyncTimerRef.current = window.setTimeout(syncSelectionFromDocument, 60);
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+      if (selectionSyncTimerRef.current !== null) window.clearTimeout(selectionSyncTimerRef.current);
+    };
+  }, [syncSelectionFromDocument]);
 
   useEffect(() => {
     const dismissSelection = (event: PointerEvent) => {

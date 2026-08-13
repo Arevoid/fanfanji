@@ -588,6 +588,15 @@ export default function ReadingCoStoryView({
               <p className="whitespace-pre-wrap text-[15px] leading-8 text-[#eee8df]/90">
                 {turn.narrative}
               </p>
+              {turn.dialogue.map((line, index) => (
+                <p
+                  key={`${turn.turnId}-dialogue-${index}`}
+                  className="mt-4 border-l border-amber-400/25 pl-4 text-sm leading-7 text-amber-50/85"
+                >
+                  <strong>{line.speaker}：</strong>
+                  {line.text}
+                </p>
+              ))}
               {turn.userAction && (
                 <p className="mt-3 border-l border-cyan-300/30 pl-4 text-xs leading-6 text-cyan-100/80">
                   你的视角：{turn.userAction}
