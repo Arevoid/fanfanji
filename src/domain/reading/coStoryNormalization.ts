@@ -17,6 +17,14 @@ export function normalizeReadingCoStoryStore(value: unknown): ReadingCoStoryStor
         relationId: text(item.relationId, 200),
         characterId: text(item.characterId, 200),
         universeStoryId: text(item.universeStoryId, 200) || undefined,
+        origin: item.origin === "custom" || item.origin === "book" ? item.origin : text(item.universeStoryId, 200) ? "book" : "custom",
+        worldDefinition: item.worldDefinition && typeof item.worldDefinition === "object" && !Array.isArray(item.worldDefinition) ? (() => {
+          const definition = item.worldDefinition as Record<string, unknown>;
+          const genre = text(definition.genre, 200);
+          const worldView = text(definition.worldView, 6000);
+          const synopsis = text(definition.synopsis, 6000);
+          return genre && worldView && synopsis ? { genre, worldView, synopsis, intendedEnding: text(definition.intendedEnding, 3000) || undefined } : undefined;
+        })() : undefined,
         title: text(item.title, 500),
         length: item.length,
         status: item.status,

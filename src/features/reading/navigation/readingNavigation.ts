@@ -33,6 +33,9 @@ export interface ReadingWorldItem {
   currentChapter: number;
   targetChapters: number;
   status: string;
+  origin: "book" | "custom";
+  genre?: string;
+  synopsis?: string;
   updatedAt: number;
 }
 
@@ -96,6 +99,7 @@ export function buildReadingWorldItems(input: {
       currentChapter: story.currentChapter,
       targetChapters: story.targetChapters,
       status: story.status,
+      origin: story.bookId ? "book" : "custom",
       updatedAt: story.updatedAt,
     }));
   const shared = input.coStories
@@ -111,6 +115,9 @@ export function buildReadingWorldItems(input: {
       currentChapter: story.currentChapter,
       targetChapters: story.targetChapters,
       status: story.status,
+      origin: story.origin || (story.universeStoryId ? "book" : "custom"),
+      genre: story.worldDefinition?.genre,
+      synopsis: story.worldDefinition?.synopsis,
       updatedAt: story.updatedAt,
     }));
   return [...solo, ...shared].sort((left, right) => right.updatedAt - left.updatedAt);

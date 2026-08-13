@@ -4,7 +4,7 @@ export interface ReadingCoStoryAiContext {
   persona: string;
   role: string;
   userRole: string;
-  currentStory: { title: string; location: string; time: string; chapter: string };
+  currentStory: { title: string; location: string; time: string; chapter: string; genre?: string; worldView?: string; synopsis?: string; intendedEnding?: string };
   knownIntel: string[];
   visibleRecentTurns: Array<{ actor: "user" | "ai_friend" | "system"; action?: string; narrative: string }>;
 }
@@ -17,7 +17,7 @@ export function projectReadingCoStoryForAi(input: { story: ReadingCoStoryState; 
     persona: input.story.aiFriend.personaSummary,
     role: input.story.aiFriend.characterRole || input.story.aiFriend.characterName,
     userRole: input.story.userCharacterRole || input.story.userCharacterName,
-    currentStory: { title: input.story.title, location: input.story.currentLocation, time: input.story.currentTime, chapter: `${input.story.currentChapter}/${input.story.targetChapters}` },
+    currentStory: { title: input.story.title, location: input.story.currentLocation, time: input.story.currentTime, chapter: `${input.story.currentChapter}/${input.story.targetChapters}`, genre: input.story.worldDefinition?.genre, worldView: input.story.worldDefinition?.worldView, synopsis: input.story.worldDefinition?.synopsis, intendedEnding: input.story.worldDefinition?.intendedEnding },
     knownIntel: input.story.aiFriend.knownIntel.slice(-20),
     visibleRecentTurns,
   };

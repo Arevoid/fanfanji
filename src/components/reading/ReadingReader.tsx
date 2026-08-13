@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bookmark, BookOpenText, ChevronLeft, ChevronRight, Copy, Highlighter, List, LoaderCircle, Search, SlidersHorizontal, StickyNote, Trash2, X } from "lucide-react";
+import { Bookmark, BookOpenText, ChevronLeft, ChevronRight, Copy, Highlighter, List, LoaderCircle, MessageCircle, Search, SlidersHorizontal, Sparkles, StickyNote, Trash2, X } from "lucide-react";
 import { fontAssetDb } from "../../utils/fontAssetDb";
 import { GLOBAL_FONT_ASSET_ID } from "../../features/theme/globalTypography";
 import {
@@ -21,10 +21,13 @@ import {
   type ReadingSearchResult,
 } from "../../features/reading/tools/readingTools";
 import type { ReadingAnnotation, ReadingBookPreferences } from "../../domain/reading/types";
+import type { ReadingRoom } from "../../domain/reading/coReadingTypes";
+import { createUserReadingComment, listReadingComments, startReadingDiscussion } from "../../features/reading/coReading/readingCoReadingContent";
 
 interface ReadingReaderProps {
   userIdentityId: string;
   bookId: string;
+  room?: ReadingRoom;
   onClose: () => void;
 }
 
@@ -35,7 +38,7 @@ interface VisiblePosition {
   scrollOffsetHint: number;
 }
 
-export default function ReadingReader({ userIdentityId, bookId, onClose }: ReadingReaderProps) {
+export default function ReadingReader({ userIdentityId, bookId, room, onClose }: ReadingReaderProps) {
   const scrollRef = useRef<HTMLElement>(null);
   const paragraphRefs = useRef(new Map<string, HTMLParagraphElement>());
   const progressTimerRef = useRef<number | null>(null);
@@ -55,6 +58,9 @@ export default function ReadingReader({ userIdentityId, bookId, onClose }: Readi
   const [customFontFamily, setCustomFontFamily] = useState<string | undefined>();
   const [percent, setPercent] = useState(0);
   const [currentChapterId, setCurrentChapterId] = useState<string | null>(null);
+  const [roomComments, setRoomComments] = useState(() => room ? listReadingComments(room) : []);
+
+  useEffect(() => { setRoomComments(room ? listReadingComments(room) : []); }, [room]);
 
   useEffect(() => {
     let active = true;
@@ -259,6 +265,27 @@ export default function ReadingReader({ userIdentityId, bookId, onClose }: Readi
     } catch { setToolMessage("笔记保存失败"); }
   };
 
+  const addParagraphComment = () => {
+    if (!activeParagraph || !room) return;
+    const body = window.prompt(`写给共读房间的段评（${room.characterSnapshot.name} 可见）：`, "");
+    if (!body?.trim()) return;
+    try {
+      createUserReadingComment({ scope: room, authorName: "我", kind: "paragraph", body, targetChapterId: activeParagraph.chapterId, targetParagraphAnchorId: activeParagraph.paragraph.anchor.id, textSnapshot: activeParagraph.paragraph.text.slice(activeParagraph.start, activeParagraph.end) });
+      setRoomComments(listReadingComments(room));
+      setToolMessage("段评已保存到当前共读房间");
+    } catch { setToolMessage("段评保存失败"); }
+  };
+
+  const summonRoomFriend = () => {
+    if (!activeParagraph || !room || !room.settings.allowSummon) return;
+    const prompt = window.prompt(`召唤 ${room.characterSnapshot.name} 讨论这段内容：`, "你怎么看这里？");
+    if (!prompt?.trim()) return;
+    try {
+      startReadingDiscussion({ scope: room, authorName: "我", userPrompt: prompt, targetChapterId: activeParagraph.chapterId, targetParagraphAnchorId: activeParagraph.paragraph.anchor.id, frozenFragment: activeParagraph.paragraph.text.slice(activeParagraph.start, activeParagraph.end) });
+      setToolMessage(`已召唤 ${room.characterSnapshot.name}，片段仅进入当前房间`);
+    } catch { setToolMessage("召唤保存失败"); }
+  };
+
   const jumpToSearchResult = (result: ReadingSearchResult) => {
     setCurrentChapterId(result.chapterId);
     setIsSearchOpen(false);
@@ -322,7 +349,7 @@ export default function ReadingReader({ userIdentityId, bookId, onClose }: Readi
     <div data-theme-page="reading-reader" className="relative flex h-full flex-col overflow-hidden" style={{ background: preferences.background, color: preferences.textColor, fontFamily: customFontFamily }}>
       <header className="relative z-20 flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)]/95 px-4 py-2 backdrop-blur">
         <button type="button" onClick={closeReader} aria-label="返回书籍详情" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><ChevronLeft className="h-4 w-4" /></button>
-        <div className="min-w-0 px-3 text-center"><h1 className="max-w-56 truncate text-sm font-bold">{content?.book.title || "阅读"}</h1><p className="mt-0.5 max-w-56 truncate text-[10px] text-[var(--text-muted)]">{content?.chapters[currentChapterIndex]?.chapter.title || "正在打开正文"}</p></div>
+        <div className="min-w-0 px-3 text-center"><h1 className="max-w-56 truncate text-sm font-bold">{content?.book.title || "阅读"}</h1><p className="mt-0.5 max-w-56 truncate text-[10px] text-[var(--text-muted)]">{room ? `与 ${room.characterSnapshot.name} 共读 · ` : ""}{content?.chapters[currentChapterIndex]?.chapter.title || "正在打开正文"}</p></div>
         <button type="button" onClick={() => setIsTocOpen(true)} aria-label="打开目录" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><List className="h-4 w-4" /></button>
       </header>
 
@@ -359,6 +386,7 @@ export default function ReadingReader({ userIdentityId, bookId, onClose }: Readi
                     >
                       {renderParagraphText(paragraph)}
                       {annotations.some((item) => item.paragraphAnchorId === paragraph.anchor.id && item.kind === "bookmark") && <Bookmark className="absolute -right-4 top-1 h-3.5 w-3.5 fill-current" aria-label="已添加书签" />}
+                      {room && roomComments.some((item) => item.targetParagraphAnchorId === paragraph.anchor.id) && <span aria-label={`${roomComments.filter((item) => item.targetParagraphAnchorId === paragraph.anchor.id).length} 条段评`} className="absolute -right-5 bottom-0 inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-current px-1 text-[8px] opacity-60">{roomComments.filter((item) => item.targetParagraphAnchorId === paragraph.anchor.id).length}</span>}
                     </p>
                   ))}
                 </div>
@@ -373,7 +401,7 @@ export default function ReadingReader({ userIdentityId, bookId, onClose }: Readi
         <footer className="absolute inset-x-3 bottom-3 z-20 flex h-12 items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 px-1 shadow-lg backdrop-blur text-[var(--text-primary)]">
           <button type="button" disabled={currentChapterIndex <= 0} onClick={() => jumpToChapter(currentChapterIndex - 1)} className="flex h-8 items-center gap-1 rounded-xl px-2 text-xs font-bold disabled:opacity-30"><ChevronLeft className="h-4 w-4" />上一章</button>
           <button type="button" onClick={() => setIsSearchOpen(true)} aria-label="搜索正文" className="flex h-8 w-8 items-center justify-center rounded-xl"><Search className="h-4 w-4" /></button>
-          <span className="text-[11px] tabular-nums text-[var(--text-muted)]">{percent.toFixed(1)}%</span>
+          {room ? <span className="flex max-w-20 items-center gap-1 truncate text-[10px] font-bold text-[var(--text-muted)]">{room.characterSnapshot.avatar ? <img src={room.characterSnapshot.avatar} alt="" className="h-5 w-5 rounded-full object-cover" /> : <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--surface-raised)]">{room.characterSnapshot.name.slice(0,1)}</span>}{percent.toFixed(1)}%</span> : <span className="text-[11px] tabular-nums text-[var(--text-muted)]">{percent.toFixed(1)}%</span>}
           <button type="button" onClick={() => setIsSettingsOpen(true)} aria-label="阅读设置" className="flex h-8 w-8 items-center justify-center rounded-xl"><SlidersHorizontal className="h-4 w-4" /></button>
           <button type="button" disabled={!content || currentChapterIndex >= content.chapters.length - 1} onClick={() => jumpToChapter(currentChapterIndex + 1)} className="flex h-8 items-center gap-1 rounded-xl px-2 text-xs font-bold disabled:opacity-30">下一章<ChevronRight className="h-4 w-4" /></button>
         </footer>
@@ -381,11 +409,13 @@ export default function ReadingReader({ userIdentityId, bookId, onClose }: Readi
 
       {activeParagraph && !isTocOpen && !isSearchOpen && !isSettingsOpen && (
         <div className="absolute inset-x-4 bottom-16 z-30 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 text-[var(--text-primary)] shadow-xl">
-          <div className="grid grid-cols-4 gap-1">
+          <div className={`grid gap-1 ${room ? "grid-cols-6" : "grid-cols-4"}`}>
             <button type="button" onClick={copyActiveParagraph} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><Copy className="h-4 w-4" />复制</button>
             <button type="button" onClick={toggleHighlight} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><Highlighter className="h-4 w-4" />高亮</button>
             <button type="button" onClick={addNote} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><StickyNote className="h-4 w-4" />笔记</button>
             <button type="button" onClick={toggleBookmark} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><Bookmark className="h-4 w-4" />书签</button>
+            {room && <button type="button" onClick={addParagraphComment} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><MessageCircle className="h-4 w-4" />段评</button>}
+            {room && <button type="button" disabled={!room.settings.allowSummon} onClick={summonRoomFriend} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px] disabled:opacity-30"><Sparkles className="h-4 w-4" />召唤</button>}
           </div>
           <button type="button" onClick={() => setActiveParagraph(null)} aria-label="关闭段落工具" className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]"><X className="h-3 w-3" /></button>
           {toolMessage && <p className="border-t border-[var(--border)] px-2 pt-2 text-center text-[10px] text-[var(--text-muted)]">{toolMessage}</p>}

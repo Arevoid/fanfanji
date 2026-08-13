@@ -13,6 +13,13 @@ export type ReadingCoStoryActor = "user" | "ai_friend" | "system";
 export type ReadingCoStoryActionMode = "suggest" | "ask_opinion" | "low_risk_execute";
 export type ReadingCoStoryActionRisk = "low" | "major";
 
+export interface ReadingWorldDefinition {
+  genre: string;
+  worldView: string;
+  synopsis: string;
+  intendedEnding?: string;
+}
+
 export interface ReadingStoryAiFriendProfile {
   relationId: string;
   characterId: string;
@@ -28,6 +35,8 @@ export interface ReadingStoryAiFriendProfile {
 
 export interface ReadingCoStoryState extends ReadingCoStoryScope {
   universeStoryId?: string;
+  origin?: "book" | "custom";
+  worldDefinition?: ReadingWorldDefinition;
   title: string;
   length: ReadingStoryLength;
   status: "active" | "completed" | "paused";
