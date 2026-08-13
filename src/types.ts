@@ -832,6 +832,14 @@ export interface MemoryItem {
   timestamp: number;
   importance?: number; // 1-10, default 5
   isManual?: boolean;
+  /** A confirmed reading interaction may mirror into this exact relationship only. */
+  sourceReadingRoomId?: string;
+  sourceReadingCommentId?: string;
+  sourceReadingEvidence?: {
+    bookId: string;
+    chapterId?: string;
+    paragraphAnchorId?: string;
+  };
 }
 
 export interface MemoryVaultSettings {

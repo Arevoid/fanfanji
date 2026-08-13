@@ -356,6 +356,7 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
             <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
               <div className="flex items-center justify-between"><h2 className="text-sm font-bold">召唤 TA 讨论</h2><span className="text-[10px] text-[var(--text-muted)]">应用内讨论室</span></div>
               <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">召唤只带当前房间允许的内容；不会跳转聊天，也不会读取其他关系的记忆。</p>
+              <p className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">AI 回复会优先服从 TA 的角色卡与关系人设；未确认的记忆只会作为候选，不会自动写入主记忆。</p>
               <textarea value={roomDiscussionDraft} onChange={(event) => setRoomDiscussionDraft(event.target.value)} placeholder="你想和 TA 讨论什么？" rows={2} className="mt-3 w-full resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs outline-none" />
               <button type="button" disabled={!roomDiscussionDraft.trim() || selectedRoom.status !== "active"} onClick={() => summonRoomFriend(selectedRoom)} className="mt-2 h-10 w-full rounded-2xl border border-[var(--border)] text-xs font-bold disabled:opacity-40">召唤 TA</button>
             </section>
