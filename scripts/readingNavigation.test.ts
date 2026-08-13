@@ -21,7 +21,8 @@ const soloStory = { userIdentityId: "user-1", storyId: "solo-1", bookId: book.id
 const worlds = buildReadingWorldItems({ userIdentityId: "user-1", stories: [soloStory], coStories: [coStory] });
 const sharedActivity = activities.find((item) => item.kind === "co_story");
 const sharedWorld = worlds.find((item) => item.kind === "co_story");
-assert.equal(sharedActivity?.sourceId, sharedWorld?.sourceId, "共同穿书在两个栏目必须引用同一存档");
+assert.equal(sharedActivity, undefined, "穿书卡片不能混入共读栏目");
+assert.equal(sharedWorld?.sourceId, coStory.coStoryId, "共同穿书只显示在世界栏目");
 
 const unreadBook = { ...book, id: "book-2", title: "远山", updatedAt: now + 1 };
 const progress = [{ userIdentityId: "user-1", bookId: book.id, percent: 50 }] as ReadingProgress[];

@@ -64,22 +64,7 @@ export function buildReadingActivityItems(input: {
       status: room.status,
       updatedAt: room.updatedAt,
     }));
-  const coStories = input.coStories
-    .filter((story) => story.userIdentityId === input.userIdentityId)
-    .map((story): ReadingActivityItem => ({
-      id: `co-story:${story.coStoryId}`,
-      sourceId: story.coStoryId,
-      kind: "co_story",
-      userIdentityId: story.userIdentityId,
-      bookId: story.universeStoryId,
-      bookTitle: story.universeStoryId ? bookTitle(input.books, story.universeStoryId) : story.title,
-      relationId: story.relationId,
-      characterId: story.characterId,
-      friendName: story.aiFriend.displayName,
-      status: story.status,
-      updatedAt: story.updatedAt,
-    }));
-  return [...rooms, ...coStories].sort((left, right) => right.updatedAt - left.updatedAt);
+  return rooms.sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
 export function buildReadingWorldItems(input: {

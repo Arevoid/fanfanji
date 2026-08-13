@@ -2137,36 +2137,6 @@ export default function AppReading({
                             100,
                         )
                       : 0;
-                  if (item.kind === "co_story")
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => {
-                          setInitialCoStoryId(item.sourceId);
-                          setReadingCoStoryBookId(
-                            item.bookId || "custom-world",
-                          );
-                        }}
-                        className="flex w-full items-center gap-3 rounded-3xl border border-amber-300/25 bg-[var(--surface)] p-4 text-left"
-                      >
-                        <div className="flex h-14 w-11 items-center justify-center rounded-xl bg-amber-500/10 text-amber-300">
-                          <Sparkles className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-bold text-amber-300">
-                            共同穿书
-                          </span>
-                          <h3 className="mt-2 truncate text-sm font-black">
-                            {item.bookTitle}
-                          </h3>
-                          <p className="mt-1 text-[10px] text-[var(--text-muted)]">
-                            和 {item.friendName} · {item.status}
-                          </p>
-                        </div>
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    );
                   return (
                     <div
                       key={item.id}
@@ -2252,7 +2222,7 @@ export default function AppReading({
                         <button
                           type="button"
                           onClick={() => setSelectedRoomId(item.sourceId)}
-                          className="h-10 rounded-2xl border border-[var(--border)] px-4 text-xs font-bold"
+                          className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--border)] px-4 text-center text-xs font-bold"
                         >
                           书房
                         </button>
@@ -2275,34 +2245,26 @@ export default function AppReading({
           {rootTab === "world" && (
             <section aria-label="故事世界" className="space-y-3">
               <div>
-                <div className="flex items-end justify-between">
-                  <div>
-                    <h2 className="text-xl font-black">故事世界</h2>
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">
-                      所有内容只保存在独立宇宙记忆
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={openWorldSetup}
-                    className="flex h-9 items-center gap-1 rounded-2xl bg-[var(--button-primary-bg)] px-3 text-[10px] font-bold text-[var(--button-primary-text)]"
-                  >
-                    <Plus className="h-4 w-4" />
-                    新建
-                  </button>
+                <div>
+                  <h2 className="text-xl font-black">故事世界</h2>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    所有内容只保存在独立宇宙记忆
+                  </p>
                 </div>
                 <div className="mt-4 grid grid-cols-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1">
                   <button
                     type="button"
                     onClick={() => setWorldSection("book")}
-                    className={`h-9 rounded-xl text-xs font-bold ${worldSection === "book" ? "bg-[var(--surface-raised)]" : "text-[var(--text-muted)]"}`}
+                    aria-pressed={worldSection === "book"}
+                    className={`h-9 rounded-xl text-xs font-bold transition ${worldSection === "book" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] shadow-sm" : "text-[var(--text-secondary)]"}`}
                   >
                     穿书宇宙
                   </button>
                   <button
                     type="button"
                     onClick={() => setWorldSection("custom")}
-                    className={`h-9 rounded-xl text-xs font-bold ${worldSection === "custom" ? "bg-[var(--surface-raised)]" : "text-[var(--text-muted)]"}`}
+                    aria-pressed={worldSection === "custom"}
+                    className={`h-9 rounded-xl text-xs font-bold transition ${worldSection === "custom" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] shadow-sm" : "text-[var(--text-secondary)]"}`}
                   >
                     自建世界
                   </button>
@@ -2381,19 +2343,9 @@ export default function AppReading({
                   </p>
                   <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
                     {worldSection === "custom"
-                      ? "点击新建，与一位 AI 好友共同设定世界。"
+                      ? "点击右上角的 +，与一位 AI 好友共同设定世界。"
                       : "长按书籍封面选择穿书后，会显示在这里。"}
                   </p>
-                  {worldSection === "custom" && (
-                    <button
-                      type="button"
-                      disabled={!availableFriends.length}
-                      onClick={openWorldSetup}
-                      className="mt-4 h-10 rounded-2xl bg-[var(--button-primary-bg)] px-5 text-xs font-bold text-[var(--button-primary-text)] disabled:opacity-40"
-                    >
-                      新建原创世界
-                    </button>
-                  )}
                 </div>
               )}
             </section>
