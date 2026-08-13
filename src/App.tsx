@@ -3719,6 +3719,13 @@ export default function App() {
                   <LazyAppBoundary>
                     <AppSchedule
                       entries={scheduleEntries}
+                      appointments={scheduleStore.appointments}
+                      characters={characters}
+                      onOpenChat={(characterId, relationId) => {
+                        setActiveChatCharId(characterId);
+                        setActiveChatRelationId(relationId);
+                        setActiveApp("chat");
+                      }}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>
