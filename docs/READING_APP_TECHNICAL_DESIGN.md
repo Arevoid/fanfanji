@@ -248,4 +248,17 @@ Round 5 不包含字体排版面板、搜索、复制增强、高亮、笔记、
 - 系统 JSON 备份继续不包含小说正文，也不宣称能恢复阅读数据；设置页明确引导用户在阅读应用导出独立完整归档。
 - 新增 `readingTools.test.ts`、`readingArchive.test.ts` 和 `readingRound6Ui.test.ts`，覆盖偏好约束、范围标注、身份隔离、搜索、完整往返、哈希拒绝、回滚和 UI 接入。
 
-第一阶段至此完成。仍未进入范围：EPUB、左右翻页、TTS、AI 共读、小说分析和穿书；下一阶段从独立 AI 好友共读房间与知识边界开始。
+第一阶段至此完成。仍未进入范围：EPUB、左右翻页、TTS、小说分析和穿书。
+
+## 16. Round 7 AI 好友共读房间基础
+
+Round 7 开始第二阶段，先落地共读房间和关系边界，不把 AI 角色伪装成真人在线用户，也不在没有模型结构化结果时猜测接受状态。
+
+- 新增独立 `phone_reading_co_reading_store_v1`，不与私人阅读 `phone_reading_store_v1` 混存。
+- `ReadingRoom` 的完整作用域固定为 `userIdentityId + bookId + readingRoomId + relationId + characterId + conversationId`。
+- 同一本书与不同好友分别创建不同 `readingRoomId`；即使两个关系指向同一个角色卡，也不会合并房间。
+- 房间创建时状态为 `invited`，只有经过结构化 `accept | hesitate | decline` 决策才会进入 `active`、保持邀请中或变为 `declined`。
+- 房间保存角色名称和头像快照。角色被删除后仍能显示历史房间，但不会回退到其他关系。
+- 每个房间同时初始化独立 `AiReadingState`：阅读游标为空、已知章节为空、段落知识范围为空、阅读速度为 `persona_driven`、剧透策略为 `strict`。
+- 任何读取或更新都必须完整匹配房间作用域；只替换 `readingRoomId` 或 `conversationId` 的越权查询会被拒绝。
+- 当前 UI 提供书架/共读切换、邀请 AI 好友、独立房间列表和房间边界说明；段评、章评、书评、召唤和 AI 推进留待后续轮次接入。

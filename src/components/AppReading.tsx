@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import { loadReadingStore } from "../core/storage/repositories/readingRepository";
 import type { ReadingBook, ReadingChapter, ReadingProgress } from "../domain/reading/types";
+import type { Character } from "../types";
+import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
+import type { ReadingRoom } from "../domain/reading/coReadingTypes";
 import { importReadingFile, ReadingImportError } from "../features/reading/import/readingImport";
 import {
   deleteReadingBook,
@@ -30,9 +33,13 @@ import {
 } from "../features/reading/library/readingLibrary";
 import ReadingReader from "./reading/ReadingReader";
 import { buildReadingArchive, restoreReadingArchive, serializeReadingArchive } from "../features/reading/archive/readingArchive";
+import { createAiReadingRoom, ReadingCoReadingError } from "../features/reading/coReading/readingCoReading";
+import { listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
 
 interface AppReadingProps {
   userIdentityId: string;
+  characters?: Character[];
+  relationships?: CharacterRelationship[];
   onClose: () => void;
 }
 
@@ -44,12 +51,16 @@ const formatDate = (timestamp: number): string => new Intl.DateTimeFormat("zh-CN
   day: "numeric",
 }).format(new Date(timestamp));
 
-export default function AppReading({ userIdentityId, onClose }: AppReadingProps) {
+export default function AppReading({ userIdentityId, characters = [], relationships = [], onClose }: AppReadingProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const archiveInputRef = useRef<HTMLInputElement>(null);
   const [books, setBooks] = useState<ReadingBook[]>([]);
   const [chapters, setChapters] = useState<ReadingChapter[]>([]);
   const [progress, setProgress] = useState<ReadingProgress[]>([]);
+  const [rooms, setRooms] = useState<ReadingRoom[]>([]);
+  const [readingView, setReadingView] = useState<"library" | "rooms">("library");
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [inviteBookId, setInviteBookId] = useState<string | null>(null);
   const [section, setSection] = useState<"library" | "archived">("library");
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [readingBookId, setReadingBookId] = useState<string | null>(null);
@@ -70,6 +81,7 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
       .filter((chapter) => chapter.userIdentityId === userIdentityId)
       .sort((left, right) => left.order - right.order));
     setProgress(store.progress.filter((item) => item.userIdentityId === userIdentityId));
+    setRooms(listReadingRooms(userIdentityId));
   }, [userIdentityId]);
 
   useEffect(() => {
@@ -84,6 +96,12 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
     ? chapters.filter((chapter) => chapter.bookId === selectedBook.id)
     : [];
   const selectedProgress = selectedBook ? progress.find((item) => item.bookId === selectedBook.id) : null;
+  const selectedRoom = rooms.find((room) => room.readingRoomId === selectedRoomId) || null;
+  const inviteBook = books.find((book) => book.id === inviteBookId) || null;
+  const availableFriends = relationships
+    .filter((relationship) => relationship.userIdentityId === userIdentityId)
+    .map((relationship) => ({ relationship, character: characters.find((character) => character.id === relationship.characterId) }))
+    .filter((entry): entry is { relationship: CharacterRelationship; character: Character } => Boolean(entry.character));
 
   const showError = (error: unknown, fallback: string) => {
     const text = error instanceof ReadingImportError || error instanceof ReadingLibraryError ? error.message : fallback;
@@ -225,6 +243,20 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
     } finally { setIsWorking(false); }
   };
 
+  const handleInviteFriend = (relationship: CharacterRelationship, character: Character) => {
+    if (!inviteBook) return;
+    try {
+      createAiReadingRoom({ userIdentityId, book: inviteBook, relationship, character });
+      refreshLibrary();
+      setInviteBookId(null);
+      setReadingView("rooms");
+      setNotice({ tone: "success", text: `已向 ${character.name} 发出共读邀请。等待 TA 根据人设回应。` });
+    } catch (error) {
+      const text = error instanceof ReadingCoReadingError ? error.message : "共读邀请保存失败";
+      setNotice({ tone: "error", text });
+    }
+  };
+
   const renderNotice = () => notice && (
     <div
       role={notice.tone === "error" ? "alert" : "status"}
@@ -241,6 +273,44 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
 
   if (readingBookId) {
     return <ReadingReader userIdentityId={userIdentityId} bookId={readingBookId} onClose={() => { setReadingBookId(null); refreshLibrary(); }} />;
+  }
+
+  if (selectedRoom) {
+    const roomBook = books.find((book) => book.id === selectedRoom.bookId);
+    return (
+      <div data-theme-page="reading-co-reading-room" className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
+        <header className="relative z-10 flex shrink-0 items-center justify-between px-4 py-1.5">
+          <button type="button" onClick={() => setSelectedRoomId(null)} aria-label="返回共读列表" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]"><ChevronLeft className="h-4 w-4" /></button>
+          <h1 className="absolute left-1/2 max-w-[65%] -translate-x-1/2 truncate text-base font-bold">共读房间</h1>
+          <span className="rounded-full border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--text-muted)]">AI 好友</span>
+        </header>
+        <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
+          <div className="mx-auto w-full max-w-md space-y-4">
+            <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-[var(--surface-raised)] text-xl font-black">
+                  {selectedRoom.characterSnapshot.avatar ? <img src={selectedRoom.characterSnapshot.avatar} alt="" className="h-full w-full object-cover" /> : selectedRoom.characterSnapshot.name.slice(0, 1)}
+                </div>
+                <div className="min-w-0 flex-1"><p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">与 TA 共读</p><h2 className="mt-1 truncate text-xl font-bold">{selectedRoom.characterSnapshot.name}</h2><p className="mt-1 truncate text-xs text-[var(--text-secondary)]">{roomBook?.title || "书籍已不在当前书架"}</p></div>
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${selectedRoom.status === "active" ? "bg-emerald-500/15 text-emerald-300" : selectedRoom.status === "declined" ? "bg-rose-500/15 text-rose-300" : "bg-amber-500/15 text-amber-200"}`}>{selectedRoom.status === "active" ? "共读中" : selectedRoom.status === "declined" ? "已拒绝" : selectedRoom.status === "invited" ? "等待回应" : selectedRoom.status === "paused" ? "已暂停" : "已结束"}</span>
+              </div>
+            </section>
+            {renderNotice()}
+            <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <h2 className="text-sm font-bold">共读边界</h2>
+              <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">这是一个只属于当前身份与 {selectedRoom.characterSnapshot.name} 的独立房间。同一本书与其他好友的进度、评论、召唤和讨论不会合并。</p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-[var(--text-muted)]"><span className="rounded-xl bg-[var(--surface-raised)] p-2">房间：{selectedRoom.readingRoomId.slice(-8)}</span><span className="rounded-xl bg-[var(--surface-raised)] p-2">剧透：严格保护</span></div>
+            </section>
+            <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex items-center justify-between"><h2 className="text-sm font-bold">AI 阅读状态</h2><span className="text-[10px] text-[var(--text-muted)]">独立保存</span></div>
+              <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">AI 会按照自己的阅读速度逐步获得知识，只能评论已经读到的章节。后续会在这里显示 TA 的阅读游标、已知范围和段评。</p>
+              <div className="mt-3 flex gap-2"><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px]">人设驱动速度</span><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px]">适中段评</span></div>
+            </section>
+            {roomBook && roomBook.status !== "archived" && <button type="button" onClick={() => setReadingBookId(roomBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)]"><BookOpenText className="h-4 w-4" />继续阅读这本书</button>}
+          </div>
+        </main>
+      </div>
+    );
   }
 
   if (selectedBook) {
@@ -275,6 +345,10 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
               <button type="button" onClick={() => setReadingBookId(selectedBook.id)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] text-sm font-bold text-[var(--button-primary-text)] shadow-sm">
                 <BookOpenText className="h-4 w-4" />{selectedProgress ? `继续阅读 · ${selectedProgress.percent.toFixed(1)}%` : "开始阅读"}
               </button>
+            )}
+
+            {selectedBook.status !== "archived" && availableFriends.length > 0 && (
+              <button type="button" onClick={() => setInviteBookId(selectedBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold"><span aria-hidden="true">👥</span>邀请一位 AI 好友共读</button>
             )}
 
             {isEditing && (
@@ -342,6 +416,21 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
 
       <main className="flex-1 overflow-y-auto px-4 pb-24 pt-3">
         <section className="mx-auto flex w-full max-w-md flex-col gap-4">
+          <div className="grid grid-cols-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1">
+            <button type="button" onClick={() => setReadingView("library")} className={`h-9 rounded-xl text-xs font-bold ${readingView === "library" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "text-[var(--text-secondary)]"}`}>书架</button>
+            <button type="button" onClick={() => setReadingView("rooms")} className={`h-9 rounded-xl text-xs font-bold ${readingView === "rooms" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "text-[var(--text-secondary)]"}`}>共读 {rooms.length ? `· ${rooms.length}` : ""}</button>
+          </div>
+          {readingView === "rooms" && (
+            <section aria-label="共读房间" className="space-y-2">
+              {rooms.length > 0 ? rooms.map((room) => {
+                const roomBook = books.find((book) => book.id === room.bookId);
+                return <button key={room.readingRoomId} type="button" onClick={() => setSelectedRoomId(room.readingRoomId)} className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[var(--surface-raised)] text-base font-black">{room.characterSnapshot.avatar ? <img src={room.characterSnapshot.avatar} alt="" className="h-full w-full object-cover" /> : room.characterSnapshot.name.slice(0, 1)}</div>
+                  <div className="min-w-0 flex-1"><h3 className="truncate text-sm font-bold">{room.characterSnapshot.name}</h3><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">{roomBook?.title || "书籍已移除"}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{room.status === "active" ? "共读中" : room.status === "declined" ? "已拒绝" : "等待 TA 回应"} · 独立房间</p></div><ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+                </button>;
+              }) : <div className="rounded-3xl border border-dashed border-[var(--border)] p-8 text-center"><p className="text-sm font-bold">还没有共读房间</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">打开一本书，在详情页邀请一位 AI 好友。每位好友都会建立独立房间。</p></div>}
+            </section>
+          )}
           <input ref={fileInputRef} type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={handleFileSelected} className="hidden" aria-label="选择 TXT 或 Markdown 小说" />
           <input ref={archiveInputRef} type="file" accept=".json,.fanfan-reading.json,application/json,application/vnd.fanfanji.reading+json" onChange={handleImportArchive} className="hidden" aria-label="选择阅读归档" />
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
@@ -384,6 +473,15 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
           </section>
         </section>
       </main>
+      {inviteBook && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-4 sm:items-center" role="dialog" aria-modal="true" aria-label="邀请 AI 好友共读">
+          <div className="w-full max-w-md space-y-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3"><div><p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">建立独立关系空间</p><h2 className="mt-1 text-lg font-bold">邀请谁来共读《{inviteBook.title}》？</h2></div><button type="button" onClick={() => setInviteBookId(null)} aria-label="关闭邀请" className="h-8 w-8 rounded-full border border-[var(--border)] text-lg">×</button></div>
+            <p className="text-xs leading-5 text-[var(--text-secondary)]">好友是 AI 角色。邀请会先进入明确的邀请状态，由 TA 根据角色卡与关系作出接受、犹豫或拒绝；不会等待真人上线，也不会与其他好友共享房间。</p>
+            <div className="space-y-2">{availableFriends.map(({ relationship, character }) => <button key={relationship.id} type="button" onClick={() => handleInviteFriend(relationship, character)} className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-left"><div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-[var(--surface)] font-bold">{character.avatar ? <img src={character.avatar} alt="" className="h-full w-full object-cover" /> : character.name.slice(0, 1)}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{character.name}</p><p className="mt-0.5 text-[10px] text-[var(--text-muted)]">关系：{relationship.relationship} · 独立共读记忆</p></div><ChevronRight className="h-4 w-4 text-[var(--text-muted)]" /></button>)}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

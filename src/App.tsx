@@ -3767,6 +3767,8 @@ export default function App() {
                   <LazyAppBoundary>
                     <AppReading
                       userIdentityId={activeIdentityId}
+                      characters={characters}
+                      relationships={relationships}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>
