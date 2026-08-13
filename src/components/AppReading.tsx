@@ -17,7 +17,7 @@ import {
   Upload,
 } from "lucide-react";
 import { loadReadingStore } from "../core/storage/repositories/readingRepository";
-import type { ReadingBook, ReadingChapter } from "../domain/reading/types";
+import type { ReadingBook, ReadingChapter, ReadingProgress } from "../domain/reading/types";
 import { importReadingFile, ReadingImportError } from "../features/reading/import/readingImport";
 import {
   deleteReadingBook,
@@ -27,6 +27,7 @@ import {
   setReadingBookArchived,
   updateReadingBookDetails,
 } from "../features/reading/library/readingLibrary";
+import ReadingReader from "./reading/ReadingReader";
 
 interface AppReadingProps {
   userIdentityId: string;
@@ -45,8 +46,10 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [books, setBooks] = useState<ReadingBook[]>([]);
   const [chapters, setChapters] = useState<ReadingChapter[]>([]);
+  const [progress, setProgress] = useState<ReadingProgress[]>([]);
   const [section, setSection] = useState<"library" | "archived">("library");
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
+  const [readingBookId, setReadingBookId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -63,6 +66,7 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
     setChapters(store.chapters
       .filter((chapter) => chapter.userIdentityId === userIdentityId)
       .sort((left, right) => left.order - right.order));
+    setProgress(store.progress.filter((item) => item.userIdentityId === userIdentityId));
   }, [userIdentityId]);
 
   useEffect(() => {
@@ -76,6 +80,7 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
   const selectedChapters = selectedBook
     ? chapters.filter((chapter) => chapter.bookId === selectedBook.id)
     : [];
+  const selectedProgress = selectedBook ? progress.find((item) => item.bookId === selectedBook.id) : null;
 
   const showError = (error: unknown, fallback: string) => {
     const text = error instanceof ReadingImportError || error instanceof ReadingLibraryError ? error.message : fallback;
@@ -198,6 +203,10 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
     </div>
   );
 
+  if (readingBookId) {
+    return <ReadingReader userIdentityId={userIdentityId} bookId={readingBookId} onClose={() => { setReadingBookId(null); refreshLibrary(); }} />;
+  }
+
   if (selectedBook) {
     return (
       <div data-theme-page="reading" className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
@@ -225,6 +234,12 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
             </section>
 
             {renderNotice()}
+
+            {selectedBook.status !== "archived" && selectedChapters.length > 0 && (
+              <button type="button" onClick={() => setReadingBookId(selectedBook.id)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] text-sm font-bold text-[var(--button-primary-text)] shadow-sm">
+                <BookOpenText className="h-4 w-4" />{selectedProgress ? `继续阅读 · ${selectedProgress.percent.toFixed(1)}%` : "开始阅读"}
+              </button>
+            )}
 
             {isEditing && (
               <section className="space-y-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
@@ -318,7 +333,7 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
             {visibleBooks.length > 0 ? visibleBooks.map((book) => (
               <button key={`${book.userIdentityId}:${book.id}`} type="button" onClick={() => openBookDetails(book)} className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left">
                 <div className="flex h-14 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-raised)] text-base font-black">{book.title.trim().slice(0, 1) || <FileText className="h-4 w-4" />}</div>
-                <div className="min-w-0 flex-1"><h3 className="truncate text-sm font-bold">{book.title}</h3><p className="mt-1 truncate text-[11px] text-[var(--text-muted)]">{book.author || book.sourceFileName}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{book.wordCount.toLocaleString()} 字 · {book.chapterCount} 章 · {book.format === "markdown" ? "Markdown" : "TXT"}</p></div>
+                <div className="min-w-0 flex-1"><h3 className="truncate text-sm font-bold">{book.title}</h3><p className="mt-1 truncate text-[11px] text-[var(--text-muted)]">{book.author || book.sourceFileName}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{progress.find((item) => item.bookId === book.id) ? `已读 ${progress.find((item) => item.bookId === book.id)?.percent.toFixed(1)}% · ` : ""}{book.wordCount.toLocaleString()} 字 · {book.chapterCount} 章</p></div>
                 <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
               </button>
             )) : (

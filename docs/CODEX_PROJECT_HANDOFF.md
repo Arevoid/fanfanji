@@ -714,7 +714,7 @@ Node 路由在 `server.ts`，Cloudflare 对应路由在 `src/cloudflare/worker.t
 - 完成线下后约定状态变为历史；
 - 日程只为全新用户默认加入桌面，老用户布局不变。
 
-### 12.5 阅读应用基础（Round 1～4）
+### 12.5 阅读应用基础（Round 1～5）
 
 - 产品基线位于 `docs/READING_APP_PRODUCT_BASELINE.md`，技术边界位于 `docs/READING_APP_TECHNICAL_DESIGN.md`；
 - 已建立 `src/domain/reading/` 的书籍、章节、稳定段落锚点、进度、标注、偏好与完整关系作用域模型；
@@ -729,6 +729,10 @@ Node 路由在 `server.ts`，Cloudflare 对应路由在 `src/cloudflare/worker.t
 - Round 4 已实现导入时分章、稳定段落锚点、旧书补解析、书籍详情、目录、资料编辑、归档恢复和永久删除。
 - 删除先提交作用域内元数据和 `assetCleanupTasks`，再清正文 Blob；失败任务会在下次进入阅读应用时重试，且永不跨 `userIdentityId + bookId + assetId` 清理。
 - 目录当前是只读预览；正文阅读、目录跳转和进度恢复从 Round 5 开始。
+- Round 5 已实现上下连续正文、目录跳转、上一章/下一章和 `chapterId + paragraphAnchorId + characterOffset` 精确恢复。
+- 阅读百分比按可阅读段落的累计字符计算，不受章名、空行、视口尺寸或字体变化影响；像素滚动量不作为持久位置真相。
+- 正文加载与进度保存都强制校验 `userIdentityId + bookId`，相同书籍 ID 在不同身份下仍完全独立。
+- 第 6 轮继续完成搜索、复制、高亮、笔记、书签、字体排版以及含正文 Blob 的完整备份恢复。
 
 ## 13. 新增 AI 应用时的强制流程
 
