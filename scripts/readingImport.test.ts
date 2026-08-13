@@ -60,6 +60,9 @@ assert.equal(first.status, "imported");
 assert.equal(store.books.length, 1);
 assert.equal(assets.size, 1);
 assert.equal(store.books[0]?.userIdentityId, "identity-a");
+assert.equal(store.books[0]?.chapterCount, 1);
+assert.equal(store.chapters.length, 1, "import persists parsed chapters in the metadata transaction");
+assert.equal(store.paragraphAnchors.length, 2, "import creates stable paragraph anchors before reporting success");
 assert.equal(await [...assets.values()][0]?.blob.text(), "第一行\n第二行", "asset is canonical UTF-8 text");
 
 const duplicate = await importReadingFile(sourceFile, "identity-a", { dependencies });

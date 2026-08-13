@@ -43,6 +43,7 @@ const store: ReadingStore = {
   progress: [],
   annotations: [],
   preferences: [],
+  assetCleanupTasks: [],
 };
 
 assert.deepEqual(saveReadingStore(store), { success: true });

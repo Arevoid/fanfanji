@@ -117,6 +117,7 @@ export interface ReadingStore {
   progress: ReadingProgress[];
   annotations: ReadingAnnotation[];
   preferences: ReadingBookPreferences[];
+  assetCleanupTasks: ReadingAssetCleanupTask[];
 }
 
 export interface ReadingBookAsset {
@@ -130,6 +131,16 @@ export interface ReadingBookAsset {
   createdAt: number;
 }
 
+export interface ReadingAssetCleanupTask {
+  id: string;
+  assetId: string;
+  userIdentityId: string;
+  bookId: string;
+  createdAt: number;
+  lastAttemptAt?: number;
+  lastError?: string;
+}
+
 export const EMPTY_READING_STORE: ReadingStore = {
   version: READING_STORE_VERSION,
   books: [],
@@ -138,6 +149,7 @@ export const EMPTY_READING_STORE: ReadingStore = {
   progress: [],
   annotations: [],
   preferences: [],
+  assetCleanupTasks: [],
 };
 
 export const createEmptyReadingStore = (): ReadingStore => ({
@@ -148,4 +160,5 @@ export const createEmptyReadingStore = (): ReadingStore => ({
   progress: [],
   annotations: [],
   preferences: [],
+  assetCleanupTasks: [],
 });

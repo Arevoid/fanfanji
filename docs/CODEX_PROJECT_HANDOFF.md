@@ -714,7 +714,7 @@ Node 路由在 `server.ts`，Cloudflare 对应路由在 `src/cloudflare/worker.t
 - 完成线下后约定状态变为历史；
 - 日程只为全新用户默认加入桌面，老用户布局不变。
 
-### 12.5 阅读应用基础（Round 1～3）
+### 12.5 阅读应用基础（Round 1～4）
 
 - 产品基线位于 `docs/READING_APP_PRODUCT_BASELINE.md`，技术边界位于 `docs/READING_APP_TECHNICAL_DESIGN.md`；
 - 已建立 `src/domain/reading/` 的书籍、章节、稳定段落锚点、进度、标注、偏好与完整关系作用域模型；
@@ -726,6 +726,9 @@ Node 路由在 `server.ts`，Cloudflare 对应路由在 `src/cloudflare/worker.t
 - Round 3 已接入本地文件导入：UTF-8/UTF-16/GB18030 解码、正文 SHA-256、同身份重复检测、跨身份隔离、IndexedDB Blob 写入与元数据失败回滚。
 - 导入时正文会规范化为 UTF-8 Blob；元数据仓库不可读时拒绝写入，避免以安全空值覆盖原始损坏数据。
 - 当前阅读页已能展示当前身份的本地书架和导入反馈，但尚未实现章节解析与正文阅读。
+- Round 4 已实现导入时分章、稳定段落锚点、旧书补解析、书籍详情、目录、资料编辑、归档恢复和永久删除。
+- 删除先提交作用域内元数据和 `assetCleanupTasks`，再清正文 Blob；失败任务会在下次进入阅读应用时重试，且永不跨 `userIdentityId + bookId + assetId` 清理。
+- 目录当前是只读预览；正文阅读、目录跳转和进度恢复从 Round 5 开始。
 
 ## 13. 新增 AI 应用时的强制流程
 

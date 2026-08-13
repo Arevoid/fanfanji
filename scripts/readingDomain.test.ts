@@ -109,6 +109,7 @@ const validStore: ReadingStore = {
     fontSize: 18,
     updatedAt: 2,
   }],
+  assetCleanupTasks: [],
 };
 
 const dirty = {
@@ -130,6 +131,15 @@ assert.equal(normalized.books.length, 1);
 assert.equal(normalized.progress.length, 1, "orphan and cross-identity progress must be rejected");
 assert.equal(normalized.annotations.length, 1, "cross-identity annotations must be rejected");
 assert.equal(normalized.preferences[0]?.fontAssetId, "global-font-asset", "preferences store only a font asset reference");
+
+const withCleanupTasks = normalizeReadingStore({
+  ...validStore,
+  assetCleanupTasks: [
+    { id: "cleanup-a", assetId: "deleted-asset", userIdentityId: "identity-a", bookId: "deleted-book", createdAt: 3 },
+    { id: "", assetId: "invalid", userIdentityId: "identity-a", bookId: "deleted-book", createdAt: 3 },
+  ],
+});
+assert.equal(withCleanupTasks.assetCleanupTasks.length, 1, "valid cleanup tasks survive without a live book record");
 
 const wrongVersion = normalizeReadingStore({ ...validStore, version: 99 });
 assert.equal(wrongVersion.books.length, 0, "unknown versions require an explicit migration");

@@ -1,6 +1,7 @@
 import {
   createEmptyReadingStore,
   READING_STORE_VERSION,
+  type ReadingAssetCleanupTask,
   type ParagraphAnchor,
   type ReadingAnnotation,
   type ReadingBook,
@@ -124,6 +125,17 @@ export function isReadingBookPreferences(value: unknown): value is ReadingBookPr
     && timestamp(value.updatedAt);
 }
 
+export function isReadingAssetCleanupTask(value: unknown): value is ReadingAssetCleanupTask {
+  if (!record(value)) return false;
+  return string(value.id)
+    && string(value.assetId)
+    && string(value.userIdentityId)
+    && string(value.bookId)
+    && timestamp(value.createdAt)
+    && optionalNumber(value.lastAttemptAt)
+    && optionalString(value.lastError);
+}
+
 const dedupe = <T>(items: readonly T[], key: (item: T) => string): T[] => {
   const seen = new Set<string>();
   return items.filter((item) => {
@@ -161,5 +173,6 @@ export function normalizeReadingStore(value: unknown): ReadingStore {
     progress: dedupe(array(value.progress, isReadingProgress).filter(belongsToAnchor), (item) => `${item.userIdentityId}:${item.bookId}`),
     annotations: dedupe(array(value.annotations, isReadingAnnotation).filter(belongsToAnchor), (item) => `${item.userIdentityId}:${item.id}`),
     preferences: dedupe(array(value.preferences, isReadingBookPreferences).filter(belongsToBook), (item) => `${item.userIdentityId}:${item.bookId}`),
+    assetCleanupTasks: dedupe(array(value.assetCleanupTasks, isReadingAssetCleanupTask), (item) => `${item.userIdentityId}:${item.id}`),
   };
 }

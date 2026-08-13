@@ -2,12 +2,14 @@ import { readingAssetDb } from "../../../core/storage/readingAssetDb";
 import { loadReadingStore, saveReadingStore } from "../../../core/storage/repositories/readingRepository";
 import type { StorageResult, StorageWriteResult } from "../../../core/storage/storageTypes";
 import type { ReadingBook, ReadingBookAsset, ReadingBookFormat, ReadingStore } from "../../../domain/reading/types";
+import { parseReadingDocument } from "../library/readingParser";
 
 export type ReadingImportErrorCode =
   | "unsupported-format"
   | "empty-file"
   | "decode-failed"
   | "hash-unavailable"
+  | "parse-failed"
   | "asset-write-failed"
   | "metadata-write-failed";
 
@@ -164,6 +166,12 @@ export async function importReadingFile(
   const now = dependencies.now();
   const bookId = dependencies.createId("book");
   const assetId = dependencies.createId("reading-asset");
+  let parsed: Awaited<ReturnType<typeof parseReadingDocument>>;
+  try {
+    parsed = await parseReadingDocument({ text: prepared.text, format: prepared.format, userIdentityId, bookId });
+  } catch (error) {
+    throw new ReadingImportError("parse-failed", error instanceof Error ? error.message : "章节解析失败");
+  }
   const canonicalBlob = new Blob([prepared.text], { type: "text/plain;charset=utf-8" });
   const book: ReadingBook = {
     id: bookId,
@@ -178,7 +186,7 @@ export async function importReadingFile(
     sourceEncoding: prepared.sourceEncoding,
     byteLength: prepared.sourceByteLength,
     wordCount: prepared.characterCount,
-    chapterCount: 0,
+    chapterCount: parsed.chapters.length,
     createdAt: now,
     updatedAt: now,
   };
@@ -199,7 +207,12 @@ export async function importReadingFile(
     throw new ReadingImportError("asset-write-failed", error instanceof Error ? error.message : "小说正文保存失败");
   }
 
-  const write = dependencies.saveStore({ ...current, books: [...current.books, book] });
+  const write = dependencies.saveStore({
+    ...current,
+    books: [...current.books, book],
+    chapters: [...current.chapters, ...parsed.chapters],
+    paragraphAnchors: [...current.paragraphAnchors, ...parsed.paragraphAnchors],
+  });
   if (!write.success) {
     await dependencies.assetStore.delete(assetId, userIdentityId, bookId).catch(() => false);
     throw new ReadingImportError("metadata-write-failed", `小说元数据保存失败：${write.error || "unknown"}`);
