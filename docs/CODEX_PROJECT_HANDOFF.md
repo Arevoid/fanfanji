@@ -714,7 +714,7 @@ Node 路由在 `server.ts`，Cloudflare 对应路由在 `src/cloudflare/worker.t
 - 完成线下后约定状态变为历史；
 - 日程只为全新用户默认加入桌面，老用户布局不变。
 
-### 12.5 阅读应用基础（Round 1～5）
+### 12.5 阅读应用第一阶段（Round 1～6，已完成）
 
 - 产品基线位于 `docs/READING_APP_PRODUCT_BASELINE.md`，技术边界位于 `docs/READING_APP_TECHNICAL_DESIGN.md`；
 - 已建立 `src/domain/reading/` 的书籍、章节、稳定段落锚点、进度、标注、偏好与完整关系作用域模型；
@@ -733,6 +733,11 @@ Node 路由在 `server.ts`，Cloudflare 对应路由在 `src/cloudflare/worker.t
 - 阅读百分比按可阅读段落的累计字符计算，不受章名、空行、视口尺寸或字体变化影响；像素滚动量不作为持久位置真相。
 - 正文加载与进度保存都强制校验 `userIdentityId + bookId`，相同书籍 ID 在不同身份下仍完全独立。
 - 第 6 轮继续完成搜索、复制、高亮、笔记、书签、字体排版以及含正文 Blob 的完整备份恢复。
+- Round 6 已完成本地全文搜索、选区复制、范围高亮/取消、范围笔记、段落书签和单书排版设置。
+- 单书字体只引用全局 `FontAsset` 的 `fontAssetId`，不重复保存字体文件。
+- 独立 Reading Archive 会携带当前身份的正文 Blob、元数据、进度、标注和偏好；恢复前校验版本、UTF-8 与 SHA-256，并为目标身份重新生成全套 ID。
+- 系统 JSON 备份不包含阅读正文，设置页已取消“所有数据完整导出”的误导说法并引导使用阅读归档。
+- 第一阶段已收口；下一阶段从 AI 好友共读房间、AI 阅读进度、知识边界和剧透保护开始。
 
 ## 13. 新增 AI 应用时的强制流程
 

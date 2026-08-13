@@ -8,6 +8,7 @@ import {
   ChevronRight,
   FileText,
   HardDrive,
+  Download,
   Library,
   LoaderCircle,
   Pencil,
@@ -28,6 +29,7 @@ import {
   updateReadingBookDetails,
 } from "../features/reading/library/readingLibrary";
 import ReadingReader from "./reading/ReadingReader";
+import { buildReadingArchive, restoreReadingArchive, serializeReadingArchive } from "../features/reading/archive/readingArchive";
 
 interface AppReadingProps {
   userIdentityId: string;
@@ -44,6 +46,7 @@ const formatDate = (timestamp: number): string => new Intl.DateTimeFormat("zh-CN
 
 export default function AppReading({ userIdentityId, onClose }: AppReadingProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const archiveInputRef = useRef<HTMLInputElement>(null);
   const [books, setBooks] = useState<ReadingBook[]>([]);
   const [chapters, setChapters] = useState<ReadingChapter[]>([]);
   const [progress, setProgress] = useState<ReadingProgress[]>([]);
@@ -189,6 +192,39 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
     }
   };
 
+  const handleExportArchive = async () => {
+    setIsWorking(true);
+    try {
+      const archive = await buildReadingArchive(userIdentityId);
+      const url = URL.createObjectURL(serializeReadingArchive(archive));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `fanfanji-reading-${new Date().toISOString().slice(0, 10)}.fanfan-reading.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice({ tone: "success", text: `已导出 ${archive.store.books.length} 本书及其本地正文。` });
+    } catch (error) {
+      showError(error, "阅读归档导出失败");
+    } finally { setIsWorking(false); }
+  };
+
+  const handleImportArchive = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setIsWorking(true);
+    try {
+      const restored = await restoreReadingArchive(JSON.parse(await file.text()), userIdentityId);
+      refreshLibrary();
+      setSection("library");
+      setNotice({ tone: "success", text: `已恢复 ${restored.restoredBooks} 本书，正文、进度和标注均已写回本地。` });
+    } catch (error) {
+      showError(error, "阅读归档恢复失败");
+    } finally { setIsWorking(false); }
+  };
+
   const renderNotice = () => notice && (
     <div
       role={notice.tone === "error" ? "alert" : "status"}
@@ -307,6 +343,7 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
       <main className="flex-1 overflow-y-auto px-4 pb-24 pt-3">
         <section className="mx-auto flex w-full max-w-md flex-col gap-4">
           <input ref={fileInputRef} type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={handleFileSelected} className="hidden" aria-label="选择 TXT 或 Markdown 小说" />
+          <input ref={archiveInputRef} type="file" accept=".json,.fanfan-reading.json,application/json,application/vnd.fanfanji.reading+json" onChange={handleImportArchive} className="hidden" aria-label="选择阅读归档" />
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
             <div className="flex items-start gap-3">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--surface-raised)]"><BookOpenText className="h-5 w-5" strokeWidth={1.7} /></div>
@@ -327,6 +364,11 @@ export default function AppReading({ userIdentityId, onClose }: AppReadingProps)
           <div className="grid grid-cols-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1">
             <button type="button" onClick={() => setSection("library")} className={`flex h-9 items-center justify-center gap-2 rounded-xl text-xs font-bold ${section === "library" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "text-[var(--text-secondary)]"}`}><Library className="h-4 w-4" />书架</button>
             <button type="button" onClick={() => setSection("archived")} className={`flex h-9 items-center justify-center gap-2 rounded-xl text-xs font-bold ${section === "archived" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "text-[var(--text-secondary)]"}`}><Archive className="h-4 w-4" />归档</button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" disabled={isWorking || books.length === 0} onClick={handleExportArchive} className="flex h-10 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold disabled:opacity-40"><Download className="h-4 w-4" />导出阅读归档</button>
+            <button type="button" disabled={isWorking} onClick={() => archiveInputRef.current?.click()} className="flex h-10 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold disabled:opacity-40"><Upload className="h-4 w-4" />恢复阅读归档</button>
           </div>
 
           <section aria-label={section === "library" ? "本地书籍" : "归档书籍"} className="space-y-2">

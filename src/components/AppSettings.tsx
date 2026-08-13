@@ -3287,7 +3287,7 @@ export default function AppSettings({
                         className="w-full rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 text-left transition-colors hover:bg-[var(--surface-raised)]"
                       >
                         <span className="block text-sm font-semibold text-[var(--text-primary)]">完整导出</span>
-                        <span className="mt-1 block text-xs text-[var(--text-tertiary)]">本机内的所有数据完整导出</span>
+                        <span className="mt-1 block text-xs leading-5 text-[var(--text-tertiary)]">导出系统配置与结构化数据；阅读小说请在“阅读”应用导出含正文的阅读归档</span>
                       </button>
                       <button
                         type="button"
@@ -3313,7 +3313,7 @@ export default function AppSettings({
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">数据备份与还原</h3>
                 
                 <p className="text-[10px] text-slate-400 leading-relaxed">
-                  可以将本机内的配置打包导出备份，未来可在任何设备上导入此文件进行100%完美还原。音频和本地封面不会写入JSON，恢复后需重新导入本地文件。
+                  可以将本机配置和结构化数据打包导出。音频和本地封面不会写入 JSON，小说正文也不会写入系统 JSON；小说请在“阅读”应用使用独立阅读归档，才能连同正文、进度和标注一起恢复。
                 </p>
 
                 <div className="grid grid-cols-2 gap-3">
