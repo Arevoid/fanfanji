@@ -1,4 +1,5 @@
 import {
+  deleteReadingStoryScope,
   getReadingStory,
   listReadingStorySaves,
   listReadingStoryTurns,
@@ -178,6 +179,19 @@ export function loadReadingStorySave(input: { scope: ReadingStoryScope; saveId: 
   const save = listReadingStorySaves(input.scope).find((candidate) => candidate.id === input.saveId);
   if (!save) throw new ReadingStoryError("存档不存在", "missing");
   return persist(saveReadingStory(save.state), save.state);
+}
+
+export function updateReadingStoryMetadata(input: { scope: ReadingStoryScope; title?: string; status?: "active" | "paused"; now?: number }): ReadingStoryState {
+  const story = getReadingStory(input.scope);
+  if (!story) throw new ReadingStoryError("故事不存在", "missing");
+  if (story.status === "completed" && input.status === "active") throw new ReadingStoryError("已完成的故事不能恢复为进行中", "invalid");
+  const next = { ...story, title: input.title === undefined ? story.title : text(input.title, 500), status: input.status || story.status, updatedAt: input.now ?? Date.now() };
+  if (!next.title) throw new ReadingStoryError("故事名称不能为空", "invalid");
+  return persist(saveReadingStory(next), next);
+}
+
+export function deleteReadingStory(input: { scope: ReadingStoryScope }): void {
+  persist(deleteReadingStoryScope(input.scope), undefined);
 }
 
 export { getReadingStory, listReadingStorySaves, listReadingStoryTurns };

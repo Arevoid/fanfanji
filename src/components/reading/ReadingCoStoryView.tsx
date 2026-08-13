@@ -5,8 +5,8 @@ import type { CharacterRelationship } from "../../domain/relationship/characterR
 import type { ReadingBook } from "../../domain/reading/types";
 import type { ReadingCoStoryActionMode, ReadingCoStoryState } from "../../domain/reading/coStoryTypes";
 import { getReadingCoStory, listReadingCoStories, listReadingCoStorySaves, listReadingCoStoryTurns } from "../../core/storage/repositories/readingCoStoryRepository";
-import { commitReadingCoStoryUserAction, createReadingCoStory, createReadingCoStorySave, loadReadingCoStorySave, ReadingCoStoryError, resolveReadingCoStoryApproval } from "../../features/reading/story/readingCoStory";
-import { generateReadingCoStoryAiAction } from "../../features/reading/story/readingCoStoryGeneration";
+import { createReadingCoStory, createReadingCoStorySave, deleteReadingCoStory, loadReadingCoStorySave, ReadingCoStoryError, resolveReadingCoStoryApproval, updateReadingCoStoryMetadata } from "../../features/reading/story/readingCoStory";
+import { generateReadingCoStoryAiAction, generateReadingCoStoryTurn } from "../../features/reading/story/readingCoStoryGeneration";
 import ReadingStoryPlayShell, { type ReadingStoryPanel } from "./ReadingStoryPlayShell";
 
 interface FriendOption { relationship: CharacterRelationship; character: Character; }
@@ -43,18 +43,23 @@ export default function ReadingCoStoryView({ userIdentityId, book, initialCoStor
     } catch (error) { setMessage(error instanceof ReadingCoStoryError ? error.message : "共同故事创建失败"); }
   };
 
-  const submitUserAction = () => {
-    if (!story || !userAction.trim() || busy || story.pendingApproval) return;
+  const submitUserAction = async () => {
+    if (!story || !settings || !userAction.trim() || busy || story.pendingApproval) return;
+    if (story.status !== "active") { setMessage(story.status === "completed" ? "共同故事已经完成，不能继续生成。" : "共同故事已暂停，请先在管理面板中继续故事。"); return; }
+    setBusy(true);
+    setMessage("正在生成共同故事下一回合，双方身份和知识边界保持隔离。");
     try {
-      const next = commitReadingCoStoryUserAction({ scope: story, userAction, expectedStoryUpdatedAt: story.updatedAt });
+      const next = await generateReadingCoStoryTurn({ story, userAction, requestId: makeId(), settings: { apiKey: settings.apiKey || "", selectedModel: settings.selectedModel || "", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible } });
       setUserAction("");
       refresh(next.story);
-      setMessage(`你的行动已保存。现在可以让 ${story.aiFriend.displayName} 回应。`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "用户行动保存失败"); }
+      setMessage("共同故事新回合已生成并自动保存。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "共同故事回合生成失败"); }
+    finally { setBusy(false); }
   };
 
   const askFriend = async () => {
     if (!story || !settings || busy || story.pendingApproval) return;
+    if (story.status !== "active") { setMessage(story.status === "completed" ? "共同故事已经完成。" : "共同故事已暂停，请先继续故事。"); return; }
     setBusy(true);
     setMessage(`正在等待 ${story.aiFriend.displayName} 行动；TA 只能读取自己的已知回合。`);
     try {
@@ -82,6 +87,20 @@ export default function ReadingCoStoryView({ userIdentityId, book, initialCoStor
     try { const restored = loadReadingCoStorySave({ scope: story, saveId }); refresh(restored); setMessage("已读档，双方身份与知识状态已恢复。"); }
     catch (error) { setMessage(error instanceof Error ? error.message : "读档失败"); }
   };
+  const renameStory = () => {
+    if (!story) return;
+    const title = window.prompt("修改故事名称", story.title);
+    if (!title?.trim() || title.trim() === story.title) return;
+    try { refresh(updateReadingCoStoryMetadata({ scope: story, title })); setMessage("故事名称已更新。"); } catch (error) { setMessage(error instanceof Error ? error.message : "重命名失败"); }
+  };
+  const toggleStoryStatus = () => {
+    if (!story || story.status === "completed") return;
+    try { const next = updateReadingCoStoryMetadata({ scope: story, status: story.status === "paused" ? "active" : "paused" }); refresh(next); setMessage(next.status === "paused" ? "共同故事已暂停。" : "共同故事已继续。"); } catch (error) { setMessage(error instanceof Error ? error.message : "状态更新失败"); }
+  };
+  const removeStory = () => {
+    if (!story || !window.confirm("删除后将同时移除这个共同故事的全部回合和存档，确定继续吗？")) return;
+    try { deleteReadingCoStory({ scope: story }); onClose(); } catch (error) { setMessage(error instanceof Error ? error.message : "删除共同故事失败"); }
+  };
 
   if (!story) return <div data-theme-page="reading-co-story" className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]"><header className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3"><button type="button" onClick={onClose} aria-label="返回阅读" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><ChevronLeft className="h-4 w-4" /></button><h1 className="text-base font-bold">共同穿书</h1></header><main className="flex-1 overflow-y-auto px-4 py-5"><div className="mx-auto max-w-md space-y-4"><section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5"><p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)]">AI 好友共同进入故事宇宙</p><h2 className="mt-2 text-xl font-bold">和谁一起穿书？</h2><div className="mt-3 space-y-2">{friends.map((item) => <button key={item.relationship.id} type="button" onClick={() => setFriendId(item.relationship.id)} className={`flex w-full items-center gap-3 rounded-2xl border p-3 text-left ${friendId === item.relationship.id ? "border-[var(--button-primary-bg)] bg-[var(--surface-raised)]" : "border-[var(--border)]"}`}><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-raised)] font-bold">{item.character.avatar ? <img src={item.character.avatar} alt="" className="h-full w-full rounded-xl object-cover" /> : item.character.name.slice(0, 1)}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{item.character.name}</p><p className="text-[10px] text-[var(--text-muted)]">{item.relationship.relationship} · 独立故事记忆</p></div></button>)}</div><div className="mt-4 grid grid-cols-3 gap-2">{(["short", "medium", "long"] as const).map((item) => <button key={item} type="button" onClick={() => setLength(item)} className={`rounded-xl border p-2 text-xs font-bold ${length === item ? "border-[var(--button-primary-bg)] bg-[var(--surface-raised)]" : "border-[var(--border)]"}`}>{item === "short" ? "短篇" : item === "medium" ? "中篇" : "长篇"}</button>)}</div><button type="button" disabled={!selectedFriend} onClick={createStory} className="mt-4 h-11 w-full rounded-2xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)] disabled:opacity-40">建立共同故事</button></section>{stories.length > 0 && <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4"><h2 className="text-sm font-bold">继续已有共同故事</h2><div className="mt-3 space-y-2">{stories.map((item) => <button key={item.coStoryId} type="button" onClick={() => setSelectedId(item.coStoryId)} className="flex w-full items-center gap-3 rounded-xl bg-[var(--surface-raised)] p-3 text-left"><UsersRound className="h-4 w-4" /><span className="min-w-0 flex-1 truncate text-xs font-bold">{item.title}</span><span className="text-[10px] text-[var(--text-muted)]">{item.aiFriend.displayName}</span></button>)}</div></section>}</div></main></div>;
 
@@ -91,6 +110,7 @@ export default function ReadingCoStoryView({ userIdentityId, book, initialCoStor
     { id: "roles", label: "角色", icon: <UserRound className="h-4 w-4" />, content: <div className={panelClass}><section className="rounded-2xl bg-cyan-400/5 p-4"><p className="text-[10px] text-cyan-200/60">你的角色</p><p className="mt-1 text-sm font-black text-white">{story.userCharacterName}</p><p>{story.userCharacterRole || "身份待设定"}</p><p className="mt-2">目标：{story.userGoals.join("、") || "尚未设定"}</p></section><section className="rounded-2xl bg-amber-400/5 p-4"><p className="text-[10px] text-amber-200/60">AI 好友</p><p className="mt-1 text-sm font-black text-white">{story.aiFriend.characterName}</p><p>{story.aiFriend.characterRole || story.aiFriend.displayName}</p><p className="mt-2 whitespace-pre-wrap">{story.aiFriend.personaSummary || "沿用既有人设"}</p></section></div> },
     { id: "intel", label: "情报", icon: <BookOpenText className="h-4 w-4" />, content: <div className={panelClass}><section className="rounded-2xl bg-white/5 p-4"><p className="font-bold text-white">{story.aiFriend.displayName} 已知情报</p>{story.aiFriend.knownIntel.length ? <ul className="mt-2 space-y-1">{story.aiFriend.knownIntel.map((item) => <li key={item}>· {item}</li>)}</ul> : <p className="mt-2 text-white/35">暂未发现独立情报</p>}</section>{story.worldDefinition && <section className="rounded-2xl bg-white/5 p-4"><p className="font-bold text-white">世界规则 · {story.worldDefinition.genre}</p><p className="mt-2 whitespace-pre-wrap">{story.worldDefinition.worldView}</p></section>}</div> },
     { id: "saves", label: "存档", icon: <Save className="h-4 w-4" />, content: <div className={panelClass}><button type="button" onClick={saveStory} disabled={!turns.length} className="h-11 w-full rounded-2xl bg-amber-600 font-bold text-amber-50 disabled:opacity-40">保存当前共同节点</button>{saves.length ? <div className="space-y-2">{saves.map((save) => <button key={save.id} type="button" onClick={() => loadSave(save.id)} className="flex w-full items-center justify-between rounded-2xl bg-white/5 p-4 text-left"><span>{save.label}</span><span className="text-[10px] text-amber-300">读档</span></button>)}</div> : <p className="text-center text-white/35">还没有手动存档</p>}<p className="text-white/35">存档包含双方身份、AI 已知情报和重大行动确认状态。</p></div> },
+    { id: "manage", label: "管理", icon: <ListChecks className="h-4 w-4" />, content: <div className={panelClass}><button type="button" onClick={renameStory} className="h-11 w-full rounded-2xl bg-white/5 font-bold text-white">修改故事名称</button><button type="button" onClick={toggleStoryStatus} disabled={story.status === "completed"} className="h-11 w-full rounded-2xl bg-white/5 font-bold text-white disabled:opacity-35">{story.status === "paused" ? "继续故事" : "暂停故事"}</button><button type="button" onClick={removeStory} className="h-11 w-full rounded-2xl border border-red-400/25 bg-red-500/10 font-bold text-red-200">删除故事及存档</button><p className="text-white/35">删除只影响当前关系与当前故事宇宙，不会删除原书、其他好友的故事或现实关系记录。</p></div> },
   ];
 
   return <ReadingStoryPlayShell title={story.title} subtitle={`${story.aiFriend.displayName} · ${story.origin === "custom" ? "自建世界" : "共同穿书"}`} currentChapter={story.currentChapter} targetChapters={story.targetChapters} currentLocation={story.currentLocation} currentTime={story.currentTime} statusLabel={story.pendingApproval ? "等待你确认" : "自动保存"} choices={latestChoices} action={userAction} actionPlaceholder="输入你的行动；AI 好友不会替你选择……" submitLabel={settings ? "提交我的行动" : "请先配置 AI"} busy={busy} submitDisabled={!userAction.trim() || !settings || Boolean(story.pendingApproval)} notice={message} panels={panels} headerAction={<button type="button" onClick={saveStory} disabled={!turns.length} aria-label="保存共同故事" className="flex h-9 w-9 items-center justify-center rounded-full disabled:opacity-35"><Save className="h-4 w-4" /></button>} onActionChange={setUserAction} onSubmit={submitUserAction} onBack={onClose}>

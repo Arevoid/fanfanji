@@ -49,6 +49,9 @@ export interface ReadingCoStoryState extends ReadingCoStoryScope {
   userEntryMode?: ReadingStoryEntryMode;
   userOriginalCharacterId?: string;
   userGoals: string[];
+  userKnownIntel: string[];
+  tasks: string[];
+  inventory: string[];
   aiFriend: ReadingStoryAiFriendProfile;
   activeActor: "user" | "ai_friend";
   pendingApproval?: ReadingCoStoryPendingApproval;
@@ -67,6 +70,7 @@ export interface ReadingCoStoryPendingApproval {
 
 export interface ReadingCoStoryTurn extends ReadingCoStoryScope {
   turnId: string;
+  requestId?: string;
   turnIndex: number;
   actor: ReadingCoStoryActor;
   actionMode?: ReadingCoStoryActionMode;
@@ -78,6 +82,13 @@ export interface ReadingCoStoryTurn extends ReadingCoStoryScope {
   narrative: string;
   dialogue: Array<{ speaker: string; text: string }>;
   choices: ReadingStoryChoice[];
+  stateChanges?: string[];
+  userDiscoveredIntel?: string[];
+  aiDiscoveredIntel?: string[];
+  currentLocation?: string;
+  currentTime?: string;
+  chapterProgress?: number;
+  shouldEndChapter?: boolean;
   risk: ReadingCoStoryActionRisk;
   requiresUserApproval: boolean;
   visibleTo: Array<"user" | "ai_friend">;
