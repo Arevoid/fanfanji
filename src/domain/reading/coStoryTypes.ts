@@ -58,6 +58,10 @@ export interface ReadingCoStoryTurn extends ReadingCoStoryScope {
   actor: ReadingCoStoryActor;
   actionMode?: ReadingCoStoryActionMode;
   action?: string;
+  /** User and AI actions share the same persisted turn stream. */
+  userAction?: string;
+  aiAction?: string;
+  perspective: "user" | "ai_friend" | "shared";
   narrative: string;
   dialogue: Array<{ speaker: string; text: string }>;
   choices: ReadingStoryChoice[];

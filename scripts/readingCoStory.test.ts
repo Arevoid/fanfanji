@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { getReadingCoStory, listReadingCoStoryTurns, saveReadingCoStoryStore } from "../src/core/storage/repositories/readingCoStoryRepository";
 import { createEmptyReadingCoStoryStore } from "../src/domain/reading/coStoryTypes";
-import { createReadingCoStory, commitReadingCoStoryAiAction } from "../src/features/reading/story/readingCoStory";
+import { createReadingCoStory, commitReadingCoStoryAiAction, commitReadingCoStoryUserAction, resolveReadingCoStoryApproval } from "../src/features/reading/story/readingCoStory";
 import { buildReadingCoStoryAiActionPrompt, projectReadingCoStoryForAi } from "../src/features/reading/story/readingCoStoryPrompt";
 import { ReadingCoStoryPolicyError } from "../src/features/reading/story/readingCoStoryPolicy";
 import { generateReadingCoStoryAiAction } from "../src/features/reading/story/readingCoStoryGeneration";
@@ -43,3 +43,13 @@ assert.equal(generated.story.coStoryId, "co-story-generation");
 assert.equal(generated.attempts, 2);
 
 console.log("AI friend co-story scope, knowledge projection, and major-decision guard tests passed");
+
+const turnStory = createReadingCoStory({ scope: { ...scope, coStoryId: "co-story-turns" }, title: "turns", length: "short", userCharacterName: "user", aiFriend: { ...friend, knownTurnIds: [] }, now: 20 });
+const userTurn = commitReadingCoStoryUserAction({ scope: { ...scope, coStoryId: "co-story-turns" }, userAction: "hide behind the gate", expectedStoryUpdatedAt: turnStory.updatedAt, now: 21 });
+assert.equal(userTurn.turn.perspective, "user");
+assert.equal(userTurn.story.activeActor, "ai_friend");
+const majorTurn = commitReadingCoStoryAiAction({ scope: { ...scope, coStoryId: "co-story-turns" }, result: { action: "announce the user's identity", rationale: "this changes the route", risk: "major", requiresUserApproval: false, controlsUserCharacter: false }, mode: "suggest", expectedStoryUpdatedAt: userTurn.story.updatedAt, now: 22 });
+assert.ok(majorTurn.story.pendingApproval);
+const resolved = resolveReadingCoStoryApproval({ scope: { ...scope, coStoryId: "co-story-turns" }, actionId: majorTurn.story.pendingApproval!.actionId, approve: false, now: 23 });
+assert.equal(resolved.pendingApproval, undefined);
+assert.equal(listReadingCoStoryTurns({ ...scope, coStoryId: "co-story-turns" }).at(-1)?.perspective, "shared");

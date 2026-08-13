@@ -61,6 +61,9 @@ export function normalizeReadingCoStoryStore(value: unknown): ReadingCoStoryStor
       actor: item.actor,
       actionMode: item.actionMode,
       action: text(item.action, 2000) || undefined,
+      userAction: text(item.userAction, 2000) || undefined,
+      aiAction: text(item.aiAction, 2000) || undefined,
+      perspective: item.perspective === "user" || item.perspective === "ai_friend" || item.perspective === "shared" ? item.perspective : item.actor === "user" ? "user" : item.actor === "ai_friend" ? "ai_friend" : "shared",
       narrative: text(item.narrative),
       dialogue: Array.isArray(item.dialogue) ? item.dialogue.slice(0, 50).filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry))).map((entry) => ({ speaker: text(entry.speaker, 200), text: text(entry.text, 2000) })).filter((entry) => entry.speaker && entry.text) : [],
       choices: Array.isArray(item.choices) ? item.choices.slice(0, 8).filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry))).map((entry) => ({ id: text(entry.id, 100), label: text(entry.label, 500), consequenceHint: text(entry.consequenceHint, 500) || undefined })).filter((entry) => entry.id && entry.label) : [],
@@ -68,7 +71,7 @@ export function normalizeReadingCoStoryStore(value: unknown): ReadingCoStoryStor
       requiresUserApproval: Boolean(item.requiresUserApproval),
       visibleTo: Array.isArray(item.visibleTo) ? item.visibleTo.filter((entry): entry is "user" | "ai_friend" => entry === "user" || entry === "ai_friend") : ["user"],
       createdAt: Number(item.createdAt) || Date.now(),
-    })).filter((item) => item.turnId && item.coStoryId && item.narrative && ["user", "ai_friend", "system"].includes(String(item.actor)) && ["low", "major"].includes(String(item.risk)))
+    })).filter((item) => item.turnId && item.coStoryId && item.narrative && ["user", "ai_friend", "system"].includes(String(item.actor)) && ["user", "ai_friend", "shared"].includes(String(item.perspective)) && ["low", "major"].includes(String(item.risk)))
     : [];
   return { version: READING_CO_STORY_STORE_VERSION, stories: stories as ReadingCoStoryStore["stories"], turns: turns as ReadingCoStoryStore["turns"] };
 }

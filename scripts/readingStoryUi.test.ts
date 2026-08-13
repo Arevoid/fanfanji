@@ -22,5 +22,7 @@ assert.match(coStoryView, /让 TA 提建议/);
 assert.match(coStoryView, /询问 TA 的意见/);
 assert.match(coStoryView, /接受/);
 assert.match(coStoryView, /拒绝/);
+assert.match(coStoryView, /提交我的行动/);
+assert.match(coStoryView, /你的视角/);
 assert.match(coStoryGeneration, /generateReadingCoStoryAiAction/);
 console.log("reading story UI integration checks passed");
