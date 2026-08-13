@@ -37,6 +37,9 @@ import { createAiReadingRoom, ReadingCoReadingError } from "../features/reading/
 import { getAiReadingState, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
 import { advanceAiReadingToParagraph, AiReadingBoundaryError } from "../features/reading/coReading/aiReadingBoundary";
 import { createUserReadingComment, listReadingComments, startReadingDiscussion, ReadingCoReadingContentError } from "../features/reading/coReading/readingCoReadingContent";
+import { getReadingBookBible, listReadingAnalysisTasks } from "../core/storage/repositories/readingAnalysisRepository";
+import { createReadingAnalysisTask, startReadingAnalysisTask, saveBookBible, ReadingAnalysisError } from "../features/reading/analysis/readingAnalysis";
+import type { ReadingBookBible } from "../domain/reading/analysisTypes";
 
 interface AppReadingProps {
   userIdentityId: string;
@@ -74,6 +77,10 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
   const [titleDraft, setTitleDraft] = useState("");
   const [authorDraft, setAuthorDraft] = useState("");
   const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [analysisRefreshToken, setAnalysisRefreshToken] = useState(0);
+  const [isEditingBible, setIsEditingBible] = useState(false);
+  const [biblePremiseDraft, setBiblePremiseDraft] = useState("");
+  const [bibleRulesDraft, setBibleRulesDraft] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const refreshLibrary = useCallback(() => {
@@ -100,6 +107,8 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
     ? chapters.filter((chapter) => chapter.bookId === selectedBook.id)
     : [];
   const selectedProgress = selectedBook ? progress.find((item) => item.bookId === selectedBook.id) : null;
+  const selectedAnalysisTasks = useMemo(() => selectedBook ? listReadingAnalysisTasks({ userIdentityId, bookId: selectedBook.id }) : [], [analysisRefreshToken, selectedBook, userIdentityId]);
+  const selectedBookBible = useMemo(() => selectedBook ? getReadingBookBible({ userIdentityId, bookId: selectedBook.id }) : undefined, [analysisRefreshToken, selectedBook, userIdentityId]);
   const selectedRoom = rooms.find((room) => room.readingRoomId === selectedRoomId) || null;
   const inviteBook = books.find((book) => book.id === inviteBookId) || null;
   const availableFriends = relationships
@@ -179,6 +188,67 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
       setNotice({ tone: "success", text: "书籍资料已保存。" });
     } catch (error) {
       showError(error, "书籍资料保存失败");
+    }
+  };
+
+  const handleStartBookAnalysis = () => {
+    if (!selectedBook || selectedChapters.length === 0) return;
+    try {
+      const scope = { userIdentityId, bookId: selectedBook.id };
+      const task = createReadingAnalysisTask({ scope, type: "chapter_summary", inputVersion: selectedBook.contentHash, chapterIds: selectedChapters.map((chapter) => chapter.id) });
+      startReadingAnalysisTask(scope, task.id);
+      setAnalysisRefreshToken((value) => value + 1);
+      setNotice({ tone: "success", text: "已创建章节分析任务。后续会按检查点处理，不会把整本小说一次发送给 API。" });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof ReadingAnalysisError ? error.message : "分析任务创建失败" });
+    }
+  };
+
+  const handleRetryAnalysis = (taskId: string) => {
+    try {
+      if (!selectedBook) return;
+      startReadingAnalysisTask({ userIdentityId, bookId: selectedBook.id }, taskId);
+      setAnalysisRefreshToken((value) => value + 1);
+      setNotice({ tone: "success", text: "已从最近检查点重新开始分析任务。" });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof ReadingAnalysisError ? error.message : "分析任务重试失败" });
+    }
+  };
+
+  const beginEditingBible = () => {
+    if (!selectedBook) return;
+    setBiblePremiseDraft(selectedBookBible?.premise || "");
+    setBibleRulesDraft((selectedBookBible?.worldRules || []).join("\n"));
+    setIsEditingBible(true);
+  };
+
+  const saveBibleDetails = () => {
+    if (!selectedBook || !biblePremiseDraft.trim()) return;
+    const now = Date.now();
+    const bible: ReadingBookBible = {
+      userIdentityId,
+      bookId: selectedBook.id,
+      id: selectedBookBible?.id || `reading-bible-${userIdentityId}-${selectedBook.id}`,
+      version: (selectedBookBible?.version || 0) + 1,
+      analysisVersion: selectedBookBible?.analysisVersion || "manual-v1",
+      premise: biblePremiseDraft.trim(),
+      worldRules: bibleRulesDraft.split("\n").map((item) => item.trim()).filter(Boolean).slice(0, 100),
+      storyLines: selectedBookBible?.storyLines || [],
+      coreCharacterIds: selectedBookBible?.coreCharacterIds || [],
+      keyLocationIds: selectedBookBible?.keyLocationIds || [],
+      keyFactionIds: selectedBookBible?.keyFactionIds || [],
+      timeline: selectedBookBible?.timeline || [],
+      isUserEdited: true,
+      createdAt: selectedBookBible?.createdAt || now,
+      updatedAt: now,
+    };
+    try {
+      saveBookBible(bible);
+      setIsEditingBible(false);
+      setAnalysisRefreshToken((value) => value + 1);
+      setNotice({ tone: "success", text: "Book Bible 已保存，仅属于当前身份和这本书。" });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof ReadingAnalysisError ? error.message : "Book Bible 保存失败" });
     }
   };
 
@@ -404,6 +474,17 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
             {selectedBook.status !== "archived" && availableFriends.length > 0 && (
               <button type="button" onClick={() => setInviteBookId(selectedBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold"><span aria-hidden="true">👥</span>邀请一位 AI 好友共读</button>
             )}
+
+            <section aria-label="novel-analysis" className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex items-center justify-between gap-2"><div><h2 className="text-sm font-bold">小说分析</h2><p className="mt-1 text-[10px] text-[var(--text-muted)]">按章节处理 · 可恢复 · 不发送整本正文</p></div><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px] text-[var(--text-muted)]">本地任务</span></div>
+              {selectedAnalysisTasks.length > 0 ? selectedAnalysisTasks.slice(0, 2).map((task) => { const percent = task.chapterIds.length ? Math.round((task.completedChapterIds.length / task.chapterIds.length) * 100) : 0; return <div key={task.id} className="mt-3 rounded-2xl bg-[var(--surface-raised)] p-3"><div className="flex items-center justify-between gap-2 text-[11px]"><span>{task.status === "completed" ? "分析完成" : task.status === "failed" ? "分析失败" : task.status === "running" ? "分析中" : "等待分析"}</span><span className="text-[var(--text-muted)]">{percent}% · {task.completedChapterIds.length}/{task.chapterIds.length} 章</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/10"><div className="h-full rounded-full bg-[var(--button-primary-bg)] transition-all" style={{ width: `${percent}%` }} /></div>{task.status === "failed" && <><p className="mt-2 text-[10px] leading-4 text-rose-300">{task.lastError || "任务中断，可从检查点重试"}</p><button type="button" onClick={() => handleRetryAnalysis(task.id)} className="mt-2 h-9 w-full rounded-xl border border-[var(--border)] text-xs font-bold">从检查点重试</button></>}</div>; }) : <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">尚未分析人物、地点、势力和事件。开始后会逐章生成摘要，并保留失败检查点。</p>}
+              {selectedAnalysisTasks.every((task) => task.status !== "running" && task.status !== "queued") && selectedChapters.length > 0 && <button type="button" onClick={handleStartBookAnalysis} className="mt-3 h-10 w-full rounded-2xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)]">{selectedAnalysisTasks.some((task) => task.status === "completed") ? "重新分析当前版本" : "开始小说分析"}</button>}
+            </section>
+
+            <section aria-label="Book Bible" className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex items-center justify-between gap-2"><div><h2 className="text-sm font-bold">Book Bible</h2><p className="mt-1 text-[10px] text-[var(--text-muted)]">世界规则与故事骨架 · 仅当前身份可见</p></div><button type="button" onClick={beginEditingBible} className="rounded-xl border border-[var(--border)] px-3 py-2 text-[10px] font-bold">编辑</button></div>
+              {isEditingBible ? <div className="mt-3 space-y-3"><label className="block text-xs font-semibold">故事 premise<textarea value={biblePremiseDraft} onChange={(event) => setBiblePremiseDraft(event.target.value)} rows={3} className="mt-2 w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm outline-none" placeholder="故事的核心前提" /></label><label className="block text-xs font-semibold">世界规则（每行一条）<textarea value={bibleRulesDraft} onChange={(event) => setBibleRulesDraft(event.target.value)} rows={3} className="mt-2 w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-sm outline-none" /></label><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setIsEditingBible(false)} className="h-10 rounded-xl border border-[var(--border)] text-xs font-bold">取消</button><button type="button" disabled={!biblePremiseDraft.trim()} onClick={saveBibleDetails} className="h-10 rounded-xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)] disabled:opacity-40">保存 Book Bible</button></div></div> : selectedBookBible ? <div className="mt-3 space-y-3"><p className="rounded-2xl bg-[var(--surface-raised)] p-3 text-xs leading-5 text-[var(--text-secondary)]">{selectedBookBible.premise}</p>{selectedBookBible.worldRules.length > 0 && <div><p className="text-[10px] font-bold text-[var(--text-muted)]">世界规则</p><ul className="mt-2 space-y-1 text-xs leading-5 text-[var(--text-secondary)]">{selectedBookBible.worldRules.slice(0, 5).map((rule) => <li key={rule}>· {rule}</li>)}</ul></div>}<p className="text-[10px] text-[var(--text-muted)]">版本 {selectedBookBible.version}{selectedBookBible.isUserEdited ? " · 已手动编辑" : " · AI 分析"}</p></div> : <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">分析完成后会在这里形成可编辑的故事圣经，也可以先手动创建 premise。</p>}
+            </section>
 
             {isEditing && (
               <section className="space-y-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
