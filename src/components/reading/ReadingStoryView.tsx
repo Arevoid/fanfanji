@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { ChevronLeft, FileText, Save, ScrollText, UserRound, UsersRound } from "lucide-react";
 import type { ReadingBook } from "../../domain/reading/types";
 import type { ReadingStoryLength, ReadingStoryState } from "../../domain/reading/storyTypes";
+import type { UserSettings } from "../../types";
 import {
   createReadingStory,
   createReadingStorySave,
@@ -11,19 +12,21 @@ import {
   loadReadingStorySave,
   ReadingStoryError,
 } from "../../features/reading/story/readingStory";
+import { generateReadingStoryTurn } from "../../features/reading/story/readingStoryGeneration";
 import { listReadingStories } from "../../core/storage/repositories/readingStoryRepository";
 
-interface ReadingStoryViewProps { userIdentityId: string; book?: ReadingBook; onClose: () => void; }
+interface ReadingStoryViewProps { userIdentityId: string; book?: ReadingBook; settings?: UserSettings; onClose: () => void; }
 type Panel = "profile" | "intel" | "saves";
 
 const makeId = (): string => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-export default function ReadingStoryView({ userIdentityId, book, onClose }: ReadingStoryViewProps) {
+export default function ReadingStoryView({ userIdentityId, book, settings, onClose }: ReadingStoryViewProps) {
   const [stories, setStories] = useState(() => listReadingStories(userIdentityId));
   const [selectedStoryId, setSelectedStoryId] = useState<string | null>(() => listReadingStories(userIdentityId)[0]?.storyId || null);
   const [panel, setPanel] = useState<Panel>("profile");
   const [action, setAction] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const story = useMemo(() => selectedStoryId ? getReadingStory({ userIdentityId, storyId: selectedStoryId }) : undefined, [selectedStoryId, stories, userIdentityId]);
   const turns = useMemo(() => story ? listReadingStoryTurns({ userIdentityId, storyId: story.storyId }) : [], [story, userIdentityId]);
@@ -40,6 +43,16 @@ export default function ReadingStoryView({ userIdentityId, book, onClose }: Read
   const chooseAction = (value: string) => { setAction(value); setMessage("已选择行动，可继续补充自由输入。当前版本不会替用户自动提交重大决定。"); };
   const saveStory = () => { if (!story || turns.length === 0) return; try { createReadingStorySave({ scope: { userIdentityId, storyId: story.storyId }, label: `第 ${turns.length} 回合` }); refresh(story); setMessage("已创建手动存档。"); } catch (error) { setMessage(error instanceof ReadingStoryError ? error.message : "存档失败"); } };
   const loadSave = (saveId: string) => { if (!story) return; try { const loaded = loadReadingStorySave({ scope: { userIdentityId, storyId: story.storyId }, saveId }); refresh(loaded); setMessage("已读档，当前故事状态已恢复。"); } catch (error) { setMessage(error instanceof ReadingStoryError ? error.message : "读档失败"); } };
+  const submitAction = async () => {
+    if (!story || !action.trim() || isGenerating) return;
+    if (!settings) { setMessage("当前应用没有提供 AI 配置，行动已暂存。"); return; }
+    setIsGenerating(true); setMessage("正在生成下一回合，模型只会看到当前故事状态和最近回合。");
+    try {
+      const generated = await generateReadingStoryTurn({ story, userAction: action, bookTitle: book?.title, settings: { apiKey: settings.apiKey || "", selectedModel: settings.selectedModel || "", apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: settings.streamCompatible } });
+      setAction(""); refresh(generated.story); setMessage("新回合已生成并保存，状态与正文已同步更新。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "故事回合生成失败"); }
+    finally { setIsGenerating(false); }
+  };
 
   if (!story) return <div data-theme-page="reading-story" className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]"><header className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3"><button type="button" onClick={onClose} aria-label="返回阅读" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><ChevronLeft className="h-4 w-4" /></button><h1 className="text-base font-bold">穿书</h1></header><main className="flex-1 overflow-y-auto px-4 py-5"><div className="mx-auto max-w-md space-y-4"><section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5"><p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)]">故事宇宙</p><h2 className="mt-2 text-xl font-bold">进入《{book?.title || "自定义世界"}》</h2><p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">选择故事长度后建立独立存档。穿书内容不会同步到现实关系记忆。</p><div className="mt-4 grid grid-cols-3 gap-2">{(["short", "medium", "long"] as ReadingStoryLength[]).map((length) => <button key={length} type="button" onClick={() => startStory(length)} className="rounded-2xl border border-[var(--border)] p-3 text-left"><p className="text-sm font-bold">{length === "short" ? "短篇" : length === "medium" ? "中篇" : "长篇"}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{length === "short" ? "约 3 章" : length === "medium" ? "约 8 章" : "约 20 章"}</p></button>)}</div></section>{stories.length > 0 && <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4"><h2 className="text-sm font-bold">继续已有故事</h2><div className="mt-3 space-y-2">{stories.map((item) => <button key={item.storyId} type="button" onClick={() => setSelectedStoryId(item.storyId)} className="flex w-full items-center gap-3 rounded-2xl bg-[var(--surface-raised)] p-3 text-left"><ScrollText className="h-4 w-4" /><span className="min-w-0 flex-1 truncate text-xs font-bold">{item.title}</span><span className="text-[10px] text-[var(--text-muted)]">第 {item.currentChapter}/{item.targetChapters} 章</span></button>)}</div></section>}</div></main></div>;
 

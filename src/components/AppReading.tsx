@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { loadReadingStore } from "../core/storage/repositories/readingRepository";
 import type { ReadingBook, ReadingChapter, ReadingProgress } from "../domain/reading/types";
-import type { Character } from "../types";
+import type { Character, UserSettings } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import type { ReadingRoom } from "../domain/reading/coReadingTypes";
 import { importReadingFile, ReadingImportError } from "../features/reading/import/readingImport";
@@ -44,6 +44,7 @@ import type { ReadingBookBible } from "../domain/reading/analysisTypes";
 
 interface AppReadingProps {
   userIdentityId: string;
+  settings?: UserSettings;
   characters?: Character[];
   relationships?: CharacterRelationship[];
   onClose: () => void;
@@ -57,7 +58,7 @@ const formatDate = (timestamp: number): string => new Intl.DateTimeFormat("zh-CN
   day: "numeric",
 }).format(new Date(timestamp));
 
-export default function AppReading({ userIdentityId, characters = [], relationships = [], onClose }: AppReadingProps) {
+export default function AppReading({ userIdentityId, settings, characters = [], relationships = [], onClose }: AppReadingProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const archiveInputRef = useRef<HTMLInputElement>(null);
   const [books, setBooks] = useState<ReadingBook[]>([]);
@@ -375,7 +376,7 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
 
   if (readingStoryBookId) {
     const storyBook = books.find((book) => book.id === readingStoryBookId);
-    return <ReadingStoryView userIdentityId={userIdentityId} book={storyBook} onClose={() => { setReadingStoryBookId(null); refreshLibrary(); }} />;
+    return <ReadingStoryView userIdentityId={userIdentityId} book={storyBook} settings={settings} onClose={() => { setReadingStoryBookId(null); refreshLibrary(); }} />;
   }
 
   if (selectedRoom) {
