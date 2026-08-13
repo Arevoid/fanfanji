@@ -49,9 +49,8 @@ const store: ReadingStore = {
 assert.deepEqual(saveReadingStore(store), { success: true });
 const serialized = localStorage.getItem(storageKeys.readingStore);
 assert.ok(serialized);
-assert.equal(serialized!.includes("Local Only"), true);
+assert.equal(serialized!.startsWith("lz16:"), true, "reading metadata should use the quota-safe compressed wire format");
 assert.equal(serialized!.includes("blob"), false, "raw book content must not enter localStorage");
-assert.equal(JSON.parse(serialized!).compact, 2, "large reading indexes use the compact wire format");
 
 const loaded = loadReadingStore();
 assert.equal(loaded.valid, true);
@@ -59,6 +58,19 @@ assert.equal(loaded.value.books[0]?.userIdentityId, "identity-a");
 assert.equal(loaded.value.paragraphAnchors[0]?.chapterId, "chapter-a");
 assert.equal(loaded.value.progress[0]?.percent, 20);
 assert.equal(loaded.value.preferences[0]?.pageMode, "horizontal");
+
+localStorage.setItem(storageKeys.readingStore, JSON.stringify({ ...store, compact: undefined }));
+const legacyLoaded = loadReadingStore();
+assert.equal(legacyLoaded.valid, true, "uncompressed stores from older app versions must remain readable");
+assert.equal(legacyLoaded.value.books[0]?.title, "Local Only");
+
+assert.deepEqual(saveReadingStore(store), { success: true });
+const compactLength = localStorage.getItem(storageKeys.readingStore)!.length;
+const repeatedStore = { ...store, paragraphAnchors: Array.from({ length: 2_000 }, (_, index) => ({ ...store.paragraphAnchors[0], id: `anchor-${index}`, ordinal: index, characterStart: index * 10, characterEnd: index * 10 + 10 })) };
+const rawLength = JSON.stringify(repeatedStore).length;
+assert.deepEqual(saveReadingStore(repeatedStore), { success: true });
+assert.ok(localStorage.getItem(storageKeys.readingStore)!.length < rawLength / 2, "large paragraph indexes should compress enough to avoid legacy quota failures");
+assert.ok(compactLength > 0);
 
 localStorage.setItem(storageKeys.readingStore, "{not-json");
 const invalid = loadReadingStore();

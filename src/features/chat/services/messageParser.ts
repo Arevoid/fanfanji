@@ -55,6 +55,30 @@ export const cleanAiReplyText = (text: string, disableBracketActions: boolean): 
   removeFakeImageNarration(cleanOnlineMessage(removeFakeImageNarration(text), disableBracketActions));
 export const splitAiReplyBubbles = splitIntoWeChatBubbles;
 
+/**
+ * A direct-chat completion is one character turn. If a model nevertheless
+ * writes a labelled user turn, stop before it so the client never persists an
+ * invented user reply and the character cannot answer that invented reply.
+ */
+export function stripSimulatedUserTurns(text: string, options: { userName?: string; characterName?: string } = {}): string {
+  const normalizeLabel = (value: string) => value.trim().replace(/^[\[【（(]|[\]】）)]$/g, "").toLowerCase();
+  const userLabels = new Set(["用户", "user", "{{user}}", "我（用户）", options.userName || ""].filter(Boolean).map(normalizeLabel));
+  const characterLabels = new Set(["角色", "assistant", "model", "{{char}}", options.characterName || ""].filter(Boolean).map(normalizeLabel));
+  const kept: string[] = [];
+
+  for (const originalLine of text.split(/\r?\n/)) {
+    const match = originalLine.match(/^\s*([^：:\n]{1,24})\s*[：:]\s*(.*)$/);
+    if (!match) {
+      kept.push(originalLine);
+      continue;
+    }
+    const label = normalizeLabel(match[1]);
+    if (userLabels.has(label)) break;
+    kept.push(characterLabels.has(label) ? match[2] : originalLine);
+  }
+  return kept.join("\n").trim();
+}
+
 export const normalizePaymentMarkup = (content: string): string => content
   .replace(/^\[微信红包\]/, "[红包]")
   .replace(/^\[微信转账\]/, "[转账]");

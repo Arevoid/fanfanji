@@ -19,6 +19,7 @@ const mainPrompt = buildDirectChatMainPrompt({ characterName: "测试角色", di
 assert.match(mainPrompt, /RED PACKET CAPABILITY/);
 assert.match(mainPrompt, /unless that is your explicit character人设/);
 assert.match(mainPrompt, /ordinary greeting or short message/);
+assert.match(mainPrompt, /Never simulate a user reply/);
 assert.match(buildDirectChatMainPrompt({ characterName: "测试角色", disableBracketActions: true }), /pure conversational speech/);
 
 const timePrompt = buildTimeAwarenessPrompt(new Date("2026-08-11T08:30:00+08:00"), "HISTORY_MARK");
@@ -113,6 +114,7 @@ assert.equal((appChatSource.match(/if \(musicContext\) assembledInstructions\.pu
 assert.equal((appChatSource.match(/if \(forumContext\) assembledInstructions\.push\(forumContext\)/g) || []).length, 2);
 assert.equal((appChatSource.match(/if \(diaryContext\) assembledInstructions\.push\(diaryContext\)/g) || []).length, 2);
 assert.equal((appChatSource.match(/NEW_DAY_CONVERSATION_BOUNDARY_PROMPT/g) || []).length >= 3, true);
+assert.equal((appChatSource.match(/assembledInstructions\.push\(DIRECT_CHAT_SINGLE_SPEAKER_RULE\)/g) || []).length, 2);
 assert.equal((appChatSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 2, "send and regeneration must share cross-day history routing");
 assert.equal((appChatSource.match(/partitionDirectChatHistoryByCurrentDay\(\{/g) || []).length, 2, "send and regeneration must remove old live-scene turns from current-day history");
 assert.equal((appChatSource.match(/&& !isCrossDayNewSession/g) || []).length, 0, "cross-day routing must not disable relation and offline memory retrieval");

@@ -1,11 +1,15 @@
+import LZString from "lz-string";
 import { normalizeReadingStore } from "../../../domain/reading/normalization";
 import { createEmptyReadingStore, type ReadingStore } from "../../../domain/reading/types";
-import { readJson, writeJson } from "../storageAdapter";
+import { readJson, readString, writeString } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 
 export function loadReadingStore(): StorageResult<ReadingStore> {
-  const loaded = readJson<unknown>(storageKeys.readingStore, createEmptyReadingStore());
+  const raw = readString(storageKeys.readingStore);
+  const loaded = raw.valid && raw.found && raw.value?.startsWith(COMPRESSED_READING_STORE_PREFIX)
+    ? readCompressedReadingStore(raw.value)
+    : readJson<unknown>(storageKeys.readingStore, createEmptyReadingStore());
   return {
     ...loaded,
     value: normalizeReadingStore(unpackReadingStore(loaded.value)),
@@ -13,7 +17,27 @@ export function loadReadingStore(): StorageResult<ReadingStore> {
 }
 
 export function saveReadingStore(store: ReadingStore): StorageWriteResult {
-  return writeJson(storageKeys.readingStore, packReadingStore(normalizeReadingStore(store)));
+  try {
+    const serialized = JSON.stringify(packReadingStore(normalizeReadingStore(store)));
+    const compressed = LZString.compressToUTF16(serialized);
+    return writeString(storageKeys.readingStore, `${COMPRESSED_READING_STORE_PREFIX}${compressed}`);
+  } catch (error) {
+    console.warn("[reading] Failed to serialize the reading metadata store.", error);
+    return { success: false, error: "serialize" };
+  }
+}
+
+const COMPRESSED_READING_STORE_PREFIX = "lz16:";
+
+function readCompressedReadingStore(value: string): StorageResult<unknown> {
+  try {
+    const decompressed = LZString.decompressFromUTF16(value.slice(COMPRESSED_READING_STORE_PREFIX.length));
+    if (!decompressed) throw new Error("The compressed reading store is empty or invalid.");
+    return { value: JSON.parse(decompressed), found: true, valid: true };
+  } catch (error) {
+    console.warn("[reading] Invalid compressed reading metadata. The original value was left untouched.", error);
+    return { value: createEmptyReadingStore(), found: true, valid: false, error: "parse" };
+  }
 }
 
 /**

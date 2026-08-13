@@ -15,7 +15,7 @@ assert.match(app, /ReadingWorldSetupWizard/);
 assert.match(reader, /createUserReadingComment/);
 assert.match(reader, /startReadingDiscussion/);
 assert.match(reader, /段评/);
-assert.match(reader, /召唤/);
+assert.match(reader, /isDiscussionOpen/, "the companion-avatar discussion entry replaces the removed summon label");
 assert.match(reader, /scope: room/);
 
 assert.match(wizard, /故事名称/);

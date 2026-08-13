@@ -31,7 +31,7 @@ import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromp
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
-import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
+import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
@@ -2993,6 +2993,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       assembledInstructions.push(userProfileText);
       assembledInstructions.push(userKnowledgeBoundary);
       assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
+      assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
 
       // Recent dialogue is already present in the role-correct history. Do not
       // copy it into a system block: duplicate user wording encourages parroting
@@ -3165,6 +3166,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             disableBracketActions: turnSettings.disableBracketActions,
             keepPeriods,
             context: replyContext,
+            characterName: activeCharacter?.name,
+            userName: settings.name,
             allowEmoji: mayCharacterUseEmoji({
               latestUserMessage: userMsg?.content,
               recentCharacterMessages: currentChatMessages
@@ -4112,6 +4115,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       assembledInstructions.push(userProfileText);
       assembledInstructions.push(userKnowledgeBoundary);
       assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
+      assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
       assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
 
       // 7. Before Chat History entries
@@ -4174,6 +4178,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           disableBracketActions: turnSettings.disableBracketActions,
           keepPeriods,
           characterId: activeChatCharId,
+          characterName: activeCharacter?.name,
+          userName: settings.name,
           allowEmoji: false,
           createId: (idx) => `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
           currentTime: (idx) => Date.now() + idx,
@@ -5401,6 +5407,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 box-shadow: var(--chat-composer-shadow, none);
               }
               #conv-screen .chat-composer__input {
+                min-width: 0 !important;
+                width: 0 !important;
+                flex: 1 1 0% !important;
                 background: var(--chat-input-bg, var(--input-bg));
                 color: var(--chat-input-text, var(--text-primary));
                 border: var(--chat-input-border-width, 1px) solid var(--chat-input-border, var(--border));
@@ -5415,6 +5424,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 box-shadow: var(--chat-input-focus-shadow, 0 0 0 2px var(--focus-ring));
               }
               #conv-screen .chat-composer__button {
+                flex: 0 0 auto !important;
                 border: var(--chat-button-border-width, 1px) solid var(--chat-button-border, var(--border));
                 border-radius: var(--chat-button-radius, var(--radius-full));
                 box-shadow: var(--chat-button-shadow, none);
@@ -5883,6 +5893,27 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   padding: 0 !important;
                   margin: 0 !important;
                   box-sizing: border-box !important;
+                }
+                #conv-screen .chat-composer__form {
+                  width: 100% !important;
+                  max-width: 100% !important;
+                  min-width: 0 !important;
+                  box-sizing: border-box !important;
+                }
+                @media (max-width: 420px) {
+                  #conv-screen .chat-composer__form {
+                    gap: 6px !important;
+                    padding-left: 8px !important;
+                    padding-right: 8px !important;
+                  }
+                  #conv-screen .chat-composer__button {
+                    width: 36px !important;
+                    height: 36px !important;
+                  }
+                  #conv-screen .chat-composer__input {
+                    padding-left: 10px !important;
+                    padding-right: 10px !important;
+                  }
                 }
                 .cv-footer form {
                   background: transparent !important;
@@ -7738,7 +7769,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 e.preventDefault();
                 handleSendOnly(e);
               }}
-              className="px-3 py-2 flex items-center gap-2 chat-composer__form"
+              className="w-full min-w-0 max-w-full box-border px-3 py-2 flex items-center gap-2 chat-composer__form"
             >
               {/* Plus (+) Button */}
               <button
@@ -7771,7 +7802,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                         : "输入发言，继续剧本对话...")
                     : `发送消息给 ${activeCharacter.name}...`
                 }
-                className="flex-1 h-10 px-4 text-xs chat-input chat-composer__input"
+                className="min-w-0 w-0 flex-1 h-10 px-4 text-xs chat-input chat-composer__input"
               />
 
               {/* Send Button 1 (User send only - gray background with white upward arrow) */}
