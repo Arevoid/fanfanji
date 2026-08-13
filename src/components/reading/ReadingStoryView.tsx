@@ -7,13 +7,13 @@ import { listReadingStories } from "../../core/storage/repositories/readingStory
 import { createReadingStory, createReadingStorySave, getReadingStory, listReadingStorySaves, listReadingStoryTurns, loadReadingStorySave, ReadingStoryError } from "../../features/reading/story/readingStory";
 import { generateReadingStoryTurn } from "../../features/reading/story/readingStoryGeneration";
 
-interface ReadingStoryViewProps { userIdentityId: string; book?: ReadingBook; settings?: UserSettings; onClose: () => void; }
+interface ReadingStoryViewProps { userIdentityId: string; book?: ReadingBook; initialStoryId?: string; settings?: UserSettings; onClose: () => void; }
 type Panel = "profile" | "intel" | "saves";
 const makeId = (): string => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-export default function ReadingStoryView({ userIdentityId, book, settings, onClose }: ReadingStoryViewProps) {
+export default function ReadingStoryView({ userIdentityId, book, initialStoryId, settings, onClose }: ReadingStoryViewProps) {
   const [stories, setStories] = useState(() => listReadingStories(userIdentityId));
-  const [selectedStoryId, setSelectedStoryId] = useState<string | null>(() => listReadingStories(userIdentityId)[0]?.storyId || null);
+  const [selectedStoryId, setSelectedStoryId] = useState<string | null>(() => initialStoryId || listReadingStories(userIdentityId)[0]?.storyId || null);
   const [action, setAction] = useState("");
   const [panel, setPanel] = useState<Panel>("profile");
   const [message, setMessage] = useState<string | null>(null);

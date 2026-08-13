@@ -58,7 +58,10 @@ const markup = renderToStaticMarkup(React.createElement(AppReading, {
 }));
 assert.match(markup, /把故事放进书架/);
 assert.match(markup, /导入本地小说/);
-assert.match(markup, /仅保存在本地/);
-assert.match(markup, /当前身份的本地书籍/);
+assert.match(markup, /正文仅保存在本地/);
+assert.match(markup, /阅读主导航/);
+assert.match(markup, /书架/);
+assert.match(markup, /共读/);
+assert.match(markup, /世界/);
 
 console.log("reading application foundation tests passed");

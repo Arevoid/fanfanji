@@ -9,8 +9,12 @@ import {
   FileText,
   HardDrive,
   Download,
+  Globe2,
   Library,
   LoaderCircle,
+  Search,
+  SlidersHorizontal,
+  UsersRound,
   Pencil,
   RotateCcw,
   ShieldCheck,
@@ -42,6 +46,19 @@ import { createUserReadingComment, listReadingComments, startReadingDiscussion, 
 import { getReadingBookBible, listReadingAnalysisTasks } from "../core/storage/repositories/readingAnalysisRepository";
 import { createReadingAnalysisTask, startReadingAnalysisTask, saveBookBible, ReadingAnalysisError } from "../features/reading/analysis/readingAnalysis";
 import type { ReadingBookBible } from "../domain/reading/analysisTypes";
+import { listReadingStories } from "../core/storage/repositories/readingStoryRepository";
+import { listReadingCoStories } from "../core/storage/repositories/readingCoStoryRepository";
+import type { ReadingStoryState } from "../domain/reading/storyTypes";
+import type { ReadingCoStoryState } from "../domain/reading/coStoryTypes";
+import {
+  buildReadingActivityItems,
+  buildReadingWorldItems,
+  selectReadingShelfBooks,
+  type ReadingRootTab,
+  type ReadingShelfFilter,
+  type ReadingShelfSort,
+} from "../features/reading/navigation/readingNavigation";
+import ReadingBookCover from "./reading/ReadingBookCover";
 
 interface AppReadingProps {
   userIdentityId: string;
@@ -66,7 +83,12 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
   const [chapters, setChapters] = useState<ReadingChapter[]>([]);
   const [progress, setProgress] = useState<ReadingProgress[]>([]);
   const [rooms, setRooms] = useState<ReadingRoom[]>([]);
-  const [readingView, setReadingView] = useState<"library" | "rooms">("library");
+  const [stories, setStories] = useState<ReadingStoryState[]>([]);
+  const [coStories, setCoStories] = useState<ReadingCoStoryState[]>([]);
+  const [rootTab, setRootTab] = useState<ReadingRootTab>("shelf");
+  const [shelfFilter, setShelfFilter] = useState<ReadingShelfFilter>("all");
+  const [shelfSort, setShelfSort] = useState<ReadingShelfSort>("recent");
+  const [shelfQuery, setShelfQuery] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [inviteBookId, setInviteBookId] = useState<string | null>(null);
   const [roomCommentDraft, setRoomCommentDraft] = useState("");
@@ -76,6 +98,8 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
   const [readingBookId, setReadingBookId] = useState<string | null>(null);
   const [readingStoryBookId, setReadingStoryBookId] = useState<string | null>(null);
   const [readingCoStoryBookId, setReadingCoStoryBookId] = useState<string | null>(null);
+  const [initialStoryId, setInitialStoryId] = useState<string | undefined>();
+  const [initialCoStoryId, setInitialCoStoryId] = useState<string | undefined>();
   const [isImporting, setIsImporting] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -98,6 +122,8 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
       .sort((left, right) => left.order - right.order));
     setProgress(store.progress.filter((item) => item.userIdentityId === userIdentityId));
     setRooms(listReadingRooms(userIdentityId));
+    setStories(listReadingStories(userIdentityId));
+    setCoStories(listReadingCoStories(userIdentityId));
   }, [userIdentityId]);
 
   useEffect(() => {
@@ -105,8 +131,9 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
     retryReadingAssetCleanup(userIdentityId).catch(() => undefined);
   }, [refreshLibrary, userIdentityId]);
 
-  const visibleBooks = useMemo(() => books.filter((book) =>
-    section === "archived" ? book.status === "archived" : book.status !== "archived"), [books, section]);
+  const visibleBooks = useMemo(() => selectReadingShelfBooks({ books, progress, userIdentityId, filter: shelfFilter, query: shelfQuery, sort: shelfSort }), [books, progress, shelfFilter, shelfQuery, shelfSort, userIdentityId]);
+  const activityItems = useMemo(() => buildReadingActivityItems({ userIdentityId, rooms, coStories, books }), [books, coStories, rooms, userIdentityId]);
+  const worldItems = useMemo(() => buildReadingWorldItems({ userIdentityId, stories, coStories }), [coStories, stories, userIdentityId]);
   const selectedBook = books.find((book) => book.id === selectedBookId) || null;
   const selectedChapters = selectedBook
     ? chapters.filter((chapter) => chapter.bookId === selectedBook.id)
@@ -328,7 +355,7 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
       createAiReadingRoom({ userIdentityId, book: inviteBook, relationship, character });
       refreshLibrary();
       setInviteBookId(null);
-      setReadingView("rooms");
+      setRootTab("co_reading");
       setNotice({ tone: "success", text: `已向 ${character.name} 发出共读邀请。等待 TA 根据人设回应。` });
     } catch (error) {
       const text = error instanceof ReadingCoReadingError ? error.message : "共读邀请保存失败";
@@ -378,12 +405,12 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
 
   if (readingStoryBookId) {
     const storyBook = books.find((book) => book.id === readingStoryBookId);
-    return <ReadingStoryView userIdentityId={userIdentityId} book={storyBook} settings={settings} onClose={() => { setReadingStoryBookId(null); refreshLibrary(); }} />;
+    return <ReadingStoryView userIdentityId={userIdentityId} book={storyBook} initialStoryId={initialStoryId} settings={settings} onClose={() => { setReadingStoryBookId(null); setInitialStoryId(undefined); refreshLibrary(); }} />;
   }
 
   if (readingCoStoryBookId) {
     const storyBook = books.find((book) => book.id === readingCoStoryBookId);
-    return <ReadingCoStoryView userIdentityId={userIdentityId} book={storyBook} friends={availableFriends} settings={settings} onClose={() => { setReadingCoStoryBookId(null); refreshLibrary(); }} />;
+    return <ReadingCoStoryView userIdentityId={userIdentityId} book={storyBook} initialCoStoryId={initialCoStoryId} friends={availableFriends} settings={settings} onClose={() => { setReadingCoStoryBookId(null); setInitialCoStoryId(undefined); refreshLibrary(); }} />;
   }
 
   if (selectedRoom) {
@@ -566,71 +593,31 @@ export default function AppReading({ userIdentityId, settings, characters = [], 
         <button type="button" onClick={onClose} aria-label="返回桌面" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]">
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-bold tracking-tight">阅读</h1>
-        <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="导入小说" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]">
+        <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-bold tracking-tight">{rootTab === "shelf" ? "书架" : rootTab === "co_reading" ? "共读" : "世界"}</h1>
+        <button type="button" onClick={() => rootTab === "shelf" && fileInputRef.current?.click()} aria-label={rootTab === "shelf" ? "导入小说" : "当前栏目"} className={`flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] ${rootTab === "shelf" ? "" : "invisible"}`}>
           <Upload className="h-4 w-4" />
         </button>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-4 pb-24 pt-3">
+      <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3">
         <section className="mx-auto flex w-full max-w-md flex-col gap-4">
-          <div className="grid grid-cols-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1">
-            <button type="button" onClick={() => setReadingView("library")} className={`h-9 rounded-xl text-xs font-bold ${readingView === "library" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "text-[var(--text-secondary)]"}`}>书架</button>
-            <button type="button" onClick={() => setReadingView("rooms")} className={`h-9 rounded-xl text-xs font-bold ${readingView === "rooms" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "text-[var(--text-secondary)]"}`}>共读 {rooms.length ? `· ${rooms.length}` : ""}</button>
-          </div>
-          {readingView === "rooms" && (
-            <section aria-label="共读房间" className="space-y-2">
-              {rooms.length > 0 ? rooms.map((room) => {
-                const roomBook = books.find((book) => book.id === room.bookId);
-                return <button key={room.readingRoomId} type="button" onClick={() => setSelectedRoomId(room.readingRoomId)} className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[var(--surface-raised)] text-base font-black">{room.characterSnapshot.avatar ? <img src={room.characterSnapshot.avatar} alt="" className="h-full w-full object-cover" /> : room.characterSnapshot.name.slice(0, 1)}</div>
-                  <div className="min-w-0 flex-1"><h3 className="truncate text-sm font-bold">{room.characterSnapshot.name}</h3><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">{roomBook?.title || "书籍已移除"}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{room.status === "active" ? "共读中" : room.status === "declined" ? "已拒绝" : "等待 TA 回应"} · 独立房间</p></div><ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-                </button>;
-              }) : <div className="rounded-3xl border border-dashed border-[var(--border)] p-8 text-center"><p className="text-sm font-bold">还没有共读房间</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">打开一本书，在详情页邀请一位 AI 好友。每位好友都会建立独立房间。</p></div>}
-            </section>
-          )}
           <input ref={fileInputRef} type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={handleFileSelected} className="hidden" aria-label="选择 TXT 或 Markdown 小说" />
           <input ref={archiveInputRef} type="file" accept=".json,.fanfan-reading.json,application/json,application/vnd.fanfanji.reading+json" onChange={handleImportArchive} className="hidden" aria-label="选择阅读归档" />
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--surface-raised)]"><BookOpenText className="h-5 w-5" strokeWidth={1.7} /></div>
-              <div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">本地书架</p><h2 className="mt-1 text-lg font-bold">把故事放进书架</h2><p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">支持 TXT 与 Markdown。导入、分章和管理都只在当前设备完成。</p></div>
-            </div>
-            <button type="button" disabled={isImporting} onClick={() => fileInputRef.current?.click()} className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)] disabled:cursor-wait disabled:opacity-60">
-              {isImporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}{isImporting ? "正在解析并保存" : "导入本地小说"}
-            </button>
-          </div>
-
           {renderNotice()}
+          {rootTab === "shelf" && <>
+            <div className="flex items-end justify-between"><div><p className="text-2xl font-black tracking-tight">我的书架</p><p className="mt-1 text-[11px] text-[var(--text-muted)]">{books.filter((book) => book.status !== "archived").length} 本书 · 正文仅保存在本地</p></div><SlidersHorizontal className="h-5 w-5 text-[var(--text-muted)]" /></div>
+            <div className="flex gap-2 overflow-x-auto pb-1" aria-label="书架筛选">{([['all','全部'],['reading','阅读中'],['unread','未读'],['finished','已读完'],['archived','归档']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setShelfFilter(value)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold ${shelfFilter === value ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]"}`}>{label}</button>)}</div>
+            <div className="flex gap-2"><label className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3"><Search className="h-4 w-4 text-[var(--text-muted)]" /><input value={shelfQuery} onChange={(event) => setShelfQuery(event.target.value)} placeholder={`搜索 ${books.length} 本书`} className="h-11 min-w-0 flex-1 bg-transparent text-xs outline-none" /></label><select aria-label="书架排序" value={shelfSort} onChange={(event) => setShelfSort(event.target.value as ReadingShelfSort)} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-2 text-xs font-bold outline-none"><option value="recent">最近</option><option value="title">书名</option><option value="progress">进度</option></select></div>
+            {visibleBooks.length > 0 ? <section aria-label="封面书架" className="grid grid-cols-3 gap-x-3 gap-y-5">{visibleBooks.map((book) => { const bookProgress = progress.find((item) => item.bookId === book.id)?.percent || 0; return <button key={`${book.userIdentityId}:${book.id}`} type="button" onClick={() => openBookDetails(book)} className="min-w-0 text-left"><ReadingBookCover book={book} className="aspect-[3/4] w-full rounded-xl shadow-md" /><h3 className="mt-2 line-clamp-2 text-xs font-bold leading-4">{book.title}</h3><p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">{book.status === "archived" ? "已归档" : bookProgress > 0 ? `${bookProgress.toFixed(1)}%` : book.author || "未读"}</p></button>; })}</section> : <div className="rounded-3xl border border-dashed border-[var(--border)] p-8 text-center"><BookMarked className="mx-auto h-6 w-6 text-[var(--text-muted)]" /><p className="mt-3 text-sm font-bold">{books.length ? "没有符合条件的书" : "把故事放进书架"}</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">支持 TXT 与 Markdown，导入和分章都在当前设备完成。</p><button type="button" disabled={isImporting} onClick={() => fileInputRef.current?.click()} className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] px-5 text-xs font-bold text-[var(--button-primary-text)]">{isImporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}导入本地小说</button></div>}
+            <div className="grid grid-cols-2 gap-2"><button type="button" disabled={isWorking || books.length === 0} onClick={handleExportArchive} className="flex h-9 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[10px] font-bold disabled:opacity-40"><Download className="h-3.5 w-3.5" />导出阅读归档</button><button type="button" disabled={isWorking} onClick={() => archiveInputRef.current?.click()} className="flex h-9 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[10px] font-bold disabled:opacity-40"><Upload className="h-3.5 w-3.5" />恢复阅读归档</button></div>
+          </>}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><HardDrive className="h-4 w-4 text-[var(--text-secondary)]" /><p className="mt-3 text-xl font-bold">{books.filter((book) => book.status !== "archived").length}</p><p className="mt-0.5 text-[11px] text-[var(--text-muted)]">当前身份的本地书籍</p></div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><ShieldCheck className="h-4 w-4 text-[var(--text-secondary)]" /><p className="mt-3 text-sm font-bold">仅保存在本地</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-muted)]">不会自动发送小说正文到 API</p></div>
-          </div>
+          {rootTab === "co_reading" && <section aria-label="共读活动" className="space-y-3"><div><h2 className="text-xl font-black">和 TA 一起</h2><p className="mt-1 text-xs text-[var(--text-muted)]">同一本书与不同好友拥有完全独立的进度、评论和记忆。</p></div>{activityItems.length ? activityItems.map((item) => <button key={item.id} type="button" onClick={() => { if (item.kind === "co_reading") setSelectedRoomId(item.sourceId); else { setInitialCoStoryId(item.sourceId); setReadingCoStoryBookId(item.bookId || "custom-world"); } }} className="relative flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left"><div className="flex h-14 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--surface-raised)] font-black">{item.friendAvatar ? <img src={item.friendAvatar} alt="" className="h-full w-full object-cover" /> : item.bookTitle.slice(0,1)}</div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${item.kind === "co_story" ? "bg-amber-500/15 text-amber-300" : "bg-emerald-500/15 text-emerald-300"}`}>{item.kind === "co_story" ? "穿书" : "共读"}</span><span className="text-[10px] text-[var(--text-muted)]">{item.status}</span></div><h3 className="mt-1 truncate text-sm font-bold">{item.bookTitle}</h3><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">和 {item.friendName} · 独立空间</p></div><ChevronRight className="h-4 w-4 text-[var(--text-muted)]" /></button>) : <div className="rounded-3xl border border-dashed border-[var(--border)] p-8 text-center"><UsersRound className="mx-auto h-6 w-6 text-[var(--text-muted)]" /><p className="mt-3 text-sm font-bold">还没有共读活动</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">下一轮可从书籍封面长按邀请一位 AI 好友。</p></div>}</section>}
 
-          <div className="grid grid-cols-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1">
-            <button type="button" onClick={() => setSection("library")} className={`flex h-9 items-center justify-center gap-2 rounded-xl text-xs font-bold ${section === "library" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "text-[var(--text-secondary)]"}`}><Library className="h-4 w-4" />书架</button>
-            <button type="button" onClick={() => setSection("archived")} className={`flex h-9 items-center justify-center gap-2 rounded-xl text-xs font-bold ${section === "archived" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "text-[var(--text-secondary)]"}`}><Archive className="h-4 w-4" />归档</button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" disabled={isWorking || books.length === 0} onClick={handleExportArchive} className="flex h-10 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold disabled:opacity-40"><Download className="h-4 w-4" />导出阅读归档</button>
-            <button type="button" disabled={isWorking} onClick={() => archiveInputRef.current?.click()} className="flex h-10 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold disabled:opacity-40"><Upload className="h-4 w-4" />恢复阅读归档</button>
-          </div>
-
-          <section aria-label={section === "library" ? "本地书籍" : "归档书籍"} className="space-y-2">
-            {visibleBooks.length > 0 ? visibleBooks.map((book) => (
-              <button key={`${book.userIdentityId}:${book.id}`} type="button" onClick={() => openBookDetails(book)} className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left">
-                <div className="flex h-14 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-raised)] text-base font-black">{book.title.trim().slice(0, 1) || <FileText className="h-4 w-4" />}</div>
-                <div className="min-w-0 flex-1"><h3 className="truncate text-sm font-bold">{book.title}</h3><p className="mt-1 truncate text-[11px] text-[var(--text-muted)]">{book.author || book.sourceFileName}</p><p className="mt-1 text-[10px] text-[var(--text-muted)]">{progress.find((item) => item.bookId === book.id) ? `已读 ${progress.find((item) => item.bookId === book.id)?.percent.toFixed(1)}% · ` : ""}{book.wordCount.toLocaleString()} 字 · {book.chapterCount} 章</p></div>
-                <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-              </button>
-            )) : (
-              <div className="rounded-3xl border border-dashed border-[var(--border)] p-8 text-center"><BookMarked className="mx-auto h-6 w-6 text-[var(--text-muted)]" /><p className="mt-3 text-sm font-bold">{section === "library" ? "书架还是空的" : "没有归档书籍"}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{section === "library" ? "导入一本 TXT 或 Markdown 小说开始使用" : "归档只收起书籍，不会删除正文和标注"}</p></div>
-            )}
-          </section>
+          {rootTab === "world" && <section aria-label="故事世界" className="space-y-3"><div><h2 className="text-xl font-black">故事世界</h2><p className="mt-1 text-xs text-[var(--text-muted)]">单人和共同穿书都使用独立宇宙记忆，不写入现实关系事实。</p></div>{worldItems.length ? worldItems.map((item) => <button key={item.id} type="button" onClick={() => { if (item.kind === "solo_story") { setInitialStoryId(item.sourceId); setReadingStoryBookId(item.bookId || "custom-world"); } else { setInitialCoStoryId(item.sourceId); setReadingCoStoryBookId(item.bookId || "custom-world"); } }} className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface-raised)]"><Globe2 className="h-5 w-5" /></div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h3 className="truncate text-sm font-bold">{item.title}</h3>{item.kind === "co_story" && <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-bold text-amber-300">双人</span>}</div><p className="mt-1 text-[10px] text-[var(--text-muted)]">第 {item.currentChapter}/{item.targetChapters} 章{item.friendName ? ` · ${item.friendName}` : " · 单人"}</p></div><ChevronRight className="h-4 w-4 text-[var(--text-muted)]" /></button>) : <div className="rounded-3xl border border-dashed border-[var(--border)] p-8 text-center"><Globe2 className="mx-auto h-6 w-6 text-[var(--text-muted)]" /><p className="mt-3 text-sm font-bold">还没有故事世界</p><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">书籍穿书与自建世界入口将在后续轮次完善。</p></div>}</section>}
         </section>
       </main>
+      <nav aria-label="阅读主导航" className="grid shrink-0 grid-cols-3 border-t border-[var(--border)] bg-[var(--surface)]/95 px-5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur">{([['shelf','书架',Library],['co_reading','共读',UsersRound],['world','世界',Globe2]] as const).map(([value,label,Icon]) => <button key={value} type="button" onClick={() => setRootTab(value)} aria-current={rootTab === value ? "page" : undefined} className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-2xl text-[10px] font-bold ${rootTab === value ? "bg-[var(--surface-raised)] text-[var(--text-primary)]" : "text-[var(--text-muted)]"}`}><Icon className="h-5 w-5" strokeWidth={rootTab === value ? 2.2 : 1.6} />{label}</button>)}</nav>
       {inviteBook && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-4 sm:items-center" role="dialog" aria-modal="true" aria-label="邀请 AI 好友共读">
           <div className="w-full max-w-md space-y-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl">

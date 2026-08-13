@@ -9,14 +9,14 @@ import { commitReadingCoStoryUserAction, createReadingCoStory, ReadingCoStoryErr
 import { generateReadingCoStoryAiAction } from "../../features/reading/story/readingCoStoryGeneration";
 
 interface FriendOption { relationship: CharacterRelationship; character: Character; }
-interface ReadingCoStoryViewProps { userIdentityId: string; book?: ReadingBook; friends: FriendOption[]; settings?: UserSettings; onClose: () => void; }
+interface ReadingCoStoryViewProps { userIdentityId: string; book?: ReadingBook; initialCoStoryId?: string; friends: FriendOption[]; settings?: UserSettings; onClose: () => void; }
 type Mode = ReadingCoStoryActionMode;
 const makeId = (): string => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const modeCopy: Record<Mode, string> = { suggest: "让 TA 提建议", ask_opinion: "询问 TA 的意见", low_risk_execute: "让 TA 先行动" };
 
-export default function ReadingCoStoryView({ userIdentityId, book, friends, settings, onClose }: ReadingCoStoryViewProps) {
+export default function ReadingCoStoryView({ userIdentityId, book, initialCoStoryId, friends, settings, onClose }: ReadingCoStoryViewProps) {
   const [stories, setStories] = useState(() => listReadingCoStories(userIdentityId));
-  const [selectedId, setSelectedId] = useState<string | null>(() => listReadingCoStories(userIdentityId)[0]?.coStoryId || null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => initialCoStoryId || listReadingCoStories(userIdentityId)[0]?.coStoryId || null);
   const [friendId, setFriendId] = useState(friends[0]?.relationship.id || "");
   const [length, setLength] = useState<"short" | "medium" | "long">("short");
   const [mode, setMode] = useState<Mode>("suggest");

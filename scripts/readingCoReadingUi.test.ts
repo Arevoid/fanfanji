@@ -5,7 +5,8 @@ const appReading = readFileSync(new URL("../src/components/AppReading.tsx", impo
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const service = readFileSync(new URL("../src/features/reading/coReading/readingCoReading.ts", import.meta.url), "utf8");
 
-assert.match(appReading, /readingView.*rooms/);
+assert.match(appReading, /rootTab.*co_reading/);
+assert.match(appReading, /buildReadingActivityItems/);
 assert.match(appReading, /邀请一位 AI 好友共读/);
 assert.match(appReading, /独立房间/);
 assert.match(appReading, /不会等待真人上线/);
