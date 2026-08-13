@@ -71,7 +71,7 @@ export default function ReadingWorldSetupWizard({
     "mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-sm outline-none";
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-[var(--app-bg)] pt-[max(0.75rem,env(safe-area-inset-top))] text-[var(--text-primary)]"
+      className="absolute inset-0 z-50 flex flex-col bg-[var(--app-bg)] text-[var(--text-primary)]"
       role="dialog"
       aria-modal="true"
       aria-label="新建原创世界"

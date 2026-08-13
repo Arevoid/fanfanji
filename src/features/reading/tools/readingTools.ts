@@ -38,6 +38,7 @@ export const DEFAULT_READING_PREFERENCES = {
   textAlign: "justify" as const,
   pageMargin: 24,
   firstLineIndent: 2,
+  pageMode: "scroll" as const,
 };
 
 export function getReadingBookPreferences(userIdentityId: string, bookId: string, dependencies: Pick<ReadingToolDependencies, "loadStore"> = defaultDependencies): ReadingBookPreferences {
@@ -64,6 +65,7 @@ export function saveReadingBookPreferences(
     textAlign: input.textAlign === "left" ? "left" : "justify",
     pageMargin: Math.min(Math.max(input.pageMargin ?? 24, 12), 48),
     firstLineIndent: Math.min(Math.max(input.firstLineIndent ?? 2, 0), 3),
+    pageMode: input.pageMode === "horizontal" ? "horizontal" : "scroll",
     updatedAt: dependencies.now(),
   };
   save(dependencies, {

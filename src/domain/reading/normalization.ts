@@ -122,6 +122,7 @@ export function isReadingBookPreferences(value: unknown): value is ReadingBookPr
     && (value.textAlign === undefined || value.textAlign === "left" || value.textAlign === "justify")
     && optionalNumber(value.pageMargin)
     && optionalNumber(value.firstLineIndent)
+    && (value.pageMode === undefined || value.pageMode === "scroll" || value.pageMode === "horizontal")
     && timestamp(value.updatedAt);
 }
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bookmark, BookOpenText, ChevronLeft, ChevronRight, Copy, Highlighter, List, LoaderCircle, MessageCircle, Search, SlidersHorizontal, Sparkles, StickyNote, Trash2, X } from "lucide-react";
+import { Bookmark, BookOpenText, ChevronLeft, ChevronRight, Copy, Highlighter, List, LoaderCircle, MessageCircle, Pencil, Search, Share2, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import { fontAssetDb } from "../../utils/fontAssetDb";
 import { GLOBAL_FONT_ASSET_ID } from "../../features/theme/globalTypography";
 import {
@@ -53,6 +53,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
   const [searchQuery, setSearchQuery] = useState("");
   const [annotations, setAnnotations] = useState<ReadingAnnotation[]>([]);
   const [activeParagraph, setActiveParagraph] = useState<{ paragraph: ReadingParagraphView; chapterId: string; start: number; end: number } | null>(null);
+  const [selectionToolbarPosition, setSelectionToolbarPosition] = useState<{ left: number; top: number } | null>(null);
   const [toolMessage, setToolMessage] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<ReadingBookPreferences>(() => getReadingBookPreferences(userIdentityId, bookId));
   const [customFontFamily, setCustomFontFamily] = useState<string | undefined>();
@@ -132,10 +133,15 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     const ratio = element.textContent?.length ? characterOffset / element.textContent.length : 0;
     const containerRect = container.getBoundingClientRect();
     const elementRect = element.getBoundingClientRect();
+    if (preferences.pageMode === "horizontal") {
+      const left = elementRect.left - containerRect.left + container.scrollLeft;
+      container.scrollTo({ left: Math.max(0, left - 12), behavior });
+      return;
+    }
     const elementTop = elementRect.top - containerRect.top + container.scrollTop;
     const top = elementTop - 48 + elementRect.height * Math.min(Math.max(ratio, 0), 1);
     container.scrollTo({ top, behavior });
-  }, []);
+  }, [preferences.pageMode]);
 
   useEffect(() => {
     if (!content || restoredRef.current) return;
@@ -153,13 +159,15 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     const container = scrollRef.current;
     if (!container || flatParagraphs.length === 0) return null;
     const containerRect = container.getBoundingClientRect();
-    const threshold = containerRect.top + 48;
+    const horizontal = preferences.pageMode === "horizontal";
+    const threshold = horizontal ? containerRect.left + 24 : containerRect.top + 48;
     let chosen = flatParagraphs[0];
     let chosenElement = paragraphRefs.current.get(chosen.paragraph.anchor.id) || null;
     for (const candidate of flatParagraphs) {
       const element = paragraphRefs.current.get(candidate.paragraph.anchor.id);
       if (!element) continue;
-      if (element.getBoundingClientRect().top <= threshold + 2) {
+      const candidateRect = element.getBoundingClientRect();
+      if ((horizontal ? candidateRect.left : candidateRect.top) <= threshold + 2) {
         chosen = candidate;
         chosenElement = element;
       } else {
@@ -168,17 +176,19 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
     }
     if (!chosenElement) return null;
     const rect = chosenElement.getBoundingClientRect();
-    const atEnd = container.scrollTop + container.clientHeight >= container.scrollHeight - 4;
+    const atEnd = horizontal
+      ? container.scrollLeft + container.clientWidth >= container.scrollWidth - 4
+      : container.scrollTop + container.clientHeight >= container.scrollHeight - 4;
     const ratio = atEnd && chosen === flatParagraphs.at(-1)
       ? 1
-      : Math.min(Math.max((threshold - rect.top) / Math.max(rect.height, 1), 0), 1);
+      : Math.min(Math.max((threshold - (horizontal ? rect.left : rect.top)) / Math.max(horizontal ? rect.width : rect.height, 1), 0), 1);
     return {
       paragraph: chosen.paragraph,
       chapterId: chosen.chapterId,
       characterOffset: Math.round(chosen.paragraph.text.length * ratio),
-      scrollOffsetHint: Math.round(rect.top - containerRect.top),
+      scrollOffsetHint: Math.round((horizontal ? rect.left - containerRect.left : rect.top - containerRect.top)),
     } satisfies VisiblePosition;
-  }, [flatParagraphs]);
+  }, [flatParagraphs, preferences.pageMode]);
 
   const handleScroll = () => {
     const position = captureVisiblePosition();
@@ -266,14 +276,32 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
   };
 
   const addParagraphComment = () => {
-    if (!activeParagraph || !room) return;
-    const body = window.prompt(`写给共读房间的段评（${room.characterSnapshot.name} 可见）：`, "");
+    if (!activeParagraph) return;
+    const body = window.prompt(room ? `写给共读房间的段评（${room.characterSnapshot.name} 可见）：` : "写下这段文字的段评：", "");
     if (!body?.trim()) return;
     try {
+      if (!room) {
+        createReadingAnnotation({ userIdentityId, bookId, chapterId: activeParagraph.chapterId, paragraph: activeParagraph.paragraph, kind: "note", note: body, start: activeParagraph.start, end: activeParagraph.end });
+        refreshAnnotations();
+        setToolMessage("段评已保存到本书");
+        return;
+      }
       createUserReadingComment({ scope: room, authorName: "我", kind: "paragraph", body, targetChapterId: activeParagraph.chapterId, targetParagraphAnchorId: activeParagraph.paragraph.anchor.id, textSnapshot: activeParagraph.paragraph.text.slice(activeParagraph.start, activeParagraph.end) });
       setRoomComments(listReadingComments(room));
       setToolMessage("段评已保存到当前共读房间");
     } catch { setToolMessage("段评保存失败"); }
+  };
+
+  const shareActiveText = async () => {
+    if (!activeParagraph) return;
+    const text = activeParagraph.paragraph.text.slice(activeParagraph.start, activeParagraph.end);
+    try {
+      if (navigator.share) await navigator.share({ title: content?.book.title || "小说摘录", text });
+      else await navigator.clipboard.writeText(text);
+      setToolMessage(navigator.share ? "已打开分享" : "摘录已复制，可粘贴分享");
+    } catch (error) {
+      if ((error as { name?: string })?.name !== "AbortError") setToolMessage("暂时无法分享这段文字");
+    }
   };
 
   const summonRoomFriend = () => {
@@ -304,7 +332,16 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
         prefix.setEnd(range.startContainer, range.startOffset);
         start = Math.min(prefix.toString().length, paragraph.text.length);
         end = Math.min(start + range.toString().length, paragraph.text.length);
+        const rect = range.getBoundingClientRect();
+        setSelectionToolbarPosition({
+          left: Math.min(Math.max(rect.left + rect.width / 2, 168), window.innerWidth - 168),
+          top: Math.max(8, rect.top - 70),
+        });
       }
+    }
+    if (start === 0 && end === paragraph.text.length) {
+      const rect = element.getBoundingClientRect();
+      setSelectionToolbarPosition({ left: Math.min(Math.max(rect.left + rect.width / 2, 168), window.innerWidth - 168), top: Math.max(8, rect.top - 70) });
     }
     setActiveParagraph({ paragraph, chapterId, start, end });
     setToolMessage(null);
@@ -358,8 +395,16 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
       ) : error ? (
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center"><BookOpenText className="h-8 w-8 text-[var(--text-muted)]" /><p className="mt-4 text-sm font-bold">无法打开这本书</p><p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">{error}</p></div>
       ) : (
-        <main ref={scrollRef} onScroll={handleScroll} aria-label="小说正文" className="flex-1 overflow-y-auto scroll-smooth pb-28 pt-8" style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin }}>
-          <article className="mx-auto max-w-[42rem]">
+        <main ref={scrollRef} onScroll={handleScroll} aria-label="小说正文" className={`flex-1 scroll-smooth ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined }}>
+          <article
+            className={preferences.pageMode === "horizontal" ? "h-full py-8" : "mx-auto max-w-[42rem]"}
+            style={preferences.pageMode === "horizontal" ? {
+              columnWidth: `calc(100vw - ${(preferences.pageMargin || 24) * 2}px)`,
+              columnGap: `${(preferences.pageMargin || 24) * 2}px`,
+              columnFill: "auto",
+              height: "100%",
+            } : undefined}
+          >
             {content?.chapters.map((chapterView) => (
               <section key={chapterView.chapter.id} data-chapter-id={chapterView.chapter.id} className="mb-16">
                 <h2 className="mb-10 mt-3 text-center text-xl font-bold tracking-wide">{chapterView.chapter.title}</h2>
@@ -407,17 +452,16 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
         </footer>
       )}
 
-      {activeParagraph && !isTocOpen && !isSearchOpen && !isSettingsOpen && (
-        <div className="absolute inset-x-4 bottom-16 z-30 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 text-[var(--text-primary)] shadow-xl">
-          <div className={`grid gap-1 ${room ? "grid-cols-6" : "grid-cols-4"}`}>
-            <button type="button" onClick={copyActiveParagraph} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><Copy className="h-4 w-4" />复制</button>
-            <button type="button" onClick={toggleHighlight} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><Highlighter className="h-4 w-4" />高亮</button>
-            <button type="button" onClick={addNote} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><StickyNote className="h-4 w-4" />笔记</button>
-            <button type="button" onClick={toggleBookmark} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><Bookmark className="h-4 w-4" />书签</button>
-            {room && <button type="button" onClick={addParagraphComment} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"><MessageCircle className="h-4 w-4" />段评</button>}
-            {room && <button type="button" disabled={!room.settings.allowSummon} onClick={summonRoomFriend} className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px] disabled:opacity-30"><Sparkles className="h-4 w-4" />召唤</button>}
+      {activeParagraph && selectionToolbarPosition && !isTocOpen && !isSearchOpen && !isSettingsOpen && (
+        <div className="fixed z-[70] w-[336px] max-w-[calc(100vw-16px)] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 text-[var(--text-primary)] shadow-xl" style={{ left: selectionToolbarPosition.left, top: selectionToolbarPosition.top }}>
+          <div className="grid grid-cols-6 gap-0.5">
+            <button type="button" onClick={copyActiveParagraph} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Copy className="h-4 w-4" />复制</button>
+            <button type="button" onClick={toggleHighlight} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Highlighter className="h-4 w-4" />高亮</button>
+            <button type="button" onClick={addParagraphComment} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><MessageCircle className="h-4 w-4" />段评</button>
+            <button type="button" onClick={toggleBookmark} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Bookmark className="h-4 w-4" />书签</button>
+            <button type="button" onClick={addNote} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Pencil className="h-4 w-4" />编辑</button>
+            <button type="button" onClick={shareActiveText} className="flex flex-col items-center gap-1 rounded-lg py-1.5 text-[9px]"><Share2 className="h-4 w-4" />分享</button>
           </div>
-          <button type="button" onClick={() => setActiveParagraph(null)} aria-label="关闭段落工具" className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]"><X className="h-3 w-3" /></button>
           {toolMessage && <p className="border-t border-[var(--border)] px-2 pt-2 text-center text-[10px] text-[var(--text-muted)]">{toolMessage}</p>}
           {annotations.filter((item) => item.paragraphAnchorId === activeParagraph.paragraph.anchor.id && item.kind === "note").map((item) => (
             <div key={item.id} className="mt-2 flex items-start gap-2 rounded-xl bg-[var(--surface-raised)] p-2 text-xs"><p className="min-w-0 flex-1 leading-5">{item.note}</p><button type="button" aria-label="删除笔记" onClick={() => { deleteReadingAnnotation(userIdentityId, item.id); refreshAnnotations(); }}><Trash2 className="h-3.5 w-3.5" /></button></div>
@@ -455,6 +499,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, onClose }:
               ["#f6f1e7", "#2f2b25"], ["#ffffff", "#202020"], ["#dce8d5", "#263127"], ["#171717", "#dedede"],
             ].map(([background, textColor]) => <button key={background} type="button" aria-label={`背景 ${background}`} onClick={() => updatePreferences({ background, textColor })} className="h-10 rounded-xl border-2" style={{ background, borderColor: preferences.background === background ? "var(--text-primary)" : "transparent" }} />)}</div></div>
             <div className="mt-5 grid grid-cols-2 gap-2"><button type="button" onClick={() => updatePreferences({ textAlign: preferences.textAlign === "justify" ? "left" : "justify" })} className="h-10 rounded-xl border border-[var(--border)] text-xs font-bold">{preferences.textAlign === "justify" ? "两端对齐" : "左对齐"}</button><button type="button" onClick={() => updatePreferences({ firstLineIndent: preferences.firstLineIndent ? 0 : 2 })} className="h-10 rounded-xl border border-[var(--border)] text-xs font-bold">首行缩进 {preferences.firstLineIndent ? "开" : "关"}</button></div>
+            <div className="mt-3 grid grid-cols-2 gap-2" aria-label="翻页方式"><button type="button" onClick={() => updatePreferences({ pageMode: "scroll" })} className={`h-10 rounded-xl border text-xs font-bold ${preferences.pageMode !== "horizontal" ? "border-[var(--text-primary)] bg-[var(--surface-raised)]" : "border-[var(--border)]"}`}>上下滚动</button><button type="button" onClick={() => updatePreferences({ pageMode: "horizontal" })} className={`h-10 rounded-xl border text-xs font-bold ${preferences.pageMode === "horizontal" ? "border-[var(--text-primary)] bg-[var(--surface-raised)]" : "border-[var(--border)]"}`}>左右翻页</button></div>
             <label className="mt-4 flex items-center justify-between rounded-2xl border border-[var(--border)] p-3 text-xs font-bold"><span>引用全局上传字体</span><input type="checkbox" checked={preferences.fontAssetId === GLOBAL_FONT_ASSET_ID} onChange={(event) => updatePreferences({ fontAssetId: event.target.checked ? GLOBAL_FONT_ASSET_ID : undefined })} /></label>
           </div>
         </div>

@@ -8,10 +8,55 @@ export function loadReadingStore(): StorageResult<ReadingStore> {
   const loaded = readJson<unknown>(storageKeys.readingStore, createEmptyReadingStore());
   return {
     ...loaded,
-    value: normalizeReadingStore(loaded.value),
+    value: normalizeReadingStore(unpackReadingStore(loaded.value)),
   };
 }
 
 export function saveReadingStore(store: ReadingStore): StorageWriteResult {
-  return writeJson(storageKeys.readingStore, normalizeReadingStore(store));
+  return writeJson(storageKeys.readingStore, packReadingStore(normalizeReadingStore(store)));
+}
+
+/**
+ * Paragraph indexes contain thousands of records. Repeating the identity, book and
+ * chapter keys in every JSON object can consume the entire localStorage quota even
+ * though the novel body itself already lives in IndexedDB. This wire format keeps
+ * the public domain model unchanged while persisting the index as compact tuples.
+ */
+function packReadingStore(store: ReadingStore) {
+  return {
+    version: store.version,
+    compact: 2,
+    books: store.books,
+    chapters: store.chapters.map((chapter) => [chapter.id, chapter.bookId, chapter.order, chapter.title, chapter.firstParagraphAnchorId || "", chapter.lastParagraphAnchorId || "", chapter.wordCount]),
+    paragraphAnchors: store.paragraphAnchors.map((anchor) => [anchor.id, anchor.chapterId, anchor.ordinal, anchor.normalizedTextHash.slice(0, 16), anchor.characterStart, anchor.characterEnd]),
+    progress: store.progress.map((item) => [item.bookId, item.chapterId, item.paragraphAnchorId, item.characterOffset, item.scrollOffsetHint ?? null, item.percent, item.updatedAt]),
+    annotations: store.annotations.map((item) => [item.id, item.bookId, item.chapterId, item.paragraphAnchorId, item.kind, item.range?.start ?? null, item.range?.end ?? null, item.textSnapshot, item.color || "", item.note || "", item.createdAt, item.updatedAt]),
+    preferences: store.preferences.map((item) => [item.bookId, item.fontAssetId || "", item.fontSize ?? null, item.textColor || "", item.background || "", item.lineHeight ?? null, item.paragraphSpacing ?? null, item.letterSpacing ?? null, item.textAlign || "", item.pageMargin ?? null, item.firstLineIndent ?? null, item.updatedAt, item.pageMode || "scroll"]),
+    assetCleanupTasks: store.assetCleanupTasks,
+  };
+}
+
+function unpackReadingStore(value: unknown): unknown {
+  if (!value || typeof value !== "object" || (value as { compact?: unknown }).compact !== 2) return value;
+  const packed = value as Record<string, unknown>;
+  const books = Array.isArray(packed.books) ? packed.books : [];
+  const bookById = new Map(books.flatMap((book) => book && typeof book === "object" && typeof (book as { id?: unknown }).id === "string" ? [[(book as { id: string }).id, book as { userIdentityId?: string }]] : []));
+  const chapters = (Array.isArray(packed.chapters) ? packed.chapters : []).flatMap((row) => {
+    if (!Array.isArray(row)) return [];
+    const book = bookById.get(String(row[1] || ""));
+    if (!book?.userIdentityId) return [];
+    return [{ id: row[0], userIdentityId: book.userIdentityId, bookId: row[1], order: row[2], title: row[3], ...(row[4] ? { firstParagraphAnchorId: row[4] } : {}), ...(row[5] ? { lastParagraphAnchorId: row[5] } : {}), wordCount: row[6] }];
+  });
+  const chapterById = new Map(chapters.map((chapter) => [String(chapter.id), chapter]));
+  const paragraphAnchors = (Array.isArray(packed.paragraphAnchors) ? packed.paragraphAnchors : []).flatMap((row) => {
+    if (!Array.isArray(row)) return [];
+    const chapter = chapterById.get(String(row[1] || ""));
+    if (!chapter) return [];
+    return [{ id: row[0], userIdentityId: chapter.userIdentityId, bookId: chapter.bookId, chapterId: row[1], ordinal: row[2], normalizedTextHash: row[3], characterStart: row[4], characterEnd: row[5] }];
+  });
+  const scoped = (bookId: unknown) => bookById.get(String(bookId || ""));
+  const progress = (Array.isArray(packed.progress) ? packed.progress : []).flatMap((row) => Array.isArray(row) && scoped(row[0])?.userIdentityId ? [{ userIdentityId: scoped(row[0])!.userIdentityId, bookId: row[0], chapterId: row[1], paragraphAnchorId: row[2], characterOffset: row[3], ...(row[4] !== null ? { scrollOffsetHint: row[4] } : {}), percent: row[5], updatedAt: row[6] }] : []);
+  const annotations = (Array.isArray(packed.annotations) ? packed.annotations : []).flatMap((row) => Array.isArray(row) && scoped(row[1])?.userIdentityId ? [{ id: row[0], userIdentityId: scoped(row[1])!.userIdentityId, bookId: row[1], chapterId: row[2], paragraphAnchorId: row[3], kind: row[4], ...(row[5] !== null && row[6] !== null ? { range: { start: row[5], end: row[6] } } : {}), textSnapshot: row[7], ...(row[8] ? { color: row[8] } : {}), ...(row[9] ? { note: row[9] } : {}), createdAt: row[10], updatedAt: row[11] }] : []);
+  const preferences = (Array.isArray(packed.preferences) ? packed.preferences : []).flatMap((row) => Array.isArray(row) && scoped(row[0])?.userIdentityId ? [{ userIdentityId: scoped(row[0])!.userIdentityId, bookId: row[0], ...(row[1] ? { fontAssetId: row[1] } : {}), ...(row[2] !== null ? { fontSize: row[2] } : {}), ...(row[3] ? { textColor: row[3] } : {}), ...(row[4] ? { background: row[4] } : {}), ...(row[5] !== null ? { lineHeight: row[5] } : {}), ...(row[6] !== null ? { paragraphSpacing: row[6] } : {}), ...(row[7] !== null ? { letterSpacing: row[7] } : {}), ...(row[8] ? { textAlign: row[8] } : {}), ...(row[9] !== null ? { pageMargin: row[9] } : {}), ...(row[10] !== null ? { firstLineIndent: row[10] } : {}), updatedAt: row[11], pageMode: row[12] === "horizontal" ? "horizontal" : "scroll" }] : []);
+  return { version: packed.version, books, chapters, paragraphAnchors, progress, annotations, preferences, assetCleanupTasks: packed.assetCleanupTasks };
 }

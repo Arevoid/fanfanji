@@ -44,6 +44,7 @@ export default function ReadingStoryPlayShell(
 ) {
   const [choicesExpanded, setChoicesExpanded] = useState(true);
   const [activePanelId, setActivePanelId] = useState<string | null>(null);
+  const [panelsExpanded, setPanelsExpanded] = useState(false);
   const scrollRef = useRef<HTMLElement>(null);
   const activePanel = props.panels.find((item) => item.id === activePanelId);
   const progress =
@@ -64,6 +65,7 @@ export default function ReadingStoryPlayShell(
     <div
       data-theme-page="reading-story-play"
       className="relative flex h-full flex-col overflow-hidden bg-[#0c0b0a] text-[#eee8df]"
+      onClick={() => { if (panelsExpanded) setPanelsExpanded(false); }}
     >
       <header className="relative z-30 flex shrink-0 items-center justify-between border-b border-white/10 bg-[#0c0b0a]/95 px-3 py-2 backdrop-blur">
         <button
@@ -128,18 +130,32 @@ export default function ReadingStoryPlayShell(
       <aside
         aria-label="故事快捷面板"
         className="absolute right-3 top-24 z-30 flex flex-col gap-2"
+        onClick={(event) => event.stopPropagation()}
       >
-        {props.panels.map((panel) => (
+        {!panelsExpanded ? (
           <button
-            key={panel.id}
             type="button"
-            onClick={() => setActivePanelId(panel.id)}
+            aria-expanded="false"
+            onClick={() => setPanelsExpanded(true)}
             className="flex h-10 items-center gap-2 rounded-full border border-white/10 bg-[#26221f]/95 px-3 text-[11px] font-bold shadow-lg backdrop-blur"
           >
-            <span className="text-amber-300">{panel.icon}</span>
-            {panel.label}
+            <ChevronDown className="h-4 w-4 text-amber-300" />功能
           </button>
-        ))}
+        ) : (
+          <>
+            {props.panels.map((panel) => (
+              <button
+                key={panel.id}
+                type="button"
+                onClick={() => { setActivePanelId(panel.id); setPanelsExpanded(false); }}
+                className="flex h-10 items-center gap-2 rounded-full border border-white/10 bg-[#26221f]/95 px-3 text-[11px] font-bold shadow-lg backdrop-blur"
+              >
+                <span className="text-amber-300">{panel.icon}</span>
+                {panel.label}
+              </button>
+            ))}
+          </>
+        )}
       </aside>
 
       <section

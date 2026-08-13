@@ -38,11 +38,11 @@ const store: ReadingStore = {
     createdAt: 1,
     updatedAt: 1,
   }],
-  chapters: [],
-  paragraphAnchors: [],
-  progress: [],
+  chapters: [{ id: "chapter-a", userIdentityId: "identity-a", bookId: "book-a", order: 0, title: "Chapter", firstParagraphAnchorId: "anchor-a", lastParagraphAnchorId: "anchor-a", wordCount: 10 }],
+  paragraphAnchors: [{ id: "anchor-a", userIdentityId: "identity-a", bookId: "book-a", chapterId: "chapter-a", ordinal: 0, normalizedTextHash: "0123456789abcdef0123456789abcdef", characterStart: 0, characterEnd: 10 }],
+  progress: [{ userIdentityId: "identity-a", bookId: "book-a", chapterId: "chapter-a", paragraphAnchorId: "anchor-a", characterOffset: 2, percent: 20, updatedAt: 2 }],
   annotations: [],
-  preferences: [],
+  preferences: [{ userIdentityId: "identity-a", bookId: "book-a", pageMode: "horizontal", updatedAt: 3 }],
   assetCleanupTasks: [],
 };
 
@@ -51,10 +51,14 @@ const serialized = localStorage.getItem(storageKeys.readingStore);
 assert.ok(serialized);
 assert.equal(serialized!.includes("Local Only"), true);
 assert.equal(serialized!.includes("blob"), false, "raw book content must not enter localStorage");
+assert.equal(JSON.parse(serialized!).compact, 2, "large reading indexes use the compact wire format");
 
 const loaded = loadReadingStore();
 assert.equal(loaded.valid, true);
 assert.equal(loaded.value.books[0]?.userIdentityId, "identity-a");
+assert.equal(loaded.value.paragraphAnchors[0]?.chapterId, "chapter-a");
+assert.equal(loaded.value.progress[0]?.percent, 20);
+assert.equal(loaded.value.preferences[0]?.pageMode, "horizontal");
 
 localStorage.setItem(storageKeys.readingStore, "{not-json");
 const invalid = loadReadingStore();

@@ -93,6 +93,7 @@ export interface ReadingBookPreferences {
   textAlign?: "left" | "justify";
   pageMargin?: number;
   firstLineIndent?: number;
+  pageMode?: "scroll" | "horizontal";
   updatedAt: number;
 }
 

@@ -29,7 +29,8 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { loadReadingStore } from "../core/storage/repositories/readingRepository";
+import { loadReadingStore, saveReadingStore } from "../core/storage/repositories/readingRepository";
+import { readingAssetDb } from "../core/storage/readingAssetDb";
 import type {
   ReadingBook,
   ReadingChapter,
@@ -226,6 +227,40 @@ export default function AppReading({
     refreshLibrary();
     retryReadingAssetCleanup(userIdentityId).catch(() => undefined);
   }, [refreshLibrary, userIdentityId]);
+
+  useEffect(() => {
+    let active = true;
+    const migrateEmbeddedCovers = async () => {
+      const loaded = loadReadingStore();
+      const embedded = loaded.value.books.filter((book) => book.userIdentityId === userIdentityId && book.coverUrl?.startsWith("data:image/"));
+      if (!embedded.length) return;
+      const migrated = new Set<string>();
+      for (const book of embedded) {
+        try {
+          const blob = await (await fetch(book.coverUrl!)).blob();
+          await readingAssetDb.saveCover(book.id, blob);
+          migrated.add(book.id);
+        } catch {
+          // Keep the original cover when this browser cannot decode its data URL.
+        }
+      }
+      if (!migrated.size) return;
+      const latest = loadReadingStore().value;
+      const result = saveReadingStore({
+        ...latest,
+        books: latest.books.map((book) => migrated.has(book.id) ? { ...book, coverUrl: `reading-cover:${book.id}` } : book),
+      });
+      if (result.success && active) refreshLibrary();
+    };
+    migrateEmbeddedCovers().catch(() => undefined);
+    return () => { active = false; };
+  }, [refreshLibrary, userIdentityId]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const visibleBooks = useMemo(
     () =>
@@ -477,7 +512,7 @@ export default function AppReading({
     }
   };
 
-  const handleCoverSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     const bookId = coverBookId;
@@ -491,24 +526,15 @@ export default function AppReading({
       setNotice({ tone: "error", text: "封面图片不能超过 4 MB。" });
       return;
     }
-    const reader = new FileReader();
-    reader.onerror = () =>
-      setNotice({ tone: "error", text: "封面读取失败，请重新选择。" });
-    reader.onload = () => {
-      try {
-        updateReadingBookCover({
-          userIdentityId,
-          bookId,
-          coverUrl:
-            typeof reader.result === "string" ? reader.result : undefined,
-        });
-        refreshLibrary();
-        setNotice({ tone: "success", text: "书籍封面已更新。" });
-      } catch (error) {
-        showError(error, "封面保存失败");
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      await readingAssetDb.saveCover(bookId, file);
+      updateReadingBookCover({ userIdentityId, bookId, coverUrl: `reading-cover:${bookId}` });
+      refreshLibrary();
+      setNotice({ tone: "success", text: "书籍封面已更新。" });
+    } catch (error) {
+      await readingAssetDb.deleteCover(bookId).catch(() => undefined);
+      showError(error, "封面保存失败");
+    }
   };
 
   const createStoryFromSetup = (draft: ReadingStorySetupDraft) => {
@@ -861,6 +887,7 @@ export default function AppReading({
     setIsWorking(true);
     try {
       const result = await deleteReadingBook(userIdentityId, selectedBook.id);
+      await readingAssetDb.deleteCover(selectedBook.id).catch(() => undefined);
       refreshLibrary();
       setSelectedBookId(null);
       setNotice(
@@ -1020,7 +1047,7 @@ export default function AppReading({
     notice && (
       <div
         role={notice.tone === "error" ? "alert" : "status"}
-        className={`flex items-start gap-2 rounded-2xl border p-3 text-xs leading-5 ${
+        className={`pointer-events-none absolute left-4 right-4 top-3 z-[80] mx-auto flex max-w-md items-start gap-2 rounded-2xl border p-3 text-xs leading-5 shadow-xl backdrop-blur ${
           notice.tone === "error"
             ? "border-rose-300/40 bg-rose-500/10 text-rose-200"
             : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]"
@@ -1120,7 +1147,7 @@ export default function AppReading({
     return (
       <div
         data-theme-page="reading-co-reading-room"
-        className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]"
+        className="relative flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]"
       >
         <header className="relative z-10 flex shrink-0 items-center justify-between px-4 py-1.5">
           <button
@@ -1351,7 +1378,7 @@ export default function AppReading({
     return (
       <div
         data-theme-page="reading"
-        className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]"
+        className="relative flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]"
       >
         <input
           ref={coverInputRef}
@@ -1794,7 +1821,7 @@ export default function AppReading({
   return (
     <div
       data-theme-page="reading"
-      className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]"
+      className="relative flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]"
     >
       <header className="relative z-10 flex shrink-0 items-center justify-between px-4 py-1.5">
         <button
@@ -2473,14 +2500,14 @@ export default function AppReading({
       )}
       {inviteBook && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:items-center"
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/45 p-3"
           role="dialog"
           aria-modal="true"
           aria-label="选择 AI 好友共读"
           onClick={() => setInviteBookId(null)}
         >
           <div
-            className="flex max-h-full w-full max-w-md flex-col rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
+            className="flex max-h-[calc(100%-1.5rem)] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">

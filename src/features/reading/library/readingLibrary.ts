@@ -137,7 +137,7 @@ export function updateReadingBookCover(
   const store = requireStore(dependencies);
   const book = findScopedBook(store, input.userIdentityId, input.bookId);
   const coverUrl = input.coverUrl?.trim();
-  if (coverUrl && !coverUrl.startsWith("data:image/")) throw new ReadingLibraryError("save-failed", "书籍封面必须是本地图片");
+  if (coverUrl && !coverUrl.startsWith("data:image/") && !coverUrl.startsWith("reading-cover:")) throw new ReadingLibraryError("save-failed", "书籍封面必须是本地图片");
   const updated = { ...book, coverUrl: coverUrl || undefined, updatedAt: dependencies.now() };
   saveOrThrow(dependencies, {
     ...store,

@@ -280,7 +280,7 @@ export default function ReadingStorySetupWizard({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 pt-[max(0.75rem,env(safe-area-inset-top))] sm:items-center sm:p-4"
+      className="absolute inset-0 z-50 flex items-end justify-center bg-black/55 sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label={`穿书设置：${book.title}`}

@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import type { ReadingBook } from "../../domain/reading/types";
+import { readingAssetDb } from "../../core/storage/readingAssetDb";
 
 const palettes = [
   "from-emerald-950 via-teal-800 to-cyan-600",
@@ -10,7 +11,24 @@ const palettes = [
 ];
 
 export default function ReadingBookCover({ book, className = "" }: { book: ReadingBook; className?: string }) {
-  if (book.coverUrl) return <img src={book.coverUrl} alt={`${book.title}封面`} className={`object-cover ${className}`} />;
+  const [storedCoverUrl, setStoredCoverUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setStoredCoverUrl(null);
+    if (!book.coverUrl?.startsWith("reading-cover:")) return () => { active = false; };
+    readingAssetDb.loadCover(book.id).then((blob) => {
+      if (!active || !blob) return;
+      objectUrl = URL.createObjectURL(blob);
+      setStoredCoverUrl(objectUrl);
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [book.coverUrl, book.id]);
+  const coverUrl = book.coverUrl?.startsWith("reading-cover:") ? storedCoverUrl : book.coverUrl;
+  if (coverUrl) return <img src={coverUrl} alt={`${book.title}封面`} className={`object-cover ${className}`} />;
   const palette = palettes[Array.from(book.title).reduce((sum, character) => sum + (character.codePointAt(0) || 0), 0) % palettes.length];
   return (
     <div aria-label={`${book.title}默认封面`} className={`relative overflow-hidden bg-gradient-to-br ${palette} ${className}`}>

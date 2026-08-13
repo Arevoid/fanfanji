@@ -27,10 +27,9 @@ assert.match(
 );
 assert.match(reader, /aria-label="打开目录"/);
 assert.match(reader, /上一章[\s\S]*下一章/);
-assert.doesNotMatch(
-  reader,
-  /overflow-x-auto|左右翻页|translateX/,
-  "Round 5 remains a vertical continuous reader",
-);
+assert.match(reader, /pageMode === "horizontal"/);
+assert.match(reader, /overflow-x-auto overflow-y-hidden/);
+assert.match(reader, /左右翻页/);
+assert.match(reader, /复制[\s\S]*高亮[\s\S]*段评[\s\S]*书签[\s\S]*编辑[\s\S]*分享/);
 
-console.log("reading vertical reader interface tests passed");
+console.log("reading reader modes and selection toolbar tests passed");

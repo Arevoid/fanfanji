@@ -1,8 +1,9 @@
 import type { ReadingBookAsset } from "../../domain/reading/types";
 
 const DB_NAME = "FanfanjiReadingDB";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const ASSET_STORE = "assets";
+const COVER_STORE = "covers";
 
 function isValidAsset(asset: ReadingBookAsset): boolean {
   return typeof asset.assetId === "string" && asset.assetId.length > 0
@@ -29,6 +30,9 @@ class ReadingAssetDB {
         if (!database.objectStoreNames.contains(ASSET_STORE)) {
           const store = database.createObjectStore(ASSET_STORE, { keyPath: "assetId" });
           store.createIndex("byIdentityAndBook", ["userIdentityId", "bookId"], { unique: false });
+        }
+        if (!database.objectStoreNames.contains(COVER_STORE)) {
+          database.createObjectStore(COVER_STORE);
         }
       };
       request.onsuccess = () => {
@@ -89,8 +93,43 @@ class ReadingAssetDB {
   async clearAll(): Promise<void> {
     const database = await this.init();
     return new Promise((resolve, reject) => {
-      const transaction = database.transaction(ASSET_STORE, "readwrite");
+      const transaction = database.transaction([ASSET_STORE, COVER_STORE], "readwrite");
       transaction.objectStore(ASSET_STORE).clear();
+      transaction.objectStore(COVER_STORE).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
+  async saveCover(bookId: string, blob: Blob): Promise<void> {
+    if (!bookId || !(blob instanceof Blob) || !blob.type.startsWith("image/")) throw new Error("Invalid reading cover");
+    const database = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(COVER_STORE, "readwrite");
+      transaction.objectStore(COVER_STORE).put(blob, bookId);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
+  async loadCover(bookId: string): Promise<Blob | null> {
+    if (!bookId) return null;
+    const database = await this.init();
+    return new Promise((resolve, reject) => {
+      const request = database.transaction(COVER_STORE, "readonly").objectStore(COVER_STORE).get(bookId);
+      request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteCover(bookId: string): Promise<void> {
+    if (!bookId) return;
+    const database = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(COVER_STORE, "readwrite");
+      transaction.objectStore(COVER_STORE).delete(bookId);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
