@@ -1,10 +1,13 @@
-import type { ReadingBookAsset } from "../../domain/reading/types";
+import type { ReadingBookAsset, ReadingStore } from "../../domain/reading/types";
 
 const DB_NAME = "FanfanjiReadingDB";
 const DB_VERSION = 1;
 const ASSET_STORE = "assets";
 const COVER_DB_NAME = "FanfanjiReadingCoverDB";
 const COVER_STORE = "covers";
+const METADATA_DB_NAME = "FanfanjiReadingMetadataDB";
+const METADATA_STORE = "metadata";
+const METADATA_KEY = "reading-store";
 
 function isValidAsset(asset: ReadingBookAsset): boolean {
   return typeof asset.assetId === "string" && asset.assetId.length > 0
@@ -20,6 +23,7 @@ function isValidAsset(asset: ReadingBookAsset): boolean {
 class ReadingAssetDB {
   private db: IDBDatabase | null = null;
   private coverDb: IDBDatabase | null = null;
+  private metadataDb: IDBDatabase | null = null;
 
   private async init(): Promise<IDBDatabase> {
     if (this.db) return this.db;
@@ -73,6 +77,27 @@ class ReadingAssetDB {
     });
   }
 
+  private async initMetadata(): Promise<IDBDatabase> {
+    if (this.metadataDb) return this.metadataDb;
+    if (typeof indexedDB === "undefined") throw new Error("IndexedDB is unavailable");
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void) => { if (!settled) { settled = true; globalThis.clearTimeout(timer); callback(); } };
+      const timer = globalThis.setTimeout(() => finish(() => reject(new Error("Reading metadata database open timed out"))), 8000);
+      const request = indexedDB.open(METADATA_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(METADATA_STORE)) request.result.createObjectStore(METADATA_STORE);
+      };
+      request.onsuccess = () => {
+        this.metadataDb = request.result;
+        this.metadataDb.onversionchange = () => { this.metadataDb?.close(); this.metadataDb = null; };
+        finish(() => resolve(request.result));
+      };
+      request.onerror = () => finish(() => reject(request.error));
+      request.onblocked = () => finish(() => reject(new Error("Reading metadata database is blocked")));
+    });
+  }
+
   async save(asset: ReadingBookAsset): Promise<void> {
     if (!isValidAsset(asset)) throw new Error("Invalid reading book asset");
     const database = await this.init();
@@ -118,6 +143,7 @@ class ReadingAssetDB {
   async clearAll(): Promise<void> {
     const database = await this.init();
     const coverDatabase = await this.initCover();
+    const metadataDatabase = await this.initMetadata();
     const clearStore = (target: IDBDatabase, storeName: string) => new Promise<void>((resolve, reject) => {
       const transaction = target.transaction(storeName, "readwrite");
       transaction.objectStore(storeName).clear();
@@ -125,9 +151,29 @@ class ReadingAssetDB {
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
-    const tasks = [clearStore(database, ASSET_STORE), clearStore(coverDatabase, COVER_STORE)];
+    const tasks = [clearStore(database, ASSET_STORE), clearStore(coverDatabase, COVER_STORE), clearStore(metadataDatabase, METADATA_STORE)];
     if (database.objectStoreNames.contains(COVER_STORE)) tasks.push(clearStore(database, COVER_STORE));
     await Promise.all(tasks);
+  }
+
+  async saveMetadata(store: ReadingStore): Promise<void> {
+    const database = await this.initMetadata();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(METADATA_STORE, "readwrite");
+      transaction.objectStore(METADATA_STORE).put(store, METADATA_KEY);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
+  async loadMetadata(): Promise<ReadingStore | null> {
+    const database = await this.initMetadata();
+    return new Promise((resolve, reject) => {
+      const request = database.transaction(METADATA_STORE, "readonly").objectStore(METADATA_STORE).get(METADATA_KEY);
+      request.onsuccess = () => resolve(request.result && typeof request.result === "object" ? request.result as ReadingStore : null);
+      request.onerror = () => reject(request.error);
+    });
   }
 
   async saveCover(bookId: string, blob: Blob): Promise<void> {
@@ -178,4 +224,10 @@ class ReadingAssetDB {
 }
 
 export const readingAssetDb = new ReadingAssetDB();
-export { ASSET_STORE as READING_ASSET_STORE_NAME, DB_NAME as READING_DB_NAME, DB_VERSION as READING_DB_VERSION };
+export {
+  ASSET_STORE as READING_ASSET_STORE_NAME,
+  DB_NAME as READING_DB_NAME,
+  DB_VERSION as READING_DB_VERSION,
+  METADATA_DB_NAME as READING_METADATA_DB_NAME,
+  METADATA_STORE as READING_METADATA_STORE_NAME,
+};

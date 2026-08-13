@@ -1,7 +1,7 @@
 import { readingAssetDb } from "../../../core/storage/readingAssetDb";
 import {
   loadReadingStore,
-  saveReadingStore,
+  saveReadingStoreDurably,
 } from "../../../core/storage/repositories/readingRepository";
 import type {
   StorageResult,
@@ -71,7 +71,7 @@ interface ReadingAssetStore {
 
 export interface ReadingImportDependencies {
   loadStore: () => StorageResult<ReadingStore>;
-  saveStore: (store: ReadingStore) => StorageWriteResult;
+  saveStore: (store: ReadingStore) => StorageWriteResult | Promise<StorageWriteResult>;
   assetStore: ReadingAssetStore;
   now: () => number;
   createId: (prefix: string) => string;
@@ -79,7 +79,7 @@ export interface ReadingImportDependencies {
 
 const defaultDependencies: ReadingImportDependencies = {
   loadStore: loadReadingStore,
-  saveStore: saveReadingStore,
+  saveStore: saveReadingStoreDurably,
   assetStore: readingAssetDb,
   now: () => Date.now(),
   createId: (prefix) =>
@@ -283,7 +283,7 @@ export async function importReadingFile(
     );
   }
 
-  const write = dependencies.saveStore({
+  const write = await dependencies.saveStore({
     ...current,
     books: [...current.books, book],
     chapters: [...current.chapters, ...parsed.chapters],

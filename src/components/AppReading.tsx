@@ -29,7 +29,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { loadReadingStore, saveReadingStore } from "../core/storage/repositories/readingRepository";
+import { initializeReadingStore, loadReadingStore, saveReadingStore } from "../core/storage/repositories/readingRepository";
 import { readingAssetDb } from "../core/storage/readingAssetDb";
 import type {
   ReadingBook,
@@ -260,13 +260,23 @@ export default function AppReading({
   }, [userIdentityId]);
 
   useEffect(() => {
-    refreshLibrary();
-    retryReadingAssetCleanup(userIdentityId).catch(() => undefined);
+    let active = true;
+    initializeReadingStore()
+      .then(() => {
+        if (!active) return;
+        refreshLibrary();
+        retryReadingAssetCleanup(userIdentityId).catch(() => undefined);
+      })
+      .catch(() => {
+        if (active) refreshLibrary();
+      });
+    return () => { active = false; };
   }, [refreshLibrary, userIdentityId]);
 
   useEffect(() => {
     let active = true;
     const migrateEmbeddedCovers = async () => {
+      await initializeReadingStore();
       const loaded = loadReadingStore();
       const embedded = loaded.value.books.filter((book) => book.userIdentityId === userIdentityId && book.coverUrl?.startsWith("data:image/"));
       if (!embedded.length) return;
@@ -411,6 +421,7 @@ export default function AppReading({
     setIsImporting(true);
     setNotice({ tone: "info", text: "正在读取并导入小说……" });
     try {
+      await initializeReadingStore();
       let result = await importReadingFile(file, userIdentityId);
       if (result.status === "duplicate") {
         const keepBoth = window.confirm(

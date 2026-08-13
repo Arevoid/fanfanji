@@ -1,11 +1,19 @@
 import LZString from "lz-string";
 import { normalizeReadingStore } from "../../../domain/reading/normalization";
 import { createEmptyReadingStore, type ReadingStore } from "../../../domain/reading/types";
-import { readJson, readString, writeString } from "../storageAdapter";
+import { readingAssetDb } from "../readingAssetDb";
+import { readJson, readString, remove, writeString } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
-import type { StorageResult, StorageWriteResult } from "../storageTypes";
+import type { StorageErrorKind, StorageResult, StorageWriteResult } from "../storageTypes";
 
 export function loadReadingStore(): StorageResult<ReadingStore> {
+  if (metadataReady && cachedReadingStore) {
+    return { value: cachedReadingStore, found: true, valid: true };
+  }
+  return loadLegacyReadingStore();
+}
+
+function loadLegacyReadingStore(): StorageResult<ReadingStore> {
   const raw = readString(storageKeys.readingStore);
   const loaded = raw.valid && raw.found && raw.value?.startsWith(COMPRESSED_READING_STORE_PREFIX)
     ? readCompressedReadingStore(raw.value)
@@ -17,14 +25,98 @@ export function loadReadingStore(): StorageResult<ReadingStore> {
 }
 
 export function saveReadingStore(store: ReadingStore): StorageWriteResult {
+  const normalized = normalizeReadingStore(store);
+  if (typeof indexedDB !== "undefined") {
+    cachedReadingStore = normalized;
+    metadataReady = true;
+    enqueueMetadataWrite(normalized).catch((error) => {
+      console.warn("[reading] Failed to persist reading metadata in IndexedDB.", error);
+    });
+    return { success: true };
+  }
+  return saveLegacyReadingStore(normalized);
+}
+
+export async function saveReadingStoreDurably(store: ReadingStore): Promise<StorageWriteResult> {
+  const normalized = normalizeReadingStore(store);
+  if (typeof indexedDB === "undefined") return saveLegacyReadingStore(normalized);
+  const previousStore = cachedReadingStore;
+  cachedReadingStore = normalized;
+  metadataReady = true;
   try {
-    const serialized = JSON.stringify(packReadingStore(normalizeReadingStore(store)));
+    await enqueueMetadataWrite(normalized);
+    remove(storageKeys.readingStore);
+    return { success: true };
+  } catch (error) {
+    cachedReadingStore = previousStore;
+    metadataReady = previousStore !== null;
+    console.warn("[reading] Failed to persist reading metadata in IndexedDB.", error);
+    return { success: false, error: describeIndexedDbError(error) };
+  }
+}
+
+export async function initializeReadingStore(): Promise<StorageResult<ReadingStore>> {
+  if (typeof indexedDB === "undefined") return loadLegacyReadingStore();
+  if (metadataReady && cachedReadingStore) return { value: cachedReadingStore, found: true, valid: true };
+  if (initializationPromise) return initializationPromise;
+  initializationPromise = (async () => {
+    try {
+      const stored = await readingAssetDb.loadMetadata();
+      if (stored) {
+        cachedReadingStore = normalizeReadingStore(stored);
+        metadataReady = true;
+        return { value: cachedReadingStore, found: true, valid: true };
+      }
+      const legacy = loadLegacyReadingStore();
+      if (legacy.found && !legacy.valid) return legacy;
+      cachedReadingStore = legacy.value;
+      metadataReady = true;
+      await enqueueMetadataWrite(cachedReadingStore);
+      if (legacy.found && legacy.valid) remove(storageKeys.readingStore);
+      return legacy;
+    } catch (error) {
+      console.warn("[reading] IndexedDB metadata initialization failed; using the legacy store for this session.", error);
+      metadataReady = false;
+      return loadLegacyReadingStore();
+    }
+  })();
+  return initializationPromise;
+}
+
+function saveLegacyReadingStore(store: ReadingStore): StorageWriteResult {
+  try {
+    const serialized = JSON.stringify(packReadingStore(store));
     const compressed = LZString.compressToUTF16(serialized);
     return writeString(storageKeys.readingStore, `${COMPRESSED_READING_STORE_PREFIX}${compressed}`);
   } catch (error) {
     console.warn("[reading] Failed to serialize the reading metadata store.", error);
     return { success: false, error: "serialize" };
   }
+}
+
+let cachedReadingStore: ReadingStore | null = null;
+let metadataReady = false;
+let initializationPromise: Promise<StorageResult<ReadingStore>> | null = null;
+let metadataWriteQueue: Promise<void> = Promise.resolve();
+
+function enqueueMetadataWrite(store: ReadingStore): Promise<void> {
+  const snapshot = structuredCloneReadingStore(store);
+  metadataWriteQueue = metadataWriteQueue.catch(() => undefined).then(() => readingAssetDb.saveMetadata(snapshot));
+  return metadataWriteQueue;
+}
+
+function structuredCloneReadingStore(store: ReadingStore): ReadingStore {
+  return typeof structuredClone === "function"
+    ? structuredClone(store)
+    : JSON.parse(JSON.stringify(store)) as ReadingStore;
+}
+
+function describeIndexedDbError(error: unknown): StorageErrorKind {
+  if (error && typeof error === "object") {
+    const name = String((error as { name?: unknown }).name || "");
+    if (name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED") return "quota";
+  }
+  return error instanceof Error && /unavailable|disabled/i.test(error.message) ? "unavailable" : "write";
 }
 
 const COMPRESSED_READING_STORE_PREFIX = "lz16:";
