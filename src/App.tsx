@@ -103,6 +103,7 @@ import {
 import StatusBar from "./components/StatusBar";
 import { resolveActiveChatStylePreset } from "./features/chat/styles/chatStylePreset";
 import { useForumActivityEngine } from "./features/forum/hooks/useForumActivityEngine";
+import { shouldSeedScheduleForFreshInstall } from "./features/home/freshInstallPolicy";
 import {
   BookOpen,
   Bookmark,
@@ -242,6 +243,7 @@ const DEFAULT_HOME_SCREEN_ITEMS: HomeScreenItem[] = [
   { id: "store", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 0 } },
   { id: "settings", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 1 } },
   { id: "notes", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 0 } },
+  { id: "schedule", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 1 } },
 ];
 
 const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
@@ -349,6 +351,9 @@ const DEFAULT_MESSAGES: Message[] = [];
 export default function App() {
   const { resolvedTheme } = useTheme();
   useVisualViewport();
+  const seedScheduleForFreshInstall = useRef(
+    typeof window !== "undefined" && shouldSeedScheduleForFreshInstall(window.localStorage),
+  ).current;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -704,6 +709,7 @@ export default function App() {
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
     const raw = localStorage.getItem("phone_installed_apps");
     let parsed: string[] = ["chat", "archives", "worldbook", "music", "notes", "offline", "store", "settings"];
+    if (!raw && seedScheduleForFreshInstall) parsed.push("schedule");
     if (raw) {
       try {
         const candidate = JSON.parse(raw);
@@ -919,10 +925,12 @@ export default function App() {
         items = [];
       }
     } else {
-      items = DEFAULT_HOME_SCREEN_ITEMS.map((item) => ({
+      items = DEFAULT_HOME_SCREEN_ITEMS
+        .filter((item) => item.id !== "schedule" || seedScheduleForFreshInstall)
+        .map((item) => ({
         ...item,
         position: item.position ? { ...item.position } : undefined,
-      }));
+        }));
     }
 
     items = items
