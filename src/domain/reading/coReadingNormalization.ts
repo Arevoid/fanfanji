@@ -2,6 +2,7 @@ import {
   CO_READING_STORE_VERSION,
   createEmptyCoReadingStore,
   type AiReadingState,
+  type AiReadingSpoilerDisclosure,
   type CoReadingStore,
   type ReadingRoom,
 } from "./coReadingTypes";
@@ -15,6 +16,15 @@ const array = <T>(value: unknown, guard: (item: unknown) => item is T): T[] => A
 
 const isRange = (value: unknown): value is { start: number; end: number } =>
   record(value) && number(value.start) && number(value.end) && value.end >= value.start;
+
+const isSpoilerDisclosure = (value: unknown): value is AiReadingSpoilerDisclosure =>
+  record(value)
+  && string(value.id)
+  && string(value.chapterId)
+  && string(value.paragraphAnchorId)
+  && typeof value.textSnapshot === "string"
+  && value.textSnapshot.length <= 8000
+  && number(value.disclosedAt);
 
 const isRoom = (value: unknown): value is ReadingRoom => {
   if (!record(value)) return false;
@@ -63,6 +73,7 @@ const isAiReadingState = (value: unknown): value is AiReadingState => {
     && (value.lastCommentedAnchor === undefined || (record(value.lastCommentedAnchor) && string(value.lastCommentedAnchor.id)))
     && ["off", "rare", "moderate", "active"].includes(String(value.autonomousCommentFrequency))
     && ["strict", "shared_fragment_only", "allow_user_spoilers"].includes(String(value.spoilerPolicy))
+    && (value.userRevealedSpoilers === undefined || (Array.isArray(value.userRevealedSpoilers) && value.userRevealedSpoilers.every(isSpoilerDisclosure)))
     && number(value.updatedAt);
 };
 
@@ -84,6 +95,6 @@ export function normalizeCoReadingStore(value: unknown): CoReadingStore {
   const aiReadingStates = dedupe(
     array(value.aiReadingStates, isAiReadingState).filter(belongsToRoom),
     (state) => `${state.userIdentityId}:${state.readingRoomId}`,
-  );
+  ).map((state) => ({ ...state, userRevealedSpoilers: state.userRevealedSpoilers || [] }));
   return { version: CO_READING_STORE_VERSION, rooms, aiReadingStates };
 }

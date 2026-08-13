@@ -68,6 +68,7 @@ export function createAiReadingRoom(input: CreateReadingRoomInput): ReadingRoom 
     aiKnownChapterIds: [],
     aiKnownParagraphRange: {},
     ...DEFAULT_AI_READING_STATE,
+    userRevealedSpoilers: [],
     updatedAt: now,
   };
   const result = createReadingRoom(room, aiReadingState);

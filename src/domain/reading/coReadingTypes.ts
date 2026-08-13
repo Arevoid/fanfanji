@@ -40,6 +40,14 @@ export interface AiReadingParagraphRange {
   end: number;
 }
 
+export interface AiReadingSpoilerDisclosure {
+  id: string;
+  chapterId: string;
+  paragraphAnchorId: string;
+  textSnapshot: string;
+  disclosedAt: number;
+}
+
 export interface AiReadingState extends ReadingRoomScope {
   aiReadingCursor: ParagraphAnchor | null;
   aiKnownChapterIds: string[];
@@ -48,6 +56,7 @@ export interface AiReadingState extends ReadingRoomScope {
   lastCommentedAnchor?: ParagraphAnchor;
   autonomousCommentFrequency: AutonomousCommentFrequency;
   spoilerPolicy: SpoilerPolicy;
+  userRevealedSpoilers: AiReadingSpoilerDisclosure[];
   updatedAt: number;
 }
 

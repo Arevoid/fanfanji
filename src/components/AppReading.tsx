@@ -34,7 +34,8 @@ import {
 import ReadingReader from "./reading/ReadingReader";
 import { buildReadingArchive, restoreReadingArchive, serializeReadingArchive } from "../features/reading/archive/readingArchive";
 import { createAiReadingRoom, ReadingCoReadingError } from "../features/reading/coReading/readingCoReading";
-import { listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
+import { getAiReadingState, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
+import { advanceAiReadingToParagraph, AiReadingBoundaryError } from "../features/reading/coReading/aiReadingBoundary";
 
 interface AppReadingProps {
   userIdentityId: string;
@@ -277,6 +278,18 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
 
   if (selectedRoom) {
     const roomBook = books.find((book) => book.id === selectedRoom.bookId);
+    const aiReadingState = getAiReadingState(selectedRoom);
+    const personalPosition = progress.find((item) => item.bookId === selectedRoom.bookId);
+    const advanceAiToPersonalPosition = () => {
+      if (!personalPosition) return;
+      try {
+        advanceAiReadingToParagraph({ scope: selectedRoom, paragraphAnchorId: personalPosition.paragraphAnchorId });
+        refreshLibrary();
+        setNotice({ tone: "success", text: "已明确告诉 TA 读到你的当前位置；这不会把私人笔记或其他房间内容分享出去。" });
+      } catch (error) {
+        setNotice({ tone: "error", text: error instanceof AiReadingBoundaryError ? error.message : "AI 阅读进度更新失败" });
+      }
+    };
     return (
       <div data-theme-page="reading-co-reading-room" className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
         <header className="relative z-10 flex shrink-0 items-center justify-between px-4 py-1.5">
@@ -303,8 +316,10 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
             </section>
             <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
               <div className="flex items-center justify-between"><h2 className="text-sm font-bold">AI 阅读状态</h2><span className="text-[10px] text-[var(--text-muted)]">独立保存</span></div>
-              <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">AI 会按照自己的阅读速度逐步获得知识，只能评论已经读到的章节。后续会在这里显示 TA 的阅读游标、已知范围和段评。</p>
-              <div className="mt-3 flex gap-2"><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px]">人设驱动速度</span><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px]">适中段评</span></div>
+              <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">AI 只能评论已经读到的段落；整本书的后续内容不会因为分析存在就自动泄露。</p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]"><span className="rounded-xl bg-[var(--surface-raised)] p-2">已知章节：{aiReadingState?.aiKnownChapterIds.length || 0}</span><span className="rounded-xl bg-[var(--surface-raised)] p-2">已知段落：{aiReadingState ? Object.values(aiReadingState.aiKnownParagraphRange).reduce((sum, range) => sum + Math.max(0, range.end - range.start + 1), 0) : 0}</span></div>
+              <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px]">{aiReadingState?.aiReadingPace === "persona_driven" ? "人设驱动速度" : aiReadingState?.aiReadingPace || "未设置速度"}</span><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px]">剧透：严格保护</span></div>
+              {personalPosition && selectedRoom.status === "active" && <button type="button" onClick={advanceAiToPersonalPosition} className="mt-3 h-10 w-full rounded-2xl border border-[var(--border)] text-xs font-bold">让 TA 读到我的当前位置</button>}
             </section>
             {roomBook && roomBook.status !== "archived" && <button type="button" onClick={() => setReadingBookId(roomBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)]"><BookOpenText className="h-4 w-4" />继续阅读这本书</button>}
           </div>
