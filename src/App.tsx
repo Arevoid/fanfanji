@@ -3770,6 +3770,7 @@ export default function App() {
                       settings={settings}
                       characters={characters}
                       relationships={relationships}
+                      worldBookEntries={worldBookEntries}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

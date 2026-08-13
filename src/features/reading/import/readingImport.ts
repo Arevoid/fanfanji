@@ -1,8 +1,20 @@
 import { readingAssetDb } from "../../../core/storage/readingAssetDb";
-import { loadReadingStore, saveReadingStore } from "../../../core/storage/repositories/readingRepository";
-import type { StorageResult, StorageWriteResult } from "../../../core/storage/storageTypes";
-import type { ReadingBook, ReadingBookAsset, ReadingBookFormat, ReadingStore } from "../../../domain/reading/types";
+import {
+  loadReadingStore,
+  saveReadingStore,
+} from "../../../core/storage/repositories/readingRepository";
+import type {
+  StorageResult,
+  StorageWriteResult,
+} from "../../../core/storage/storageTypes";
+import type {
+  ReadingBook,
+  ReadingBookAsset,
+  ReadingBookFormat,
+  ReadingStore,
+} from "../../../domain/reading/types";
 import { parseReadingDocument } from "../library/readingParser";
+import { stableTextHash } from "../library/stableTextHash";
 
 export type ReadingImportErrorCode =
   | "unsupported-format"
@@ -14,7 +26,10 @@ export type ReadingImportErrorCode =
   | "metadata-write-failed";
 
 export class ReadingImportError extends Error {
-  constructor(public readonly code: ReadingImportErrorCode, message: string) {
+  constructor(
+    public readonly code: ReadingImportErrorCode,
+    message: string,
+  ) {
     super(message);
     this.name = "ReadingImportError";
   }
@@ -32,15 +47,26 @@ export interface PreparedReadingImport {
   characterCount: number;
 }
 
-export type ReadingImportFile = Pick<File, "name" | "type" | "size" | "arrayBuffer">;
+export type ReadingImportFile = Pick<
+  File,
+  "name" | "type" | "size" | "arrayBuffer"
+>;
 
 export type ReadingImportResult =
-  | { status: "duplicate"; existingBookIds: string[]; prepared: PreparedReadingImport }
+  | {
+      status: "duplicate";
+      existingBookIds: string[];
+      prepared: PreparedReadingImport;
+    }
   | { status: "imported"; book: ReadingBook };
 
 interface ReadingAssetStore {
   save(asset: ReadingBookAsset): Promise<void>;
-  delete(assetId: string, userIdentityId: string, bookId: string): Promise<boolean>;
+  delete(
+    assetId: string,
+    userIdentityId: string,
+    bookId: string,
+  ): Promise<boolean>;
 }
 
 export interface ReadingImportDependencies {
@@ -56,19 +82,35 @@ const defaultDependencies: ReadingImportDependencies = {
   saveStore: saveReadingStore,
   assetStore: readingAssetDb,
   now: () => Date.now(),
-  createId: (prefix) => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`,
+  createId: (prefix) =>
+    `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`,
 };
 
-const extensionOf = (name: string): string => name.split(".").pop()?.toLowerCase() || "";
+const extensionOf = (name: string): string =>
+  name.split(".").pop()?.toLowerCase() || "";
 
-export function detectReadingBookFormat(file: Pick<ReadingImportFile, "name" | "type">): ReadingBookFormat {
+export function detectReadingBookFormat(
+  file: Pick<ReadingImportFile, "name" | "type">,
+): ReadingBookFormat {
   const extension = extensionOf(file.name);
   if (extension === "txt" || file.type === "text/plain") return "txt";
-  if (extension === "md" || extension === "markdown" || file.type === "text/markdown") return "markdown";
-  throw new ReadingImportError("unsupported-format", "第一阶段仅支持 TXT 和 Markdown 文件");
+  if (
+    extension === "md" ||
+    extension === "markdown" ||
+    file.type === "text/markdown"
+  )
+    return "markdown";
+  throw new ReadingImportError(
+    "unsupported-format",
+    "第一阶段仅支持 TXT 和 Markdown 文件",
+  );
 }
 
-function decodeWithLabel(bytes: Uint8Array, label: string, fatal: boolean): string {
+function decodeWithLabel(
+  bytes: Uint8Array,
+  label: string,
+  fatal: boolean,
+): string {
   try {
     return new TextDecoder(label, { fatal }).decode(bytes);
   } catch {
@@ -78,14 +120,20 @@ function decodeWithLabel(bytes: Uint8Array, label: string, fatal: boolean): stri
 
 function looksCorrupted(text: string): boolean {
   if (!text) return true;
-  const replacementCount = [...text].filter((character) => character === "�").length;
+  const replacementCount = [...text].filter(
+    (character) => character === "�",
+  ).length;
   const nulCount = [...text].filter((character) => character === "\0").length;
   return replacementCount / text.length > 0.01 || nulCount / text.length > 0.01;
 }
 
-export function decodeReadingText(buffer: ArrayBuffer): { text: string; encoding: string } {
+export function decodeReadingText(buffer: ArrayBuffer): {
+  text: string;
+  encoding: string;
+} {
   const bytes = new Uint8Array(buffer);
-  if (bytes.byteLength === 0) throw new ReadingImportError("empty-file", "文件内容为空");
+  if (bytes.byteLength === 0)
+    throw new ReadingImportError("empty-file", "文件内容为空");
 
   let decoded: string;
   let encoding: string;
@@ -108,16 +156,16 @@ export function decodeReadingText(buffer: ArrayBuffer): { text: string; encoding
     }
   }
 
-  if (looksCorrupted(decoded)) throw new ReadingImportError("decode-failed", "文件编码无法可靠识别");
-  const text = decoded.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").replace(/\0/g, "").trim();
-  if (!text) throw new ReadingImportError("empty-file", "文件中没有可阅读的文字");
+  if (looksCorrupted(decoded))
+    throw new ReadingImportError("decode-failed", "文件编码无法可靠识别");
+  const text = decoded
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\0/g, "")
+    .trim();
+  if (!text)
+    throw new ReadingImportError("empty-file", "文件中没有可阅读的文字");
   return { text, encoding };
-}
-
-async function sha256Hex(text: string): Promise<string> {
-  if (!globalThis.crypto?.subtle) throw new ReadingImportError("hash-unavailable", "当前环境无法计算文件哈希");
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 const titleFromFileName = (name: string): string => {
@@ -125,7 +173,9 @@ const titleFromFileName = (name: string): string => {
   return title || "未命名小说";
 };
 
-export async function prepareReadingImport(file: ReadingImportFile): Promise<PreparedReadingImport> {
+export async function prepareReadingImport(
+  file: ReadingImportFile,
+): Promise<PreparedReadingImport> {
   const format = detectReadingBookFormat(file);
   const { text, encoding } = decodeReadingText(await file.arrayBuffer());
   return {
@@ -134,10 +184,12 @@ export async function prepareReadingImport(file: ReadingImportFile): Promise<Pre
     text,
     sourceEncoding: encoding,
     sourceFileName: file.name,
-    sourceMimeType: file.type || (format === "markdown" ? "text/markdown" : "text/plain"),
+    sourceMimeType:
+      file.type || (format === "markdown" ? "text/markdown" : "text/plain"),
     sourceByteLength: file.size,
-    contentHash: await sha256Hex(text),
-    characterCount: [...text].filter((character) => !/\s/u.test(character)).length,
+    contentHash: await stableTextHash(text),
+    characterCount: [...text].filter((character) => !/\s/u.test(character))
+      .length,
   };
 }
 
@@ -149,18 +201,29 @@ export async function importReadingFile(
     dependencies?: ReadingImportDependencies;
   } = {},
 ): Promise<ReadingImportResult> {
-  if (!userIdentityId.trim()) throw new ReadingImportError("metadata-write-failed", "缺少当前用户身份");
+  if (!userIdentityId.trim())
+    throw new ReadingImportError("metadata-write-failed", "缺少当前用户身份");
   const dependencies = options.dependencies || defaultDependencies;
   const prepared = await prepareReadingImport(file);
   const loaded = dependencies.loadStore();
   if (!loaded.valid) {
-    throw new ReadingImportError("metadata-write-failed", "阅读元数据当前不可用，已停止导入以保护现有数据");
+    throw new ReadingImportError(
+      "metadata-write-failed",
+      "阅读元数据当前不可用，已停止导入以保护现有数据",
+    );
   }
   const current = loaded.value;
-  const duplicates = current.books.filter((book) =>
-    book.userIdentityId === userIdentityId && book.contentHash === prepared.contentHash);
+  const duplicates = current.books.filter(
+    (book) =>
+      book.userIdentityId === userIdentityId &&
+      book.contentHash === prepared.contentHash,
+  );
   if (duplicates.length > 0 && options.duplicateStrategy !== "keep-both") {
-    return { status: "duplicate", existingBookIds: duplicates.map((book) => book.id), prepared };
+    return {
+      status: "duplicate",
+      existingBookIds: duplicates.map((book) => book.id),
+      prepared,
+    };
   }
 
   const now = dependencies.now();
@@ -168,11 +231,21 @@ export async function importReadingFile(
   const assetId = dependencies.createId("reading-asset");
   let parsed: Awaited<ReturnType<typeof parseReadingDocument>>;
   try {
-    parsed = await parseReadingDocument({ text: prepared.text, format: prepared.format, userIdentityId, bookId });
+    parsed = await parseReadingDocument({
+      text: prepared.text,
+      format: prepared.format,
+      userIdentityId,
+      bookId,
+    });
   } catch (error) {
-    throw new ReadingImportError("parse-failed", error instanceof Error ? error.message : "章节解析失败");
+    throw new ReadingImportError(
+      "parse-failed",
+      error instanceof Error ? error.message : "章节解析失败",
+    );
   }
-  const canonicalBlob = new Blob([prepared.text], { type: "text/plain;charset=utf-8" });
+  const canonicalBlob = new Blob([prepared.text], {
+    type: "text/plain;charset=utf-8",
+  });
   const book: ReadingBook = {
     id: bookId,
     userIdentityId,
@@ -204,7 +277,10 @@ export async function importReadingFile(
   try {
     await dependencies.assetStore.save(asset);
   } catch (error) {
-    throw new ReadingImportError("asset-write-failed", error instanceof Error ? error.message : "小说正文保存失败");
+    throw new ReadingImportError(
+      "asset-write-failed",
+      error instanceof Error ? error.message : "小说正文保存失败",
+    );
   }
 
   const write = dependencies.saveStore({
@@ -214,8 +290,13 @@ export async function importReadingFile(
     paragraphAnchors: [...current.paragraphAnchors, ...parsed.paragraphAnchors],
   });
   if (!write.success) {
-    await dependencies.assetStore.delete(assetId, userIdentityId, bookId).catch(() => false);
-    throw new ReadingImportError("metadata-write-failed", `小说元数据保存失败：${write.error || "unknown"}`);
+    await dependencies.assetStore
+      .delete(assetId, userIdentityId, bookId)
+      .catch(() => false);
+    throw new ReadingImportError(
+      "metadata-write-failed",
+      `小说元数据保存失败：${write.error || "unknown"}`,
+    );
   }
   return { status: "imported", book };
 }

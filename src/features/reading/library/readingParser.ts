@@ -1,4 +1,8 @@
-import type { ParagraphAnchor, ReadingChapter } from "../../../domain/reading/types";
+import type {
+  ParagraphAnchor,
+  ReadingChapter,
+} from "../../../domain/reading/types";
+import { stableTextHash } from "./stableTextHash";
 
 export interface ParsedReadingDocument {
   chapters: ReadingChapter[];
@@ -17,16 +21,13 @@ interface ChapterDraft {
 }
 
 const markdownHeading = /^#{1,6}\s+(.+)$/u;
-const novelHeading = /^(?:第[〇零一二三四五六七八九十百千万两\d]+[章节卷回部篇集幕](?:\s+.{0,48})?|序章|楔子|引子|前言|后记|尾声|番外(?:\s+.{0,32})?|(?:chapter|part)\s+[\divxlcdm]+(?:\s+.{0,48})?)$/iu;
+const novelHeading =
+  /^(?:第[〇零一二三四五六七八九十百千万两\d]+[章节卷回部篇集幕](?:\s+.{0,48})?|序章|楔子|引子|前言|后记|尾声|番外(?:\s+.{0,32})?|(?:chapter|part)\s+[\divxlcdm]+(?:\s+.{0,48})?)$/iu;
 
-const countCharacters = (text: string): number => [...text].filter((character) => !/\s/u.test(character)).length;
-const normalizeParagraph = (text: string): string => text.trim().replace(/\s+/gu, " ");
-
-async function sha256Hex(value: string): Promise<string> {
-  if (!globalThis.crypto?.subtle) throw new Error("当前环境无法建立稳定段落锚点");
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
+const countCharacters = (text: string): number =>
+  [...text].filter((character) => !/\s/u.test(character)).length;
+const normalizeParagraph = (text: string): string =>
+  text.trim().replace(/\s+/gu, " ");
 
 function headingTitle(line: string, format: "txt" | "markdown"): string | null {
   const trimmed = line.trim();
@@ -60,7 +61,10 @@ function buildDrafts(text: string, format: "txt" | "markdown"): ChapterDraft[] {
       continue;
     }
     if (!current) {
-      current = { title: chapters.length === 0 ? "正文" : `第 ${chapters.length + 1} 章`, paragraphs: [] };
+      current = {
+        title: chapters.length === 0 ? "正文" : `第 ${chapters.length + 1} 章`,
+        paragraphs: [],
+      };
       chapters.push(current);
     }
     const characterStart = match.index + leadingWhitespace;
@@ -86,14 +90,20 @@ export async function parseReadingDocument(input: {
 
   for (let chapterOrder = 0; chapterOrder < drafts.length; chapterOrder += 1) {
     const draft = drafts[chapterOrder];
-    const chapterHash = await sha256Hex(`${input.bookId}:${chapterOrder}:${draft.title}`);
+    const chapterHash = await stableTextHash(
+      `${input.bookId}:${chapterOrder}:${draft.title}`,
+    );
     const chapterId = `chapter-${chapterOrder}-${chapterHash.slice(0, 12)}`;
     const chapterAnchors: ParagraphAnchor[] = [];
 
     for (let ordinal = 0; ordinal < draft.paragraphs.length; ordinal += 1) {
       const paragraph = draft.paragraphs[ordinal];
-      const normalizedTextHash = await sha256Hex(normalizeParagraph(paragraph.text));
-      const anchorHash = await sha256Hex(`${input.bookId}:${chapterId}:${ordinal}:${normalizedTextHash}`);
+      const normalizedTextHash = await stableTextHash(
+        normalizeParagraph(paragraph.text),
+      );
+      const anchorHash = await stableTextHash(
+        `${input.bookId}:${chapterId}:${ordinal}:${normalizedTextHash}`,
+      );
       chapterAnchors.push({
         id: `anchor-${chapterOrder}-${ordinal}-${anchorHash.slice(0, 12)}`,
         userIdentityId: input.userIdentityId,
@@ -115,7 +125,10 @@ export async function parseReadingDocument(input: {
       title: draft.title,
       firstParagraphAnchorId: chapterAnchors[0]?.id,
       lastParagraphAnchorId: chapterAnchors.at(-1)?.id,
-      wordCount: draft.paragraphs.reduce((total, paragraph) => total + countCharacters(paragraph.text), 0),
+      wordCount: draft.paragraphs.reduce(
+        (total, paragraph) => total + countCharacters(paragraph.text),
+        0,
+      ),
     });
   }
 
