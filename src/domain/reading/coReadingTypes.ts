@@ -7,6 +7,10 @@ export type ReadingInvitationDecision = "accept" | "hesitate" | "decline";
 export type AiReadingPace = "slow" | "normal" | "fast" | "persona_driven";
 export type AutonomousCommentFrequency = "off" | "rare" | "moderate" | "active";
 export type SpoilerPolicy = "strict" | "shared_fragment_only" | "allow_user_spoilers";
+export type ReadingCommentKind = "paragraph" | "chapter" | "book" | "reply";
+export type ReadingCommentAuthor = "user" | "ai";
+export type ReadingCommentSource = "known" | "user_revealed";
+export type ReadingDiscussionStatus = "open" | "pending_ai" | "closed";
 
 export interface ReadingRoomCharacterSnapshot {
   characterId: string;
@@ -60,16 +64,59 @@ export interface AiReadingState extends ReadingRoomScope {
   updatedAt: number;
 }
 
+export interface ReadingComment extends ReadingRoomScope {
+  id: string;
+  kind: ReadingCommentKind;
+  author: ReadingCommentAuthor;
+  authorName: string;
+  targetChapterId?: string;
+  targetParagraphAnchorId?: string;
+  parentCommentId?: string;
+  textSnapshot?: string;
+  body: string;
+  source: ReadingCommentSource;
+  isSpoiler: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ReadingDiscussion extends ReadingRoomScope {
+  id: string;
+  status: ReadingDiscussionStatus;
+  targetChapterId?: string;
+  targetParagraphAnchorId?: string;
+  frozenFragment?: string;
+  userPrompt: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ReadingDiscussionMessage extends ReadingRoomScope {
+  id: string;
+  discussionId: string;
+  author: ReadingCommentAuthor;
+  authorName: string;
+  body: string;
+  source: ReadingCommentSource;
+  createdAt: number;
+}
+
 export interface CoReadingStore {
   version: typeof CO_READING_STORE_VERSION;
   rooms: ReadingRoom[];
   aiReadingStates: AiReadingState[];
+  comments: ReadingComment[];
+  discussions: ReadingDiscussion[];
+  discussionMessages: ReadingDiscussionMessage[];
 }
 
 export const createEmptyCoReadingStore = (): CoReadingStore => ({
   version: CO_READING_STORE_VERSION,
   rooms: [],
   aiReadingStates: [],
+  comments: [],
+  discussions: [],
+  discussionMessages: [],
 });
 
 export const DEFAULT_READING_ROOM_SETTINGS: ReadingRoomSettings = {

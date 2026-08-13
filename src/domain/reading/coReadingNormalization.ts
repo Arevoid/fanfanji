@@ -3,6 +3,9 @@ import {
   createEmptyCoReadingStore,
   type AiReadingState,
   type AiReadingSpoilerDisclosure,
+  type ReadingComment,
+  type ReadingDiscussion,
+  type ReadingDiscussionMessage,
   type CoReadingStore,
   type ReadingRoom,
 } from "./coReadingTypes";
@@ -25,6 +28,39 @@ const isSpoilerDisclosure = (value: unknown): value is AiReadingSpoilerDisclosur
   && typeof value.textSnapshot === "string"
   && value.textSnapshot.length <= 8000
   && number(value.disclosedAt);
+
+const isRoomScope = (value: unknown): value is UnknownRecord & { userIdentityId: string; bookId: string; readingRoomId: string; relationId: string; characterId: string; conversationId: string } =>
+  record(value) && string(value.userIdentityId) && string(value.bookId) && string(value.readingRoomId) && string(value.relationId) && string(value.characterId) && string(value.conversationId);
+
+const isComment = (value: unknown): value is ReadingComment => {
+  if (!isRoomScope(value)) return false;
+  return string(value.id) && ["paragraph", "chapter", "book", "reply"].includes(String(value.kind))
+    && ["user", "ai"].includes(String(value.author)) && string(value.authorName)
+    && (value.targetChapterId === undefined || string(value.targetChapterId))
+    && (value.targetParagraphAnchorId === undefined || string(value.targetParagraphAnchorId))
+    && (value.parentCommentId === undefined || string(value.parentCommentId))
+    && (value.textSnapshot === undefined || typeof value.textSnapshot === "string")
+    && typeof value.body === "string" && value.body.trim().length > 0 && value.body.length <= 12000
+    && ["known", "user_revealed"].includes(String(value.source)) && typeof value.isSpoiler === "boolean"
+    && number(value.createdAt) && number(value.updatedAt);
+};
+
+const isDiscussion = (value: unknown): value is ReadingDiscussion => {
+  if (!isRoomScope(value)) return false;
+  return string(value.id) && ["open", "pending_ai", "closed"].includes(String(value.status))
+    && (value.targetChapterId === undefined || string(value.targetChapterId))
+    && (value.targetParagraphAnchorId === undefined || string(value.targetParagraphAnchorId))
+    && (value.frozenFragment === undefined || typeof value.frozenFragment === "string")
+    && typeof value.userPrompt === "string" && value.userPrompt.trim().length > 0 && value.userPrompt.length <= 4000
+    && number(value.createdAt) && number(value.updatedAt);
+};
+
+const isDiscussionMessage = (value: unknown): value is ReadingDiscussionMessage => {
+  if (!isRoomScope(value)) return false;
+  return string(value.id) && string(value.discussionId) && ["user", "ai"].includes(String(value.author))
+    && string(value.authorName) && typeof value.body === "string" && value.body.trim().length > 0 && value.body.length <= 12000
+    && ["known", "user_revealed"].includes(String(value.source)) && number(value.createdAt);
+};
 
 const isRoom = (value: unknown): value is ReadingRoom => {
   if (!record(value)) return false;
@@ -96,5 +132,12 @@ export function normalizeCoReadingStore(value: unknown): CoReadingStore {
     array(value.aiReadingStates, isAiReadingState).filter(belongsToRoom),
     (state) => `${state.userIdentityId}:${state.readingRoomId}`,
   ).map((state) => ({ ...state, userRevealedSpoilers: state.userRevealedSpoilers || [] }));
-  return { version: CO_READING_STORE_VERSION, rooms, aiReadingStates };
+  const comments = dedupe(array(value.comments, isComment).filter(belongsToRoom), (item) => `${item.userIdentityId}:${item.id}`);
+  const discussions = dedupe(array(value.discussions, isDiscussion).filter(belongsToRoom), (item) => `${item.userIdentityId}:${item.id}`);
+  const discussionKeys = new Set(discussions.map((item) => `${item.userIdentityId}:${item.readingRoomId}:${item.id}`));
+  const discussionMessages = dedupe(
+    array(value.discussionMessages, isDiscussionMessage).filter((item) => discussionKeys.has(`${item.userIdentityId}:${item.readingRoomId}:${item.discussionId}`)),
+    (item) => `${item.userIdentityId}:${item.id}`,
+  );
+  return { version: CO_READING_STORE_VERSION, rooms, aiReadingStates, comments, discussions, discussionMessages };
 }

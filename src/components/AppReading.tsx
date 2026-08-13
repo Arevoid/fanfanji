@@ -36,6 +36,7 @@ import { buildReadingArchive, restoreReadingArchive, serializeReadingArchive } f
 import { createAiReadingRoom, ReadingCoReadingError } from "../features/reading/coReading/readingCoReading";
 import { getAiReadingState, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
 import { advanceAiReadingToParagraph, AiReadingBoundaryError } from "../features/reading/coReading/aiReadingBoundary";
+import { createUserReadingComment, listReadingComments, startReadingDiscussion, ReadingCoReadingContentError } from "../features/reading/coReading/readingCoReadingContent";
 
 interface AppReadingProps {
   userIdentityId: string;
@@ -62,6 +63,8 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
   const [readingView, setReadingView] = useState<"library" | "rooms">("library");
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [inviteBookId, setInviteBookId] = useState<string | null>(null);
+  const [roomCommentDraft, setRoomCommentDraft] = useState("");
+  const [roomDiscussionDraft, setRoomDiscussionDraft] = useState("");
   const [section, setSection] = useState<"library" | "archived">("library");
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [readingBookId, setReadingBookId] = useState<string | null>(null);
@@ -258,6 +261,28 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
     }
   };
 
+  const submitRoomComment = (room: ReadingRoom) => {
+    try {
+      createUserReadingComment({ scope: room, authorName: "我", kind: "book", body: roomCommentDraft });
+      setRoomCommentDraft("");
+      refreshLibrary();
+      setNotice({ tone: "success", text: "评论已保存到当前共读房间。" });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof ReadingCoReadingContentError ? error.message : "评论保存失败" });
+    }
+  };
+
+  const summonRoomFriend = (room: ReadingRoom) => {
+    try {
+      startReadingDiscussion({ scope: room, authorName: "我", userPrompt: roomDiscussionDraft });
+      setRoomDiscussionDraft("");
+      refreshLibrary();
+      setNotice({ tone: "success", text: "召唤已记录，等待 AI 好友按人设回应。" });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof ReadingCoReadingContentError ? error.message : "召唤保存失败" });
+    }
+  };
+
   const renderNotice = () => notice && (
     <div
       role={notice.tone === "error" ? "alert" : "status"}
@@ -280,6 +305,7 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
     const roomBook = books.find((book) => book.id === selectedRoom.bookId);
     const aiReadingState = getAiReadingState(selectedRoom);
     const personalPosition = progress.find((item) => item.bookId === selectedRoom.bookId);
+    const roomComments = listReadingComments(selectedRoom);
     const advanceAiToPersonalPosition = () => {
       if (!personalPosition) return;
       try {
@@ -320,6 +346,18 @@ export default function AppReading({ userIdentityId, characters = [], relationsh
               <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]"><span className="rounded-xl bg-[var(--surface-raised)] p-2">已知章节：{aiReadingState?.aiKnownChapterIds.length || 0}</span><span className="rounded-xl bg-[var(--surface-raised)] p-2">已知段落：{aiReadingState ? Object.values(aiReadingState.aiKnownParagraphRange).reduce((sum, range) => sum + Math.max(0, range.end - range.start + 1), 0) : 0}</span></div>
               <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px]">{aiReadingState?.aiReadingPace === "persona_driven" ? "人设驱动速度" : aiReadingState?.aiReadingPace || "未设置速度"}</span><span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-1 text-[10px]">剧透：严格保护</span></div>
               {personalPosition && selectedRoom.status === "active" && <button type="button" onClick={advanceAiToPersonalPosition} className="mt-3 h-10 w-full rounded-2xl border border-[var(--border)] text-xs font-bold">让 TA 读到我的当前位置</button>}
+            </section>
+            <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex items-center justify-between"><h2 className="text-sm font-bold">共读评价</h2><span className="text-[10px] text-[var(--text-muted)]">仅当前房间可见</span></div>
+              {roomComments.length > 0 ? <div className="mt-3 space-y-2">{roomComments.slice(-4).map((comment) => <div key={comment.id} className="rounded-2xl bg-[var(--surface-raised)] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-bold">{comment.authorName}{comment.author === "ai" ? " · AI" : ""}</span><span className="text-[10px] text-[var(--text-muted)]">{comment.kind === "book" ? "全书评价" : comment.kind === "chapter" ? "章评" : "段评"}</span></div><p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{comment.body}</p></div>)}</div> : <p className="mt-2 text-xs text-[var(--text-muted)]">还没有评价。你的私人笔记不会自动出现在这里。</p>}
+              <textarea value={roomCommentDraft} onChange={(event) => setRoomCommentDraft(event.target.value)} placeholder="写下你对这本书的感受……" rows={2} className="mt-3 w-full resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs outline-none" />
+              <button type="button" disabled={!roomCommentDraft.trim()} onClick={() => submitRoomComment(selectedRoom)} className="mt-2 h-10 w-full rounded-2xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)] disabled:opacity-40">保存全书评价</button>
+            </section>
+            <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex items-center justify-between"><h2 className="text-sm font-bold">召唤 TA 讨论</h2><span className="text-[10px] text-[var(--text-muted)]">应用内讨论室</span></div>
+              <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">召唤只带当前房间允许的内容；不会跳转聊天，也不会读取其他关系的记忆。</p>
+              <textarea value={roomDiscussionDraft} onChange={(event) => setRoomDiscussionDraft(event.target.value)} placeholder="你想和 TA 讨论什么？" rows={2} className="mt-3 w-full resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs outline-none" />
+              <button type="button" disabled={!roomDiscussionDraft.trim() || selectedRoom.status !== "active"} onClick={() => summonRoomFriend(selectedRoom)} className="mt-2 h-10 w-full rounded-2xl border border-[var(--border)] text-xs font-bold disabled:opacity-40">召唤 TA</button>
             </section>
             {roomBook && roomBook.status !== "archived" && <button type="button" onClick={() => setReadingBookId(roomBook.id)} className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)]"><BookOpenText className="h-4 w-4" />继续阅读这本书</button>}
           </div>
