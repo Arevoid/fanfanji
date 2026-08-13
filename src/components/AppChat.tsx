@@ -6,6 +6,7 @@ import { readJson, remove as removeStoredValue, writeJson, writeString } from ".
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
+import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
 import { compressImage } from "../utils/pngParser";
 import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
@@ -1625,7 +1626,8 @@ export default function AppChat({
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
     draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss, cssTemplateCopied, setCssTemplateCopied,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
-    draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveCall, setDraftEnableProactiveCall,
+    draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
+    draftEnableProactiveCall, setDraftEnableProactiveCall,
     draftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
     draftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
@@ -4074,7 +4076,10 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       }
 
       if (activeRelationship) {
-        updateRelationshipSession(activeRelationship.id, { scheduledProactiveTime: nextScheduledTime });
+        updateRelationshipSession(activeRelationship.id, {
+          scheduledProactiveTime: nextScheduledTime,
+          ...createProactiveOfflinePreferencePatch(draftEnableProactiveOffline),
+        });
       }
 
       onSaveCharacter({
@@ -5865,7 +5870,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
               <button
                 onClick={() => {
-                  loadCharacterDraft(activeCharacter);
+                  loadCharacterDraft(activeCharacter, activeRelationship);
                   setAdvancedSettingsSection(null);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
@@ -6141,6 +6146,22 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       </div>
                       <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
+
+                    {!activeCharacter.isGroupChat && activeRelationship && (
+                      <div className="flex min-h-[52px] px-4 py-2 items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-slate-800 font-medium text-[16px] block">主动发起线下</span>
+                          <span className="mt-0.5 text-[11px] leading-4 text-slate-400 block">
+                            允许对方在距离、时间和聊天上下文合理时提出见面
+                          </span>
+                        </div>
+                        <SettingsSwitch
+                          checked={draftEnableProactiveOffline}
+                          onChange={setDraftEnableProactiveOffline}
+                          label="主动发起线下"
+                        />
+                      </div>
+                    )}
 
                     {!activeCharacter.isGroupChat && <div className={draftEnableProactiveChat ? "min-h-[52px]" : "contents"}>
                       <div className="flex h-[52px] px-4 items-center justify-between gap-3">

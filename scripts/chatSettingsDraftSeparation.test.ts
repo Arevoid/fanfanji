@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const hook = readFileSync(new URL("../src/features/chat/hooks/useChatSettingsDraft.ts", import.meta.url), "utf8");
 assert.match(appChat, /useChatSettingsDraft\(\)/);
-assert.match(appChat, /loadCharacterDraft\(activeCharacter\)/);
+assert.match(appChat, /loadCharacterDraft\(activeCharacter, activeRelationship\)/);
 assert.doesNotMatch(appChat, /setDraftRemark\(activeCharacter\.isGroupChat/);
 assert.match(hook, /character\.customChatCSS \|\| character\.customCss/);
 assert.match(hook, /character\.enableAutoArchive !== undefined/);

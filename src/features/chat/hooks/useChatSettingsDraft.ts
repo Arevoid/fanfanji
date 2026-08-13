@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { sanitizeChatIcons, type Character, type ChatIconOverrides } from "../../../types";
+import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
+import { isProactiveOfflineEnabled } from "../../../domain/schedule/proactiveOfflinePreference";
 
 export function useChatSettingsDraft() {
   const [draftRemark, setDraftRemark] = useState("");
@@ -15,6 +17,7 @@ export function useChatSettingsDraft() {
   const [draftChatIcons, setDraftChatIcons] = useState<ChatIconOverrides>({});
   const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
+  const [draftEnableProactiveOffline, setDraftEnableProactiveOffline] = useState(false);
   const [draftEnableProactiveCall, setDraftEnableProactiveCall] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
   const [draftProactiveStartTime, setDraftProactiveStartTime] = useState("09:00");
@@ -38,7 +41,7 @@ export function useChatSettingsDraft() {
   const [draftImageReferenceAssetId, setDraftImageReferenceAssetId] = useState<string | undefined>();
   const [draftImageReferenceMimeType, setDraftImageReferenceMimeType] = useState<string | undefined>();
 
-  const loadCharacterDraft = (character: Character) => {
+  const loadCharacterDraft = (character: Character, relationship?: CharacterRelationship) => {
     setDraftRemark(character.isGroupChat ? character.name : (character.remark || ""));
     setIsEditingRemark(false);
     setDraftAvatar(character.avatar);
@@ -49,6 +52,7 @@ export function useChatSettingsDraft() {
     setDraftChatIcons(sanitizeChatIcons(character.customChatIcons));
     setDraftChatStylePreset(character.chatStylePreset || "default");
     setDraftEnableProactiveChat(character.enableProactiveChat || false);
+    setDraftEnableProactiveOffline(isProactiveOfflineEnabled(relationship));
     setDraftEnableProactiveCall(character.enableProactiveCall || false);
     setDraftProactiveChatInterval(character.proactiveChatInterval || 3);
     setDraftProactiveStartTime(character.proactiveStartTime || "09:00");
@@ -79,7 +83,8 @@ export function useChatSettingsDraft() {
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
     draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss, cssTemplateCopied, setCssTemplateCopied,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
-    draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveCall, setDraftEnableProactiveCall,
+    draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
+    draftEnableProactiveCall, setDraftEnableProactiveCall,
     draftProactiveChatInterval, setDraftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
     draftHistoryMemoryLimit, setDraftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
