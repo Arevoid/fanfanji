@@ -21,8 +21,9 @@ import { loadConversationSummaries, saveConversationSummaries, retractConversati
 import { loadBehaviorCorrections, saveBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
 import { loadCharacterKnowledgeMigrationState, saveCharacterKnowledgeMigrationState } from "./core/storage/repositories/characterKnowledgeMigrationRepository";
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
-import { loadScheduleStore } from "./core/storage/repositories/scheduleRepository";
+import { loadScheduleStore, saveScheduleStore, upsertAppointment } from "./core/storage/repositories/scheduleRepository";
 import { projectAppointmentsToScheduleEntries } from "./domain/schedule/scheduleProjection";
+import type { Appointment } from "./domain/schedule/scheduleTypes";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
@@ -420,7 +421,18 @@ export default function App() {
 
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => readArray<MusicPlaylist>("phone_music_playlists", []).value);
 
-  const [scheduleStore] = useState(() => loadScheduleStore().value);
+  const [scheduleStore, setScheduleStore] = useState(() => loadScheduleStore().value);
+  const scheduleStoreRef = useRef(scheduleStore);
+  scheduleStoreRef.current = scheduleStore;
+  const handleSaveAppointment = (appointment: Appointment): boolean => {
+    const result = upsertAppointment(scheduleStoreRef.current, appointment);
+    if (!result.success) return false;
+    const persisted = saveScheduleStore(result.store);
+    if (!persisted.success) return false;
+    scheduleStoreRef.current = result.store;
+    setScheduleStore(result.store);
+    return true;
+  };
   const scheduleEntries = React.useMemo(
     () => projectAppointmentsToScheduleEntries(scheduleStore.appointments),
     [scheduleStore.appointments],
@@ -3615,6 +3627,8 @@ export default function App() {
                     activeChatRelationId={activeChatRelationId}
                     setActiveChatRelationId={setActiveChatRelationId}
                     onSaveRelationships={setRelationships}
+                    appointments={scheduleStore.appointments}
+                    onSaveAppointment={handleSaveAppointment}
                     offlineStories={offlineStories}
                     onSaveOfflineStory={handleSaveOfflineStory}
                     onDeleteOfflineStory={handleDeleteOfflineStory}

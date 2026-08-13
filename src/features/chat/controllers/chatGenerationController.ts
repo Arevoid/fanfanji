@@ -2,6 +2,7 @@ import type { Character, UserSettings } from "../../../types";
 import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import type { PromptContext } from "../../../domain/prompt/promptTypes";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import type { AppointmentMode } from "../../../domain/schedule/scheduleTypes";
 import { apiChat } from "../../../utils/apiHelper";
 import { requestAiReply } from "../services/aiReplyService";
 import { generateGroupReplyCandidates } from "../services/groupChatService";
@@ -61,6 +62,7 @@ export function generateProactiveChatTurn(input: {
   prompt: PromptInput; settings: UserSettings; characterId: string; disableBracketActions: boolean;
   keepPeriods: boolean; createId: (index: number) => string; currentTime: (index: number) => number;
   transformBubble?: (bubbleText: string, index: number) => string; cognitiveContext?: CharacterCognitiveContext; requestAi?: RequestAi;
+  proactiveOfflineAllowedModes?: readonly AppointmentMode[]; directiveNow?: number;
 }) {
   return generateProactiveReplyCandidates({
     requestAi: input.requestAi || apiChat,
@@ -71,6 +73,8 @@ export function generateProactiveChatTurn(input: {
     createId: input.createId,
     currentTime: input.currentTime,
     transformBubble: input.transformBubble,
+    proactiveOfflineAllowedModes: input.proactiveOfflineAllowedModes,
+    directiveNow: input.directiveNow,
     cognitiveContext: input.cognitiveContext,
   });
 }
