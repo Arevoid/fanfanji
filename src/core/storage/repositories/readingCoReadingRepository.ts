@@ -9,20 +9,84 @@ import {
   type ReadingComment,
   type ReadingDiscussion,
   type ReadingDiscussionMessage,
+  type ReadingRoomProgress,
 } from "../../../domain/reading/coReadingTypes";
 import { isSameReadingRoomScope, isValidReadingRoomScope } from "../../../domain/reading/scope";
 import type { ReadingRoomScope } from "../../../domain/reading/types";
-import { readJson, writeJson } from "../storageAdapter";
+import { readingAssetDb } from "../readingAssetDb";
+import { readJson, remove, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 
-export function loadCoReadingStore(): StorageResult<CoReadingStore> {
+const CO_READING_METADATA_KEY = "reading-co-reading-store";
+let cachedStore: CoReadingStore | null = null;
+let metadataReady = false;
+let initializationPromise: Promise<StorageResult<CoReadingStore>> | null = null;
+let writeQueue: Promise<void> = Promise.resolve();
+
+function loadLegacyCoReadingStore(): StorageResult<CoReadingStore> {
   const loaded = readJson<unknown>(storageKeys.readingCoReadingStore, createEmptyCoReadingStore());
   return { ...loaded, value: normalizeCoReadingStore(loaded.value) };
 }
 
+function enqueueCoReadingWrite(store: CoReadingStore): Promise<void> {
+  const snapshot = typeof structuredClone === "function" ? structuredClone(store) : JSON.parse(JSON.stringify(store)) as CoReadingStore;
+  writeQueue = writeQueue.catch(() => undefined).then(() => readingAssetDb.saveMetadataValue(CO_READING_METADATA_KEY, snapshot));
+  return writeQueue;
+}
+
+export async function initializeCoReadingStore(): Promise<StorageResult<CoReadingStore>> {
+  if (typeof indexedDB === "undefined") return loadLegacyCoReadingStore();
+  if (metadataReady && cachedStore) return { value: cachedStore, found: true, valid: true };
+  if (initializationPromise) return initializationPromise;
+  initializationPromise = (async () => {
+    try {
+      const stored = await readingAssetDb.loadMetadataValue<CoReadingStore>(CO_READING_METADATA_KEY);
+      if (stored) {
+        cachedStore = normalizeCoReadingStore(stored);
+        metadataReady = true;
+        return { value: cachedStore, found: true, valid: true };
+      }
+      const legacy = loadLegacyCoReadingStore();
+      if (legacy.found && !legacy.valid) return legacy;
+      cachedStore = legacy.value;
+      metadataReady = true;
+      await enqueueCoReadingWrite(cachedStore);
+      if (legacy.found && legacy.valid) remove(storageKeys.readingCoReadingStore);
+      return legacy;
+    } catch (error) {
+      console.warn("[reading] IndexedDB co-reading initialization failed; using the legacy store for this session.", error);
+      metadataReady = false;
+      return loadLegacyCoReadingStore();
+    }
+  })();
+  return initializationPromise;
+}
+
+export function loadCoReadingStore(): StorageResult<CoReadingStore> {
+  if (metadataReady && cachedStore) return { value: cachedStore, found: true, valid: true };
+  return loadLegacyCoReadingStore();
+}
+
 export function saveCoReadingStore(store: CoReadingStore): StorageWriteResult {
-  return writeJson(storageKeys.readingCoReadingStore, normalizeCoReadingStore(store));
+  const normalized = normalizeCoReadingStore(store);
+  if (typeof indexedDB === "undefined") return writeJson(storageKeys.readingCoReadingStore, normalized);
+  cachedStore = normalized;
+  metadataReady = true;
+  enqueueCoReadingWrite(normalized).catch((error) => console.warn("[reading] Failed to persist co-reading data in IndexedDB.", error));
+  return { success: true };
+}
+
+export async function flushCoReadingStore(): Promise<StorageWriteResult> {
+  if (typeof indexedDB === "undefined") return { success: true };
+  try {
+    await writeQueue;
+    remove(storageKeys.readingCoReadingStore);
+    return { success: true };
+  } catch (error) {
+    console.warn("[reading] Co-reading IndexedDB transaction failed.", error);
+    return { success: false, error: error && typeof error === "object" && String((error as { name?: unknown }).name) === "QuotaExceededError" ? "quota" : "write" };
+  }
 }
 
 export function listReadingRooms(userIdentityId: string, bookId?: string): ReadingRoom[] {
@@ -60,6 +124,22 @@ export function createReadingRoom(room: ReadingRoom, aiReadingState: AiReadingSt
     comments: store.comments,
     discussions: store.discussions,
     discussionMessages: store.discussionMessages,
+    roomProgress: store.roomProgress,
+  });
+}
+
+export function getReadingRoomProgress(scope: ReadingRoomScope): ReadingRoomProgress | undefined {
+  if (!isValidReadingRoomScope(scope)) return undefined;
+  return loadCoReadingStore().value.roomProgress.find((item) => isSameReadingRoomScope(item, scope));
+}
+
+export function saveReadingRoomProgress(progress: ReadingRoomProgress): StorageWriteResult {
+  if (!isValidReadingRoomScope(progress)) return { success: false, error: "validation" };
+  const store = loadCoReadingStore().value;
+  if (!store.rooms.some((room) => isSameReadingRoomScope(room, progress))) return { success: false, error: "scope" };
+  return saveCoReadingStore({
+    ...store,
+    roomProgress: [...store.roomProgress.filter((item) => !isSameReadingRoomScope(item, progress)), progress],
   });
 }
 

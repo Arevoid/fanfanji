@@ -8,6 +8,7 @@ import {
   type ReadingDiscussionMessage,
   type CoReadingStore,
   type ReadingRoom,
+  type ReadingRoomProgress,
 } from "./coReadingTypes";
 
 type UnknownRecord = Record<string, unknown>;
@@ -15,6 +16,7 @@ const record = (value: unknown): value is UnknownRecord => Boolean(value) && typ
 const string = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
 const optionalString = (value: unknown): value is string | undefined => value === undefined || typeof value === "string";
 const number = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+const finiteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const array = <T>(value: unknown, guard: (item: unknown) => item is T): T[] => Array.isArray(value) ? value.filter(guard) : [];
 
 const isRange = (value: unknown): value is { start: number; end: number } =>
@@ -61,6 +63,16 @@ const isDiscussionMessage = (value: unknown): value is ReadingDiscussionMessage 
     && string(value.authorName) && typeof value.body === "string" && value.body.trim().length > 0 && value.body.length <= 12000
     && ["known", "user_revealed"].includes(String(value.source)) && number(value.createdAt);
 };
+
+const isRoomProgress = (value: unknown): value is ReadingRoomProgress =>
+  isRoomScope(value)
+  && string(value.chapterId)
+  && string(value.paragraphAnchorId)
+  && number(value.characterOffset)
+  && (value.scrollOffsetHint === undefined || finiteNumber(value.scrollOffsetHint))
+  && number(value.percent)
+  && value.percent <= 100
+  && number(value.updatedAt);
 
 const isRoom = (value: unknown): value is ReadingRoom => {
   if (!record(value)) return false;
@@ -139,5 +151,9 @@ export function normalizeCoReadingStore(value: unknown): CoReadingStore {
     array(value.discussionMessages, isDiscussionMessage).filter((item) => discussionKeys.has(`${item.userIdentityId}:${item.readingRoomId}:${item.discussionId}`)),
     (item) => `${item.userIdentityId}:${item.id}`,
   );
-  return { version: CO_READING_STORE_VERSION, rooms, aiReadingStates, comments, discussions, discussionMessages };
+  const roomProgress = dedupe(
+    array(value.roomProgress, isRoomProgress).filter(belongsToRoom),
+    (item) => `${item.userIdentityId}:${item.readingRoomId}`,
+  );
+  return { version: CO_READING_STORE_VERSION, rooms, aiReadingStates, comments, discussions, discussionMessages, roomProgress };
 }

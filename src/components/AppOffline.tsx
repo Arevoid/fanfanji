@@ -35,6 +35,7 @@ import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from 
 import { remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import type { Appointment } from "../domain/schedule/scheduleTypes";
 import { completeAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
+import { isWorldBookEntryForAnyCharacter, isWorldBookEntryForCharacter } from "../domain/worldbook/worldBookVisibility";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -329,7 +330,7 @@ export default function AppOffline({
     if (!activeStory) return;
     const participantIds = new Set(resolveOfflineStoryCharacterIds(activeStory, characters));
     const worldBookSnapshot = getLatestWorldBookEntries(worldBookEntries || [])
-      .filter((entry) => !entry.characterId || entry.characterId === "global" || participantIds.has(entry.characterId));
+      .filter((entry) => isWorldBookEntryForAnyCharacter(entry, participantIds));
     saveActiveStorySnapshot({
       ...activeStory,
       worldBookSnapshot,
@@ -600,7 +601,7 @@ export default function AppOffline({
             messages: importedMessages,
             memories: memories.filter(m => m.relationId === selectedRelationId).map(m => m.content),
             worldBook: getLatestWorldBookEntries(worldBookEntries || [])
-              .filter(entry => !entry.characterId || entry.characterId === selectedCharId)
+              .filter(entry => isWorldBookEntryForCharacter(entry, selectedCharId))
               .map(entry => `${entry.title}: ${entry.content}`),
             importedAt: Date.now()
           };
@@ -621,7 +622,7 @@ export default function AppOffline({
       updatedAt: Date.now(),
       mode: newMode,
       worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => !entry.characterId || entry.characterId === "global" || selectedCharIds.includes(entry.characterId)),
+        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, selectedCharIds)),
       knowledgeSnapshot: Array.from(new Set([
         ...loadKnowledgeClaims().value
           .filter((claim) => claim.relationId === relationship.id
@@ -983,7 +984,7 @@ export default function AppOffline({
         // One-time compatibility migration for stories created before
         // structured snapshots existed. The captured data is then frozen.
         worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
-          .filter((entry) => !entry.characterId || entry.characterId === "global" || storyParticipantIds.has(entry.characterId)),
+          .filter((entry) => isWorldBookEntryForAnyCharacter(entry, storyParticipantIds)),
       };
     if (!updatedStory.knowledgeSnapshot && updatedStory.relationId) {
       const relation = relationships.find((item) => item.id === updatedStory.relationId);

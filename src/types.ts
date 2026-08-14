@@ -595,6 +595,7 @@ export interface MusicPlaylist {
 export type WorldBookScope =
   | { kind: "global" }
   | { kind: "character"; characterId: string }
+  | { kind: "characters"; characterIds: string[] }
   | { kind: "identity"; userIdentityId: string }
   | { kind: "relationship"; relationId: string; characterId: string; userIdentityId: string };
 
@@ -609,6 +610,8 @@ export interface WorldBookEntry {
   content: string;
   timestamp: number;
   characterId?: string; // "global" or a specific character's ID
+  /** Multiple canonical characters that may use this entry. */
+  characterIds?: string[];
   /** New explicit scope; missing scope keeps legacy character/global reads compatible. */
   scope?: WorldBookScope;
   /** Public entries must opt in explicitly; missing visibility is legacy/private. */

@@ -23,8 +23,10 @@ assert.match(reader, /data-anchor-id=\{paragraph\.anchor\.id\}/);
 assert.match(reader, /characterOffset: Math\.round/);
 assert.match(
   reader,
-  /scrollToAnchor\(target, "auto", progress\?\.characterOffset \|\| 0\)/,
+  /initialAnchorId \|\| progress\?\.paragraphAnchorId/,
 );
+assert.match(reader, /modeSwitchPositionRef\.current = captureVisiblePosition\(\) \|\| currentPositionRef\.current/);
+assert.match(reader, /scrollToAnchor\(position\.paragraph\.anchor\.id, "auto", position\.characterOffset\)/);
 assert.match(reader, /aria-label="打开目录"/);
 assert.match(reader, /上一章[\s\S]*下一章/);
 assert.match(reader, /pageMode === "horizontal"/);
@@ -34,5 +36,10 @@ assert.match(reader, /复制[\s\S]*高亮[\s\S]*段评[\s\S]*书签[\s\S]*编辑
 assert.doesNotMatch(reader, />分享<|navigator\.share/);
 assert.match(reader, /handleReaderEdgeClick/);
 assert.match(reader, /和 \$\{room\.characterSnapshot\.name\} 讨论当前内容/);
+
+assert.match(reader, /openDiscussions\.find\(\(item\) => item\.id === discussionId\)/);
+assert.match(appReading, /getReadingRoomProgress\(room\)\?\.percent/);
+assert.match(appReading, /setReadingInitialAnchorId\(targetAnchorId\)/);
+assert.match(appReading, /openCommentAtSource/);
 
 console.log("reading reader modes and selection toolbar tests passed");

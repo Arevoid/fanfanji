@@ -157,10 +157,15 @@ class ReadingAssetDB {
   }
 
   async saveMetadata(store: ReadingStore): Promise<void> {
+    return this.saveMetadataValue(METADATA_KEY, store);
+  }
+
+  async saveMetadataValue<T>(key: string, value: T): Promise<void> {
+    if (!key) throw new Error("Reading metadata key is required");
     const database = await this.initMetadata();
     return new Promise((resolve, reject) => {
       const transaction = database.transaction(METADATA_STORE, "readwrite");
-      transaction.objectStore(METADATA_STORE).put(store, METADATA_KEY);
+      transaction.objectStore(METADATA_STORE).put(value, key);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
@@ -168,10 +173,15 @@ class ReadingAssetDB {
   }
 
   async loadMetadata(): Promise<ReadingStore | null> {
+    return this.loadMetadataValue<ReadingStore>(METADATA_KEY);
+  }
+
+  async loadMetadataValue<T>(key: string): Promise<T | null> {
+    if (!key) return null;
     const database = await this.initMetadata();
     return new Promise((resolve, reject) => {
-      const request = database.transaction(METADATA_STORE, "readonly").objectStore(METADATA_STORE).get(METADATA_KEY);
-      request.onsuccess = () => resolve(request.result && typeof request.result === "object" ? request.result as ReadingStore : null);
+      const request = database.transaction(METADATA_STORE, "readonly").objectStore(METADATA_STORE).get(key);
+      request.onsuccess = () => resolve(request.result && typeof request.result === "object" ? request.result as T : null);
       request.onerror = () => reject(request.error);
     });
   }

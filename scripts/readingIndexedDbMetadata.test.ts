@@ -86,4 +86,21 @@ const imported = await importReadingFile(
 assert.equal(imported.status, "imported", "imports must succeed when localStorage rejects every write");
 assert.equal((await readingAssetDb.loadMetadata())?.books.length, 2);
 
+const { flushReadingCoStoryStore, initializeReadingCoStoryStore } = await import("../src/core/storage/repositories/readingCoStoryRepository");
+const { createReadingCoStory, createReadingCoStoryOpening } = await import("../src/features/reading/story/readingCoStory");
+await initializeReadingCoStoryStore();
+const world = createReadingCoStory({
+  scope: { userIdentityId: "identity-a", coStoryId: "world-quota", relationId: "relation-a", characterId: "character-a" },
+  origin: "custom",
+  title: "Quota-safe world",
+  worldDefinition: { genre: "Mystery", worldView: "A local-first world", synopsis: "Two people investigate a sealed room" },
+  length: "short",
+  userCharacterName: "User",
+  aiFriend: { relationId: "relation-a", characterId: "character-a", displayName: "Friend", characterName: "Friend", personaSummary: "Careful", knownIntel: [], knownTurnIds: [] },
+});
+createReadingCoStoryOpening({ scope: world, narrative: "The door opens.", choices: [{ id: "enter", label: "Enter" }] });
+assert.deepEqual(await flushReadingCoStoryStore(), { success: true }, "custom worlds must persist without localStorage");
+assert.equal(localStorage.getItem(storageKeys.readingCoStoryStore), null);
+assert.equal((await readingAssetDb.loadMetadataValue<{ stories: unknown[] }>("reading-co-story-store"))?.stories.length, 1);
+
 console.log("reading IndexedDB metadata tests passed");

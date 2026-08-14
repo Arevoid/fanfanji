@@ -254,7 +254,7 @@ export default function AppArchives({
       let importedChar: Character;
       let characterBook: any = null;
 
-      const importStructuredTextCharacter = (text: string): Character => {
+      const importStructuredTextCharacter = (text: string, preserveFullDocument = false): Character => {
         const parsed = parseStructuredCharacterDocument(text, file.name);
         const id = "char-import-" + Date.now();
         if (parsed.worldBookEntries.length > 0) {
@@ -267,7 +267,7 @@ export default function AppArchives({
           gender: parsed.gender,
           mbti: parsed.mbti,
           avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
-          personality: parsed.personality,
+          personality: preserveFullDocument ? parsed.fullText : parsed.personality,
           backstory: parsed.description,
           greeting: "",
           album: [],
@@ -336,7 +336,7 @@ export default function AppArchives({
           r.readAsArrayBuffer(file);
         });
         const text = await safeParseDocx(arrayBuffer);
-        importedChar = importStructuredTextCharacter(text);
+        importedChar = importStructuredTextCharacter(text, true);
       } else {
         throw new Error("请上传 .png 角色卡、.json 配置文件、.txt 或 .docx 文档文件！");
       }

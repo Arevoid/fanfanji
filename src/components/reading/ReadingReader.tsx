@@ -3,10 +3,11 @@ import { Bookmark, BookOpenText, ChevronLeft, ChevronRight, Copy, Highlighter, L
 import { fontAssetDb } from "../../utils/fontAssetDb";
 import { GLOBAL_FONT_ASSET_ID } from "../../features/theme/globalTypography";
 import {
-  getReadingProgress,
+  getScopedReadingProgress,
   loadReadingBookContent,
   ReadingReaderError,
   saveReadingProgress,
+  saveReadingRoomPosition,
   type ReadingBookContent,
   type ReadingParagraphView,
 } from "../../features/reading/reader/readingReader";
@@ -39,6 +40,7 @@ interface ReadingReaderProps {
   character?: Character;
   relationship?: CharacterRelationship;
   worldBookContext?: string;
+  initialAnchorId?: string;
   onClose: () => void;
 }
 
@@ -49,7 +51,7 @@ interface VisiblePosition {
   scrollOffsetHint: number;
 }
 
-export default function ReadingReader({ userIdentityId, bookId, room, settings, character, relationship, worldBookContext, onClose }: ReadingReaderProps) {
+export default function ReadingReader({ userIdentityId, bookId, room, settings, character, relationship, worldBookContext, initialAnchorId, onClose }: ReadingReaderProps) {
   const scrollRef = useRef<HTMLElement>(null);
   const paragraphRefs = useRef(new Map<string, HTMLParagraphElement>());
   const progressTimerRef = useRef<number | null>(null);
@@ -59,6 +61,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
   const aiRequestInFlightRef = useRef(false);
   const lastAiSyncAnchorRef = useRef<string | null>(null);
   const currentPositionRef = useRef<VisiblePosition | null>(null);
+  const modeSwitchPositionRef = useRef<VisiblePosition | null>(null);
   const restoredRef = useRef(false);
   const [content, setContent] = useState<ReadingBookContent | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -107,7 +110,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
         setContent(loaded);
         setAnnotations(getReadingAnnotations(userIdentityId, bookId));
         setPreferences(getReadingBookPreferences(userIdentityId, bookId));
-        const progress = getReadingProgress(userIdentityId, bookId);
+        const progress = getScopedReadingProgress(userIdentityId, bookId, room);
         setPercent(progress?.percent || 0);
         setCurrentChapterId(progress?.chapterId || loaded.chapters[0]?.chapter.id || null);
       })
@@ -117,7 +120,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
       })
       .finally(() => { if (active) setIsLoading(false); });
     return () => { active = false; };
-  }, [bookId, userIdentityId]);
+  }, [bookId, room, userIdentityId]);
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -174,15 +177,24 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
   const persistPosition = useCallback((position: VisiblePosition | null) => {
     if (!content || !position) return;
     try {
-      const saved = saveReadingProgress({
-        userIdentityId,
-        bookId,
-        chapterId: position.chapterId,
-        paragraphAnchorId: position.paragraph.anchor.id,
-        characterOffset: position.characterOffset,
-        scrollOffsetHint: position.scrollOffsetHint,
-        sourceCharacterLength: content.sourceCharacterLength,
-      });
+      const saved = room
+        ? saveReadingRoomPosition({
+            ...room,
+            chapterId: position.chapterId,
+            paragraphAnchorId: position.paragraph.anchor.id,
+            characterOffset: position.characterOffset,
+            scrollOffsetHint: position.scrollOffsetHint,
+            sourceCharacterLength: content.sourceCharacterLength,
+          })
+        : saveReadingProgress({
+            userIdentityId,
+            bookId,
+            chapterId: position.chapterId,
+            paragraphAnchorId: position.paragraph.anchor.id,
+            characterOffset: position.characterOffset,
+            scrollOffsetHint: position.scrollOffsetHint,
+            sourceCharacterLength: content.sourceCharacterLength,
+          });
       setPercent(saved.percent);
       if (room) {
         if (aiSyncTimerRef.current !== null) window.clearTimeout(aiSyncTimerRef.current);
@@ -214,14 +226,27 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
   useEffect(() => {
     if (!content || restoredRef.current) return;
     restoredRef.current = true;
-    const progress = getReadingProgress(userIdentityId, bookId);
-    const target = progress?.paragraphAnchorId || content.chapters[0]?.paragraphs[0]?.anchor.id;
+    const progress = getScopedReadingProgress(userIdentityId, bookId, room);
+    const target = initialAnchorId || progress?.paragraphAnchorId || content.chapters[0]?.paragraphs[0]?.anchor.id;
     if (!target) return;
     const frame = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => scrollToAnchor(target, "auto", progress?.characterOffset || 0));
+      window.requestAnimationFrame(() => {
+        scrollToAnchor(target, "auto", initialAnchorId ? 0 : progress?.characterOffset || 0);
+        if (initialAnchorId && room && roomComments.some((comment) => comment.targetParagraphAnchorId === initialAnchorId)) setCommentThreadAnchorId(initialAnchorId);
+      });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [bookId, content, scrollToAnchor, userIdentityId]);
+  }, [bookId, content, initialAnchorId, room, roomComments, scrollToAnchor, userIdentityId]);
+
+  useEffect(() => {
+    const position = modeSwitchPositionRef.current;
+    if (!position) return;
+    modeSwitchPositionRef.current = null;
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => scrollToAnchor(position.paragraph.anchor.id, "auto", position.characterOffset));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [preferences.pageMode, scrollToAnchor]);
 
   const captureVisiblePosition = useCallback(() => {
     const container = scrollRef.current;
@@ -290,7 +315,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
   const closeReader = () => {
     if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
     persistPosition(currentPositionRef.current || (() => {
-      const progress = getReadingProgress(userIdentityId, bookId);
+      const progress = getScopedReadingProgress(userIdentityId, bookId, room);
       if (!progress) return null;
       const paragraph = flatParagraphs.find((item) => item.paragraph.anchor.id === progress.paragraphAnchorId);
       return paragraph ? {
@@ -308,6 +333,10 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
   const refreshAnnotations = () => setAnnotations(getReadingAnnotations(userIdentityId, bookId));
   const updatePreferences = (patch: Partial<ReadingBookPreferences>) => {
     try {
+      if (patch.pageMode && patch.pageMode !== preferences.pageMode) {
+        modeSwitchPositionRef.current = captureVisiblePosition() || currentPositionRef.current;
+        persistPosition(modeSwitchPositionRef.current);
+      }
       setPreferences(saveReadingBookPreferences({ ...preferences, ...patch, userIdentityId, bookId, updatedAt: preferences.updatedAt }));
     } catch {
       setToolMessage("阅读设置保存失败");
@@ -422,7 +451,10 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
     if (!room) return;
     const context = getDiscussionParagraph();
     if (!context) return;
-    const existing = listReadingDiscussions(room).find((item) => item.targetParagraphAnchorId === context.paragraph.anchor.id && item.status !== "closed");
+    const openDiscussions = listReadingDiscussions(room).filter((item) => item.status !== "closed");
+    const existing = openDiscussions.find((item) => item.id === discussionId)
+      || openDiscussions.find((item) => item.targetParagraphAnchorId === context.paragraph.anchor.id)
+      || openDiscussions[0];
     setDiscussionId(existing?.id || null);
     setDiscussionMessages(existing ? listDiscussionMessages(room, existing.id) : []);
     setDiscussionDraft("");
@@ -431,7 +463,11 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
 
   const sendDiscussionMessage = async () => {
     const prompt = discussionDraft.trim();
-    const context = getDiscussionParagraph();
+    const activeDiscussion = room && discussionId ? listReadingDiscussions(room).find((item) => item.id === discussionId) : undefined;
+    const anchoredContext = activeDiscussion?.targetParagraphAnchorId
+      ? flatParagraphs.find((item) => item.paragraph.anchor.id === activeDiscussion.targetParagraphAnchorId)
+      : undefined;
+    const context = anchoredContext || getDiscussionParagraph();
     if (!room || !context || !prompt || isAiResponding) return;
     setDiscussionDraft("");
     setIsAiResponding(true);

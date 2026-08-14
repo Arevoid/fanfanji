@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createAiReadingRoom, respondToReadingInvitation } from "../src/features/reading/coReading/readingCoReading";
-import { getAiReadingState, getReadingRoom, listReadingRooms } from "../src/core/storage/repositories/readingCoReadingRepository";
+import { getAiReadingState, getReadingRoom, getReadingRoomProgress, listReadingRooms, saveReadingRoomProgress } from "../src/core/storage/repositories/readingCoReadingRepository";
 import { storageKeys } from "../src/core/storage/storageKeys";
 import type { ReadingBook } from "../src/domain/reading/types";
 import type { Character } from "../src/types";
@@ -38,6 +38,11 @@ assert.equal(getAiReadingState(roomA)?.aiKnownChapterIds.length, 0);
 respondToReadingInvitation({ scope: roomA, decision: "accept", replyText: "我想和你一起读。", now: 20 });
 assert.equal(getReadingRoom(roomA)?.status, "active");
 assert.equal(getReadingRoom(roomB)?.status, "invited", "accepting A must not change B");
+
+assert.deepEqual(saveReadingRoomProgress({ ...roomA, chapterId: "chapter-a", paragraphAnchorId: "anchor-a", characterOffset: 4, percent: 12, updatedAt: 30 }), { success: true });
+assert.deepEqual(saveReadingRoomProgress({ ...roomB, chapterId: "chapter-b", paragraphAnchorId: "anchor-b", characterOffset: 8, percent: 67, updatedAt: 31 }), { success: true });
+assert.equal(getReadingRoomProgress(roomA)?.percent, 12);
+assert.equal(getReadingRoomProgress(roomB)?.percent, 67, "the same book must keep a separate user cursor for every friend room");
 
 const wrongRoom = { ...roomA, readingRoomId: roomB.readingRoomId };
 assert.equal(getReadingRoom(wrongRoom), undefined, "changing only room id cannot cross-read");

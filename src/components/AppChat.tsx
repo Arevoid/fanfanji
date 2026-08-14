@@ -24,6 +24,7 @@ import type { VoiceCallStatus } from "../features/chat/services/messageTypes";
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
 import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
+import { isWorldBookEntryForAnyCharacter } from "../domain/worldbook/worldBookVisibility";
 import { stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
@@ -1544,7 +1545,7 @@ export default function AppChat({
         : [],
       ...(memberMemories ? { memberMemories } : {}),
       worldBook: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId))
+        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set([activeChatCharId, ...offlineParticipantSet])))
         .map((entry) => `${entry.title}: ${entry.content}`),
       importedAt: snapshotTimestamp,
     };
@@ -1563,7 +1564,7 @@ export default function AppChat({
       updatedAt: Date.now(),
       mode: "continue",
       worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId)),
+        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set([activeChatCharId, ...offlineParticipantSet]))),
       knowledgeSnapshot: activeRelationship ? Array.from(new Set([
         ...loadKnowledgeClaims().value
           .filter((claim) => claim.relationId === activeRelationship.id

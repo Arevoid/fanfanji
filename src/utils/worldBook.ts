@@ -1,6 +1,7 @@
 import { WorldBookEntry } from "../types";
 import { loadWorldBookEntries } from "../core/storage/repositories/worldBookRepository";
 import { isWorldBookEntryVisible, type WorldBookReadContext } from "../domain/worldbook/worldBookVisibility";
+import { isWorldBookEntryForCharacter } from "../domain/worldbook/worldBookVisibility";
 
 export function getLatestWorldBookEntries(propEntries: WorldBookEntry[]): WorldBookEntry[] {
   try {
@@ -48,8 +49,7 @@ export function getVisibleWorldBookEntries(
 ): WorldBookEntry[] {
   return getLatestWorldBookEntries(propEntries).filter((entry) => {
     if (readContext ? !isWorldBookEntryVisible(entry, readContext) : entry.isActive === false) return false;
-    const isGlobal = !entry.characterId || entry.characterId === "global";
-    return isGlobal || entry.characterId === characterId;
+    return isWorldBookEntryForCharacter(entry, characterId);
   });
 }
 

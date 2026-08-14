@@ -1,4 +1,5 @@
 import type { Character, WorldBookEntry } from "../../types";
+import { getWorldBookCharacterIds } from "../../domain/worldbook/worldBookVisibility";
 
 export type PortableCharacterProfile = Pick<Character,
   "name" | "age" | "avatar" | "gender" | "mbti" | "personality" | "backstory" | "replyLanguage" | "greeting"
@@ -68,7 +69,7 @@ export const buildCharacterExport = (
 ) => {
   const profile = toPortableCharacterProfile(character);
   const boundEntries = includeWorldBook
-    ? worldBookEntries.filter((entry) => entry.characterId === character.id)
+    ? worldBookEntries.filter((entry) => getWorldBookCharacterIds(entry).includes(character.id))
     : [];
 
   return {

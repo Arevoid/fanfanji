@@ -1,5 +1,6 @@
 import { readingAssetDb } from "../../../core/storage/readingAssetDb";
 import { loadReadingStore, saveReadingStore } from "../../../core/storage/repositories/readingRepository";
+import { getReadingRoomProgress, saveReadingRoomProgress } from "../../../core/storage/repositories/readingCoReadingRepository";
 import type { StorageResult, StorageWriteResult } from "../../../core/storage/storageTypes";
 import type {
   ParagraphAnchor,
@@ -8,7 +9,9 @@ import type {
   ReadingChapter,
   ReadingProgress,
   ReadingStore,
+  ReadingRoomScope,
 } from "../../../domain/reading/types";
+import type { ReadingRoomProgress } from "../../../domain/reading/coReadingTypes";
 
 export interface ReadingParagraphView {
   anchor: ParagraphAnchor;
@@ -53,7 +56,7 @@ const defaultDependencies: ReadingReaderDependencies = {
   now: () => Date.now(),
 };
 
-function requireStore(dependencies: ReadingReaderDependencies): ReadingStore {
+function requireStore(dependencies: Pick<ReadingReaderDependencies, "loadStore">): ReadingStore {
   const loaded = dependencies.loadStore();
   if (!loaded.valid) throw new ReadingReaderError("store-unavailable", "阅读数据当前不可用，已停止读取以保护现有内容");
   return loaded.value;
@@ -111,6 +114,50 @@ export function calculateReadingPercent(characterOffset: number, readableCharact
   if (readableCharacterLength <= 0) return 0;
   const position = Math.min(Math.max(readableCharactersBefore + characterOffset, 0), readableCharacterLength);
   return Math.round((position / readableCharacterLength) * 10000) / 100;
+}
+
+export function getScopedReadingProgress(
+  userIdentityId: string,
+  bookId: string,
+  room?: ReadingRoomScope,
+  dependencies: Pick<ReadingReaderDependencies, "loadStore"> = defaultDependencies,
+): ReadingProgress | ReadingRoomProgress | null {
+  return room ? getReadingRoomProgress(room) || null : getReadingProgress(userIdentityId, bookId, dependencies);
+}
+
+export function saveReadingRoomPosition(
+  input: ReadingRoomScope & Omit<ReadingRoomProgress, keyof ReadingRoomScope | "percent" | "updatedAt"> & { sourceCharacterLength: number },
+  dependencies: Pick<ReadingReaderDependencies, "loadStore" | "now"> = defaultDependencies,
+): ReadingRoomProgress {
+  const store = requireStore(dependencies);
+  findBook(store, input.userIdentityId, input.bookId);
+  const chapter = store.chapters.find((candidate) => candidate.userIdentityId === input.userIdentityId && candidate.bookId === input.bookId && candidate.id === input.chapterId);
+  const anchor = store.paragraphAnchors.find((candidate) => candidate.userIdentityId === input.userIdentityId && candidate.bookId === input.bookId && candidate.chapterId === input.chapterId && candidate.id === input.paragraphAnchorId);
+  if (!chapter || !anchor || input.characterOffset < 0 || input.characterOffset > anchor.characterEnd - anchor.characterStart) {
+    throw new ReadingReaderError("invalid-position", "共读位置不属于当前房间对应的书籍");
+  }
+  const scopedAnchors = store.paragraphAnchors
+    .filter((candidate) => candidate.userIdentityId === input.userIdentityId && candidate.bookId === input.bookId)
+    .sort((left, right) => left.characterStart - right.characterStart || left.ordinal - right.ordinal);
+  const anchorIndex = scopedAnchors.findIndex((candidate) => candidate.id === anchor.id && candidate.chapterId === anchor.chapterId);
+  const readableCharactersBefore = scopedAnchors.slice(0, anchorIndex).reduce((total, candidate) => total + candidate.characterEnd - candidate.characterStart, 0);
+  const progress: ReadingRoomProgress = {
+    userIdentityId: input.userIdentityId,
+    bookId: input.bookId,
+    readingRoomId: input.readingRoomId,
+    relationId: input.relationId,
+    characterId: input.characterId,
+    conversationId: input.conversationId,
+    chapterId: input.chapterId,
+    paragraphAnchorId: input.paragraphAnchorId,
+    characterOffset: input.characterOffset,
+    scrollOffsetHint: input.scrollOffsetHint,
+    percent: calculateReadingPercent(input.characterOffset, readableCharactersBefore, input.sourceCharacterLength),
+    updatedAt: dependencies.now(),
+  };
+  const result = saveReadingRoomProgress(progress);
+  if (!result.success) throw new ReadingReaderError("save-failed", `共读进度保存失败：${result.error || "unknown"}`);
+  return progress;
 }
 
 export function saveReadingProgress(

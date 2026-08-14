@@ -40,6 +40,7 @@ assert.equal(parsed.detectedSections, true);
 assert.equal(parsed.name, "步随影");
 assert.equal(parsed.age, 22);
 assert.equal(parsed.gender, "Male");
+assert.equal(parsed.fullText, source.trim());
 assert.match(parsed.description, /人物背景/);
 assert.match(parsed.description, /生活方式/);
 assert.doesNotMatch(parsed.description, /热情话痨/);
@@ -62,6 +63,8 @@ const archivesSource = readFileSync(new URL("../src/components/AppArchives.tsx",
 const worldBookSource = readFileSync(new URL("../src/components/AppWorldBook.tsx", import.meta.url), "utf8");
 assert.match(archivesSource, /parseStructuredCharacterDocument\(text, file\.name\)/);
 assert.match(archivesSource, /backstory: parsed\.description/);
+assert.match(archivesSource, /personality: preserveFullDocument \? parsed\.fullText : parsed\.personality/);
+assert.match(archivesSource, /importStructuredTextCharacter\(text, true\)/);
 assert.match(archivesSource, /characterBook = \{ entries: parsed\.worldBookEntries \}/);
 assert.match(worldBookSource, /parsed\.worldBookEntries/);
 

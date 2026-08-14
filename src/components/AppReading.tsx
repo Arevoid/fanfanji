@@ -67,6 +67,8 @@ import {
 } from "../features/reading/coReading/readingCoReading";
 import {
   getAiReadingState,
+  getReadingRoomProgress,
+  initializeCoReadingStore,
   listReadingRooms,
 } from "../core/storage/repositories/readingCoReadingRepository";
 import {
@@ -92,7 +94,7 @@ import {
 } from "../features/reading/analysis/readingAnalysis";
 import type { ReadingBookBible } from "../domain/reading/analysisTypes";
 import { listReadingStories } from "../core/storage/repositories/readingStoryRepository";
-import { listReadingCoStories } from "../core/storage/repositories/readingCoStoryRepository";
+import { flushReadingCoStoryStore, initializeReadingCoStoryStore, listReadingCoStories } from "../core/storage/repositories/readingCoStoryRepository";
 import type { ReadingStoryState } from "../domain/reading/storyTypes";
 import type { ReadingCoStoryState } from "../domain/reading/coStoryTypes";
 import {
@@ -211,6 +213,7 @@ export default function AppReading({
   const [readingRoomReaderId, setReadingRoomReaderId] = useState<string | null>(
     null,
   );
+  const [readingInitialAnchorId, setReadingInitialAnchorId] = useState<string | undefined>();
   const [readingStoryBookId, setReadingStoryBookId] = useState<string | null>(
     null,
   );
@@ -261,7 +264,7 @@ export default function AppReading({
 
   useEffect(() => {
     let active = true;
-    initializeReadingStore()
+    Promise.all([initializeReadingStore(), initializeCoReadingStore(), initializeReadingCoStoryStore()])
       .then(() => {
         if (!active) return;
         refreshLibrary();
@@ -721,7 +724,7 @@ export default function AppReading({
     }
   };
 
-  const createCustomWorld = (draft: ReadingWorldSetupDraft) => {
+  const createCustomWorld = async (draft: ReadingWorldSetupDraft) => {
     const friendOption = availableFriends.find(
       (item) => item.relationship.id === draft.relationId,
     );
@@ -729,6 +732,7 @@ export default function AppReading({
     const makeId = (prefix: string) =>
       `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
     try {
+      await initializeReadingCoStoryStore();
       const userName = settings?.name?.trim() || "我";
       const story = createReadingCoStory({
         scope: {
@@ -780,6 +784,8 @@ export default function AppReading({
           { id: "d", label: "按自己的想法开始行动" },
         ],
       });
+      const persisted = await flushReadingCoStoryStore();
+      if (!persisted.success) throw new Error(persisted.error || "自建世界保存失败");
       setIsWorldSetupOpen(false);
       setWorldSection("custom");
       setInitialCoStoryId(story.coStoryId);
@@ -1155,9 +1161,11 @@ export default function AppReading({
         character={readerCharacter}
         relationship={readerRelationship}
         worldBookContext={readerWorldBookContext}
+        initialAnchorId={readingInitialAnchorId}
         onClose={() => {
           setReadingBookId(null);
           setReadingRoomReaderId(null);
+          setReadingInitialAnchorId(undefined);
           refreshLibrary();
         }}
       />
@@ -1202,10 +1210,18 @@ export default function AppReading({
   if (selectedRoom) {
     const roomBook = books.find((book) => book.id === selectedRoom.bookId);
     const aiReadingState = getAiReadingState(selectedRoom);
-    const personalPosition = progress.find(
-      (item) => item.bookId === selectedRoom.bookId,
-    );
+    const personalPosition = getReadingRoomProgress(selectedRoom);
     const roomComments = listReadingComments(selectedRoom);
+    const openCommentAtSource = (comment: (typeof roomComments)[number]) => {
+      const targetAnchorId = comment.targetParagraphAnchorId
+        || (comment.targetChapterId
+          ? chapters.find((chapter) => chapter.id === comment.targetChapterId)?.firstParagraphAnchorId
+          : undefined);
+      if (!targetAnchorId || !roomBook) return;
+      setReadingInitialAnchorId(targetAnchorId);
+      setReadingRoomReaderId(selectedRoom.readingRoomId);
+      setReadingBookId(roomBook.id);
+    };
     const advanceAiToPersonalPosition = () => {
       if (!personalPosition) return;
       try {
@@ -1362,9 +1378,12 @@ export default function AppReading({
               {roomComments.length > 0 ? (
                 <div className="mt-3 space-y-2">
                   {roomComments.slice(-4).map((comment) => (
-                    <div
+                    <button
+                      type="button"
                       key={comment.id}
-                      className="rounded-2xl bg-[var(--surface-raised)] p-3"
+                      disabled={!comment.targetParagraphAnchorId && !comment.targetChapterId}
+                      onClick={() => openCommentAtSource(comment)}
+                      className="w-full rounded-2xl bg-[var(--surface-raised)] p-3 text-left disabled:cursor-default"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-[10px] font-bold">
@@ -1382,7 +1401,16 @@ export default function AppReading({
                       <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
                         {comment.body}
                       </p>
-                    </div>
+                      {(comment.targetParagraphAnchorId || comment.targetChapterId) && (
+                        <p className="mt-2 flex items-center justify-between gap-2 border-t border-[var(--border)] pt-2 text-[10px] text-[var(--text-muted)]">
+                          <span className="min-w-0 truncate">
+                            {chapters.find((chapter) => chapter.id === comment.targetChapterId)?.title || "原文位置"}
+                            {comment.textSnapshot ? ` · ${comment.textSnapshot.slice(0, 36)}` : ""}
+                          </span>
+                          <span className="shrink-0 font-bold">查看原文 →</span>
+                        </p>
+                      )}
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -2155,11 +2183,7 @@ export default function AppReading({
                   const book = item.bookId
                     ? books.find((candidate) => candidate.id === item.bookId)
                     : undefined;
-                  const personalPercent = item.bookId
-                    ? progress.find(
-                        (candidate) => candidate.bookId === item.bookId,
-                      )?.percent || 0
-                    : 0;
+                   const personalPercent = room ? getReadingRoomProgress(room)?.percent || 0 : 0;
                   const aiState = room ? getAiReadingState(room) : undefined;
                   const anchorCount = item.bookId
                     ? chapters.filter(

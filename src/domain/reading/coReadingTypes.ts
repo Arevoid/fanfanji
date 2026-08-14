@@ -101,6 +101,15 @@ export interface ReadingDiscussionMessage extends ReadingRoomScope {
   createdAt: number;
 }
 
+export interface ReadingRoomProgress extends ReadingRoomScope {
+  chapterId: string;
+  paragraphAnchorId: string;
+  characterOffset: number;
+  scrollOffsetHint?: number;
+  percent: number;
+  updatedAt: number;
+}
+
 export interface CoReadingStore {
   version: typeof CO_READING_STORE_VERSION;
   rooms: ReadingRoom[];
@@ -108,6 +117,7 @@ export interface CoReadingStore {
   comments: ReadingComment[];
   discussions: ReadingDiscussion[];
   discussionMessages: ReadingDiscussionMessage[];
+  roomProgress: ReadingRoomProgress[];
 }
 
 export const createEmptyCoReadingStore = (): CoReadingStore => ({
@@ -117,6 +127,7 @@ export const createEmptyCoReadingStore = (): CoReadingStore => ({
   comments: [],
   discussions: [],
   discussionMessages: [],
+  roomProgress: [],
 });
 
 export const DEFAULT_READING_ROOM_SETTINGS: ReadingRoomSettings = {
