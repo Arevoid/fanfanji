@@ -101,4 +101,11 @@ assert.equal(rawDocument.personality, rawText, "TXT/DOCX source text must remain
 assert.equal(rawDocument.backstory, "");
 assert.deepEqual(rawDocument.references, []);
 
+const markdownProfile = "解之遥-人设卡\n\n### 【基本信息】\n\n**姓名**：解之遥\n**性别**：男\n**年龄**：24岁\n\n其余原文必须完整保留。";
+const markdownDocument = createCharacterFromRawDocument(markdownProfile, "解之遥-人设卡.docx", "markdown-character");
+assert.equal(markdownDocument.name, "解之遥");
+assert.equal(markdownDocument.age, 24);
+assert.equal(markdownDocument.gender, "男");
+assert.equal(markdownDocument.personality, markdownProfile);
+
 console.log("character export tests passed");

@@ -10,6 +10,7 @@ let cachedCharacters: Character[] | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<Character[]>> | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
+let mutationVersion = 0;
 
 const cloneCharacters = (characters: Character[]): Character[] => typeof structuredClone === "function"
   ? structuredClone(characters)
@@ -34,6 +35,7 @@ export function loadCharacters(fallback: Character[]): StorageResult<Character[]
 
 export function saveCharacters(characters: Character[]): StorageWriteResult {
   if (typeof indexedDB === "undefined") return writeArray(storageKeys.characters, characters);
+  mutationVersion += 1;
   cachedCharacters = cloneCharacters(characters);
   metadataReady = true;
   enqueueWrite(cachedCharacters).catch((error) => console.warn("[storage] Failed to persist characters in IndexedDB.", error));
@@ -44,9 +46,15 @@ export async function initializeCharacterRepository(fallback: Character[]): Prom
   if (typeof indexedDB === "undefined") return loadLegacyCharacters(fallback);
   if (metadataReady && cachedCharacters) return { value: cachedCharacters, found: true, valid: true };
   if (initializationPromise) return initializationPromise;
+  const initializationMutationVersion = mutationVersion;
   initializationPromise = (async () => {
     try {
       const stored = await readingAssetDb.loadMetadataValue<Character[]>(CHARACTER_METADATA_KEY);
+      // A slow IndexedDB open must never restore an older archive over a file
+      // imported while initialization was still in flight.
+      if (mutationVersion !== initializationMutationVersion && cachedCharacters) {
+        return { value: cloneCharacters(cachedCharacters), found: true, valid: true };
+      }
       if (Array.isArray(stored)) {
         cachedCharacters = stored;
         metadataReady = true;

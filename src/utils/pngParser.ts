@@ -518,7 +518,7 @@ export const extractTextFromDocxXml = (xml: string): string => decodeDocxXml(xml
   .replace(/<w:tab\b[^>]*\/?\s*>/gi, "\t")
   .replace(/<w:(?:br|cr)\b[^>]*\/?\s*>/gi, "\n")
   .replace(/<\/w:p>/gi, "\n")
-  .replace(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gi, "$1")
+  .replace(/<(?:[\w.-]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?t>/gi, "$1")
   .replace(/<[^>]+>/g, ""))
   .replace(/[ \t]+\n/g, "\n")
   .replace(/\n{3,}/g, "\n\n")
@@ -530,19 +530,31 @@ export async function extractSupplementalDocxText(arrayBuffer: ArrayBuffer): Pro
   const main = extractTextFromDocxXml(documentXml);
   const sections: string[] = [];
   const supplementalFiles = Object.keys(zip.files)
-    .filter((name) => /^word\/(?:header\d+|footer\d+|comments)\.xml$/i.test(name))
+    .filter((name) => /^word\/(?:header\d+|footer\d+|comments|footnotes|endnotes)\.xml$/i.test(name))
     .sort();
   for (const name of supplementalFiles) {
     const xml = await zip.file(name)?.async("string") || "";
     const content = extractTextFromDocxXml(xml);
     if (!content || sections.includes(content)) continue;
-    const label = /header/i.test(name) ? "页眉" : /footer/i.test(name) ? "页脚" : "批注";
+    const label = /header/i.test(name)
+      ? "页眉"
+      : /footer/i.test(name)
+        ? "页脚"
+        : /footnotes/i.test(name)
+          ? "脚注"
+          : /endnotes/i.test(name)
+            ? "尾注"
+            : "批注";
     sections.push(`【${label}】\n${content}`);
   }
   return { main, supplemental: sections.join("\n\n") };
 }
 
 export async function safeParseDocx(arrayBuffer: ArrayBuffer): Promise<string> {
+  // OOXML is the compatibility baseline. It does not require dynamic code
+  // execution, so restrictive and older mobile WebViews can still import the
+  // complete document when the Mammoth browser bundle cannot initialize.
+  const extracted = await extractSupplementalDocxText(arrayBuffer);
   const g = typeof window !== "undefined" ? window : globalThis;
   // @ts-ignore
   if (!g.mammoth) {
@@ -551,20 +563,33 @@ export async function safeParseDocx(arrayBuffer: ArrayBuffer): Promise<string> {
       fn(undefined, undefined, undefined);
     } catch (e) {
       console.error("Failed to load mammoth browser bundle", e);
+      if (extracted.main) {
+        return [extracted.main, extracted.supplemental].filter(Boolean).join("\n\n");
+      }
       throw new Error("初始化 DOCX 解析器失败");
     }
   }
   // @ts-ignore
   const mammothInstance = g.mammoth;
   if (!mammothInstance) {
+    if (extracted.main) {
+      return [extracted.main, extracted.supplemental].filter(Boolean).join("\n\n");
+    }
     throw new Error("DOCX 解析器未加载成功");
   }
-  const result = await mammothInstance.extractRawText({ arrayBuffer });
-  const extracted = await extractSupplementalDocxText(arrayBuffer);
-  const mammothText = typeof result.value === "string" ? result.value : "";
-  // Prefer the longer main-body extraction so unusual Word structures cannot
-  // silently disappear, then append parts Mammoth intentionally omits.
-  const main = extracted.main.length > mammothText.trim().length ? extracted.main : mammothText;
+  let mammothText = "";
+  try {
+    const result = await mammothInstance.extractRawText({ arrayBuffer });
+    mammothText = typeof result.value === "string" ? result.value : "";
+  } catch (error) {
+    console.warn("Mammoth DOCX extraction failed; using OOXML fallback.", error);
+  }
+  const compact = (value: string) => value.replace(/\s+/gu, "");
+  const rawCompact = compact(extracted.main);
+  const mammothCompact = compact(mammothText);
+  // Mammoth's paragraph spacing is preferred only when it contains every
+  // piece of OOXML body text. A simple length comparison can hide omissions.
+  const main = rawCompact && mammothCompact.includes(rawCompact) ? mammothText : extracted.main;
   return [main, extracted.supplemental].filter((part) => part.trim()).join("\n\n");
 }
 
