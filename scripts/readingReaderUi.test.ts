@@ -37,7 +37,10 @@ assert.doesNotMatch(reader, />分享<|navigator\.share/);
 assert.match(reader, /handleReaderEdgeClick/);
 assert.match(reader, /和 \$\{room\.characterSnapshot\.name\} 讨论当前内容/);
 
-assert.match(reader, /openDiscussions\.find\(\(item\) => item\.id === discussionId\)/);
+assert.match(reader, /sort\(byLatestUpdate\)\[0\]/);
+assert.match(reader, /ref=\{discussionScrollRef\}/);
+assert.match(reader, /container\.scrollTop = container\.scrollHeight/);
+assert.match(reader, /placeholder="讨论当前内容…" rows=\{1\}/);
 assert.match(appReading, /getReadingRoomProgress\(room\)\?\.percent/);
 assert.match(appReading, /setReadingInitialAnchorId\(targetAnchorId\)/);
 assert.match(appReading, /openCommentAtSource/);
