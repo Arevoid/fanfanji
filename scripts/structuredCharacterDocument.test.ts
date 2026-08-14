@@ -61,11 +61,10 @@ assert.equal(plain.worldBookEntries.length, 0);
 
 const archivesSource = readFileSync(new URL("../src/components/AppArchives.tsx", import.meta.url), "utf8");
 const worldBookSource = readFileSync(new URL("../src/components/AppWorldBook.tsx", import.meta.url), "utf8");
-assert.match(archivesSource, /parseStructuredCharacterDocument\(text, file\.name\)/);
-assert.match(archivesSource, /backstory: parsed\.description/);
-assert.match(archivesSource, /personality: preserveFullDocument \? parsed\.fullText : parsed\.personality/);
-assert.match(archivesSource, /importStructuredTextCharacter\(text, true\)/);
-assert.match(archivesSource, /characterBook = \{ entries: parsed\.worldBookEntries \}/);
+assert.doesNotMatch(archivesSource, /parseStructuredCharacterDocument\(text, file\.name\)/);
+assert.match(archivesSource, /createCharacterFromRawDocument\(text, file\.name/);
+assert.equal((archivesSource.match(/createCharacterFromRawDocument\(text, file\.name/g) || []).length, 2, "TXT and DOCX must both use raw import");
+assert.doesNotMatch(archivesSource, /parsed\.worldBookEntries/);
 assert.match(worldBookSource, /parsed\.worldBookEntries/);
 
 console.log("PASS structured character document separates identity, description, personality, and World Book entries");

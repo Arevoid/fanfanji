@@ -50,6 +50,24 @@ export const createCharacterFromImportedProfile = (value: unknown, id: string): 
   };
 };
 
+/**
+ * TXT/DOCX imports are plain archive documents. Keep their entire extracted
+ * text in one field and never infer fields or World Book entries from it.
+ */
+export const createCharacterFromRawDocument = (text: string, filename: string, id: string): Character => ({
+  id,
+  name: filename.replace(/\.[^/.]+$/, "").trim() || "未命名角色",
+  age: "",
+  avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
+  gender: "",
+  mbti: "",
+  personality: text,
+  backstory: "",
+  greeting: "",
+  album: [],
+  references: [],
+});
+
 const toWorldBookEntry = (entry: WorldBookEntry) => ({
   keys: (entry.keywords || "").split(/[,，]/).map((key) => key.trim()).filter(Boolean),
   content: entry.content,

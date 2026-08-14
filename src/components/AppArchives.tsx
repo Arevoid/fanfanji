@@ -4,8 +4,7 @@ import { apiSummarizePersonality } from "../utils/apiHelper";
 import { Plus, Trash2, User, ChevronLeft, AlertCircle, X, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
 import { getSpeechForText } from "../utils/minimaxTts";
-import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile } from "../features/archives/characterExport";
-import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
+import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../features/archives/characterExport";
 import { buildCharacterTtsOptions, type TtsProvider } from "../features/voice/ttsConfig";
 
 interface AppArchivesProps {
@@ -254,27 +253,6 @@ export default function AppArchives({
       let importedChar: Character;
       let characterBook: any = null;
 
-      const importStructuredTextCharacter = (text: string, preserveFullDocument = false): Character => {
-        const parsed = parseStructuredCharacterDocument(text, file.name);
-        const id = "char-import-" + Date.now();
-        if (parsed.worldBookEntries.length > 0) {
-          characterBook = { entries: parsed.worldBookEntries };
-        }
-        return {
-          id,
-          name: parsed.name,
-          age: parsed.age,
-          gender: parsed.gender,
-          mbti: parsed.mbti,
-          avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
-          personality: preserveFullDocument ? parsed.fullText : parsed.personality,
-          backstory: parsed.description,
-          greeting: "",
-          album: [],
-          references: [],
-        };
-      };
-
       if (isPng) {
         const charaStr = await parsePngChunks(file);
         if (!charaStr) {
@@ -294,13 +272,6 @@ export default function AppArchives({
           });
         }
         importedChar = mapSillyTavernToCharacter(parsedJson, imgDataUrl);
-        const innerData = parsedJson.data || parsedJson;
-        const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
-        if (mwb && Array.isArray(mwb)) {
-          characterBook = { entries: mwb };
-        } else {
-          characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
-        }
       } else if (isJson) {
         const text = await new Promise<string>((resolve, reject) => {
           const r = new FileReader();
@@ -327,7 +298,7 @@ export default function AppArchives({
           r.onerror = () => reject(new Error("读取 TXT 配置文件失败"));
           r.readAsText(file);
         });
-        importedChar = importStructuredTextCharacter(text);
+        importedChar = createCharacterFromRawDocument(text, file.name, "char-import-" + Date.now());
       } else if (isDocx) {
         const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
           const r = new FileReader();
@@ -336,7 +307,7 @@ export default function AppArchives({
           r.readAsArrayBuffer(file);
         });
         const text = await safeParseDocx(arrayBuffer);
-        importedChar = importStructuredTextCharacter(text, true);
+        importedChar = createCharacterFromRawDocument(text, file.name, "char-import-" + Date.now());
       } else {
         throw new Error("请上传 .png 角色卡、.json 配置文件、.txt 或 .docx 文档文件！");
       }

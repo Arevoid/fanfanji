@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile } from "../src/features/archives/characterExport";
+import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../src/features/archives/characterExport";
 
 const character = {
   id: "char-a",
@@ -91,5 +91,12 @@ assert.deepEqual(imported, {
   references: [],
 });
 assert.equal(characterExportFilename('祁/澈'), "祁_澈-角色卡.json");
+
+const rawText = "  姓名：不要解析\n↓世界书部分。\n规则：也不要拆分\n\n";
+const rawDocument = createCharacterFromRawDocument(rawText, "完整角色.docx", "raw-character");
+assert.equal(rawDocument.name, "完整角色");
+assert.equal(rawDocument.personality, rawText, "TXT/DOCX source text must remain byte-for-byte unchanged after extraction");
+assert.equal(rawDocument.backstory, "");
+assert.deepEqual(rawDocument.references, []);
 
 console.log("character export tests passed");
