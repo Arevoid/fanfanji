@@ -92,9 +92,11 @@ assert.deepEqual(imported, {
 });
 assert.equal(characterExportFilename('祁/澈'), "祁_澈-角色卡.json");
 
-const rawText = "  姓名：不要解析\n↓世界书部分。\n规则：也不要拆分\n\n";
+const rawText = "  姓名：完整姓名\n年龄：27\n性别：女\n↓世界书部分。\n规则：也不要拆分\n\n";
 const rawDocument = createCharacterFromRawDocument(rawText, "完整角色.docx", "raw-character");
-assert.equal(rawDocument.name, "完整角色");
+assert.equal(rawDocument.name, "完整姓名");
+assert.equal(rawDocument.age, 27);
+assert.equal(rawDocument.gender, "女");
 assert.equal(rawDocument.personality, rawText, "TXT/DOCX source text must remain byte-for-byte unchanged after extraction");
 assert.equal(rawDocument.backstory, "");
 assert.deepEqual(rawDocument.references, []);

@@ -56,10 +56,15 @@ export const createCharacterFromImportedProfile = (value: unknown, id: string): 
  */
 export const createCharacterFromRawDocument = (text: string, filename: string, id: string): Character => ({
   id,
-  name: filename.replace(/\.[^/.]+$/, "").trim() || "未命名角色",
-  age: "",
+  name: text.match(/^\s*(?:姓名|角色名|name)\s*[:：]\s*([^\r\n]+)/im)?.[1]?.trim()
+    || filename.replace(/\.[^/.]+$/, "").trim()
+    || "未命名角色",
+  age: (() => {
+    const value = text.match(/^\s*(?:年龄|age)\s*[:：]\s*(\d{1,3})\b/im)?.[1];
+    return value ? Number(value) : "";
+  })(),
   avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
-  gender: "",
+  gender: text.match(/^\s*(?:性别|gender)\s*[:：]\s*([^\r\n]+)/im)?.[1]?.trim() || "",
   mbti: "",
   personality: text,
   backstory: "",

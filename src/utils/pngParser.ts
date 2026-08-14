@@ -1,5 +1,6 @@
 import { Character, WorldBookEntry } from "../types";
 import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
+import JSZip from "jszip";
 
 // PNG Character Card text chunk parser
 export async function parsePngChunks(file: File): Promise<string | null> {
@@ -504,6 +505,43 @@ export const isTransparencyPreservedImage = (value?: string | null): boolean =>
 // @ts-ignore
 import mammothCode from "mammoth/mammoth.browser.min.js?raw";
 
+const decodeDocxXml = (value: string): string => value
+  .replace(/&lt;/g, "<")
+  .replace(/&gt;/g, ">")
+  .replace(/&quot;/g, '"')
+  .replace(/&apos;/g, "'")
+  .replace(/&amp;/g, "&")
+  .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+  .replace(/&#x([\da-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
+
+export const extractTextFromDocxXml = (xml: string): string => decodeDocxXml(xml
+  .replace(/<w:tab\b[^>]*\/?\s*>/gi, "\t")
+  .replace(/<w:(?:br|cr)\b[^>]*\/?\s*>/gi, "\n")
+  .replace(/<\/w:p>/gi, "\n")
+  .replace(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gi, "$1")
+  .replace(/<[^>]+>/g, ""))
+  .replace(/[ \t]+\n/g, "\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+
+export async function extractSupplementalDocxText(arrayBuffer: ArrayBuffer): Promise<{ main: string; supplemental: string }> {
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const documentXml = await zip.file("word/document.xml")?.async("string") || "";
+  const main = extractTextFromDocxXml(documentXml);
+  const sections: string[] = [];
+  const supplementalFiles = Object.keys(zip.files)
+    .filter((name) => /^word\/(?:header\d+|footer\d+|comments)\.xml$/i.test(name))
+    .sort();
+  for (const name of supplementalFiles) {
+    const xml = await zip.file(name)?.async("string") || "";
+    const content = extractTextFromDocxXml(xml);
+    if (!content || sections.includes(content)) continue;
+    const label = /header/i.test(name) ? "页眉" : /footer/i.test(name) ? "页脚" : "批注";
+    sections.push(`【${label}】\n${content}`);
+  }
+  return { main, supplemental: sections.join("\n\n") };
+}
+
 export async function safeParseDocx(arrayBuffer: ArrayBuffer): Promise<string> {
   const g = typeof window !== "undefined" ? window : globalThis;
   // @ts-ignore
@@ -522,7 +560,12 @@ export async function safeParseDocx(arrayBuffer: ArrayBuffer): Promise<string> {
     throw new Error("DOCX 解析器未加载成功");
   }
   const result = await mammothInstance.extractRawText({ arrayBuffer });
-  return result.value;
+  const extracted = await extractSupplementalDocxText(arrayBuffer);
+  const mammothText = typeof result.value === "string" ? result.value : "";
+  // Prefer the longer main-body extraction so unusual Word structures cannot
+  // silently disappear, then append parts Mammoth intentionally omits.
+  const main = extracted.main.length > mammothText.trim().length ? extracted.main : mammothText;
+  return [main, extracted.supplemental].filter((part) => part.trim()).join("\n\n");
 }
 
 

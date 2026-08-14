@@ -5,7 +5,7 @@ import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
-import { loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
+import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
@@ -377,6 +377,14 @@ export default function App() {
 
   // Load initial states from LocalStorage or fallbacks
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
+
+  useEffect(() => {
+    let active = true;
+    initializeCharacterRepository(DEFAULT_CHARACTERS).then((result) => {
+      if (active && result.valid) setCharacters(result.value);
+    });
+    return () => { active = false; };
+  }, []);
 
   const [settings, setSettingsState] = useState<UserSettings>(() => {
     const loadedSettings = loadSettings(DEFAULT_SETTINGS).value;
@@ -1931,14 +1939,16 @@ export default function App() {
   }, []);
 
   // Handle character creation & updates
-  const handleSaveCharacter = (char: Character) => {
-    setCharacters((prev) => {
-      const exists = prev.some((c) => c.id === char.id);
-      if (exists) {
-        return prev.map((c) => (c.id === char.id ? char : c));
-      }
-      return [...prev, char];
-    });
+  const handleSaveCharacter = async (char: Character): Promise<boolean> => {
+    const exists = characters.some((candidate) => candidate.id === char.id);
+    const nextCharacters = exists
+      ? characters.map((candidate) => candidate.id === char.id ? char : candidate)
+      : [...characters, char];
+    setCharacters(nextCharacters);
+    const queued = saveCharacters(nextCharacters);
+    if (!queued.success) return false;
+    const persisted = await flushCharacters();
+    return persisted.success;
   };
 
   const handleDeleteCharacter = (id: string, skipConfirm = false) => {

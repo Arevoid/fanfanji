@@ -9,7 +9,7 @@ import { buildCharacterTtsOptions, type TtsProvider } from "../features/voice/tt
 
 interface AppArchivesProps {
   characters: Character[];
-  onSaveCharacter: (character: Character) => void;
+  onSaveCharacter: (character: Character) => void | boolean | Promise<boolean>;
   onDeleteCharacter: (id: string, skipConfirm?: boolean) => void;
   onClose: () => void;
   worldBookEntries?: WorldBookEntry[];
@@ -317,7 +317,7 @@ export default function AppArchives({
       // the entire Character object, including chat and relationship settings.
       importedChar = createCharacterFromImportedProfile(importedChar, importedChar.id);
 
-      const finishImport = (importEntries: boolean) => {
+      const finishImport = async (importEntries: boolean) => {
         try {
           let importedEntriesCount = 0;
           const rawEntries = Array.isArray(characterBook?.entries)
@@ -347,7 +347,8 @@ export default function AppArchives({
             }
           }
 
-          onSaveCharacter(importedChar);
+          const saved = await onSaveCharacter(importedChar);
+          if (saved === false) throw new Error("角色档案保存失败，请检查浏览器存储权限或剩余空间");
 
           let successMsg = `成功导入角色「${importedChar.name}」！`;
           if (importedEntriesCount > 0) {
