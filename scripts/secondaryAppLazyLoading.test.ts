@@ -29,11 +29,11 @@ assert.match(appSource, /<React\.Suspense/);
 assert.match(appSource, /requestIdleCallback\(preloadIdleApps, \{ timeout: 1500 \}\)/);
 assert.match(appSource, /preloadApp\(item\.id\)/);
 assert.match(appSource, /const IDLE_PRELOAD_APP_IDS = \[[^\]]+\]/);
-assert.doesNotMatch(appSource, /IDLE_PRELOAD_APP_IDS = \[[^\]]*"chat"/);
+assert.match(appSource, /IDLE_PRELOAD_APP_IDS = \[[^\]]*"chat"/);
 assert.match(appSource, /activeApp === "chat" \|\| chatModuleActivated/);
 assert.match(appSource, /if \(activeApp === "chat"\) setChatModuleActivated\(true\)/);
 assert.match(appSource, /else if \(activeApp === null\) setChatModuleActivated\(false\)/);
-assert.doesNotMatch(appSource, /正在打开/);
+assert.match(appSource, /正在打开/);
 assert.doesNotMatch(appSource, /import AppChat(?:,\s*\{[^}]+\})? from "\.\/components\/AppChat"/);
 assert.match(appSource, /import \{ resolveActiveChatStylePreset \} from "\.\/features\/chat\/styles\/chatStylePreset"/);
 

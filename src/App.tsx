@@ -157,7 +157,12 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   reading: loadAppReading,
 };
 
-const IDLE_PRELOAD_APP_IDS = ["archives", "worldbook", "notes", "store", "settings"] as const;
+// Warm all app chunks after the first paint so switching between installed
+// pages does not expose a blank Suspense frame on slower mobile browsers.
+const IDLE_PRELOAD_APP_IDS = [
+  "chat", "archives", "worldbook", "music", "forum", "notes", "diary",
+  "store", "settings", "memory", "offline", "schedule", "reading",
+] as const;
 
 const preloadApp = (appId: string) => {
   const loader = APP_LOADERS[appId];
@@ -181,7 +186,12 @@ const AppReading = React.lazy(loadAppReading);
 function LazyAppBoundary({ children }: React.PropsWithChildren) {
   return (
     <React.Suspense
-      fallback={<div className="h-full bg-[var(--app-bg)]" aria-hidden="true" />}
+      fallback={(
+        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] text-[var(--text-secondary)]" role="status" aria-live="polite">
+          <span className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" aria-hidden="true" />
+          <span className="text-xs font-semibold">正在打开…</span>
+        </div>
+      )}
     >
       {children}
     </React.Suspense>
