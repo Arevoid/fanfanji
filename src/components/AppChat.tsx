@@ -65,7 +65,7 @@ import { generateInnerVoice } from "../features/chat/services/innerVoiceService"
 import { generateCharacterImage } from "../features/chat/services/characterImageService";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
-import { resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
+import { resolveChatRoutine, resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
 import { getChatTypingScopeKey, getVisibleChatTyping, setChatScopeCharacterOverride, setChatScopeTyping, type ChatTypingScopeState } from "../features/chat/services/chatTypingScope";
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
@@ -3342,7 +3342,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           knowledgeBoundary: createDirectChatKnowledgeBoundary(),
           conversationId: runtimeContext.conversationId || undefined,
           relationshipTimeline: relationshipProjection.timeline,
-          routine: buildCharacterRoutine(currentCharacter.routine),
+          routine: resolveChatRoutine(
+            buildCharacterRoutine(currentCharacter.routine),
+            resolveChatTurnSettings(currentCharacter).enableTimeAwareness,
+          ),
         });
       } catch {
         // Cognitive context is read-only and must never block the legacy reply
@@ -3903,7 +3906,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               knowledgeBoundary: createDirectChatKnowledgeBoundary(),
               conversationId: activeRelationship.conversationId,
               relationshipTimeline: relationshipProjection.timeline,
-              routine: buildCharacterRoutine(activeCharacter.routine),
+              routine: resolveChatRoutine(
+                buildCharacterRoutine(activeCharacter.routine),
+                resolveChatTurnSettings(activeCharacter).enableTimeAwareness,
+              ),
             });
           } catch {
             return undefined;
@@ -4642,7 +4648,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         memories: memories || [],
         events: listCharacterEventsByRelation(relationId),
         occurredAt: Date.now(),
-        routine: buildCharacterRoutine(friend.routine),
+        routine: resolveChatRoutine(
+          buildCharacterRoutine(friend.routine),
+          friend.enableTimeAwareness !== false,
+        ),
+        timeAwareness: friend.enableTimeAwareness !== false,
         topicHistory: loadProactiveTopicRecords().value,
       });
       const proactiveCharacterProjection = projectCharacterPrompt(friend, relationship.relationship);
@@ -4783,7 +4793,10 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       memories: [...confirmedClaimMemories, ...explicitManualMemories],
       events: listCharacterEventsByRelation(relationship.id),
       occurredAt,
-      routine: buildCharacterRoutine(character.routine),
+      routine: resolveChatRoutine(
+        buildCharacterRoutine(character.routine),
+        character.enableTimeAwareness !== false,
+      ),
     });
   };
 
@@ -4883,7 +4896,10 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           character: friend,
           moments: [newMo],
           topicHistory: loadMomentTopicRecords().value,
-          routine: buildCharacterRoutine(friend.routine),
+          routine: resolveChatRoutine(
+            buildCharacterRoutine(friend.routine),
+            friend.enableTimeAwareness !== false,
+          ),
           now: Date.now(),
         });
 
@@ -4992,7 +5008,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
             },
           ],
           topicHistory: loadMomentTopicRecords().value,
-          routine: buildCharacterRoutine(friend.routine),
+          routine: resolveChatRoutine(
+            buildCharacterRoutine(friend.routine),
+            friend.enableTimeAwareness !== false,
+          ),
           now: Date.now(),
         });
 
@@ -5062,7 +5081,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
         character: friend,
         moments: ownerMomentHistory,
         topicHistory: loadMomentTopicRecords().value,
-        routine: buildCharacterRoutine(friend.routine),
+        routine: resolveChatRoutine(
+          buildCharacterRoutine(friend.routine),
+          friend.enableTimeAwareness !== false,
+        ),
         now: occurredAt,
       });
 

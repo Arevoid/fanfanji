@@ -1,6 +1,7 @@
 import type { apiChat } from "../../../utils/apiHelper";
 import type { Message } from "../../../types";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import type { ProactiveCognitiveContext } from "./proactiveCognitiveContext";
 import { buildProactivePromptContext, formatProactivePromptContext } from "../../characterCognitive/promptAdapters/proactivePromptAdapter";
 import { requestAiReply } from "./aiReplyService";
 import { createCharacterTextMessage } from "./messageFactory";
@@ -22,7 +23,7 @@ export async function generateProactiveReplyCandidates(input: {
   proactiveOfflineAllowedModes?: readonly AppointmentMode[];
   directiveNow?: number;
   /** Relation-scoped snapshot; only its ProactivePromptAdapter projection reaches the request. */
-  cognitiveContext?: CharacterCognitiveContext;
+  cognitiveContext?: CharacterCognitiveContext | ProactiveCognitiveContext;
 }): Promise<{ data: Awaited<ReturnType<typeof import("../../../utils/apiHelper").apiChat>>; messages: Message[]; proactiveOfflineDirective?: ProactiveOfflineInvitationDirective }> {
   const cognitivePromptBlock = input.cognitiveContext
     ? formatProactivePromptContext(buildProactivePromptContext(input.cognitiveContext))
