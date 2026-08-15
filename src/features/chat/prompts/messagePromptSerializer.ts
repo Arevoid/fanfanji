@@ -165,8 +165,19 @@ export function serializeMessageContentForPrompt(
   }
 
   if (content.startsWith("[表情]|")) {
-    const stickerName = content.split("|")[1]?.trim() || "未命名表情";
-    const description = `[表情包：${actor}发送了“${stickerName}”；图片地址未放入文本上下文]`;
+    const parts = content.split("|");
+    const stickerName = parts[1]?.trim() || "未命名表情";
+    let semanticDescription = "";
+    if (parts[3]) {
+      try {
+        semanticDescription = decodeURIComponent(parts.slice(3).join("|")).trim();
+      } catch {
+        semanticDescription = parts.slice(3).join("|").trim();
+      }
+    }
+    const description = semanticDescription
+      ? `[表情包：${actor}发送了“${stickerName}”；图片语义：${semanticDescription}]`
+      : `[表情包：${actor}发送了“${stickerName}”；未提供图片语义，只能谨慎按名称理解]`;
     if (mode !== "current" || message.sender !== "user") return description;
     return `${description}
 【重要表情包处理规则】：

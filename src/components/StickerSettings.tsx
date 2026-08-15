@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Sticker, StickerGroup, UserSettings } from "../types";
-import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
+import { stickerDb, compressImage as compressStickerImage, aiAnalyzeSticker, loadStickerImageBlob } from "../utils/stickerDb";
 import { parseStickerImportLine } from "../utils/stickerImport";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import {
@@ -318,31 +318,21 @@ export default function StickerSettings({
           setAiNamingProgress(`正在智能分析第 ${i + 1}/${updatedStickers.length} 张表情包: "${sticker.name}"...`);
 
           try {
-            let imageBlob: Blob | null = null;
-            // 1. Try to load from local IndexedDB first
-            imageBlob = await stickerDb.getStickerImage(sticker.id);
-
-            // 2. If it is a remote URL and not cached locally, try to fetch it
-            if (!imageBlob && sticker.url && !sticker.url.startsWith("blob:") && !sticker.url.startsWith("data:")) {
-              try {
-                const res = await fetchWithTimeout(sticker.url, undefined, API_REQUEST_TIMEOUTS.remoteAsset);
-                if (res.ok) {
-                  imageBlob = await res.blob();
-                }
-              } catch (e) {
-                console.warn("CORS/Fetch error loading remote image for AI naming:", e);
-              }
-            }
+            const imageBlob = await loadStickerImageBlob(sticker);
 
             if (imageBlob) {
-              const aiName = await aiNameSticker(
+              const analysis = await aiAnalyzeSticker(
                 imageBlob,
                 settings.apiKey,
                 settings.selectedModel,
                 settings.apiEndpoint
               );
-              if (aiName && aiName.trim()) {
-                updatedStickers[i] = { ...sticker, name: aiName.trim() };
+              if (analysis.name) {
+                updatedStickers[i] = {
+                  ...sticker,
+                  name: analysis.name,
+                  semanticDescription: analysis.description,
+                };
               }
             } else {
               console.log(`Skipping AI naming for "${sticker.name}" - image data is inaccessible due to CORS constraints.`);

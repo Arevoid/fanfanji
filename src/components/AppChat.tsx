@@ -5,7 +5,7 @@ import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../u
 import { readJson, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
@@ -25,7 +25,7 @@ import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services
 import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { isWorldBookEntryForAnyCharacter } from "../domain/worldbook/worldBookVisibility";
-import { stickerDb } from "../utils/stickerDb";
+import { aiAnalyzeRemoteSticker, aiAnalyzeSticker, loadStickerImageBlob, stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectInterveningOfflineHandoff, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
@@ -138,7 +138,7 @@ import {
 } from "../features/chat/styles/liquidGlassDefaults";
 import { sanitizeMomentPublishText } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
-import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
+import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, findMomentRelationshipCharacter, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
 import { useMomentComposerState } from "../features/moments/hooks/useMomentComposerState";
 import {
   MessageSquare,
@@ -3026,9 +3026,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const allStickers1 = stickerGroups.flatMap(g => g.stickers);
       if (activeAttachModal === "calling") {
         assembledInstructions.push(...buildVoiceCallPrompts(callTopicShiftDetected));
-      } else if (allStickers1.length > 0 && /^\[表情\]\|/.test(userMsg?.content || "")) {
-        const stickerListStr = allStickers1.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
-        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr));
+      } else if (allStickers1.length > 0) {
+        const userSentSticker = /^\[表情\]\|/.test(userMsg?.content || "");
+        const stickerListStr = allStickers1.map((sticker) =>
+          `- ${sticker.name}｜语义：${sticker.semanticDescription || `按名称“${sticker.name}”谨慎理解`}｜发送格式：[表情]|${sticker.name}|sticker://${sticker.id}`
+        ).join("\n");
+        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr, userSentSticker));
       }
 
       if (proactiveOfflineAllowedModes.length > 0) {
@@ -3396,6 +3399,54 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     if (options.triggerReply !== false) {
       generateResponseForUserMessage(normalizedUserMsg);
     }
+  };
+
+  const sendStickerMessage = async (sticker: Sticker) => {
+    const capturedContext = activeRuntimeContext;
+    let resolvedSticker = sticker;
+    if (!sticker.semanticDescription && settings.apiKey) {
+      try {
+        const imageBlob = await loadStickerImageBlob(sticker);
+        const analysis = imageBlob
+          ? await aiAnalyzeSticker(
+            imageBlob,
+            settings.apiKey,
+            settings.selectedModel,
+            settings.apiEndpoint,
+          )
+          : await aiAnalyzeRemoteSticker(
+            sticker.url,
+            settings.apiKey,
+            settings.selectedModel,
+            settings.apiEndpoint,
+          );
+        if (analysis.description) {
+          resolvedSticker = {
+            ...sticker,
+            semanticDescription: analysis.description,
+          };
+          const ownerGroup = stickerGroups.find((group) => group.stickers.some((item) => item.id === sticker.id));
+          if (ownerGroup) {
+            const updatedGroup = {
+              ...ownerGroup,
+              stickers: ownerGroup.stickers.map((item) => item.id === sticker.id ? resolvedSticker : item),
+            };
+            await stickerDb.saveGroup(updatedGroup);
+            setStickerGroups((groups) => groups.map((group) => group.id === updatedGroup.id ? updatedGroup : group));
+          }
+        }
+      } catch (error) {
+        // A text-only or temporarily unavailable multimodal provider must not
+        // prevent the user from sending the sticker. Its name remains a safe fallback.
+        console.warn("Sticker semantic analysis unavailable; using its saved name.", error);
+      }
+    }
+
+    const semanticDescription = resolvedSticker.semanticDescription || `这是名为“${resolvedSticker.name}”的聊天表情包`;
+    sendCustomMessage(
+      `[表情]|${resolvedSticker.name}|sticker://${resolvedSticker.id}|${encodeURIComponent(semanticDescription)}`,
+      capturedContext,
+    );
   };
 
   /** This is the only AppChat path that imports the image-generation service.
@@ -4142,9 +4193,12 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const allStickers2 = stickerGroups.flatMap(g => g.stickers);
       if (activeAttachModal === "calling") {
         assembledInstructions.push(...buildVoiceCallPrompts(callTopicShiftDetected));
-      } else if (allStickers2.length > 0 && /^\[表情\]\|/.test(lastUserMsg.content)) {
-        const stickerListStr = allStickers2.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
-        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr));
+      } else if (allStickers2.length > 0) {
+        const userSentSticker = /^\[表情\]\|/.test(lastUserMsg.content);
+        const stickerListStr = allStickers2.map((sticker) =>
+          `- ${sticker.name}｜语义：${sticker.semanticDescription || `按名称“${sticker.name}”谨慎理解`}｜发送格式：[表情]|${sticker.name}|sticker://${sticker.id}`
+        ).join("\n");
+        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr, userSentSticker));
       }
 
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
@@ -4749,24 +4803,22 @@ Please read the feedback carefully and rewrite your response to perfectly match 
     commentingRelationships = commentingRelationships.slice(0, 3);
 
     for (const relationship of commentingRelationships) {
-      const friend = characters.find((character) => character.id === relationship.characterId);
+      const friend = findMomentRelationshipCharacter(characters, relationship);
       if (!friend || friend.isGroupChat) continue;
-      const delay = Math.random() * 8000 + 4000; // 4 to 12 seconds delay
-      setTimeout(async () => {
-        try {
-          const temporalContext = createMomentTemporalContext(new Date());
-          const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
-          const relationWorldKnowledge = buildMomentWorldKnowledge(
-            worldBookEntries || [], friend, relationship,
-            `${newMo.content}\n${momentSourceText(relationContext)}`,
-          );
-          const publicContext = buildPublicMomentContext({
-            character: friend,
-            moments: [newMo],
-            topicHistory: loadMomentTopicRecords().value,
-            routine: buildCharacterRoutine(friend.routine),
-            now: Date.now(),
-          });
+      try {
+        const temporalContext = createMomentTemporalContext(new Date());
+        const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
+        const relationWorldKnowledge = buildMomentWorldKnowledge(
+          worldBookEntries || [], friend, relationship,
+          `${newMo.content}\n${momentSourceText(relationContext)}`,
+        );
+        const publicContext = buildPublicMomentContext({
+          character: friend,
+          moments: [newMo],
+          topicHistory: loadMomentTopicRecords().value,
+          routine: buildCharacterRoutine(friend.routine),
+          now: Date.now(),
+        });
 
           const systemInstruction = `Your task: Write a short, natural comment on the Moment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
@@ -4780,33 +4832,32 @@ ${CHARACTER_LANGUAGE_POLICY}
 ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 `;
 
-          const composedPrompt = PromptComposer.compose({
-            scenario: "moment-comment",
-            message: "请仅根据公开朋友圈内容和角色公开资料，写一条简短自然的微信评论：",
-            history: [],
-            systemInstruction,
-          });
-          const comment = await requestAutomaticMomentComment({
-            requestAi: apiChat,
-            request: {
+        const composedPrompt = PromptComposer.compose({
+          scenario: "moment-comment",
+          message: "请仅根据公开朋友圈内容和角色公开资料，写一条简短自然的微信评论：",
+          history: [],
+          systemInstruction,
+        });
+        const comment = await requestAutomaticMomentComment({
+          requestAi: apiChat,
+          request: {
             ...composedPrompt,
             apiKey: settings.apiKey,
             model: settings.selectedModel || "gemini-3.5-flash",
             apiEndpoint: settings.apiEndpoint,
             apiTemperature: settings.apiTemperature,
-            },
-            character: friend,
-            cleanText: (text) => cleanOnlineMessage(text, true),
-            temporalContext,
-            publicContext,
-            relationContext,
-            relationWorldKnowledge,
-          });
-          if (comment) onAddCommentToMoment(newMo.id, comment);
-        } catch (err) {
-          console.error(`Failed to generate automatic comment for ${friend.name}:`, err);
-        }
-      }, delay);
+          },
+          character: friend,
+          cleanText: (text) => cleanOnlineMessage(text, true),
+          temporalContext,
+          publicContext,
+          relationContext,
+          relationWorldKnowledge,
+        });
+        if (comment) onAddCommentToMoment(newMo.id, comment);
+      } catch (err) {
+        console.error(`Failed to generate automatic comment for ${friend.name}:`, err);
+      }
     }
   };
 
@@ -4915,7 +4966,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
   };
 
   const generateCharacterMoment = async (relationship: CharacterRelationship, occurredAt: number) => {
-    const friend = characters.find((character) => character.id === relationship.characterId);
+    const friend = findMomentRelationshipCharacter(characters, relationship);
     if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return;
     try {
       const ownerMomentHistory = moments
@@ -7309,7 +7360,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       })() : msg.content.startsWith("[表情]|") ? (() => {
                         const [_, stickerName, stickerUrl] = msg.content.split("|");
                         // Resolve fresh hydrated URL from local sticker groups
-                        const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s => s.name === stickerName);
+                        const stickerId = stickerUrl?.startsWith("sticker://") ? stickerUrl.slice("sticker://".length) : "";
+                        const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s =>
+                          (stickerId && s.id === stickerId) || s.name === stickerName
+                        );
                         const displayUrl = foundSticker ? foundSticker.url : stickerUrl;
                         return (
                           <div className="chat-message--sticker max-w-[130px] rounded-xl overflow-hidden relative select-none">
@@ -7989,7 +8043,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           <div
                             key={sticker.id}
                             onClick={() => {
-                              sendCustomMessage(`[表情]|${sticker.name}|${sticker.url}`, activeRuntimeContext, { triggerReply: false });
+                              void sendStickerMessage(sticker);
                               setShowStickerSelector(false);
                             }}
                             className="flex flex-col items-center bg-white border border-slate-200/40 hover:border-slate-300 rounded-xl p-1 shadow-sm hover:shadow active:scale-95 transition-all select-none relative"

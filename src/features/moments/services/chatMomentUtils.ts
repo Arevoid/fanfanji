@@ -5,6 +5,15 @@ import { buildMomentPublicCognitiveContext } from "../../../domain/momentCogniti
 import { buildKnownMomentsContext } from "../../../domain/prompt/momentContext";
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import { stripMomentVoiceMarkup } from "./momentContent";
+import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
+
+export const findMomentRelationshipCharacter = (
+  characters: readonly Character[],
+  relationship: CharacterRelationship,
+): Character | undefined => {
+  const canonicalCharacterId = resolveCanonicalCharacterId(relationship.characterId, characters);
+  return characters.find((character) => character.id === canonicalCharacterId);
+};
 
 export const buildPublicMomentContext = (input: {
   character: Character;
@@ -23,7 +32,7 @@ export const buildPublicMomentContext = (input: {
     timestamp: moment.timestamp,
     ...(moment.imageDescription ? { imageDescription: moment.imageDescription } : {}),
   })),
-  publicCommentHistory: [...input.moments.flatMap((moment) => moment.comments), ...(input.comments || [])].map((comment) => ({
+  publicCommentHistory: [...input.moments.flatMap((moment) => getMomentComments(moment)), ...(input.comments || [])].map((comment) => ({
     characterId: input.character.id,
     visibility: "public" as const,
     authorName: comment.authorName,

@@ -7,7 +7,7 @@ import { remove as removeStoredValue, writeJson, writeString } from "./core/stor
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
-import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
+import { initializeMomentRepository, loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
 import { removeMemoriesForMoment } from "./features/moments/services/momentMemory";
 import { sanitizeMomentPublishText } from "./features/moments/services/momentContent";
@@ -382,6 +382,14 @@ export default function App() {
     let active = true;
     initializeCharacterRepository(DEFAULT_CHARACTERS).then((result) => {
       if (active && result.valid) setCharacters(result.value);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    initializeMomentRepository([]).then((result) => {
+      if (active && result.valid) setMoments(result.value);
     });
     return () => { active = false; };
   }, []);

@@ -222,17 +222,18 @@ export function buildVoiceCallPrompts(callTopicShiftDetected: boolean): string[]
   ];
 }
 
-export function buildStickerResponsePrompt(stickerList: string): string {
+export function buildStickerResponsePrompt(stickerList: string, userSentSticker = false): string {
   return `[🚨 特别表情包使用指示（Sticker Response Integration） 🚨]
-用户刚刚发送了表情包；是否回表情包、如何回应以及使用频率，服从角色自己的媒体习惯、关系和当前语境。只有决定发送时才使用下面的客户端格式。
+${userSentSticker ? "用户刚刚发送了表情包；应先按提供的图片语义理解它，而不是声称看不见、加载失败或把它当普通照片。" : "以下是角色当前可以使用的表情包目录。"}
+是否使用表情包、如何回应以及使用频率，服从角色自己的媒体习惯、关系和当前语境；不要每轮都使用。只有决定发送时才复制目录中的客户端格式。
 发送表情包的格式必须完全符合以下严格语法格式：
 [表情]|表情名称|图片URL
 
-以下是你可以无缝调用的自定义表情包列表（每一行对应一个表情包，你可以直接【一字不差地复制】下面的格式并输出它）：
+以下每一项都包含图片语义和可直接复制的发送格式。图片 URL 使用客户端内部 sticker:// 标识，不需要也不允许尝试访问它：
 ${stickerList}
 
 【强制输出规则】：
-1. 绝对不允许胡编乱造不存在的表情包名称或图片URL！你只能从上面给出的列表中挑选！
+1. 绝对不允许胡编乱造不存在的表情包名称或图片URL！你只能从上面给出的目录中挑选！
 2. 发送时格式必须极其严格：[表情]|名称|URL。不能有任何多余的字符。
 3. 不要为了显示功能或凑热闹而发送表情包；不适合时只发送普通文字即可。`;
 }

@@ -53,6 +53,9 @@ assert.match(serializeMessageContentForPrompt(message("[视频通话]|已拒绝"
 const sticker = serializeMessageContentForPrompt(message("[表情]|偷笑|blob:https://secret-sticker"));
 assert.match(sticker, /偷笑/);
 assert.doesNotMatch(sticker, /blob:|secret-sticker/);
+const semanticSticker = serializeMessageContentForPrompt(message(`[表情]|震惊小狗|sticker:\/\/dog|${encodeURIComponent("小狗瞪大眼睛，表达震惊和意外")}`));
+assert.match(semanticSticker, /小狗瞪大眼睛/);
+assert.doesNotMatch(semanticSticker, /sticker:\/\//);
 
 const callRecord = createCallRecordMarkup({
   callType: "语音通话",

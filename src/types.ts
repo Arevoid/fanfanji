@@ -930,6 +930,8 @@ export interface Sticker {
   id: string;
   name: string;
   url: string; // Dynamic ObjectURL or base64/url
+  /** Cached multimodal understanding. Chat prompts use this instead of an inaccessible blob/url. */
+  semanticDescription?: string;
 }
 
 export interface StickerGroup {
