@@ -265,6 +265,9 @@ export interface InnerVoiceRecord {
 
 export interface MomentComment {
   id: string;
+  /** Stable actor identity prevents comments from different relationships being mixed by display name. */
+  characterId?: string;
+  relationId?: string;
   authorName: string;
   authorAvatar: string;
   content: string;
@@ -285,6 +288,9 @@ export interface Moment {
   /** Legacy comments parsed from older post content that the user has removed. */
   deletedCommentIds?: string[];
   image?: string; // base64 or URL
+  /** Original aspect metadata retained so uploaded photos are never forced into a square tile. */
+  imageWidth?: number;
+  imageHeight?: number;
   /** A placeholder image rendered from text until image generation is available. */
   imageType?: "photo" | "text";
   imageDescription?: string;

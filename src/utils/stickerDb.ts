@@ -292,12 +292,14 @@ export async function aiAnalyzeSticker(
   blob: Blob,
   apiKey: string,
   model: string,
-  apiEndpoint?: string
+  apiEndpoint?: string,
+  analysisPrompt: string = stickerAnalysisPrompt,
 ): Promise<StickerSemanticAnalysis> {
   if (!apiKey) {
     throw new Error("No API Key configured. Please configure it in Settings.");
   }
   const base64 = await blobToBase64(blob);
+  const mimeType = blob.type || "image/png";
 
   // If using custom endpoint
   if (apiEndpoint && apiEndpoint.trim()) {
@@ -321,12 +323,12 @@ export async function aiAnalyzeSticker(
               content: [
                 {
                   type: "text",
-                  text: stickerAnalysisPrompt,
+                  text: analysisPrompt,
                 },
                 {
                   type: "image_url",
                   image_url: {
-                    url: `data:image/png;base64,${base64}`,
+                    url: `data:${mimeType};base64,${base64}`,
                   },
                 },
               ],
@@ -354,11 +356,11 @@ export async function aiAnalyzeSticker(
       {
         parts: [
           {
-            text: stickerAnalysisPrompt,
+            text: analysisPrompt,
           },
           {
             inlineData: {
-              mimeType: "image/png",
+              mimeType,
               data: base64,
             },
           },

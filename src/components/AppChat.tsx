@@ -4792,15 +4792,69 @@ Please read the feedback carefully and rewrite your response to perfectly match 
     ...context.recentEvents.map((event) => event.summary),
   ].filter(Boolean).join("\n");
 
+  const MOMENT_PHOTO_ANALYSIS_PROMPT = `请客观识别这张朋友圈照片。只返回 JSON，不要代码块：
+{"name":"不超过12个中文字符的画面主题","description":"不超过120个中文字符，说明主体、场景、可见文字、动作和关键细节；不要猜测图片外的信息"}`;
+
+  const analyzeMomentPhoto = async (image: string): Promise<string | undefined> => {
+    if (!image || !settings.apiKey) return undefined;
+    try {
+      const blob = await fetch(image).then((response) => {
+        if (!response.ok) throw new Error(`Image fetch failed (${response.status}).`);
+        return response.blob();
+      });
+      const analysis = await aiAnalyzeSticker(
+        blob,
+        settings.apiKey,
+        settings.selectedModel || "gemini-3.5-flash",
+        settings.apiEndpoint,
+        MOMENT_PHOTO_ANALYSIS_PROMPT,
+      );
+      return analysis.description.trim() || analysis.name.trim() || undefined;
+    } catch (error) {
+      console.warn("Moment photo analysis failed:", error);
+      return undefined;
+    }
+  };
+
+  const readMomentImageSize = (image: string): Promise<{ width: number; height: number } | undefined> =>
+    new Promise((resolve) => {
+      const preview = new Image();
+      preview.onload = () => resolve(preview.naturalWidth > 0 && preview.naturalHeight > 0
+        ? { width: preview.naturalWidth, height: preview.naturalHeight }
+        : undefined);
+      preview.onerror = () => resolve(undefined);
+      preview.src = image;
+    });
+
+  const getMomentTargetDescription = (moment: Moment): string => [
+    `正文：${renderMomentContent(moment.content) || "（无文字）"}`,
+    moment.imageDescription ? `配图识别：${moment.imageDescription}` : (moment.image ? "配图：有一张尚未识别内容的照片" : ""),
+  ].filter(Boolean).join("\n");
+
   const handleAutoCommentOnUserMoment = async (newMo: Moment) => {
     if (activeRelationships.length === 0) return;
 
-    let commentingRelationships = activeRelationships.filter(() => Math.random() < 0.6);
-    if (commentingRelationships.length === 0) {
-      commentingRelationships = [activeRelationships[Math.floor(Math.random() * activeRelationships.length)]];
-    }
-
-    commentingRelationships = commentingRelationships.slice(0, 3);
+    // Rotate through the least-recently represented friends. The previous
+    // random filter could repeatedly choose the same first two people forever.
+    const latestCommentAt = (relationship: CharacterRelationship): number => {
+      const character = findMomentRelationshipCharacter(characters, relationship);
+      if (!character) return 0;
+      const names = new Set([character.name, character.remark].filter(Boolean));
+      return moments
+        .filter((moment) => !moment.characterId && (moment.ownerIdentityId || "identity-1") === relationship.userIdentityId)
+        .flatMap((moment) => getMomentComments(moment))
+        .filter((comment) => comment.relationId === relationship.id
+          || comment.characterId === character.id
+          || (!comment.relationId && !comment.characterId && names.has(comment.authorName)))
+        .reduce((latest, comment) => Math.max(latest, comment.timestamp), 0);
+    };
+    const commentingRelationships = [...activeRelationships]
+      .filter((relationship) => {
+        const friend = findMomentRelationshipCharacter(characters, relationship);
+        return Boolean(friend && !friend.isGroupChat);
+      })
+      .sort((left, right) => latestCommentAt(left) - latestCommentAt(right))
+      .slice(0, Math.min(3, activeRelationships.length));
 
     for (const relationship of commentingRelationships) {
       const friend = findMomentRelationshipCharacter(characters, relationship);
@@ -4810,7 +4864,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
         const relationWorldKnowledge = buildMomentWorldKnowledge(
           worldBookEntries || [], friend, relationship,
-          `${newMo.content}\n${momentSourceText(relationContext)}`,
+          `${getMomentTargetDescription(newMo)}\n${momentSourceText(relationContext)}`,
         );
         const publicContext = buildPublicMomentContext({
           character: friend,
@@ -4834,7 +4888,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
         const composedPrompt = PromptComposer.compose({
           scenario: "moment-comment",
-          message: "请仅根据公开朋友圈内容和角色公开资料，写一条简短自然的微信评论：",
+          message: `[本次唯一评论目标]\n${getMomentTargetDescription(newMo)}\n\n只评论上面这条新动态。历史动态、历史评论和话题冷却仅用于避免重复措辞，禁止把其中的食物、物件或对话当成这条动态的内容。`,
           history: [],
           systemInstruction,
         });
@@ -4854,7 +4908,11 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           relationContext,
           relationWorldKnowledge,
         });
-        if (comment) onAddCommentToMoment(newMo.id, comment);
+        if (comment) onAddCommentToMoment(newMo.id, {
+          ...comment,
+          characterId: friend.id,
+          relationId: relationship.id,
+        });
       } catch (err) {
         console.error(`Failed to generate automatic comment for ${friend.name}:`, err);
       }
@@ -4868,7 +4926,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
     // Identify which character should reply
     let targetChar: Character | undefined;
-    if (replyingTo) {
+    if (replyingTo?.characterId) {
+      targetChar = characters.find((character) => character.id === replyingTo.characterId);
+    } else if (replyingTo) {
       // If user is replying to a specific character's comment, that character should reply!
       targetChar = characters.find(c => c.name === replyingTo.authorName || c.remark === replyingTo.authorName);
     }
@@ -4903,11 +4963,11 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
         const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
         const relationWorldKnowledge = buildMomentWorldKnowledge(
           worldBookEntries || [], friend, relationship,
-          `${targetMoment.content}\n${userCommentText}\n${momentSourceText(relationContext)}`,
+          `${getMomentTargetDescription(targetMoment)}\n${userCommentText}\n${momentSourceText(relationContext)}`,
         );
         const publicContext = buildPublicMomentContext({
           character: friend,
-          moments: [targetMoment],
+          moments: [{ ...targetMoment, comments: [] }],
           comments: [
             ...targetMoment.comments,
             {
@@ -4937,7 +4997,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
         const composedPrompt = PromptComposer.compose({
           scenario: "moment-reply",
-          message: `请仅针对这条公开朋友圈评论 "${userCommentText}"，写一条符合角色公开人设的简短微信回复：`,
+          message: `[本次唯一回复目标]\n动态：${getMomentTargetDescription(targetMoment)}\n${replyingTo ? `用户正在回复你的评论：${replyingTo.content}\n` : ""}用户刚写的内容：${userCommentText}\n\n只回复“用户刚写的内容”。禁止延续其他朋友圈、其他评论线程或历史话题中的关键词。`,
           history: [],
           systemInstruction,
         });
@@ -4958,16 +5018,20 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           relationContext,
           relationWorldKnowledge,
         });
-        if (reply) onAddCommentToMoment(momentId, reply);
+        if (reply) onAddCommentToMoment(momentId, {
+          ...reply,
+          characterId: friend.id,
+          relationId: relationship.id,
+        });
       } catch (err) {
         console.error(`Failed to generate reply to user comment for ${friend.name}:`, err);
       }
     }, delay);
   };
 
-  const generateCharacterMoment = async (relationship: CharacterRelationship, occurredAt: number) => {
+  const generateCharacterMoment = async (relationship: CharacterRelationship, occurredAt: number): Promise<boolean> => {
     const friend = findMomentRelationshipCharacter(characters, relationship);
-    if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return;
+    if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return false;
     try {
       const ownerMomentHistory = moments
         .filter((moment) => Boolean(moment.characterId))
@@ -5035,7 +5099,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
         // Automatic Moments are optional background content. A provider safety
         // rejection should silently skip this post instead of asking the user
         // to rewrite the character or World Book for a non-essential feature.
-        return;
+        return false;
       }
       if (generated.moment) {
         onAddMoment(generated.moment);
@@ -5050,10 +5114,12 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           })
           : undefined;
         if (topicRecord) appendMomentTopicRecord(topicRecord);
+        return true;
       }
       // A public Moment is not a verified private relationship fact. Keep the
       // generator's legacy return value for compatibility, but do not write it
       // into relation-scoped Memory without an explicit user confirmation path.
+      return false;
     } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
       const errMsgStr = err?.message || String(err);
@@ -5067,13 +5133,25 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       } else {
         showToast(`⚠️ [动态生成失败] 「${friend.name}」：${errMsgStr}`);
       }
+      return false;
     }
   };
 
   const checkAndTriggerCharacterMoments = async () => {
     if (activeRelationships.length === 0) return;
 
-    for (const relationship of activeRelationships) {
+    // Always evaluate the relationship that has waited longest first. The old
+    // fixed-order loop plus `break` starved later friends whenever an earlier
+    // relationship was also eligible.
+    const orderedRelationships = [...activeRelationships].sort((left, right) => {
+      const leftFriend = findMomentRelationshipCharacter(characters, left);
+      const rightFriend = findMomentRelationshipCharacter(characters, right);
+      const leftAt = leftFriend ? getRelationshipLastMomentTimestamp(moments, left, leftFriend.id) : Number.MAX_SAFE_INTEGER;
+      const rightAt = rightFriend ? getRelationshipLastMomentTimestamp(moments, right, rightFriend.id) : Number.MAX_SAFE_INTEGER;
+      return leftAt - rightAt;
+    });
+
+    for (const relationship of orderedRelationships) {
       const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relationship.characterId, characters));
       if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) continue;
       const now = Date.now();
@@ -5094,9 +5172,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
             .filter((moment) => (moment.ownerIdentityId || "identity-1") === relationship.userIdentityId)
             .map((moment) => moment.timestamp),
         });
-        await generateCharacterMoment(relationship, occurredAt);
-        // Break to avoid generating multiple moments simultaneously
-        break;
+        const generated = await generateCharacterMoment(relationship, occurredAt);
+        // Generate one per scheduler pass, then rotate to the next oldest
+        // eligible relationship on the following pass.
+        if (generated) break;
       }
     }
   };
@@ -5108,13 +5187,15 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       try {
         const compressed = await compressImage(file, 800, 800, 0.7);
         setMomentAttachedImage(compressed);
+        const description = await analyzeMomentPhoto(compressed);
+        if (description) setMomentTextImageDescription(description);
       } catch (err) {
         console.error("Moment image compression failed:", err);
       }
     }
   };
 
-  const handlePublishMoment = (e: React.FormEvent) => {
+  const handlePublishMoment = async (e: React.FormEvent) => {
     e.preventDefault();
     const content = sanitizeMomentPublishText(momentInputText);
     if (!content && !momentAttachedImage && !momentTextImageDescription.trim()) {
@@ -5122,6 +5203,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       return;
     }
 
+    const imageDescription = momentTextImageDescription.trim()
+      || (momentAttachedImage ? await analyzeMomentPhoto(momentAttachedImage) : undefined);
+    const imageSize = momentAttachedImage ? await readMomentImageSize(momentAttachedImage) : undefined;
     const newMo: Moment = {
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
@@ -5132,8 +5216,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       likes: [],
       comments: [],
       image: momentAttachedImage || undefined,
+      imageWidth: imageSize?.width,
+      imageHeight: imageSize?.height,
       imageType: momentAttachedImage ? "photo" : (momentTextImageDescription.trim() ? "text" : undefined),
-      imageDescription: momentTextImageDescription.trim() || undefined,
+      imageDescription,
     };
 
     onAddMoment(newMo);
@@ -5193,7 +5279,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
     handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
   };
 
-  const publishMomentFromFeature = (input: { content: string; image: string | null; imageDescription: string }) => {
+  const publishMomentFromFeature = async (input: { content: string; image: string | null; imageDescription: string }) => {
+    const imageDescription = input.imageDescription.trim()
+      || (input.image ? await analyzeMomentPhoto(input.image) : undefined);
+    const imageSize = input.image ? await readMomentImageSize(input.image) : undefined;
     const newMo: Moment = {
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
@@ -5204,8 +5293,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       likes: [],
       comments: [],
       image: input.image || undefined,
+      imageWidth: imageSize?.width,
+      imageHeight: imageSize?.height,
       imageType: input.image ? "photo" : (input.imageDescription.trim() ? "text" : undefined),
-      imageDescription: input.imageDescription.trim() || undefined,
+      imageDescription,
     };
     if (!newMo.content && !newMo.image && !newMo.imageDescription) {
       showToast("朋友圈不支持聊天表情包，请发布文字或图片内容");
@@ -8900,7 +8991,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
                     <textarea
                       rows={3}
-                      required
                       value={momentInputText}
                       onChange={(e) => setMomentInputText(e.target.value)}
                       placeholder="说点什么吧，可以配个好看的插图..."
@@ -9035,7 +9125,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           )}
 
                           {/* Attached Photo */}
-                          {textImageDescription && (
+                          {textImageDescription && !mom.image && (
                             <button
                               type="button"
                               onClick={() => setViewingImageDescription(textImageDescription)}
@@ -9047,8 +9137,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                             </button>
                           )}
                           {mom.image && (
-                            <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
-                              <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
+                            <div className="mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
+                              <img src={mom.image} alt={mom.imageDescription || "朋友圈配图"} width={mom.imageWidth} height={mom.imageHeight} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />
                             </div>
                           )}
 
@@ -9946,7 +10036,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           )}
 
                           {/* Photo if attached */}
-                          {textImageDescription && (
+                          {textImageDescription && !mom.image && (
                             <button
                               type="button"
                               onClick={() => setViewingImageDescription(textImageDescription)}
@@ -9958,8 +10048,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                             </button>
                           )}
                           {mom.image && (
-                            <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
-                              <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
+                            <div className="mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
+                              <img src={mom.image} alt={mom.imageDescription || "朋友圈配图"} width={mom.imageWidth} height={mom.imageHeight} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />
                             </div>
                           )}
 

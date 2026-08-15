@@ -28,6 +28,9 @@ assert.equal(julyContext.currentSolarTerm, "大暑");
 assert.match(formatMomentTemporalContext(julyContext, character), /2026-07-26/);
 assert.match(formatMomentTemporalContext(julyContext, character), /大暑/);
 assert.match(formatMomentTemporalContext(julyContext, character), /12:00/);
+assert.ok(findMomentTemporalConflicts("晚安，睡了。", createMomentTemporalContext(new Date(2026, 6, 31, 7, 18))).length > 0);
+assert.ok(findMomentTemporalConflicts("早安，出门了。", createMomentTemporalContext(new Date(2026, 6, 31, 19, 18))).length > 0);
+assert.deepEqual(findMomentTemporalConflicts("晚安，睡了。", createMomentTemporalContext(new Date(2026, 6, 31, 23, 18))), []);
 
 for (const invalidContent of ["今天立冬，生日。", "初雪落下了", "冬季的第一场雨", "圣诞快乐", "春节的烟花真热闹", "寒潮来了"]) {
   assert.ok(

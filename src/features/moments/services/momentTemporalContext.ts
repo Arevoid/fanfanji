@@ -109,6 +109,7 @@ This Moment occurred and was published at: ${context.currentDate} ${occurrenceTi
 Current season: ${context.currentSeason}. Current solar term: ${context.currentSolarTerm}.
 Write the post as if this occurrence time is "today" and "now". Do not use the real app-open time. Use this date and clock time for day-period references, season, solar terms, holidays, and birthdays.
 If the post states an explicit current clock time such as “凌晨两点半” or “下午三点”, it must match the occurrence clock above. Prefer omitting an exact clock time unless it is necessary.
+Day-period greetings and sign-offs must also match the occurrence time. In particular, do not say “晚安” in the morning or daytime, and do not say “早安” in the afternoon or evening.
 Do not refer to a later part of the same day as if it has already happened: for example, do not write "今晚" or "今天晚上" before evening, and do not write "今天下午" before afternoon.
 Historical chat and memory are dated past events only; they must not replace this occurrence time. Offline-story time is fictional and is valid only inside that story.
 Do not describe a season, solar term, holiday, or weather scene that conflicts with this occurrence time unless explicitly referring to a clearly marked historical memory.
@@ -149,6 +150,16 @@ export function findMomentTemporalConflicts(
   const allowedSeasonWords = new Set(SEASONAL_WORDS[context.currentSeason]);
   const occurrenceHour = context.generatedAt.getHours();
   const occurrenceMinutes = occurrenceHour * 60 + context.generatedAt.getMinutes();
+
+  // Treat greetings/sign-offs as current-time claims too. These phrases were
+  // previously not covered by the explicit-clock matcher, allowing an early
+  // morning backfilled post to say "晚安".
+  if (occurrenceHour >= 5 && occurrenceHour < 17 && /(?:晚安|晚上好|夜深了)/.test(content)) {
+    conflicts.push("night greeting conflicts with a morning/daytime Moment occurrence");
+  }
+  if (occurrenceHour >= 11 && /(?:早安|早上好|早呀|早啊)/.test(content)) {
+    conflicts.push("morning greeting conflicts with a later Moment occurrence");
+  }
 
   for (const reference of findCurrentClockReferences(content)) {
     if (Math.abs(reference.minutes - occurrenceMinutes) > 45) {
