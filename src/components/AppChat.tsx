@@ -5137,6 +5137,28 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
     }
   };
 
+  const enrichUserMomentAndComment = async (moment: Moment) => {
+    let enriched = moment;
+    if (moment.image) {
+      const [description, imageSize] = await Promise.all([
+        moment.imageDescription ? Promise.resolve(moment.imageDescription) : analyzeMomentPhoto(moment.image),
+        readMomentImageSize(moment.image),
+      ]);
+      enriched = {
+        ...moment,
+        imageDescription: description || moment.imageDescription,
+        imageWidth: imageSize?.width,
+        imageHeight: imageSize?.height,
+      };
+      if (description || imageSize) onAddMoment(enriched);
+      // A pure-photo post must not receive a blind, hallucinated comment. If
+      // visual analysis is unavailable, leave it published and let the user
+      // retry later rather than asking "what is this photo?".
+      if (!description && !renderMomentContent(moment.content)) return;
+    }
+    await handleAutoCommentOnUserMoment(enriched);
+  };
+
   const checkAndTriggerCharacterMoments = async () => {
     if (activeRelationships.length === 0) return;
 
@@ -5187,15 +5209,13 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       try {
         const compressed = await compressImage(file, 800, 800, 0.7);
         setMomentAttachedImage(compressed);
-        const description = await analyzeMomentPhoto(compressed);
-        if (description) setMomentTextImageDescription(description);
       } catch (err) {
         console.error("Moment image compression failed:", err);
       }
     }
   };
 
-  const handlePublishMoment = async (e: React.FormEvent) => {
+  const handlePublishMoment = (e: React.FormEvent) => {
     e.preventDefault();
     const content = sanitizeMomentPublishText(momentInputText);
     if (!content && !momentAttachedImage && !momentTextImageDescription.trim()) {
@@ -5203,9 +5223,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       return;
     }
 
-    const imageDescription = momentTextImageDescription.trim()
-      || (momentAttachedImage ? await analyzeMomentPhoto(momentAttachedImage) : undefined);
-    const imageSize = momentAttachedImage ? await readMomentImageSize(momentAttachedImage) : undefined;
     const newMo: Moment = {
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
@@ -5216,10 +5233,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       likes: [],
       comments: [],
       image: momentAttachedImage || undefined,
-      imageWidth: imageSize?.width,
-      imageHeight: imageSize?.height,
       imageType: momentAttachedImage ? "photo" : (momentTextImageDescription.trim() ? "text" : undefined),
-      imageDescription,
+      imageDescription: momentTextImageDescription.trim() || undefined,
     };
 
     onAddMoment(newMo);
@@ -5229,8 +5244,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
     setShowTextImageInput(false);
     setShowMomentPublisher(false);
 
-    // Auto-comment trigger
-    handleAutoCommentOnUserMoment(newMo);
+    // Publish first, then understand the image and generate grounded comments
+    // in the background. The visual API can be slow and must never block UI.
+    void enrichUserMomentAndComment(newMo);
   };
 
   const handleMomentsCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -5279,10 +5295,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
     handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
   };
 
-  const publishMomentFromFeature = async (input: { content: string; image: string | null; imageDescription: string }) => {
-    const imageDescription = input.imageDescription.trim()
-      || (input.image ? await analyzeMomentPhoto(input.image) : undefined);
-    const imageSize = input.image ? await readMomentImageSize(input.image) : undefined;
+  const publishMomentFromFeature = (input: { content: string; image: string | null; imageDescription: string }) => {
     const newMo: Moment = {
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
@@ -5293,17 +5306,15 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       likes: [],
       comments: [],
       image: input.image || undefined,
-      imageWidth: imageSize?.width,
-      imageHeight: imageSize?.height,
       imageType: input.image ? "photo" : (input.imageDescription.trim() ? "text" : undefined),
-      imageDescription,
+      imageDescription: input.imageDescription.trim() || undefined,
     };
     if (!newMo.content && !newMo.image && !newMo.imageDescription) {
       showToast("朋友圈不支持聊天表情包，请发布文字或图片内容");
       return;
     }
     onAddMoment(newMo);
-    handleAutoCommentOnUserMoment(newMo);
+    void enrichUserMomentAndComment(newMo);
   };
 
   const publishMomentCommentFromFeature = (momentId: string, text: string, replyingTo?: MomentComment) => {

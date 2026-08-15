@@ -2224,13 +2224,31 @@ export default function App() {
   const handleAddMoment = (newMo: Moment) => {
     const content = sanitizeMomentPublishText(newMo.content);
     if (!content && !newMo.image && !newMo.imageDescription) return;
-    setMoments((prev) => [{
+    const normalized = {
       ...newMo,
       content,
       comments: newMo.comments
         .map((comment) => ({ ...comment, content: sanitizeMomentPublishText(comment.content) }))
         .filter((comment) => Boolean(comment.content)),
-    }, ...prev]);
+    };
+    // Publishing is immediate; background photo understanding later upserts
+    // the same Moment with semantic/aspect metadata instead of duplicating it.
+    setMoments((prev) => {
+      const existing = prev.find((moment) => moment.id === normalized.id);
+      if (!existing) return [normalized, ...prev];
+      const comments = [...existing.comments];
+      for (const comment of normalized.comments) {
+        const index = comments.findIndex((candidate) => candidate.id === comment.id);
+        if (index >= 0) comments[index] = comment;
+        else comments.push(comment);
+      }
+      return [{
+        ...existing,
+        ...normalized,
+        likes: [...new Set([...existing.likes, ...normalized.likes])],
+        comments,
+      }, ...prev.filter((moment) => moment.id !== normalized.id)];
+    });
   };
 
   const handleLikeMoment = (id: string, userName: string) => {
