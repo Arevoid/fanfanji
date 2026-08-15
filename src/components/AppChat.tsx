@@ -690,6 +690,7 @@ export default function AppChat({
 
   // Sticker groups state
   const [stickerGroups, setStickerGroups] = useState<StickerGroup[]>([]);
+  const stickerSemanticAnalysisInFlightRef = useRef(new Set<string>());
   const triggerCreateStickerGroupRef = useRef<(() => void) | null>(null);
   const [activeStickerGroupIndex, setActiveStickerGroupIndex] = useState<number>(0);
   const [showStickerSelector, setShowStickerSelector] = useState<boolean>(false);
@@ -3401,52 +3402,64 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
   };
 
-  const sendStickerMessage = async (sticker: Sticker) => {
-    const capturedContext = activeRuntimeContext;
-    let resolvedSticker = sticker;
-    if (!sticker.semanticDescription && settings.apiKey) {
-      try {
-        const imageBlob = await loadStickerImageBlob(sticker);
-        const analysis = imageBlob
-          ? await aiAnalyzeSticker(
-            imageBlob,
-            settings.apiKey,
-            settings.selectedModel,
-            settings.apiEndpoint,
-          )
-          : await aiAnalyzeRemoteSticker(
-            sticker.url,
-            settings.apiKey,
-            settings.selectedModel,
-            settings.apiEndpoint,
-          );
-        if (analysis.description) {
-          resolvedSticker = {
-            ...sticker,
-            semanticDescription: analysis.description,
+  const enrichStickerSemanticDescription = async (sticker: Sticker) => {
+    if (sticker.semanticDescription || !settings.apiKey || stickerSemanticAnalysisInFlightRef.current.has(sticker.id)) return;
+    stickerSemanticAnalysisInFlightRef.current.add(sticker.id);
+    try {
+      const imageBlob = await loadStickerImageBlob(sticker);
+      const analysis = imageBlob
+        ? await aiAnalyzeSticker(
+          imageBlob,
+          settings.apiKey,
+          settings.selectedModel,
+          settings.apiEndpoint,
+        )
+        : await aiAnalyzeRemoteSticker(
+          sticker.url,
+          settings.apiKey,
+          settings.selectedModel,
+          settings.apiEndpoint,
+        );
+      if (analysis.description) {
+        const resolvedSticker = {
+          ...sticker,
+          semanticDescription: analysis.description,
+        };
+        const ownerGroup = stickerGroups.find((group) => group.stickers.some((item) => item.id === sticker.id));
+        if (ownerGroup) {
+          const updatedGroup = {
+            ...ownerGroup,
+            stickers: ownerGroup.stickers.map((item) => item.id === sticker.id ? resolvedSticker : item),
           };
-          const ownerGroup = stickerGroups.find((group) => group.stickers.some((item) => item.id === sticker.id));
-          if (ownerGroup) {
-            const updatedGroup = {
-              ...ownerGroup,
-              stickers: ownerGroup.stickers.map((item) => item.id === sticker.id ? resolvedSticker : item),
-            };
-            await stickerDb.saveGroup(updatedGroup);
-            setStickerGroups((groups) => groups.map((group) => group.id === updatedGroup.id ? updatedGroup : group));
-          }
+          // Cache enrichment after the message is already visible. A slow
+          // provider or IndexedDB write must never block sticker delivery.
+          await stickerDb.saveGroup(updatedGroup);
+          setStickerGroups((groups) => groups.map((group) => group.id === updatedGroup.id ? updatedGroup : group));
         }
-      } catch (error) {
-        // A text-only or temporarily unavailable multimodal provider must not
-        // prevent the user from sending the sticker. Its name remains a safe fallback.
-        console.warn("Sticker semantic analysis unavailable; using its saved name.", error);
       }
+    } catch (error) {
+      // A text-only or temporarily unavailable multimodal provider must not
+      // prevent the user from sending the sticker. Its name remains a safe fallback.
+      console.warn("Sticker semantic analysis unavailable; using its saved name.", error);
+    } finally {
+      stickerSemanticAnalysisInFlightRef.current.delete(sticker.id);
     }
+  };
 
-    const semanticDescription = resolvedSticker.semanticDescription || `这是名为“${resolvedSticker.name}”的聊天表情包`;
+  const sendStickerMessage = (sticker: Sticker) => {
+    const capturedContext = activeRuntimeContext;
+    const semanticDescription = sticker.semanticDescription || `这是名为“${sticker.name}”的聊天表情包`;
+
+    // Deliver the sticker optimistically. Visual understanding is enrichment
+    // for later turns, not a prerequisite for showing the user's message.
     sendCustomMessage(
-      `[表情]|${resolvedSticker.name}|sticker://${resolvedSticker.id}|${encodeURIComponent(semanticDescription)}`,
+      `[表情]|${sticker.name}|sticker://${sticker.id}|${encodeURIComponent(semanticDescription)}`,
       capturedContext,
     );
+
+    if (!sticker.semanticDescription && settings.apiKey) {
+      void enrichStickerSemanticDescription(sticker);
+    }
   };
 
   /** This is the only AppChat path that imports the image-generation service.
