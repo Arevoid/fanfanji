@@ -19,6 +19,8 @@ const prompt = buildReadingPromptProjection({ character, relationship, room, aiC
 assert.equal(prompt.priority[0], "role_card_persona");
 assert.match(prompt.system, /寡言、谨慎/);
 assert.match(prompt.system, /close_friend/);
+assert.match(prompt.system, /第一人称/);
+assert.match(prompt.system, /不要描述自己的动作/);
 assert.match(prompt.user, /灯影在门缝里晃动/);
 assert.match(prompt.user, /你觉得他为什么沉默/);
 assert.doesNotMatch(prompt.user, /凶手在下一章现身/);

@@ -78,7 +78,6 @@ import {
 import {
   createUserReadingComment,
   listReadingComments,
-  startReadingDiscussion,
   ReadingCoReadingContentError,
 } from "../features/reading/coReading/readingCoReadingContent";
 import {
@@ -206,7 +205,6 @@ export default function AppReading({
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [inviteBookId, setInviteBookId] = useState<string | null>(null);
   const [roomCommentDraft, setRoomCommentDraft] = useState("");
-  const [roomDiscussionDraft, setRoomDiscussionDraft] = useState("");
   const [section, setSection] = useState<"library" | "archived">("library");
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [readingBookId, setReadingBookId] = useState<string | null>(null);
@@ -1076,30 +1074,6 @@ export default function AppReading({
     }
   };
 
-  const summonRoomFriend = (room: ReadingRoom) => {
-    try {
-      startReadingDiscussion({
-        scope: room,
-        authorName: "我",
-        userPrompt: roomDiscussionDraft,
-      });
-      setRoomDiscussionDraft("");
-      refreshLibrary();
-      setNotice({
-        tone: "success",
-        text: "召唤已记录，等待 AI 好友按人设回应。",
-      });
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        text:
-          error instanceof ReadingCoReadingContentError
-            ? error.message
-            : "召唤保存失败",
-      });
-    }
-  };
-
   const openWorldSetup = () => {
     if (!availableFriends.length) {
       setNotice({
@@ -1432,39 +1406,6 @@ export default function AppReading({
                 className="mt-2 h-10 w-full rounded-2xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)] disabled:opacity-40"
               >
                 保存全书评价
-              </button>
-            </section>
-            <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold">召唤 TA 讨论</h2>
-                <span className="text-[10px] text-[var(--text-muted)]">
-                  应用内讨论室
-                </span>
-              </div>
-              <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
-                召唤只带当前房间允许的内容；不会跳转聊天，也不会读取其他关系的记忆。
-              </p>
-              <p className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">
-                AI 回复会优先服从 TA
-                的角色卡与关系人设；未确认的记忆只会作为候选，不会自动写入主记忆。
-              </p>
-              <textarea
-                value={roomDiscussionDraft}
-                onChange={(event) => setRoomDiscussionDraft(event.target.value)}
-                placeholder="你想和 TA 讨论什么？"
-                rows={2}
-                className="mt-3 w-full resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs outline-none"
-              />
-              <button
-                type="button"
-                disabled={
-                  !roomDiscussionDraft.trim() ||
-                  selectedRoom.status !== "active"
-                }
-                onClick={() => summonRoomFriend(selectedRoom)}
-                className="mt-2 h-10 w-full rounded-2xl border border-[var(--border)] text-xs font-bold disabled:opacity-40"
-              >
-                召唤 TA
               </button>
             </section>
             {roomBook && roomBook.status !== "archived" && (

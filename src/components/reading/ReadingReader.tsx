@@ -483,9 +483,9 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
     if (!room || !context || !prompt || isAiResponding) return;
     setDiscussionDraft("");
     setIsAiResponding(true);
+    let activeDiscussionId = discussionId;
     try {
       advanceAiReadingToParagraph({ scope: room, paragraphAnchorId: context.paragraph.anchor.id });
-      let activeDiscussionId = discussionId;
       if (!activeDiscussionId) {
         const discussion = startReadingDiscussion({ scope: room, authorName: "我", userPrompt: prompt, targetChapterId: context.chapterId, targetParagraphAnchorId: context.paragraph.anchor.id, frozenFragment: context.paragraph.text });
         activeDiscussionId = discussion.id;
@@ -510,6 +510,9 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
       if (response) appendReadingDiscussionMessage({ scope: room, discussionId: activeDiscussionId, author: "ai", authorName: room.characterSnapshot.name, body: response.body, source: response.source });
       setDiscussionMessages(listDiscussionMessages(room, activeDiscussionId));
     } catch (reason) {
+      if (room && activeDiscussionId) {
+        setDiscussionMessages(listDiscussionMessages(room, activeDiscussionId));
+      }
       setToolMessage(reason instanceof Error ? reason.message : "实时讨论暂时失败");
     } finally {
       setIsAiResponding(false);
@@ -785,7 +788,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
               {discussionMessages.map((message) => <div key={message.id} className={`max-w-[84%] rounded-2xl px-3 py-2 text-sm leading-6 ${message.author === "user" ? "ml-auto bg-[var(--text-primary)] text-[var(--surface)]" : "mr-auto bg-[var(--surface-raised)]"}`}><p className="mb-0.5 text-[9px] opacity-60">{message.authorName}</p><p className="whitespace-pre-wrap">{message.body}</p></div>)}
               {isAiResponding && <div className="mr-auto flex items-center gap-2 rounded-2xl bg-[var(--surface-raised)] px-3 py-2 text-xs text-[var(--text-muted)]"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />{room.characterSnapshot.name} 正在回应…</div>}
             </div>
-            <div className="flex gap-2 border-t border-[var(--border)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><textarea value={discussionDraft} onChange={(event) => setDiscussionDraft(event.target.value)} placeholder="讨论当前内容…" rows={1} className="h-10 min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm leading-5 outline-none" /><button type="button" onClick={sendDiscussionMessage} disabled={!discussionDraft.trim() || isAiResponding} className="flex h-10 w-10 items-center justify-center self-end rounded-xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
+            <div className="flex gap-2 border-t border-[var(--border)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><textarea value={discussionDraft} onChange={(event) => setDiscussionDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendDiscussionMessage(); } }} placeholder="讨论当前内容…" rows={1} className="h-10 min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm leading-5 outline-none" /><button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => void sendDiscussionMessage()} disabled={!discussionDraft.trim() || isAiResponding} className="flex h-10 w-10 items-center justify-center self-end rounded-xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
           </div>
         </div>
       )}

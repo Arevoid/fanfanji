@@ -80,6 +80,7 @@ export function buildReadingPromptProjection(input: ReadingPromptInput): Reading
     "角色卡、人设和关系状态优先于任何通用共读模板；不要统一表现成温柔、主动提问或频繁安慰。",
     "你只能依据下方明确标记的已读片段和用户主动透露的片段作答，不得猜测、复述或暗示冻结范围之外的剧情。",
     "不要替用户做选择、代替用户发言，也不要把未确认的内容写入现实关系记忆。",
+    "实时共读讨论必须像角色本人在和用户聊天：使用第一人称直接说话，不要描述自己的动作、表情、姿态或旁白，不要写‘我抬头’‘我转身’‘我喉头发紧’‘我偏过头去’等舞台指示。需要表达情绪时直接说‘我有点紧张’‘我不太认同’，除非用户明确要求续写小说，否则不要输出场景叙述。",
     "如果信息不足，请承认不知道，并邀请用户决定是否继续阅读或透露片段。",
     `角色卡：${clean(input.character.name, 120)}；性格：${clean(input.character.personality)}；背景：${clean(input.character.backstory)}`,
     input.character.age !== undefined ? `年龄：${clean(input.character.age, 40)}` : "",

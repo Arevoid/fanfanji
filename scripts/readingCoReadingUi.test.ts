@@ -24,7 +24,7 @@ assert.match(
   /respondToReadingInvitation\(\{[\s\S]*?scope: room,[\s\S]*?decision: "accept"/,
 );
 assert.match(appReading, /共读评价/);
-assert.match(appReading, /召唤 TA/);
+assert.doesNotMatch(appReading, /召唤 TA 讨论/);
 assert.match(appReading, /仅当前房间可见/);
 assert.match(
   app,
