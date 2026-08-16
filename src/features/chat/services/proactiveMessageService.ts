@@ -5,7 +5,7 @@ import type { ProactiveCognitiveContext } from "./proactiveCognitiveContext";
 import { buildProactivePromptContext, formatProactivePromptContext } from "../../characterCognitive/promptAdapters/proactivePromptAdapter";
 import { requestAiReply } from "./aiReplyService";
 import { createCharacterTextMessage } from "./messageFactory";
-import { cleanAiReplyText, splitAiReplyBubbles } from "./messageParser";
+import { cleanAiReplyText, normalizePaymentMarkup, splitAiReplyBubbles } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { AiChatRequest } from "./chatServiceTypes";
 import type { AppointmentMode } from "../../../domain/schedule/scheduleTypes";
@@ -41,10 +41,12 @@ export async function generateProactiveReplyCandidates(input: {
     allowedModes: input.proactiveOfflineAllowedModes || [],
     now: input.directiveNow,
   });
-  const cleanedText = suppressCharacterEmoji(cleanAiReplyText(parsed.visibleText, input.disableBracketActions));
+  const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(parsed.visibleText, input.disableBracketActions)));
   // Internal scheduling metadata is model context, never user-visible chat.
   // Do not fall back to the raw response when sanitization removes everything.
-  const bubbles = cleanedText ? splitAiReplyBubbles(cleanedText, input.keepPeriods) : [];
+  const bubbles = cleanedText
+    ? splitAiReplyBubbles(cleanedText, input.keepPeriods).map(normalizePaymentMarkup)
+    : [];
   return {
     data,
     ...(parsed.directive ? { proactiveOfflineDirective: parsed.directive } : {}),

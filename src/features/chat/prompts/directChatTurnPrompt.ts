@@ -71,8 +71,18 @@ export function shouldUseCrossDayHistoryBoundary(input: {
 export function buildDirectChatMainPrompt(input: {
   characterName: string;
   disableBracketActions: boolean;
+  characterProfile?: string;
 }): string {
-  const { characterName, disableBracketActions } = input;
+  const { characterName, disableBracketActions, characterProfile } = input;
+  const profileExcerpt = characterProfile?.trim().replace(/\s+/gu, " ").slice(0, 1600) || "未提供额外角色资料";
+  const profileText = profileExcerpt.toLowerCase();
+  const hasHighIncomeSignals = /(总裁|董事|老板|企业家|高管|财阀|富二代|继承人|豪门|富豪|亿万|上市公司|大款)/u.test(profileText);
+  const hasLimitedBudgetSignals = /(大学生|学生|研究生|高中生|实习生|贫困|拮据|没钱|经济困难|预算有限)/u.test(profileText);
+  const amountRangeGuidance = hasHighIncomeSignals && !hasLimitedBudgetSignals
+    ? "资料显示角色可能具备较高收入或社会地位：优先从 88.88、188、520、1314 等更符合场景的金额中选择，除非角色明确节俭、恶作剧或当前情境不允许。"
+    : hasLimitedBudgetSignals
+      ? "资料显示角色可能仍在求学或预算有限：金额可以保持克制，例如 2.22、6.66、13.14、20 或 66.66，但仍要根据关系和场景变化，不要每次都发同一个数字。"
+      : "资料没有明确收入信号：根据关系、节日、事件和角色当下的支付能力，在 8.88、18.88、52.00、66.66、88.88 等合理范围内自然选择，不要固定成一个默认数字。";
   let prompt = `You are playing the role of "${characterName}" in a WeChat chat.
 Reply length, initiative, warmth, restraint, and emotional intensity must follow the character profile and the current conversation. Keep the wording natural and conversational without imposing a universally cold, brief, caring, or agreeable style.
 This completion is one character turn: output only messages authored by "${characterName}". Never simulate a user reply, never switch identity, and never answer a response that the user has not actually sent. All output bubbles occur before the user can reply.
@@ -82,7 +92,13 @@ Show the character through what they say, not by explaining their own persona. F
 
 🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
 1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.
-2. [🚨 RED PACKET CAPABILITY / 对方发红包设定]: You have the capability to send WeChat red packets (微信红包) when this specific character, relationship, and context make it natural. This is a capability, not a request to act cute, generous, warm, or romantic. To send one, output a single separate line matching the format exactly: "[红包]|金额|祝福语".
+2. [🚨 RED PACKET CAPABILITY / 对方发红包设定]: You have the capability to send WeChat red packets (微信红包) when this specific character, relationship, and context make it natural. This is a capability, not a request to act cute, generous, warm, or romantic. To send one, output a single separate line matching the format exactly: "[红包]|数字金额|祝福语".
+   - The amount must be a positive Arabic number with at most two decimal places. Never output placeholders such as “金额”, “amount”, “待定”, or explanatory text in the amount field.
+   - Calibrate the amount to this character's established financial situation, job/status, age, relationship, occasion, and current context. Do not use a universal default such as 6.66 for every character.
+   - A wealthy/high-status character may naturally choose a more substantial amount (for example 88.88, 188, 520, 1314, or higher when the scene supports it); a student or financially constrained character may choose a modest amount. These are examples, not fixed values or guarantees.
+   - Persona, relationship, and scene always outrank stereotypes: do not make a character spend beyond their established means just because of a title, and do not make a wealthy character look artificially stingy without an in-character reason.
+   - 本轮金额校准建议：${amountRangeGuidance}
+   【当前角色资料（仅用于校准红包金额，不要原样复述）】：${profileExcerpt}
 ${disableBracketActions
     ? `3. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
 4. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${characterName}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`

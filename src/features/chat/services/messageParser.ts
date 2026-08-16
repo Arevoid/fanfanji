@@ -79,9 +79,37 @@ export function stripSimulatedUserTurns(text: string, options: { userName?: stri
   return kept.join("\n").trim();
 }
 
-export const normalizePaymentMarkup = (content: string): string => content
-  .replace(/^\[微信红包\]/, "[红包]")
-  .replace(/^\[微信转账\]/, "[转账]");
+const DEFAULT_RED_PACKET_AMOUNT = "8.88";
+const DEFAULT_RED_PACKET_GREETING = "恭喜发财，万事如意";
+const RED_PACKET_AMOUNT_PLACEHOLDER = /^(?:金额|红包金额|金额数字|数额|amount|money|待定|未知|未填写|请输入金额)$/iu;
+
+/**
+ * Models occasionally copy the format placeholder literally (for example
+ * `[红包]|金额|恭喜发财`). Keep the persisted markup renderable and stable by
+ * accepting currency suffixes, while replacing non-numeric placeholders with
+ * a safe fallback amount.
+ */
+export function normalizeRedPacketAmount(value: unknown, fallback = DEFAULT_RED_PACKET_AMOUNT): string {
+  const raw = String(value ?? "").trim().replace(/^[¥￥]\s*/u, "");
+  if (!raw || RED_PACKET_AMOUNT_PLACEHOLDER.test(raw)) return fallback;
+  const match = raw.match(/\d+(?:\.\d{1,2})?/u);
+  if (!match) return fallback;
+  const amount = Number(match[0]);
+  return Number.isFinite(amount) && amount > 0 ? amount.toFixed(2) : fallback;
+}
+
+/** Normalize both legacy aliases and malformed model-generated red packets. */
+export function normalizeRedPacketMarkup(content: string): string {
+  const normalized = content.replace(/^\[微信红包\]/u, "[红包]");
+  if (!normalized.startsWith("[红包]")) return normalized;
+  const parts = normalized.split("|");
+  const amount = normalizeRedPacketAmount(parts[1]);
+  const greeting = parts.slice(2).join("|").trim() || DEFAULT_RED_PACKET_GREETING;
+  return `[红包]|${amount}|${greeting}`;
+}
+
+export const normalizePaymentMarkup = (content: string): string => normalizeRedPacketMarkup(content)
+  .replace(/^\[微信转账\]/u, "[转账]");
 
 export const isRedPacketMarkup = (content: string): boolean => /^\[(?:红包|微信红包)\]/.test(content);
 export const isTransferMarkup = (content: string): boolean => /^\[(?:转账|微信转账)\]/.test(content);

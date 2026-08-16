@@ -48,7 +48,7 @@ const regenerated = createRegeneratedReplyCandidates(candidateContext("第一句
 assert.deepEqual(regenerated.messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.deepEqual(regenerated.messages.map((message) => message.id), ["id-0", "id-1"]);
 assert.deepEqual(regenerated.messages.map((message) => message.timestamp), [100, 101]);
-assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[微信红包]|1|x")).messages.map((message) => message.content), ["[微信红包]|1|x"]);
+assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[微信红包]|1|x")).messages.map((message) => message.content), ["[红包]|1.00|x"]);
 assert.equal(createRegeneratedReplyCandidates(candidateContext("旧消息")).messages.length, 1);
 assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("第一句\n用户：我替你回答\n第二句")).messages.map((message) => message.content), ["第一句"]);
 assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("新的回复\n[15:10]")).messages.map((message) => message.content), ["新的回复"]);

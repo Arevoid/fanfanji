@@ -2,7 +2,7 @@ import type { apiChat } from "../../../utils/apiHelper";
 import type { Character, Message } from "../../../types";
 import { requestAiReply } from "./aiReplyService";
 import { createGroupCharacterMessage } from "./messageFactory";
-import { cleanAiReplyText } from "./messageParser";
+import { cleanAiReplyText, normalizePaymentMarkup } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import { matchGroupReplyMembers, parseGroupReplies } from "./groupReplyParser";
 import type { AiChatRequest } from "./chatServiceTypes";
@@ -21,7 +21,7 @@ export async function generateGroupReplyCandidates(input: {
   const matched = matchGroupReplyMembers(parseGroupReplies(data.text), input.members);
   const valid = matched.map((item) => ({
     ...item,
-    content: suppressCharacterEmoji(cleanAiReplyText(item.reply.content.trim(), input.disableBracketActions)),
+    content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(item.reply.content.trim(), input.disableBracketActions))),
   })).filter((item) => Boolean(item.content));
   return {
     members: valid.map((item) => item.member),

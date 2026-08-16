@@ -10,7 +10,9 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
   ));
   // Never fall back to rawText here: it may consist solely of a model's fake
   // “sent a photo” claim that the parser intentionally removed.
-  const bubbles = cleanedText ? splitAiReplyBubbles(cleanedText, context.keepPeriods) : [];
+  const bubbles = cleanedText
+    ? splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup)
+    : [];
   return {
     cleanedText,
     bubbleTexts: bubbles,

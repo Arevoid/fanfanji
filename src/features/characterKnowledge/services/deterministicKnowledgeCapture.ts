@@ -1,12 +1,13 @@
 import type { Message } from "../../../types";
 import type { CharacterTruthScope, KnowledgeClaim } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import { evaluateKnowledgeWrite } from "../../../domain/characterKnowledge/knowledgeWritePolicy";
-import { parseCallRecord } from "../../chat/services/messageParser";
+import { normalizePaymentMarkup, parseCallRecord } from "../../chat/services/messageParser";
 
 function describeDeterministicArtifact(message: Message): string | undefined {
   const actor = message.sender === "user" ? "用户" : "角色";
-  const parts = message.content.split("|");
-  if (message.content.startsWith("[红包]")) return `${actor}在聊天中发送了金额为 ${parts[1] || "未知"} 元的红包。`;
+  const normalizedContent = normalizePaymentMarkup(message.content);
+  const parts = normalizedContent.split("|");
+  if (normalizedContent.startsWith("[红包]")) return `${actor}在聊天中发送了金额为 ${parts[1] || "未知"} 元的红包。`;
   if (message.content.startsWith("[转账]")) return `${actor}在聊天中发起了金额为 ${parts[1] || "未知"} 元的转账。`;
   if (message.content.startsWith("[音乐]")) return `${actor}在聊天中分享了音乐《${parts[1] || "未知曲目"}》。`;
   if (message.content.startsWith("[通话记录]")) {

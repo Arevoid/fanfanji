@@ -52,7 +52,7 @@ const proactive = await generateProactiveReplyCandidates({
 
 // I-T: both proactive paths share parsing/candidates and carry caller-prepared context without extra requests.
 assert.equal(proactiveRequests, 1);
-assert.deepEqual(proactive.messages.map((message) => message.content), ["接着刚才的话", "[红包]|1|hi"]);
+assert.deepEqual(proactive.messages.map((message) => message.content), ["接着刚才的话", "[红包]|1.00|hi"]);
 assert.deepEqual(proactive.messages.map((message) => message.timestamp), [20, 21]);
 assert.deepEqual(proactive.messages.map((message) => message.characterId), ["a", "a"]);
 assert.equal(proactive.data.text?.includes("接着"), true);

@@ -1799,7 +1799,7 @@ export default function AppChat({
 
           // If the user sent it, refund the money to user's wallet
           if (msg.sender === "user") {
-            const [_, amountStr] = msg.content.split("|");
+            const [_, amountStr] = normalizePaymentMarkup(msg.content).split("|");
             const amt = parseFloat(amountStr || "0");
             if (!isNaN(amt) && amt > 0) {
               refundAmountTotal += amt;
@@ -2783,6 +2783,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         : buildDirectChatMainPrompt({
           characterName: activeCharacter.name,
           disableBracketActions: turnSettings.disableBracketActions,
+          characterProfile: [activeCharacter.remark, activeCharacter.age, activeCharacter.gender, activeCharacter.personality, activeCharacter.backstory].filter(Boolean).join("；"),
         });
 
       const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
@@ -4001,6 +4002,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const mainPromptText = buildDirectChatMainPrompt({
         characterName: activeCharacter.name,
         disableBracketActions: turnSettings.disableBracketActions,
+        characterProfile: [activeCharacter.remark, activeCharacter.age, activeCharacter.gender, activeCharacter.personality, activeCharacter.backstory].filter(Boolean).join("；"),
       });
 
       const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
@@ -7556,7 +7558,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           </button>
                         );
                       })() : isRedPacketMarkup(msg.content) ? (() => {
-                        const [, amount, greeting] = msg.content.split("|");
+                        const [, amount, greeting] = normalizePaymentMarkup(msg.content).split("|");
                         const status = getRedPacketActualStatus(msg);
                         return <RedPacketCard amount={amount || "8.88"} greeting={greeting || "恭喜发财，万事如意"} status={status} isSelf={isSelf} onClick={() => {
                           const char = characters.find((character) => character.id === msg.characterId);
@@ -9612,7 +9614,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       {(() => {
                         const transactions = messages.flatMap((m) => {
                           if (m.content.startsWith("[红包]")) {
-                            const [_, amountStr, greetingStr] = m.content.split("|");
+                            const [_, amountStr, greetingStr] = normalizePaymentMarkup(m.content).split("|");
                             const amount = parseFloat(amountStr || "8.88");
                             const status = getRedPacketActualStatus(m);
                             const char = characters.find(c => c.id === m.characterId);
