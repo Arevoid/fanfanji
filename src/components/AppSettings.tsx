@@ -71,6 +71,7 @@ import {
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../features/chat/styles/liquidGlassDefaults";
 import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
+import { buildSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb } from "../features/settings/systemBackup";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -180,6 +181,16 @@ const BACKUP_KEYS = [
   "phone_forum_actor_states",
   "phone_forum_activity_tasks",
   "phone_forum_profiles",
+  "phone_forum_community_npcs",
+  "phone_forum_translations",
+  "phone_forum_stories",
+  "phone_forum_story_characters",
+  "phone_forum_story_users",
+  "phone_forum_story_threads",
+  "phone_forum_story_replies",
+  "phone_forum_story_events",
+  "phone_forum_story_updates",
+  "phone_forum_story_execution_logs",
   "phone_forum_visit_history",
   "phone_forum_like_history",
   "phone_forum_notifications",
@@ -204,6 +215,11 @@ const BACKUP_KEYS = [
   "phone_identity_music_states",
   "phone_relationship_music_states",
   "phone_offline_stories",
+  "phone_reading_store_v1",
+  "phone_reading_co_reading_store_v1",
+  "phone_reading_analysis_store_v1",
+  "phone_reading_story_store_v1",
+  "phone_reading_co_story_store_v1",
   "phone_presets",
   "phone_settings",
   "phone_appearance_settings",
@@ -216,13 +232,13 @@ const BACKUP_KEYS = [
 ] as const;
 
 const BACKUP_KEY_SET = new Set<string>(BACKUP_KEYS);
-type BackupData = Partial<Record<(typeof BACKUP_KEYS)[number], string | null>>;
 
 const LIGHT_BACKUP_KEYS = [
   "phone_characters",
   "phone_characters_v3",
   "phone_messages",
   "phone_messages_v3",
+  "phone_moments_v3",
   "phone_conversation_summaries",
   "phone_worldbook_entries",
   "phone_memory_vault_items",
@@ -239,19 +255,30 @@ const LIGHT_BACKUP_KEYS = [
   "phone_forum_replies",
   "phone_forum_shares",
   "phone_forum_profiles",
+  "phone_forum_community_npcs",
+  "phone_forum_translations",
   "phone_offline_stories",
+  "phone_reading_store_v1",
+  "phone_reading_co_reading_store_v1",
+  "phone_reading_analysis_store_v1",
+  "phone_reading_story_store_v1",
+  "phone_reading_co_story_store_v1",
 ] as const;
 
 async function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][]): Promise<void> {
-  const backupData: BackupData = {};
-  keys.forEach((key) => {
-    backupData[key] = sanitizeSystemBackupValue(key, localStorage.getItem(key));
-  });
+  const backup = await buildSystemBackup(localStorage, keys);
+  const backupData = {
+    ...backup,
+    localStorage: Object.fromEntries(Object.entries(backup.localStorage).map(([key, value]) => [
+      key,
+      sanitizeSystemBackupValue(key, value),
+    ])),
+  };
   if (keys.includes("phone_offline_stories")) {
     try {
-      const localStories = JSON.parse(backupData.phone_offline_stories || "[]") as OfflineStory[];
+      const localStories = JSON.parse(backupData.localStorage.phone_offline_stories || "[]") as OfflineStory[];
       const durableStories = await offlineStoryDb.loadAll();
-      backupData.phone_offline_stories = JSON.stringify(mergeOfflineStoryCollections(
+      backupData.localStorage.phone_offline_stories = JSON.stringify(mergeOfflineStoryCollections(
         Array.isArray(localStories) ? localStories : [],
         durableStories,
       ));
@@ -3314,7 +3341,7 @@ export default function AppSettings({
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">数据备份与还原</h3>
                 
                 <p className="text-[10px] text-slate-400 leading-relaxed">
-                  可以将本机配置和结构化数据打包导出。音频和本地封面不会写入 JSON，小说正文也不会写入系统 JSON；小说请在“阅读”应用使用独立阅读归档，才能连同正文、进度和标注一起恢复。
+                  可以将本机配置和结构化数据打包导出，包含角色与朋友圈等 IndexedDB 数据。音频和本地封面不会写入 JSON，小说正文也不会写入系统 JSON；小说请在“阅读”应用使用独立阅读归档，才能连同正文、进度和标注一起恢复。
                 </p>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -3344,12 +3371,8 @@ export default function AppSettings({
                         const reader = new FileReader();
                         reader.onload = async () => {
                           try {
-                            const json: unknown = JSON.parse(reader.result as string);
-                            if (typeof json !== "object" || json === null || Array.isArray(json)) {
-                              throw new Error("无效的备份文件格式！");
-                            }
-
-                            const entries = Object.entries(json);
+                            const parsedBackup = parseSystemBackup(JSON.parse(reader.result as string));
+                            const entries = Object.entries(parsedBackup.localStorage);
                             if (entries.length === 0 || entries.some(([key, value]) => !BACKUP_KEY_SET.has(key) || (value !== null && typeof value !== "string"))) {
                               throw new Error("非有效的小手机备份文件！");
                             }
@@ -3365,10 +3388,11 @@ export default function AppSettings({
                                     localStorage.setItem(key, sanitizeSystemBackupValue(
                                       key,
                                       value,
-                                      json as Record<string, unknown>,
+                                      parsedBackup.localStorage,
                                     ) || value);
                                   }
                                 }
+                                await restoreSystemBackupIndexedDb(parsedBackup.indexedDb);
                                 const restoredOfflineStories = entries.find(([key]) => key === "phone_offline_stories")?.[1];
                                 if (typeof restoredOfflineStories === "string") {
                                   const parsedStories = JSON.parse(restoredOfflineStories) as unknown;

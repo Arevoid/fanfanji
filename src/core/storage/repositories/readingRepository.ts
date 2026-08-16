@@ -55,6 +55,18 @@ export async function saveReadingStoreDurably(store: ReadingStore): Promise<Stor
   }
 }
 
+export async function flushReadingStore(): Promise<StorageWriteResult> {
+  if (typeof indexedDB === "undefined") return { success: true };
+  try {
+    await metadataWriteQueue;
+    remove(storageKeys.readingStore);
+    return { success: true };
+  } catch (error) {
+    console.warn("[reading] Reading metadata IndexedDB transaction failed.", error);
+    return { success: false, error: describeIndexedDbError(error) };
+  }
+}
+
 export async function initializeReadingStore(): Promise<StorageResult<ReadingStore>> {
   if (typeof indexedDB === "undefined") return loadLegacyReadingStore();
   if (metadataReady && cachedReadingStore) return { value: cachedReadingStore, found: true, valid: true };
