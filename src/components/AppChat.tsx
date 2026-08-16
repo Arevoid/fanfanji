@@ -5765,6 +5765,27 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   : settings.otherBubbleColor || CLASSIC_OTHER_BUBBLE_TEXT};
               }
 
+              /* The classic default used to keep hard-coded green/white
+                 Tailwind backgrounds on the message nodes. That made the
+                 beauty preview (which uses the persisted classic defaults)
+                 disagree with the actual chat until another style setting
+                 happened to be touched. Make the classic chat use the same
+                 semantic variables from its first render. */
+              ${!isLiquidGlass && !isFloatingCute && !hasUserCustomChatCss ? `
+                #conv-screen .chat-bubble-self,
+                #conv-screen .voice-message-bar.chat-bubble-self {
+                  background-color: var(--chat-user-bg) !important;
+                  background-image: none !important;
+                  color: var(--chat-user-text) !important;
+                }
+                #conv-screen .chat-bubble-other,
+                #conv-screen .voice-message-bar.chat-bubble-other {
+                  background-color: var(--chat-ai-bg) !important;
+                  background-image: none !important;
+                  color: var(--chat-ai-text) !important;
+                }
+              ` : ""}
+
               ${!isLiquidGlass && settings.selfBubbleBg ? `
                 #conv-screen .chat-bubble-self,
                 #conv-screen .voice-message-bar.chat-bubble-self {
