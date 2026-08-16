@@ -34,6 +34,7 @@ import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/pro
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
 import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CHINESE_SEMANTIC_CONTINUITY_PROMPT, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
+import { loadUserMemoPromptContext } from "../features/chat/prompts/userMemoContext";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
@@ -2917,6 +2918,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           shares: loadDiaryShares().value,
         })
         : "";
+      const userMemoContext = activeRelationship
+        ? loadUserMemoPromptContext({
+          scopeKey: activeRelationship.id,
+          queryText: currentMessageContextText,
+          hasUserMessage: Boolean(userMsg),
+          nowMs: requestTime.getTime(),
+        }).text
+        : "";
 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
@@ -2944,6 +2953,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       if (musicContext) assembledInstructions.push(musicContext);
       if (forumContext) assembledInstructions.push(forumContext);
       if (diaryContext) assembledInstructions.push(diaryContext);
+      if (userMemoContext) assembledInstructions.push(userMemoContext);
 
       // 1.2 Red Packet Reaction Prompt
       if (isRedPacket && userMsg) {
@@ -4111,6 +4121,14 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           shares: loadDiaryShares().value,
         })
         : "";
+      const userMemoContext = activeRelationship
+        ? loadUserMemoPromptContext({
+          scopeKey: activeRelationship.id,
+          queryText: currentMessageContextText,
+          hasUserMessage: Boolean(lastUserMsg),
+          nowMs: requestTime.getTime(),
+        }).text
+        : "";
 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
@@ -4138,6 +4156,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       if (musicContext) assembledInstructions.push(musicContext);
       if (forumContext) assembledInstructions.push(forumContext);
       if (diaryContext) assembledInstructions.push(diaryContext);
+      if (userMemoContext) assembledInstructions.push(userMemoContext);
 
       if (isRedPacketMarkup(lastUserMsg.content)) {
         assembledInstructions.push(buildRedPacketReactionPrompt(lastUserMsg.content));
