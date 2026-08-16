@@ -9,6 +9,7 @@ import {
   buildVoiceCallPrompts,
   buildVoiceIntervalPrompt,
   CURRENT_SCENE_CONTINUITY_PROMPT,
+  CHINESE_SEMANTIC_CONTINUITY_PROMPT,
   detectCallTopicShift,
   NEW_DAY_CONVERSATION_BOUNDARY_PROMPT,
   partitionDirectChatHistoryByCurrentDay,
@@ -35,6 +36,9 @@ assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /outcome may be unknown/);
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /Never silently replace one activity/);
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /not automatically still pending forever/);
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /I'm away travelling/);
+assert.match(CHINESE_SEMANTIC_CONTINUITY_PROMPT, /省略“你／我／他”/);
+assert.match(CHINESE_SEMANTIC_CONTINUITY_PROMPT, /炖盅，你吃饱了吗/);
+assert.match(CHINESE_SEMANTIC_CONTINUITY_PROMPT, /上下文仍无法确定意图/);
 assert.doesNotMatch(CURRENT_SCENE_CONTINUITY_PROMPT, /promises, and relationship facts.*still in effect/);
 assert.match(timePrompt, /历史消息里的“明天／今晚／下周”/);
 assert.match(timePrompt, /有关联就连贯回应新旧信息/);
@@ -108,6 +112,7 @@ for (const pattern of [
   /buildTimeAwarenessPrompt\(/g,
   /buildVoiceIntervalPrompt\(/g,
   /assembledInstructions\.push\(CURRENT_SCENE_CONTINUITY_PROMPT\)/g,
+  /assembledInstructions\.push\(CHINESE_SEMANTIC_CONTINUITY_PROMPT\)/g,
 ]) {
   assert.equal((appChatSource.match(pattern) || []).length, 2, `${pattern} must be shared by send and regeneration`);
 }

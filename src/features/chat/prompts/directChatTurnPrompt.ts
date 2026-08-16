@@ -55,6 +55,13 @@ Treat recently established activities, locations, physical conditions, possessio
 - Before sending a location, movement, waiting, arrival, pickup, visit, or threat-related sentence, make it unambiguous who acts, who travels, who waits, and where. Colloquial fragments are fine only when their subject and direction remain clear; never compress several speakers' actions into an unreadable chain.
 - This continuity rule applies to every message in a multi-bubble reply as well.`;
 
+export const CHINESE_SEMANTIC_CONTINUITY_PROMPT = `[中文语义与省略主语规则]
+先结合最新消息、前后句、双方关系和已经确认的事实判断说话意图，再决定是否需要补出主语；不要只按字面把短语机械拼接。
+- 中文口语允许省略“你／我／他”等主语。涉及“吃了吗、吃饱了吗、收到了吗、看到了吗、用得怎么样”等问句时，如果上下文明确是在询问聊天对方，优先恢复为对方，而不是把前面的食物、礼物、文件或其他物品当成动作主体。
+- “我让忠叔送去的炖盅，吃饱了吗？”可以自然理解为“我让忠叔送去的炖盅，你吃饱了吗？”，不要因为存在省略就强行改成生硬的书面句。
+- 只有在上下文仍无法确定意图时，才补出“你／我／他”或拆成两句；如果存在多个合理解释，优先选择最符合当前对话目的和角色口吻的一种。
+- 生成后检查每句话的动作主体、动作对象和问句指向是否一致；保持角色的口语习惯，但不能把两个独立意图压缩成会改变指向的歧义句。`;
+
 export function shouldUseCrossDayHistoryBoundary(input: {
   enableTimeAwareness: boolean;
   currentMessageAt?: number;

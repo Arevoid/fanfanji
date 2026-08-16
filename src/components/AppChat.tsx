@@ -33,7 +33,7 @@ import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
 import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
-import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
+import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CHINESE_SEMANTIC_CONTINUITY_PROMPT, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
@@ -3004,6 +3004,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // copy it into a system block: duplicate user wording encourages parroting
       // and can swap first-person ownership on short replies.
       assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
+      assembledInstructions.push(CHINESE_SEMANTIC_CONTINUITY_PROMPT);
 
       // 7. Before Chat History entries
       const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
@@ -4192,6 +4193,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
       assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
       assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
+      assembledInstructions.push(CHINESE_SEMANTIC_CONTINUITY_PROMPT);
 
       // 7. Before Chat History entries
       const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
