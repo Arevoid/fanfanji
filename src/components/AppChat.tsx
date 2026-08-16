@@ -123,6 +123,7 @@ import {
 import { scrollContainerToBottom } from "../features/viewport/scrollContainer";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
+import { LocationCard } from "../features/chat/components/SpecialMessage/LocationCard";
 import { MomentsApp } from "../features/moments/MomentsApp";
 import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
@@ -7569,6 +7570,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
                           setShowTransferDetailModal(true);
                         }} />;
+                      })() : msg.content.startsWith("[位置]") ? (() => {
+                        const location = msg.content.split("|").slice(1).join("|").trim() || msg.content.replace(/^\[位置\]/, "").trim();
+                        return <LocationCard location={location} />;
                       })() : msg.content.startsWith("[语音") ? (() => {
                         let content = msg.content;
                         let durationStr = "3";
