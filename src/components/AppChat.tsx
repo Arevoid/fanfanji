@@ -8051,6 +8051,11 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
               {/* Send Button 1 (User send only - gray background with white upward arrow) */}
               <button
                 type="button"
+                // Keep the composer focused on mobile. Preventing the pointer
+                // default stops the button from stealing focus (and closing
+                // the on-screen keyboard) while the click still submits the
+                // user's message.
+                onPointerDown={(event) => event.preventDefault()}
                 onClick={(e) => handleSendOnly(e)}
                 disabled={!chatInputText.trim() || isTyping}
                 className="w-10 h-10 transition-all flex items-center justify-center shrink-0 cv-send-only-btn chat-composer__button chat-composer__send-only-button chat-composer__send-button"
