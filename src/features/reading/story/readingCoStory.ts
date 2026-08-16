@@ -3,6 +3,7 @@ import type { ReadingCoStoryActionMode, ReadingCoStorySave, ReadingCoStoryScope,
 import type { ReadingStoryGenerationPreferences, ReadingStoryLength } from "../../../domain/reading/storyTypes";
 import { evaluateReadingStoryAiAction, ReadingCoStoryPolicyError } from "./readingCoStoryPolicy";
 import { DEFAULT_READING_STORY_GENERATION_PREFERENCES, normalizeReadingStoryGenerationPreferences } from "../../../domain/reading/storyGenerationPreferences";
+import { ensureDistinctReadingStoryChoices } from "./readingStoryChoices";
 
 const targetChapters: Record<ReadingStoryLength, number> = { short: 3, medium: 8, long: 20 };
 const createId = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
@@ -28,7 +29,7 @@ export function createReadingCoStoryOpening(input: { scope: ReadingCoStoryScope;
   const existing = turnsFor(loaded.value, input.scope);
   if (existing.length) return existing[0];
   const now = input.now ?? Date.now();
-  const turn: ReadingCoStoryTurn = { ...input.scope, turnId: createId("co-opening"), turnIndex: 0, actor: "system", perspective: "shared", narrative: text(input.narrative, 12000), dialogue: [], choices: input.choices.slice(0, 8), risk: "low", requiresUserApproval: false, visibleTo: ["user", "ai_friend"], createdAt: now };
+  const turn: ReadingCoStoryTurn = { ...input.scope, turnId: createId("co-opening"), turnIndex: 0, actor: "system", perspective: "shared", narrative: text(input.narrative, 12000), dialogue: [], choices: ensureDistinctReadingStoryChoices(input.choices.slice(0, 8)), risk: "low", requiresUserApproval: false, visibleTo: ["user", "ai_friend"], createdAt: now };
   if (!turn.narrative) throw new ReadingCoStoryError("Opening narrative is required", "invalid");
   const nextStory: ReadingCoStoryState = { ...story, aiFriend: { ...story.aiFriend, knownTurnIds: [...story.aiFriend.knownTurnIds, turn.turnId] }, updatedAt: now };
   persist(saveReadingCoStoryStore({ ...replaceStory(loaded.value, nextStory), turns: [...loaded.value.turns, turn] }), turn);
@@ -61,12 +62,7 @@ export function validateReadingCoStoryTurnResult(raw: unknown): ReadingCoStoryTu
   const strings = (key: string): string[] => Array.isArray(value[key]) ? (value[key] as unknown[]).filter((item): item is string => typeof item === "string" && Boolean(item.trim())).slice(0, 50).map((item) => text(item, 1000)) : [];
   const dialogue = Array.isArray(value.dialogue) ? value.dialogue.slice(0, 50).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).map((item) => ({ speaker: typeof item.speaker === "string" ? text(item.speaker, 200) : "", text: typeof item.text === "string" ? text(item.text, 2000) : "" })).filter((item) => item.speaker && item.text) : [];
   const parsedChoices = Array.isArray(value.choices) ? value.choices.slice(0, 8).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).map((item) => ({ id: typeof item.id === "string" ? text(item.id, 100) : "", label: typeof item.label === "string" ? text(item.label, 500) : "", consequenceHint: typeof item.consequenceHint === "string" ? text(item.consequenceHint, 500) : undefined })).filter((item) => item.id && item.label) : [];
-  const choices = parsedChoices.length ? parsedChoices : [
-    { id: "continue-observe", label: "继续观察局势，确认刚才行动造成的变化" },
-    { id: "ask-friend", label: "询问同行好友的判断" },
-    { id: "follow-goal", label: "按照当前目标推进下一步行动" },
-    { id: "free-action", label: "按自己的想法行动" },
-  ];
+  const choices = ensureDistinctReadingStoryChoices(parsedChoices);
   return { narrative, dialogue, choices, friendAction: typeof value.friendAction === "string" ? text(value.friendAction, 2000) : "", controlsUserCharacter: false, stateChanges: strings("stateChanges"), userDiscoveredIntel: strings("userDiscoveredIntel"), aiDiscoveredIntel: strings("aiDiscoveredIntel"), taskChanges: strings("taskChanges"), inventoryChanges: strings("inventoryChanges"), currentLocation: typeof value.currentLocation === "string" ? text(value.currentLocation, 500) : "", currentTime: typeof value.currentTime === "string" ? text(value.currentTime, 200) : "", chapterProgress: Math.max(0, Math.min(1, Number(value.chapterProgress) || 0)), shouldEndChapter: Boolean(value.shouldEndChapter) };
 }
 
@@ -84,7 +80,7 @@ export function commitReadingCoStoryTurn(input: { scope: ReadingCoStoryScope; re
   if (input.expectedStoryUpdatedAt !== undefined && story.updatedAt !== input.expectedStoryUpdatedAt) throw new ReadingCoStoryError("共同故事已变化，请刷新后重试", "conflict");
   if (!input.userAction.trim()) throw new ReadingCoStoryError("用户行动不能为空", "invalid");
   const now = input.now ?? Date.now();
-  const turn: ReadingCoStoryTurn = { ...input.scope, turnId: createId("co-scene"), requestId, turnIndex: turns.length, actor: "system", action: text(input.userAction, 2000), userAction: text(input.userAction, 2000), aiAction: input.result.friendAction || undefined, perspective: "shared", narrative: input.result.narrative, dialogue: input.result.dialogue, choices: input.result.choices, stateChanges: input.result.stateChanges, userDiscoveredIntel: input.result.userDiscoveredIntel, aiDiscoveredIntel: input.result.aiDiscoveredIntel, currentLocation: input.result.currentLocation || story.currentLocation, currentTime: input.result.currentTime || story.currentTime, chapterProgress: input.result.chapterProgress, shouldEndChapter: input.result.shouldEndChapter, risk: "low", requiresUserApproval: false, visibleTo: ["user", "ai_friend"], createdAt: now };
+  const turn: ReadingCoStoryTurn = { ...input.scope, turnId: createId("co-scene"), requestId, turnIndex: turns.length, actor: "system", action: text(input.userAction, 2000), userAction: text(input.userAction, 2000), aiAction: input.result.friendAction || undefined, perspective: "shared", narrative: input.result.narrative, dialogue: input.result.dialogue, choices: ensureDistinctReadingStoryChoices(input.result.choices), stateChanges: input.result.stateChanges, userDiscoveredIntel: input.result.userDiscoveredIntel, aiDiscoveredIntel: input.result.aiDiscoveredIntel, currentLocation: input.result.currentLocation || story.currentLocation, currentTime: input.result.currentTime || story.currentTime, chapterProgress: input.result.chapterProgress, shouldEndChapter: input.result.shouldEndChapter, risk: "low", requiresUserApproval: false, visibleTo: ["user", "ai_friend"], createdAt: now };
   const chapter = Math.min(story.targetChapters, story.currentChapter + (input.result.shouldEndChapter ? 1 : 0));
   const next: ReadingCoStoryState = { ...story, currentChapter: chapter, currentLocation: input.result.currentLocation || story.currentLocation, currentTime: input.result.currentTime || story.currentTime, userKnownIntel: Array.from(new Set([...story.userKnownIntel, ...input.result.userDiscoveredIntel])).slice(-100), tasks: Array.from(new Set([...story.tasks, ...input.result.taskChanges])).slice(-100), inventory: Array.from(new Set([...story.inventory, ...input.result.inventoryChanges])).slice(-100), aiFriend: { ...story.aiFriend, knownIntel: Array.from(new Set([...story.aiFriend.knownIntel, ...input.result.aiDiscoveredIntel])).slice(-100), knownTurnIds: Array.from(new Set([...story.aiFriend.knownTurnIds, turn.turnId])).slice(-200) }, activeActor: "user", status: chapter >= story.targetChapters ? "completed" : story.status, updatedAt: now };
   persist(saveReadingCoStoryStore({ ...replaceStory(loaded.value, next), turns: [...loaded.value.turns, turn] }), next);

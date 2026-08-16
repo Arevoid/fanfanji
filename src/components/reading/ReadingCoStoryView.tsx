@@ -30,6 +30,7 @@ import {
   updateReadingCoStoryMetadata,
 } from "../../features/reading/story/readingCoStory";
 import { generateReadingCoStoryTurn } from "../../features/reading/story/readingCoStoryGeneration";
+import { ensureDistinctReadingStoryChoices } from "../../features/reading/story/readingStoryChoices";
 import ReadingStoryPlayShell, {
   type ReadingStoryPanel,
 } from "./ReadingStoryPlayShell";
@@ -97,7 +98,7 @@ export default function ReadingCoStoryView({
   );
   const latestTurn = turns.at(-1);
   const latestChoices = latestTurn?.choices.length
-    ? latestTurn.choices
+    ? ensureDistinctReadingStoryChoices(latestTurn.choices)
     : story?.status === "completed"
       ? []
       : [
@@ -126,7 +127,7 @@ export default function ReadingCoStoryView({
           { id: "a", label: "观察环境，确认当前位置与时间" },
           { id: "b", label: `与 ${story.aiFriend.displayName} 交换眼前发现` },
           { id: "c", label: "寻找故事中最先出现的关键人物" },
-          { id: "d", label: "按自己的想法行动" },
+          { id: "d", label: "按自己的想法行动或说话" },
         ],
       });
       refresh(story);
@@ -171,7 +172,7 @@ export default function ReadingCoStoryView({
           { id: "a", label: "观察眼前环境，判断故事进行到哪里" },
           { id: "b", label: `先与 ${character.name} 确认彼此的身份` },
           { id: "c", label: "寻找最近出现的原故事人物" },
-          { id: "d", label: "按自己的想法行动" },
+          { id: "d", label: "按自己的想法行动或说话" },
         ],
       });
       refresh(next);

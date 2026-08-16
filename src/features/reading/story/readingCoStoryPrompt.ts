@@ -41,7 +41,7 @@ export function buildReadingCoStoryTurnPrompt(input: { story: ReadingCoStoryStat
       "AI 好友的反应必须优先服从角色卡、人设、关系和当前身份，不得套用统一温柔、安慰或主动提问模板。",
       "只能使用提供的当前宇宙、双方已知情报和可见回合，不得读取现实主记忆、其他好友房间或其他故事分支。",
       "只输出 JSON，不要 Markdown。必须包含 narrative、dialogue、choices、friendAction、controlsUserCharacter(false)、stateChanges、userDiscoveredIntel、aiDiscoveredIntel、taskChanges、inventoryChanges、currentLocation、currentTime、chapterProgress、shouldEndChapter。",
-      "choices 最多 8 个；正文不得把尚未选择的选项写成已经发生。若 AI 好友希望进行重大行动，只能在正文中提出建议，不得直接执行。",
+      "每个新节点必须给出正好 4 个可执行方向：前 3 个必须从刚刚发生的共同场景中提炼出彼此不同、互斥且会把剧情带向不同路线的具体行动，最后 1 个固定为“按自己的想法行动或说话”。不要重复通用模板；例如正文出现岔路口时，应给出“走左边／走右边／走中间／按自己的想法行动或说话”。正文不得把尚未选择的选项写成已经发生。若 AI 好友希望进行重大行动，只能在正文中提出建议，不得直接执行。",
       `每个回合都必须推进一个完整场景：narrative 写 ${generation.minCharacters} 至 ${generation.maxCharacters} 个中文字符，包含环境、事件发展、双方反应、因果变化和新的选择节点，不能只返回几句动作摘要。`,
       "AI 好友不能只有行为描述。除非当前场景确实无法说话，否则 dialogue 至少包含一条 AI 好友符合人设、关系、身份和当前情境的自然台词；台词应与行动共同推动剧情。",
     ].join("\n"),

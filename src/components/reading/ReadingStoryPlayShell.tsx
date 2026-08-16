@@ -196,10 +196,8 @@ export default function ReadingStoryPlayShell(
                       className={`w-full rounded-2xl border px-4 py-3 text-left text-xs leading-5 transition ${props.action === choice.label ? "border-amber-300 bg-amber-400/15" : "border-amber-500/25 bg-black/20"}`}
                     >
                       <span className="mr-2 font-black text-amber-300">
-                        [
                         {(["一", "二", "三", "四", "五", "六", "七", "八"] as const)[index] ||
-                          `选项${index + 1}`}
-                        ]
+                          `选项${index + 1}`}、
                       </span>
                       {choice.label}
                       {choice.consequenceHint && (

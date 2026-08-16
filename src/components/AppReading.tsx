@@ -634,7 +634,7 @@ export default function AppReading({
               { id: "a", label: "先观察周围，确认自己所在的位置与时间" },
               { id: "b", label: "寻找一位原故事人物，试探剧情进展" },
               { id: "c", label: "检查自己的身份、物品和当前目标" },
-              { id: "d", label: "按自己的想法行动" },
+              { id: "d", label: "按自己的想法行动或说话" },
             ],
             stateChanges: [identityDescription],
             discoveredIntel: [],

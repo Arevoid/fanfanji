@@ -24,10 +24,13 @@ assert.match(prompt.systemInstruction, /900 至 1500 个中文字符/);
 assert.match(prompt.message, /影视镜头/);
 assert.match(prompt.message, /第三人称/);
 assert.match(prompt.message, /让暴雨推动下一场冲突/);
+assert.match(prompt.systemInstruction, /正好 4 个可执行方向/);
 
 const dialog = readFileSync(new URL("../src/components/reading/ReadingStoryGenerationSettingsDialog.tsx", import.meta.url), "utf8");
 const solo = readFileSync(new URL("../src/components/reading/ReadingStoryView.tsx", import.meta.url), "utf8");
 const shared = readFileSync(new URL("../src/components/reading/ReadingCoStoryView.tsx", import.meta.url), "utf8");
+const coPrompt = readFileSync(new URL("../src/features/reading/story/readingCoStoryPrompt.ts", import.meta.url), "utf8");
+assert.match(coPrompt, /彼此不同、互斥/);
 assert.match(dialog, /每次剧情生成字数/);
 assert.match(dialog, /叙事风格/);
 assert.match(dialog, /叙事视角/);

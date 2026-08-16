@@ -19,6 +19,7 @@ import type {
   ReadingStoryGenerationPreferences,
 } from "../../../domain/reading/storyTypes";
 import { DEFAULT_READING_STORY_GENERATION_PREFERENCES, normalizeReadingStoryGenerationPreferences } from "../../../domain/reading/storyGenerationPreferences";
+import { ensureDistinctReadingStoryChoices } from "./readingStoryChoices";
 
 const createId = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 const targetChapters: Record<ReadingStoryLength, number> = { short: 3, medium: 8, long: 20 };
@@ -93,12 +94,7 @@ export function validateReadingStoryTurnResult(raw: unknown): ReadingStoryTurnRe
       };
     }).filter((choice) => choice.id && choice.label)
     : [];
-  const choices = parsedChoices.length ? parsedChoices : [
-    { id: "continue-observe", label: "继续观察局势，确认刚才行动造成的变化" },
-    { id: "ask-present", label: "主动询问在场人物，获取更多信息" },
-    { id: "follow-goal", label: "按照当前目标推进下一步行动" },
-    { id: "free-action", label: "按自己的想法行动" },
-  ];
+  const choices = ensureDistinctReadingStoryChoices(parsedChoices);
   const strings = (field: string): string[] => Array.isArray(value[field])
     ? (value[field] as unknown[]).filter((item): item is string => Boolean(typeof item === "string" && item.trim())).slice(0, 50).map((item) => item.trim().slice(0, 1000))
     : [];
@@ -149,6 +145,7 @@ export function commitReadingStoryTurn(input: { scope: ReadingStoryScope; result
     turnIndex: turns.length,
     parentTurnId: previous?.id,
     ...input.result,
+    choices: ensureDistinctReadingStoryChoices(input.result.choices),
     userAction: input.userAction ? text(input.userAction, 2000) : undefined,
     createdAt: now,
   };

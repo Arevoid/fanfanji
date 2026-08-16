@@ -16,7 +16,7 @@ const story = createReadingCoStory({ scope, title: "共同穿书测试", length:
 assert.equal(getReadingCoStory(scope)?.relationId, "relation-a");
 assert.equal(getReadingCoStory({ ...scope, relationId: "relation-b", characterId: "character-b" }), undefined);
 const opening = createReadingCoStoryOpening({ scope, narrative: "两个人在城门醒来。", choices: [{ id: "a", label: "观察城门" }], now: 1 });
-assert.equal(opening.choices.length, 1);
+assert.equal(opening.choices.length, 4, "every shared-story node exposes distinct directions and free action");
 assert.equal(createReadingCoStoryOpening({ scope, narrative: "不能覆盖", choices: [], now: 1 }).turnId, opening.turnId, "opening creation is idempotent");
 
 const low = commitReadingCoStoryAiAction({ scope, result: { action: "观察城门守卫的换岗规律", rationale: "先收集信息，避免暴露", risk: "low", requiresUserApproval: false, controlsUserCharacter: false }, mode: "low_risk_execute", expectedStoryUpdatedAt: story.updatedAt, now: 2 });

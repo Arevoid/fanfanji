@@ -28,6 +28,7 @@ import {
   updateReadingStoryMetadata,
 } from "../../features/reading/story/readingStory";
 import { generateReadingStoryTurn } from "../../features/reading/story/readingStoryGeneration";
+import { ensureDistinctReadingStoryChoices } from "../../features/reading/story/readingStoryChoices";
 import { getReadingBookBible } from "../../core/storage/repositories/readingAnalysisRepository";
 import ReadingStoryPlayShell, {
   type ReadingStoryPanel,
@@ -97,7 +98,7 @@ export default function ReadingStoryView({
           { id: "a", label: "先观察周围，确认当前位置与时间" },
           { id: "b", label: "寻找一位原故事人物，判断剧情进度" },
           { id: "c", label: "检查自己的身份、物品和目标" },
-          { id: "d", label: "按自己的想法行动" },
+          { id: "d", label: "按自己的想法行动或说话" },
         ],
         stateChanges: ["故事已开始"],
         discoveredIntel: [],
@@ -348,7 +349,7 @@ export default function ReadingStoryView({
 
   const latestTurn = turns.at(-1);
   const latestChoices = latestTurn?.choices.length
-    ? latestTurn.choices
+    ? ensureDistinctReadingStoryChoices(latestTurn.choices)
     : story.status === "completed"
       ? []
       : [
