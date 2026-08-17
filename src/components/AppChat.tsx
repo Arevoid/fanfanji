@@ -31,6 +31,7 @@ import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary,
 import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectInterveningOfflineHandoff, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
+import { buildCharacterBehaviorPrompt } from "../domain/prompt/characterBehaviorProfile";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
 import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CHINESE_SEMANTIC_CONTINUITY_PROMPT, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
@@ -3020,6 +3021,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         ...currentChatMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
+      const characterBehaviorPrompt = buildCharacterBehaviorPrompt({
+        character: activeCharacter,
+        currentMessage: currentMessageContextText,
+        recentContext: scanText,
+      });
 
       // Use the unified World Book system blocks builder
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText, {
@@ -3080,6 +3086,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       assembledInstructions.push(characterDescriptionText);
       assembledInstructions.push(characterProjection.personality.content);
       if (relationshipContext) assembledInstructions.push(relationshipContext);
+      if (characterBehaviorPrompt) assembledInstructions.push(characterBehaviorPrompt);
       if (characterContextText.trim()) assembledInstructions.push(characterContextText);
 
       // The adapter receives the relation-scoped cognitive snapshot and emits
@@ -4408,6 +4415,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         ...previousMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
+      const characterBehaviorPrompt = buildCharacterBehaviorPrompt({
+        character: activeCharacter,
+        currentMessage: currentMessageContextText,
+        recentContext: scanText,
+      });
 
       // Use the unified World Book system blocks builder
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText, {
@@ -4462,6 +4474,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       assembledInstructions.push(characterDescriptionText);
       assembledInstructions.push(characterProjection.personality.content);
       if (relationshipContext) assembledInstructions.push(relationshipContext);
+      if (characterBehaviorPrompt) assembledInstructions.push(characterBehaviorPrompt);
       if (characterContextText.trim()) assembledInstructions.push(characterContextText);
 
       if (regenerationCognitiveContext) {
