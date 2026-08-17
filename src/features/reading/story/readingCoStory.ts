@@ -84,7 +84,8 @@ export function commitReadingCoStoryTurn(input: { scope: ReadingCoStoryScope; re
   if (!input.userAction.trim()) throw new ReadingCoStoryError("用户行动不能为空", "invalid");
   const now = input.now ?? Date.now();
   const turn: ReadingCoStoryTurn = { ...input.scope, turnId: createId("co-scene"), requestId, turnIndex: turns.length, actor: "system", action: text(input.userAction, 2000), userAction: text(input.userAction, 2000), aiAction: input.result.friendAction || undefined, perspective: "shared", narrative: input.result.narrative, dialogue: input.result.dialogue, choices: ensureDistinctReadingStoryChoices(input.result.choices, { narrative: input.result.narrative, currentLocation: input.result.currentLocation || story.currentLocation }), stateChanges: input.result.stateChanges, userDiscoveredIntel: input.result.userDiscoveredIntel, aiDiscoveredIntel: input.result.aiDiscoveredIntel, currentLocation: input.result.currentLocation || story.currentLocation, currentTime: input.result.currentTime || story.currentTime, chapterProgress: input.result.chapterProgress, shouldEndChapter: input.result.shouldEndChapter, risk: "low", requiresUserApproval: false, visibleTo: ["user", "ai_friend"], createdAt: now };
-  const chapter = Math.min(story.targetChapters, story.currentChapter + (input.result.shouldEndChapter ? 1 : 0));
+  const advancesChapter = input.result.shouldEndChapter || input.result.chapterProgress >= 0.999;
+  const chapter = Math.min(story.targetChapters, story.currentChapter + (advancesChapter ? 1 : 0));
   const next: ReadingCoStoryState = { ...story, currentChapter: chapter, currentLocation: input.result.currentLocation || story.currentLocation, currentTime: input.result.currentTime || story.currentTime, userKnownIntel: Array.from(new Set([...story.userKnownIntel, ...input.result.userDiscoveredIntel])).slice(-100), tasks: Array.from(new Set([...story.tasks, ...input.result.taskChanges])).slice(-100), inventory: Array.from(new Set([...story.inventory, ...input.result.inventoryChanges])).slice(-100), aiFriend: { ...story.aiFriend, knownIntel: Array.from(new Set([...story.aiFriend.knownIntel, ...input.result.aiDiscoveredIntel])).slice(-100), knownTurnIds: Array.from(new Set([...story.aiFriend.knownTurnIds, turn.turnId])).slice(-200) }, activeActor: "user", status: chapter >= story.targetChapters ? "completed" : story.status, updatedAt: now };
   persist(saveReadingCoStoryStore({ ...replaceStory(loaded.value, next), turns: [...loaded.value.turns, turn] }), next);
   return { story: next, turn };
@@ -145,9 +146,15 @@ export function loadReadingCoStorySave(input: { scope: ReadingCoStoryScope; save
     .filter((turn) => sameScope(turn, input.scope))
     .sort((left, right) => left.turnIndex - right.turnIndex);
   const savedTurnIndex = scopedTurns.find((turn) => turn.turnId === save.turnId)?.turnIndex;
-  const remainingTurns = savedTurnIndex === undefined
+  const fallbackTurn = savedTurnIndex === undefined
+    ? scopedTurns
+      .filter((turn) => turn.createdAt <= (Number(save.state.updatedAt) || save.createdAt))
+      .at(-1)
+    : undefined;
+  const effectiveSavedTurnIndex = savedTurnIndex ?? fallbackTurn?.turnIndex;
+  const remainingTurns = effectiveSavedTurnIndex === undefined
     ? loaded.value.turns
-    : loaded.value.turns.filter((turn) => !sameScope(turn, input.scope) || turn.turnIndex <= savedTurnIndex);
+    : loaded.value.turns.filter((turn) => !sameScope(turn, input.scope) || turn.turnIndex <= effectiveSavedTurnIndex);
   const restored = { ...structuredClone(save.state), updatedAt: input.now ?? Date.now() };
   const nextStore = {
     ...loaded.value,

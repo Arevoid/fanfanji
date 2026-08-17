@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import type { ReadingStoryChoice } from "../../domain/reading/storyTypes";
+import { getReadingStoryChapterNumber, getReadingStoryProgress } from "../../domain/reading/storyChapterProgress";
 
 export interface ReadingStoryPanel {
   id: string;
@@ -21,6 +22,8 @@ interface ReadingStoryPlayShellProps {
   subtitle: string;
   currentChapter: number;
   targetChapters: number;
+  chapterProgress?: number;
+  storyStatus?: "active" | "completed" | "paused" | "abandoned";
   currentLocation: string;
   currentTime: string;
   statusLabel: string;
@@ -48,13 +51,17 @@ export default function ReadingStoryPlayShell(
   const scrollRef = useRef<HTMLElement>(null);
   const activePanel = props.panels.find((item) => item.id === activePanelId);
   const choicesKey = props.choices.map((choice) => `${choice.id}:${choice.label}`).join("|");
-  const progress =
-    props.targetChapters > 0
-      ? Math.min(
-          100,
-          Math.max(0, (props.currentChapter / props.targetChapters) * 100),
-        )
-      : 0;
+  const progress = getReadingStoryProgress({
+    currentChapter: props.currentChapter,
+    targetChapters: props.targetChapters,
+    chapterProgress: props.chapterProgress,
+    status: props.storyStatus,
+  }) * 100;
+  const visibleChapter = getReadingStoryChapterNumber({
+    currentChapter: props.currentChapter,
+    targetChapters: props.targetChapters,
+    status: props.storyStatus,
+  });
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -109,7 +116,7 @@ export default function ReadingStoryPlayShell(
         <div className="mx-auto max-w-2xl">
           <div className="mb-5 flex flex-wrap items-center gap-2 text-[10px] text-white/45">
             <span className="rounded-full border border-white/10 px-2.5 py-1">
-              第 {props.currentChapter}/{props.targetChapters} 章
+              第 {visibleChapter}/{props.targetChapters} 章
             </span>
             <span className="rounded-full border border-white/10 px-2.5 py-1">
               {props.currentLocation}

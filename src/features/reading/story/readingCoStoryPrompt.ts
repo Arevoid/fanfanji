@@ -1,4 +1,5 @@
 import type { ReadingCoStoryState, ReadingCoStoryTurn } from "../../../domain/reading/coStoryTypes";
+import { getReadingStoryChapterNumber } from "../../../domain/reading/storyChapterProgress";
 import { describeReadingNarrativePerspective, normalizeReadingStoryGenerationPreferences } from "../../../domain/reading/storyGenerationPreferences";
 
 export interface ReadingCoStoryAiContext {
@@ -18,7 +19,7 @@ export function projectReadingCoStoryForAi(input: { story: ReadingCoStoryState; 
     persona: input.story.aiFriend.personaSummary,
     role: input.story.aiFriend.characterRole || input.story.aiFriend.characterName,
     userRole: input.story.userCharacterRole || input.story.userCharacterName,
-    currentStory: { title: input.story.title, location: input.story.currentLocation, time: input.story.currentTime, chapter: `${input.story.currentChapter}/${input.story.targetChapters}`, genre: input.story.worldDefinition?.genre, worldView: input.story.worldDefinition?.worldView, synopsis: input.story.worldDefinition?.synopsis, intendedEnding: input.story.worldDefinition?.intendedEnding },
+    currentStory: { title: input.story.title, location: input.story.currentLocation, time: input.story.currentTime, chapter: `第 ${getReadingStoryChapterNumber(input.story)}/${input.story.targetChapters} 章（已完成章节数：${input.story.currentChapter}）`, genre: input.story.worldDefinition?.genre, worldView: input.story.worldDefinition?.worldView, synopsis: input.story.worldDefinition?.synopsis, intendedEnding: input.story.worldDefinition?.intendedEnding },
     knownIntel: input.story.aiFriend.knownIntel.slice(-20),
     visibleRecentTurns,
   };

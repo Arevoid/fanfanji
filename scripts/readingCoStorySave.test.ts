@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { listReadingCoStorySaves, saveReadingCoStoryStore } from "../src/core/storage/repositories/readingCoStoryRepository";
+import { listReadingCoStorySaves, listReadingCoStoryTurns, saveReadingCoStoryStore } from "../src/core/storage/repositories/readingCoStoryRepository";
 import { createEmptyReadingCoStoryStore } from "../src/domain/reading/coStoryTypes";
 import { commitReadingCoStoryUserAction, createReadingCoStory, createReadingCoStoryOpening, createReadingCoStorySave, loadReadingCoStorySave } from "../src/features/reading/story/readingCoStory";
 
@@ -41,6 +41,7 @@ const changed = commitReadingCoStoryUserAction({ scope: storyA, userAction: "推
 assert.equal(changed.story.activeActor, "ai_friend");
 const restored = loadReadingCoStorySave({ scope: storyA, saveId: saveA.id, now: 5 });
 assert.equal(restored.activeActor, "user");
+assert.equal(listReadingCoStoryTurns(storyA).length, 1, "共同故事读档后应移除存档之后的行动");
 assert.equal(restored.relationId, "relation-a");
 assert.equal(restored.characterId, "character-a");
 

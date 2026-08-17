@@ -157,7 +157,11 @@ export function commitReadingStoryTurn(input: { scope: ReadingStoryScope; result
     userAction: input.userAction ? text(input.userAction, 2000) : undefined,
     createdAt: now,
   };
-  const chapter = story.currentChapter + (input.result.shouldEndChapter ? 1 : 0);
+  // A model may signal the end either explicitly or by completing the active
+  // chapter progress. Supporting both prevents a story from remaining on the
+  // first chapter forever when a provider omits the boolean flag.
+  const advancesChapter = input.result.shouldEndChapter || input.result.chapterProgress >= 0.999;
+  const chapter = story.currentChapter + (advancesChapter ? 1 : 0);
   const next: ReadingStoryState = {
     ...story,
     currentChapter: Math.min(story.targetChapters, chapter),
@@ -197,9 +201,19 @@ export function loadReadingStorySave(input: { scope: ReadingStoryScope; saveId: 
     .filter((turn) => sameScope(turn, input.scope))
     .sort((left, right) => left.turnIndex - right.turnIndex);
   const savedTurnIndex = scopedTurns.find((turn) => turn.id === save.turnId)?.turnIndex;
-  const remainingTurns = savedTurnIndex === undefined
+  // Older imported/hand-edited stores can contain a save whose turn ID no
+  // longer exists. Use the save timestamp as a compatibility boundary so a
+  // restore still removes turns generated after that save instead of appearing
+  // to do nothing.
+  const fallbackTurn = savedTurnIndex === undefined
+    ? scopedTurns
+      .filter((turn) => turn.createdAt <= (Number(save.state.updatedAt) || save.createdAt))
+      .at(-1)
+    : undefined;
+  const effectiveSavedTurnIndex = savedTurnIndex ?? fallbackTurn?.turnIndex;
+  const remainingTurns = effectiveSavedTurnIndex === undefined
     ? loaded.value.turns
-    : loaded.value.turns.filter((turn) => !sameScope(turn, input.scope) || turn.turnIndex <= savedTurnIndex);
+    : loaded.value.turns.filter((turn) => !sameScope(turn, input.scope) || turn.turnIndex <= effectiveSavedTurnIndex);
   const restoredState = structuredClone(save.state);
   const nextStore = {
     ...loaded.value,

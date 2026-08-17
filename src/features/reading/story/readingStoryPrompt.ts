@@ -3,6 +3,7 @@ import type {
   ReadingStoryTurn,
 } from "../../../domain/reading/storyTypes";
 import { describeReadingNarrativePerspective, normalizeReadingStoryGenerationPreferences } from "../../../domain/reading/storyGenerationPreferences";
+import { getReadingStoryChapterNumber } from "../../../domain/reading/storyChapterProgress";
 
 export interface ReadingStoryPromptInput {
   story: ReadingStoryState;
@@ -47,7 +48,7 @@ export function buildReadingStoryPrompt(
     input.bookContext ? `小说资料：${clean(input.bookContext, 8000)}` : "",
     `穿法：${input.story.entryMode === "soul_wear" ? "魂穿" : "身穿"}`,
     `玩家角色：${clean(input.story.characterName, 200)}；身份：${clean(input.story.characterRole, 500)}`,
-    `章节进度：${input.story.currentChapter}/${input.story.targetChapters}；地点：${clean(input.story.currentLocation, 300)}；时间：${clean(input.story.currentTime, 100)}`,
+    `当前章节：第 ${getReadingStoryChapterNumber(input.story)}/${input.story.targetChapters} 章（已完成章节数：${input.story.currentChapter}；请在场景真正收束时将 shouldEndChapter 设为 true）` + `；地点：${clean(input.story.currentLocation, 300)}；时间：${clean(input.story.currentTime, 100)}`,
     `玩家目标：${input.story.goals.map((goal) => clean(goal, 300)).join("、") || "未设定"}`,
     `叙事风格：${clean(generation.narrativeStyle, 100)}；叙事视角：${describeReadingNarrativePerspective(generation.perspective)}`,
     generation.guidance ? `场外指导（控制后续整体走向，但不能当成已发生的剧情事实）：${clean(generation.guidance, 4000)}` : "",

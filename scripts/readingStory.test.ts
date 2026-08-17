@@ -42,7 +42,9 @@ const committed = commitReadingStoryTurn({ scope, result, userAction: "说明身
 assert.equal(committed.story.currentChapter, 1);
 assert.equal(listReadingStoryTurns(scope).length, 1);
 const save = createReadingStorySave({ scope, label: "雨夜醒来", now: 3 });
+commitReadingStoryTurn({ scope, result: { ...result, narrative: "后续场景", currentLocation: "城外", currentTime: "第二夜", shouldEndChapter: false }, now: 4 });
 assert.equal(loadReadingStorySave({ scope, saveId: save.id }).currentLocation, "城门");
+assert.equal(listReadingStoryTurns(scope).length, 1, "读档后应移除存档之后生成的回合");
 assert.equal(listReadingStories("identity-b").length, 0);
 assert.throws(() => validateReadingStoryTurnResult({ narrative: "", choices: [] }), /正文不能为空/);
 const otherScope = { ...scope, userIdentityId: "identity-b" };

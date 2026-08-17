@@ -30,6 +30,7 @@ import {
 import { generateReadingStoryTurn } from "../../features/reading/story/readingStoryGeneration";
 import { ensureDistinctReadingStoryChoices } from "../../features/reading/story/readingStoryChoices";
 import { getReadingBookBible } from "../../core/storage/repositories/readingAnalysisRepository";
+import { getReadingStoryChapterNumber } from "../../domain/reading/storyChapterProgress";
 import ReadingStoryPlayShell, {
   type ReadingStoryPanel,
 } from "./ReadingStoryPlayShell";
@@ -335,7 +336,7 @@ export default function ReadingStoryView({
                         {item.title}
                       </span>
                       <span className="text-[10px] text-[var(--text-muted)]">
-                        第 {item.currentChapter}/{item.targetChapters} 章
+                        第 {getReadingStoryChapterNumber(item)}/{item.targetChapters} 章
                       </span>
                     </button>
                   ))}
@@ -372,7 +373,7 @@ export default function ReadingStoryView({
           <div className="grid grid-cols-2 gap-2">
             {[
               ["故事状态", story.status === "completed" ? "已完成" : "进行中"],
-              ["篇幅", `${story.currentChapter}/${story.targetChapters} 章`],
+              ["篇幅", `${getReadingStoryChapterNumber(story)}/${story.targetChapters} 章`],
               ["当前位置", story.currentLocation],
               ["当前时间", story.currentTime],
             ].map(([label, value]) => (
@@ -485,6 +486,8 @@ export default function ReadingStoryView({
       subtitle={`${story.characterName} · 单人故事`}
       currentChapter={story.currentChapter}
       targetChapters={story.targetChapters}
+      chapterProgress={latestTurn?.chapterProgress ?? 0.05}
+      storyStatus={story.status}
       currentLocation={story.currentLocation}
       currentTime={story.currentTime}
       statusLabel={story.status === "completed" ? "故事已完成" : "自动保存"}

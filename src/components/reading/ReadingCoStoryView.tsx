@@ -13,6 +13,7 @@ import type { Character, UserSettings } from "../../types";
 import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
 import type { ReadingBook } from "../../domain/reading/types";
 import type { ReadingCoStoryState } from "../../domain/reading/coStoryTypes";
+import { getReadingStoryChapterNumber } from "../../domain/reading/storyChapterProgress";
 import {
   getReadingCoStory,
   listReadingCoStories,
@@ -447,6 +448,7 @@ export default function ReadingCoStoryView({
                   ? "你"
                   : story.aiFriend.displayName,
               ],
+              ["当前章节", `${getReadingStoryChapterNumber(story)}/${story.targetChapters} 章`],
               ["当前位置", story.currentLocation],
               ["当前时间", story.currentTime],
             ].map(([label, value]) => (
@@ -571,6 +573,8 @@ export default function ReadingCoStoryView({
       subtitle={`${story.aiFriend.displayName} · ${story.origin === "custom" ? "自建世界" : "共同穿书"}`}
       currentChapter={story.currentChapter}
       targetChapters={story.targetChapters}
+      chapterProgress={latestTurn?.chapterProgress ?? 0.05}
+      storyStatus={story.status}
       currentLocation={story.currentLocation}
       currentTime={story.currentTime}
       statusLabel={story.pendingApproval ? "等待你确认" : "自动保存"}
