@@ -11274,9 +11274,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
             <button
               type="button"
               onClick={() => handleTranslateMomentComment(commentContextMenu.momentId, commentContextMenu.commentId, commentContextMenu.text)}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
             >
-              <Languages className="w-3.5 h-3.5 text-stone-500" />
+              <Languages className="w-3.5 h-3.5 shrink-0 text-stone-500" />
               <span>{commentTranslations[getMomentCommentTranslationKey(commentContextMenu.momentId, commentContextMenu.commentId)] ? "显示原文" : "AI 翻译"}</span>
             </button>
             <button
@@ -11285,9 +11285,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 setCommentContextMenu(null);
                 setCommentDeleteTarget({ momentId: commentContextMenu.momentId, commentId: commentContextMenu.commentId });
               }}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-red-50 rounded-lg flex items-center gap-2 text-red-500 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-red-50 rounded-lg flex items-center gap-2 text-red-500 transition-colors"
             >
-              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <Trash2 className="w-3.5 h-3.5 shrink-0 text-red-400" />
               <span>删除评论</span>
             </button>
           </motion.div>
@@ -11304,19 +11304,19 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[140px] text-stone-800 space-y-1"
+            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[160px] text-stone-800 space-y-1"
             style={{
               position: "absolute",
               top: Math.max(10, Math.min(window.innerHeight - 220, momentContextMenu.y - 10)),
-              left: Math.max(10, Math.min(window.innerWidth - 160, momentContextMenu.x - 70)),
+              left: Math.max(10, Math.min(window.innerWidth - 180, momentContextMenu.x - 80)),
             }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={() => handleCopyMomentText(momentContextMenu.text)}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
             >
-              <Copy className="w-3.5 h-3.5 text-stone-500" />
+              <Copy className="w-3.5 h-3.5 shrink-0 text-stone-500" />
               <span>复制文案</span>
             </button>
 
@@ -11328,9 +11328,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 momentContextMenu.authorAvatar,
                 momentContextMenu.timestamp
               )}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
             >
-              <Heart className={`w-3.5 h-3.5 ${momentFavorites.some(f => f.momentId === momentContextMenu.momentId && f.content === momentContextMenu.text) ? "fill-rose-500 text-rose-500" : "text-stone-400"}`} />
+              <Heart className={`w-3.5 h-3.5 shrink-0 ${momentFavorites.some(f => f.momentId === momentContextMenu.momentId && f.content === momentContextMenu.text) ? "fill-rose-500 text-rose-500" : "text-stone-400"}`} />
               <span>
                 {momentFavorites.some(f => f.momentId === momentContextMenu.momentId && f.content === momentContextMenu.text) ? "取消收藏" : "加入收藏"}
               </span>
@@ -11338,17 +11338,17 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
             <button
               onClick={() => handleTranslateMoment(momentContextMenu.momentId, momentContextMenu.text)}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
             >
-              <Languages className="w-3.5 h-3.5 text-stone-500" />
+              <Languages className="w-3.5 h-3.5 shrink-0 text-stone-500" />
               <span>{momentTranslations[momentContextMenu.momentId] ? "显示原文" : "AI 翻译"}</span>
             </button>
 
             <button
               onClick={() => handleDeleteMomentClick(momentContextMenu.momentId)}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-red-500 hover:text-red-600 rounded-lg flex items-center gap-2 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 text-red-500 hover:text-red-600 rounded-lg flex items-center gap-2 transition-colors"
             >
-              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <Trash2 className="w-3.5 h-3.5 shrink-0 text-red-400" />
               <span>删除动态</span>
             </button>
           </motion.div>
