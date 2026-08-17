@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "饭饭机",
-  "short_name": "饭饭机",
+  "name": "米饭机",
+  "short_name": "米饭机",
   "description": "饭饭的专属虚拟手机智能体",
   "start_url": "/",
   "display": "standalone",

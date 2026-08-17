@@ -3170,7 +3170,7 @@ export default function AppSettings({
                     <span className="w-9 shrink-0 text-right font-mono text-[10px] font-bold text-slate-700">{globalFontSize}px</span>
                   </div>
                   <div className="rounded-[14px] border border-slate-100 bg-slate-50 px-4 py-3 text-center text-sm text-slate-700" style={{ fontFamily: "var(--app-font-family)" }}>
-                    饭饭机 Aa 123 · 字体预览
+                    米饭机 Aa 123 · 字体预览
                   </div>
                 </div>
               </div>
@@ -3239,7 +3239,7 @@ export default function AppSettings({
                 </div>
 
                 <p className="text-[10px] text-slate-500 leading-relaxed">
-                  通过 PWA (Progressive Web App) 技术，您可以将<strong>饭饭机</strong>作为原生 App 安装到您的手机桌面。安装后点开可<strong>隐藏浏览器地址栏、实现沉浸式壁纸穿透状态栏、以及极其流畅的离线启动体验</strong>。
+                  通过 PWA (Progressive Web App) 技术，您可以将<strong>米饭机</strong>作为原生 App 安装到您的手机桌面。安装后点开可<strong>隐藏浏览器地址栏、实现沉浸式壁纸穿透状态栏、以及极其流畅的离线启动体验</strong>。
                 </p>
 
                 {isStandalone ? (
@@ -3259,7 +3259,7 @@ export default function AppSettings({
                         className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-extrabold rounded-[16px] text-xs transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span>立即安装「饭饭机」到主屏幕</span>
+                        <span>立即安装「米饭机」到主屏幕</span>
                       </button>
                     ) : (
                       <div className="bg-slate-50 p-3 rounded-[16px] border border-slate-100/80 text-[10px] text-slate-600 space-y-1.5">
