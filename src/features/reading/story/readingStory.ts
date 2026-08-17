@@ -96,7 +96,10 @@ export function validateReadingStoryTurnResult(raw: unknown): ReadingStoryTurnRe
       };
     }).filter((choice) => choice.id && choice.label)
     : [];
-  const choices = ensureDistinctReadingStoryChoices(parsedChoices);
+  const choices = ensureDistinctReadingStoryChoices(parsedChoices, {
+    narrative,
+    currentLocation: typeof value.currentLocation === "string" ? value.currentLocation : undefined,
+  });
   const strings = (field: string): string[] => Array.isArray(value[field])
     ? (value[field] as unknown[]).filter((item): item is string => Boolean(typeof item === "string" && item.trim())).slice(0, 50).map((item) => item.trim().slice(0, 1000))
     : [];
@@ -147,7 +150,10 @@ export function commitReadingStoryTurn(input: { scope: ReadingStoryScope; result
     turnIndex: turns.length,
     parentTurnId: previous?.id,
     ...input.result,
-    choices: ensureDistinctReadingStoryChoices(input.result.choices),
+    choices: ensureDistinctReadingStoryChoices(input.result.choices, {
+      narrative: input.result.narrative,
+      currentLocation: input.result.currentLocation,
+    }),
     userAction: input.userAction ? text(input.userAction, 2000) : undefined,
     createdAt: now,
   };

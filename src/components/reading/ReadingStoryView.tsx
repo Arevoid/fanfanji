@@ -349,7 +349,10 @@ export default function ReadingStoryView({
 
   const latestTurn = turns.at(-1);
   const latestChoices = latestTurn?.choices.length
-    ? ensureDistinctReadingStoryChoices(latestTurn.choices)
+    ? ensureDistinctReadingStoryChoices(latestTurn.choices, {
+        narrative: latestTurn.narrative,
+        currentLocation: latestTurn.currentLocation,
+      })
     : story.status === "completed"
       ? []
       : [

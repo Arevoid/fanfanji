@@ -30,7 +30,7 @@ export function buildReadingStoryPrompt(
     .slice(-4)
     .map(
       (turn) =>
-        `正文：${clean(turn.narrative, 5000)}\n地点：${clean(turn.currentLocation, 300)}\n时间：${clean(turn.currentTime, 100)}`,
+        `正文：${clean(turn.narrative, 5000)}\n地点：${clean(turn.currentLocation, 300)}\n时间：${clean(turn.currentTime, 100)}\n上一节点选项：${turn.choices.map((choice) => clean(choice.label, 300)).join("／") || "暂无"}`,
     )
     .join("\n\n");
   const systemInstruction = [
@@ -40,6 +40,7 @@ export function buildReadingStoryPrompt(
     "每个新节点必须给出正好 4 个可执行方向：前 3 个必须根据刚刚发生的场景生成彼此不同、互斥且会把剧情带向不同路线的具体行动，最后 1 个固定为“按自己的想法行动或说话”。不要在每个节点重复“继续观察／询问／按目标推进”这类与场景无关的模板；例如正文出现岔路口时，应给出“走左边／走右边／走中间／按自己的想法行动或说话”。不要把用户未选择的行动当成已发生。",
     `每个回合都必须推进一个完整场景：narrative 写 ${generation.minCharacters} 至 ${generation.maxCharacters} 个中文字符，包含环境变化、人物反应、因果推进和明确的新悬点，不能只写几句动作摘要。`,
     "有其他角色在场时，应在 dialogue 中安排符合其人设与处境的自然说话；不要让人物只有动作而始终不交流，也不要用旁白代替本应出现的关键对白。",
+    "上一节点已经出现过的选项不能原样复用；每次必须根据本轮新发生的事件、人物关系和可见线索重新设计分支。若场景变化不足，也要改变行动目标、对象或风险，而不是只替换几个字。",
   ].join("\n");
   const message = [
     `故事：${clean(input.bookTitle || input.story.title, 500)}`,
