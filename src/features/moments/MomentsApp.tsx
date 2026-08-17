@@ -26,7 +26,7 @@ export interface MomentsAppProps {
   onMomentTextPointerUpOrLeave: () => void;
   onMomentTextPointerMove: () => void;
   onCommentClick: (momentId: string, comment: MomentComment) => void;
-  onCommentPointerDown: (momentId: string, commentId: string) => void;
+  onCommentPointerDown: (event: React.PointerEvent, momentId: string, comment: MomentComment) => void;
   onClearCommentLongPress: () => void;
   showToast: (message: string) => void;
 }
@@ -257,7 +257,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                                   [moment.id]: true,
                                 }));
                               }}
-                              onPointerDown={() => onCommentPointerDown(moment.id, comment.id)}
+                              onPointerDown={(event) => onCommentPointerDown(event, moment.id, comment)}
                               onPointerUp={onClearCommentLongPress}
                               onPointerLeave={onClearCommentLongPress}
                               onPointerCancel={onClearCommentLongPress}
