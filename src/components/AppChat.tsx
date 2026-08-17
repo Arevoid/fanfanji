@@ -184,7 +184,8 @@ import {
   Loader2,
   Database,
   Check,
-  Edit3
+  Edit3,
+  Square
 } from "lucide-react";
 
 import { getSpeechForText } from "../utils/minimaxTts";
@@ -2326,8 +2327,9 @@ export default function AppChat({
     return () => clearInterval(timer);
   }, [activeChatCharId, activeCharacter?.enableProactiveCall, activeCharacter?.isGroupChat, activeCharacter?.proactiveStartTime, activeCharacter?.proactiveEndTime, activeAttachModal, activeIdentityId, activeVoiceCallScope?.relationId, activeRelationship?.lastProactiveCallAt, activeRelationship?.proactiveCallBackoffUntil, activeRelationship?.proactiveCallCount, activeRelationship?.proactiveCallDayKey]);
 
-  const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
+  const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[], signal?: AbortSignal) => {
     if (!activeChatCharId || !activeCharacter) return;
+    if (signal?.aborted) return;
     setIsTyping(true);
     let repliesScheduled = false;
 
@@ -2454,12 +2456,15 @@ ${memberWbText}`;
         disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
         createId: (index) => `group-route-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`,
         currentTime: () => Date.now(),
+        signal,
       });
+      if (signal?.aborted) return;
       const selectedMembers = Array.from(new Map(routerResult.members.map((member) => [member.id, member])).values()).slice(0, 3);
       const isolatedMessages: Message[] = [];
       const isolatedMembers: Character[] = [];
       let sameTurnPublicHistory = historyText;
       for (const member of selectedMembers) {
+        if (signal?.aborted) return;
         const memberPrivateContext = privateContextByMemberId.get(member.id) || "";
         const publicDefinition = publicMemberDefinitions[groupMembers.findIndex((candidate) => candidate.id === member.id)] || "";
         const memberDefinitions = buildIsolatedGroupMemberDefinitions({
@@ -2501,7 +2506,9 @@ ${memberWbText}`;
           disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
           createId: (index) => `group-reply-${Date.now()}-${member.id}-${index}-${Math.random().toString(36).slice(2, 7)}`,
           currentTime: () => Date.now(),
+          signal,
         });
+        if (signal?.aborted) return;
         isolatedMessages.push(...memberResult.messages);
         isolatedMembers.push(...memberResult.members);
         if (memberResult.messages.length > 0) {
@@ -2544,6 +2551,11 @@ ${memberWbText}`;
           let currentIdx = 0;
           
           const sendNext = () => {
+            if (signal?.aborted) {
+              setIsTyping(false);
+              setTypingCharacterOverride(null);
+              return;
+            }
             if (currentIdx >= validReplies.length) {
               setIsTyping(false);
               setTypingCharacterOverride(null);
@@ -2558,6 +2570,11 @@ ${memberWbText}`;
 
             // Simulate typing for 1500ms
             setTimeout(() => {
+              if (signal?.aborted) {
+                setIsTyping(false);
+                setTypingCharacterOverride(null);
+                return;
+              }
               currentItem.message.timestamp = Date.now();
               onSendMessage(currentItem.message);
 
@@ -2567,6 +2584,11 @@ ${memberWbText}`;
                 setTypingCharacterOverride(validReplies[currentIdx].member);
                 setIsTyping(false); 
                 setTimeout(() => {
+                  if (signal?.aborted) {
+                    setIsTyping(false);
+                    setTypingCharacterOverride(null);
+                    return;
+                  }
                   sendNext();
                 }, 400);
               } else {
@@ -2579,6 +2601,11 @@ ${memberWbText}`;
 
           // Start sequence after brief buffer
           setTimeout(() => {
+            if (signal?.aborted) {
+              setIsTyping(false);
+              setTypingCharacterOverride(null);
+              return;
+            }
             sendNext();
           }, 500);
         }
@@ -2586,6 +2613,7 @@ ${memberWbText}`;
         persistPublicGroupTurn([]);
       }
     } catch (err) {
+      if (signal?.aborted) return;
       console.error("Group chat response generation failed:", err);
     } finally {
       if (!repliesScheduled) {
@@ -2660,7 +2688,9 @@ ${memberWbText}`;
     customHistoryOverride?: Message[],
     cognitiveContext?: CharacterCognitiveContext,
     replyContext: ChatRuntimeContext = activeRuntimeContext,
+    signal?: AbortSignal,
   ) => {
+    if (signal?.aborted) return;
     setIsTyping(true);
     const callTurnGeneration = activeAttachModal === "calling" && callingStatus === "connected"
       ? callSpeechGenerationRef.current
@@ -3151,7 +3181,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const data = await requestDirectChatTurn({
         prompt: { scenario: "direct-chat", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
         settings,
+        signal,
       });
+
+      if (signal?.aborted) return;
 
       if (data && data.text) {
         const proactiveOfflineResponseParse = parseProactiveOfflineResponseDirective({
@@ -3209,11 +3242,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
           // Send each segment with realistic typing delays and real-time timestamps
           for (let idx = 0; idx < newMsgs.length; idx++) {
+            if (signal?.aborted) return;
             const m = newMsgs[idx];
             setIsTyping(true);
             const chars = m.content.length;
             const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
             await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
+            if (signal?.aborted) return;
             
             m.timestamp = Date.now();
             onSendMessage(m);
@@ -3221,6 +3256,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             
             if (idx < newMsgs.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
+              if (signal?.aborted) return;
             }
           }
 
@@ -3262,7 +3298,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           const createdMessages: Message[] = [];
           
           for (let idx = 0; idx < replyCandidates.messages.length; idx++) {
-            if (isCancelledCallTurn()) break;
+            if (isCancelledCallTurn() || signal?.aborted) break;
             const charMsg = replyCandidates.messages[idx];
             const bubbleText = replyCandidates.bubbleTexts[idx];
             
@@ -3270,7 +3306,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             const chars = bubbleText.length;
             const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
             await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
-            if (isCancelledCallTurn()) break;
+            if (signal?.aborted) return;
+            if (isCancelledCallTurn() || signal?.aborted) break;
             
             charMsg.timestamp = Date.now();
             const callSpeechCompletion = onSendMessage(charMsg);
@@ -3280,10 +3317,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             // In a voice call, keep subtitles and speech in lockstep: show one
             // bubble, play it completely, then allow the next bubble to appear.
             if (callSpeechCompletion) await callSpeechCompletion;
-            if (isCancelledCallTurn()) break;
+            if (isCancelledCallTurn() || signal?.aborted) break;
             
             if (idx < replyCandidates.messages.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
+              if (signal?.aborted) break;
             }
           }
 
@@ -3337,7 +3375,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           });
         }
       } else {
-        if (isCancelledCallTurn()) return;
+        if (isCancelledCallTurn() || signal?.aborted) return;
         const errMsg = createCharacterTextMessage({
           id: (Date.now() + 1).toString(),
           context: replyContext,
@@ -3347,7 +3385,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         onSendMessage(errMsg);
       }
     } catch (err: any) {
-      if (isCancelledCallTurn()) return;
+      if (isCancelledCallTurn() || signal?.aborted) return;
       const errMsgStr = err?.message || "";
       const isQuotaOrKeyError = errMsgStr.toLowerCase().includes("api_key") || 
                                 errMsgStr.toLowerCase().includes("key") || 
@@ -3436,8 +3474,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
     },
     generateGroupReply: generateResponseForGroupChat,
-    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext, context }) =>
-      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext, context),
+    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext, context, signal }) =>
+      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext, context, signal),
   });
 
   const chatSideEffectController = createChatSideEffectController({
@@ -3451,7 +3489,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const generateResponseForUserMessage = async (
     userMsg: Message | null,
     customHistoryOverride?: Message[],
-  ) => chatReplyController.generate({ userMsg, customHistoryOverride });
+    signal?: AbortSignal,
+  ) => chatReplyController.generate({ userMsg, customHistoryOverride, signal });
 
   const sendCustomMessage = (
     contentString: string,
@@ -3604,6 +3643,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     setQuotedMessage,
     handleSendOnly,
     handleSendAndReply,
+    stopReply,
+    isReplyInFlight,
   } = useChatController({
     activeChatCharId,
     activeCharacter,
@@ -3617,6 +3658,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     isInputNarration,
     activeOfflineStoryId,
     runtimeContext: activeRuntimeContext,
+    onReplyStopped: () => {
+      setIsTyping(false);
+      setTypingCharacterOverride(null);
+    },
   });
 
   const deleteMessageAndLinkedImage = (messageId: string) => {
@@ -8287,13 +8332,22 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
               {/* Send Button 2 (Send and AI Reply - black background with white paper plane) */}
               <button
                 type="button"
-                onClick={(e) => handleSendAndReply(e)}
-                disabled={isTyping}
-                className="w-10 h-10 transition-all flex items-center justify-center shrink-0 send-button chat-composer__button chat-composer__send-reply-button chat-composer__send-button"
-                title="发送消息并获取回复"
+                onClick={(e) => {
+                  if (isReplyInFlight) {
+                    e.preventDefault();
+                    stopReply();
+                    return;
+                  }
+                  handleSendAndReply(e);
+                }}
+                disabled={!isReplyInFlight && isTyping}
+                className={`w-10 h-10 transition-all flex items-center justify-center shrink-0 send-button chat-composer__button chat-composer__send-reply-button chat-composer__send-button ${isReplyInFlight ? "chat-composer__stop-reply-button" : ""}`}
+                title={isReplyInFlight ? "停止生成回复" : "发送消息并获取回复"}
               >
                 <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
-                  <ChatIcon src={getChatIcon("send")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>
+                  {isReplyInFlight
+                    ? <Square className="w-3.5 h-3.5 fill-current text-current" />
+                    : <ChatIcon src={getChatIcon("send")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>}
                 </span>
               </button>
             </form>

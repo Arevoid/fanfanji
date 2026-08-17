@@ -19,9 +19,9 @@ export function buildComposedAiChatRequest(prompt: PromptInput, settings: UserSe
   return { ...PromptComposer.compose(prompt), ...buildTextAiRuntimeConfig(settings) };
 }
 
-export async function requestDirectChatTurn(input: { prompt: PromptInput; settings: UserSettings; requestAi?: RequestAi }) {
+export async function requestDirectChatTurn(input: { prompt: PromptInput; settings: UserSettings; requestAi?: RequestAi; signal?: AbortSignal }) {
   const requestAi = input.requestAi || apiChat;
-  const request = buildComposedAiChatRequest(input.prompt, input.settings);
+  const request = { ...buildComposedAiChatRequest(input.prompt, input.settings), signal: input.signal };
   const first = await requestAiReply(requestAi, request);
   if (!isDegenerateDirectReply(input.prompt.message, first.text, request.history)) return first;
   const retryHistory = removeDegenerateReplyPattern(request.history, first.text);
@@ -38,11 +38,11 @@ export async function requestDirectChatTurn(input: { prompt: PromptInput; settin
 
 export function generateGroupChatTurn(input: {
   prompt: PromptInput; settings: UserSettings; members: readonly Character[]; groupId: string;
-  disableBracketActions: boolean; createId: (index: number) => string; currentTime: () => number; requestAi?: RequestAi;
+  disableBracketActions: boolean; createId: (index: number) => string; currentTime: () => number; requestAi?: RequestAi; signal?: AbortSignal;
 }) {
   return generateGroupReplyCandidates({
     requestAi: input.requestAi || apiChat,
-    request: buildComposedAiChatRequest(input.prompt, input.settings),
+    request: { ...buildComposedAiChatRequest(input.prompt, input.settings), signal: input.signal },
     members: input.members,
     groupId: input.groupId,
     disableBracketActions: input.disableBracketActions,

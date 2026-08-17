@@ -5,16 +5,18 @@ import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 export interface ChatReplyRequest {
   userMsg: Message | null;
   customHistoryOverride?: Message[];
+  signal?: AbortSignal;
 }
 
 export interface ChatReplyControllerDependencies {
   getContext: () => ChatRuntimeContext;
   /** Optional Phase-2 read-only context factory. It must not alter reply behavior. */
   getCognitiveContext?: (context: ChatRuntimeContext) => CharacterCognitiveContext | undefined;
-  generateGroupReply: (userMsg: Message | null, customHistoryOverride?: Message[]) => Promise<void> | void;
+  generateGroupReply: (userMsg: Message | null, customHistoryOverride?: Message[], signal?: AbortSignal) => Promise<void> | void;
   generateDirectReply: (input: ChatReplyRequest & {
     context: ChatRuntimeContext;
     cognitiveContext?: CharacterCognitiveContext;
+    signal?: AbortSignal;
   }) => Promise<void> | void;
 }
 
@@ -33,7 +35,7 @@ export function createChatReplyController(dependencies: ChatReplyControllerDepen
       if (!context.characterId) return;
 
       if (context.isGroup) {
-        await dependencies.generateGroupReply(request.userMsg, request.customHistoryOverride);
+        await dependencies.generateGroupReply(request.userMsg, request.customHistoryOverride, request.signal);
         return;
       }
 
