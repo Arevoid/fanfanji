@@ -56,6 +56,41 @@ export const cleanAiReplyText = (text: string, disableBracketActions: boolean): 
 export const splitAiReplyBubbles = splitIntoWeChatBubbles;
 
 /**
+ * Remove accidental same-turn re-statements before bubbles are persisted.
+ * Models sometimes answer an arrival/hand-off question twice using slightly
+ * different wording (for example “哥下来了” followed by “哥下楼了”).  These
+ * are one conversational move, not two messages.  Keep the first bubble and
+ * only collapse a narrowly-scoped arrival variant plus exact normalized
+ * duplicates so ordinary short replies remain untouched.
+ */
+export function removeRedundantCharacterBubbles(bubbles: readonly string[]): string[] {
+  const normalize = (value: string) => value
+    .replace(/^[嗯啊哦好行那就，,、\s]+/u, "")
+    .replace(/[\s\p{P}\p{S}]+/gu, "")
+    .toLowerCase();
+  const normalizeArrival = (value: string): string | null => {
+    if (!/(?:哥|哥哥|我)?(?:下来了|下楼了|下去接你了|在楼下|到楼下了|到门口了)/u.test(value)) return null;
+    return "arrival-handoff";
+  };
+  const result: string[] = [];
+  const seen = new Set<string>();
+  let arrivalSeen = false;
+  for (const bubble of bubbles) {
+    const normalized = normalize(bubble);
+    if (!normalized) continue;
+    const arrival = normalizeArrival(normalized);
+    if (arrival) {
+      if (arrivalSeen) continue;
+      arrivalSeen = true;
+    }
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(bubble);
+  }
+  return result;
+}
+
+/**
  * A direct-chat completion is one character turn. If a model nevertheless
  * writes a labelled user turn, stop before it so the client never persists an
  * invented user reply and the character cannot answer that invented reply.

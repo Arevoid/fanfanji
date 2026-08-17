@@ -13,7 +13,11 @@ const USER_SAME_AREA = /(?:我(?:就)?在你(?:家|公司|学校)?(?:楼下|门�
  */
 const HYPOTHETICAL_OR_FUTURE = /(?:如果|要是|下次|以后|改天|有空再|想象|梦里|会来|要来|准备来|打算来|有机会|when i can|someday|next time)/iu;
 const USER_PRESENT_NOW = /(?:我(?:已经|刚刚|现在)?(?:到了|到(?:你|你家|家里|门口|楼下|公司|学校)|在(?:你家|你那|门口|楼下|附近|外面|这里|你身边))|我就在(?:门口|楼下|附近|外面|你身边)|我到了|我在门口|我开门了|门我开了|进来吧|过来吧|到我家来|你来我家)/iu;
-const CHARACTER_PRESENT_NOW = /(?:我(?:已经|刚刚|现在)?(?:到了|到(?:你|你家|家里|门口|楼下|公司|学校)|在(?:你家|你那|门口|楼下|附近|外面|这里|你身边))|我就在(?:门口|楼下|附近|外面|你身边)|我到了|我在门口|门口等你|我带着(?:东西|饭|礼物|电蚊拍|炖盅)?(?:来了|在门口)|进来吧|开门)/iu;
+// Include natural Chinese arrival phrases used in ordinary chat. In
+// particular, “哥下来了/我下楼了” is a concrete present-tense commitment,
+// not a future plan; omitting it leaves an already co-located conversation in
+// online mode even when proactive offline is enabled.
+const CHARACTER_PRESENT_NOW = /(?:我(?:已经|刚刚|现在)?(?:到了|到(?:你|你家|家里|门口|楼下|公司|学校)|在(?:你家|你那|门口|楼下|附近|外面|这里|你身边)|下来了|下楼了|下去接你了)|我就在(?:门口|楼下|附近|外面|你身边)|我到了|我在门口|(?:哥|哥哥|我)?(?:已经|刚刚|现在)?下(?:来了|楼了|去接你了)|(?:哥|哥哥)?在楼下(?:等你)?|(?:哥|哥哥)?到(?:楼下|门口)了|门口等你|我带着(?:东西|饭|礼物|电蚊拍|炖盅)?(?:来了|在门口)|进来吧|开门)/iu;
 
 export type ProactiveOfflinePresenceState =
   | "remote"

@@ -22,6 +22,15 @@ assert.equal(confirmed.state, "co_location_confirmed");
 assert.equal(confirmed.userConfirmedArrival, true);
 assert.equal(confirmed.characterClaimedArrival, true);
 
+const downstairsHandoff = deriveProactiveOfflinePresenceEvidence({
+  messages: [
+    message("u-3", "user", "我在楼下", 8),
+    message("c-4", "character", "好，哥下来了。", 9),
+    message("c-5", "character", "外面有点凉，你在楼门口等我就行。", 10),
+  ],
+});
+assert.equal(downstairsHandoff.state, "co_location_confirmed");
+
 const characterOnly = deriveProactiveOfflinePresenceEvidence({
   messages: [message("c-2", "character", "我已经到你家门口了。", 3)],
 });

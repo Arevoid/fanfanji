@@ -1,5 +1,5 @@
 import { createCharacterTextMessage } from "./messageFactory";
-import { cleanAiReplyText, normalizePaymentMarkup, splitAiReplyBubbles, stripSimulatedUserTurns } from "./messageParser";
+import { cleanAiReplyText, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripSimulatedUserTurns } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatServiceTypes";
 
@@ -12,7 +12,7 @@ export function createRegeneratedReplyCandidates(context: ReplyCandidateContext)
   // Never restore raw model output after the sanitizer intentionally removed
   // an internal-only marker. Otherwise a marker-only reply becomes a bubble.
   const bubbles = cleanedText
-    ? splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup)
+    ? removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup))
     : [];
   return {
     cleanedText,
