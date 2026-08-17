@@ -96,6 +96,7 @@ import { listReadingStories } from "../core/storage/repositories/readingStoryRep
 import { flushReadingCoStoryStore, initializeReadingCoStoryStore, listReadingCoStories } from "../core/storage/repositories/readingCoStoryRepository";
 import type { ReadingStoryState } from "../domain/reading/storyTypes";
 import type { ReadingCoStoryState } from "../domain/reading/coStoryTypes";
+import { getReadingStoryChapterNumber } from "../domain/reading/storyChapterProgress";
 import {
   buildReadingActivityItems,
   buildReadingWorldItems,
@@ -2323,7 +2324,7 @@ export default function AppReading({
                         <div className="mt-3 flex items-center justify-between">
                           <div className="flex gap-2">
                             <span className="rounded-full bg-[var(--surface-raised)] px-2 py-1 text-[9px]">
-                              第 {item.currentChapter}/{item.targetChapters} 章
+                              第 {getReadingStoryChapterNumber(item)}/{item.targetChapters} 章
                             </span>
                             {item.friendName && (
                               <span className="rounded-full bg-[var(--surface-raised)] px-2 py-1 text-[9px]">
