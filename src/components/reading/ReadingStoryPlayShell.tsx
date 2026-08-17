@@ -60,6 +60,7 @@ export default function ReadingStoryPlayShell(
     const node = scrollRef.current;
     if (!node) return;
     node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+    setActivePanelId(null);
   }, [props.notice]);
 
   useEffect(() => {

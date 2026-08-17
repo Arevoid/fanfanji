@@ -34,7 +34,7 @@ import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/pro
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
 import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
 import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CHINESE_SEMANTIC_CONTINUITY_PROMPT, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
-import { loadUserMemoPromptContext } from "../features/chat/prompts/userMemoContext";
+import { loadUserMemoPromptContext, USER_MEMO_MENTION_LEDGER_KEY } from "../features/chat/prompts/userMemoContext";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
@@ -44,7 +44,7 @@ import { buildProactiveOfflineInvitationPrompt } from "../features/chat/prompts/
 import { buildProactiveOfflineResponsePrompt } from "../features/chat/prompts/proactiveOfflineResponsePrompt";
 import { parseProactiveOfflineInvitationDirective } from "../features/chat/services/proactiveOfflineInvitationProtocol";
 import { applyProactiveOfflineResponse, parseProactiveOfflineResponseDirective } from "../features/chat/services/proactiveOfflineResponseProtocol";
-import { deriveProactiveOfflineContextEvidence } from "../features/chat/services/proactiveOfflineContext";
+import { deriveProactiveOfflineContextEvidence, deriveProactiveOfflinePresenceEvidence } from "../features/chat/services/proactiveOfflineContext";
 import { buildGroupMemberPrivateContext, buildIsolatedGroupMemberDefinitions } from "../features/chat/prompts/groupMemberPrivateContext";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
@@ -1485,7 +1485,11 @@ export default function AppChat({
   const isOfflineModeActive = false;
   const isInputNarration = false;
   const activeOfflineStoryId = null;
-  const handleStartOfflineFromMsg = (msg: Message, appointment?: Appointment) => {
+  const handleStartOfflineFromMsg = (
+    msg: Message,
+    appointment?: Appointment,
+    handoffMessages?: readonly Message[],
+  ) => {
     if (!activeChatCharId || !activeCharacter) return;
     if (appointment && (!activeRelationship
       || appointment.relationId !== activeRelationship.id
@@ -1518,7 +1522,7 @@ export default function AppChat({
     // The direct menu action used to import only the clicked message. Snapshot
     // the whole configured context window so the offline scene has a real handoff.
     const contextLimit = activeCharacter.contextMemoryLimit || 20;
-    const recentOnlineMessages = messages
+    const recentOnlineMessages = (handoffMessages ? [...handoffMessages] : messages)
       .filter((item) => !item.isOffline && (activeRelationship
         ? item.relationId === activeRelationship.id
         : item.characterId === activeChatCharId && activeCharacter?.isGroupChat))
@@ -1603,6 +1607,43 @@ export default function AppChat({
     if (onNavigateToApp) {
       onNavigateToApp("offline");
     }
+  };
+
+  /**
+   * Start a relation-scoped offline story only after the online transcript
+   * confirms that both speakers are physically present.  This deliberately
+   * does not trigger on a character-only claim: the user must have clearly
+   * confirmed arrival/entry as well, preventing a role-play line or future
+   * plan from unexpectedly taking over the chat screen.
+   */
+  const maybeAutoStartOfflineFromPresence = (input: {
+    relationship: CharacterRelationship;
+    messages: readonly Message[];
+    sourceMessage?: Message;
+  }) => {
+    if (!activeCharacter || activeCharacter.isGroupChat || !activeRelationship) return;
+    if (activeRelationship.id !== input.relationship.id || !input.relationship.enableProactiveOffline) return;
+    if (isOfflineStoryActiveFor(input.relationship.id)) return;
+    const evidence = deriveProactiveOfflinePresenceEvidence({ messages: input.messages });
+    if (evidence.state !== "co_location_confirmed") return;
+    if (offlineAutoStartInFlightRef.current.has(input.relationship.id)) return;
+
+    offlineAutoStartInFlightRef.current.add(input.relationship.id);
+    const readyAppointment = appointments
+      .filter((appointment) => appointment.relationId === input.relationship.id
+        && appointment.characterId === input.relationship.characterId
+        && appointment.userIdentityId === input.relationship.userIdentityId
+        && (appointment.status === "confirmed" || appointment.status === "preparing" || appointment.status === "ready"))
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    handleStartOfflineFromMsg(
+      input.sourceMessage || [...input.messages].at(-1)!,
+      readyAppointment,
+      input.messages,
+    );
+    showToast("已确认你们正在同一地点，正在进入线下故事");
+    // Navigation/storage updates are synchronous, but release the guard on
+    // the next task so a stale queued reply cannot create a second story.
+    window.setTimeout(() => offlineAutoStartInFlightRef.current.delete(input.relationship.id), 0);
   };
 
   const handleTranslateMessage = (msg: Message) => {
@@ -1827,6 +1868,9 @@ export default function AppChat({
   // Memory Compression and Proactive Chat states
   const [isCompressingMemory, setIsCompressingMemory] = useState(false);
   const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
+  // Prevent a burst of streamed/direct replies from opening duplicate offline
+  // stories before the navigation state has caught up.
+  const offlineAutoStartInFlightRef = useRef<Set<string>>(new Set());
   const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
   const [showDisbandGroupModal, setShowDisbandGroupModal] = useState(false);
   const [, setEditingMemoryText] = useState("");
@@ -1877,11 +1921,20 @@ export default function AppChat({
     timestamp: number;
   } | null>(null);
   const [commentDeleteTarget, setCommentDeleteTarget] = useState<{ momentId: string; commentId: string } | null>(null);
+  const [commentContextMenu, setCommentContextMenu] = useState<{
+    momentId: string;
+    commentId: string;
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const commentLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressCommentClickRef = useRef(false);
 
   const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() =>
     readJson<Record<string, string>>("phone_moment_translations", {}).value);
+  const [commentTranslations, setCommentTranslations] = useState<Record<string, string>>(() =>
+    readJson<Record<string, string>>("phone_moment_comment_translations", {}).value);
 
   const [momentFavorites, setMomentFavorites] = useState<{
     id: string;
@@ -1905,6 +1958,10 @@ export default function AppChat({
   useEffect(() => {
     writeJson("phone_moment_translations", momentTranslations);
   }, [momentTranslations]);
+
+  useEffect(() => {
+    writeJson("phone_moment_comment_translations", commentTranslations);
+  }, [commentTranslations]);
 
   useEffect(() => {
     writeJson("phone_moment_favorites", momentFavorites);
@@ -3253,6 +3310,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               });
               if (!saved) console.warn("Proactive offline invitation could not be persisted.");
             }
+            // A character can naturally complete an already-started arrival
+            // exchange (for example, “我在门口”) without emitting a special
+            // invitation directive.  Check the transcript after all reply
+            // bubbles are persisted so both sides' concrete presence claims
+            // are available before handing off to the offline workspace.
+            if (turnRelationship && !replyContext.isGroup) {
+              maybeAutoStartOfflineFromPresence({
+                relationship: turnRelationship,
+                messages: [...sourceMsgs, ...createdMessages],
+                sourceMessage: createdMessages[createdMessages.length - 1],
+              });
+            }
           }
 
           chatSideEffectController.afterReplySuccess({
@@ -3621,6 +3690,120 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     onClearMessages?.(characterId, undefined, relationId);
   };
 
+  /**
+   * Clears all relationship-owned memory and generated artifacts while keeping
+   * the Character and its friendship relationship intact.
+   */
+  const clearFriendScopedMemory = (friendId: string, relationId: string) => {
+    const relationMoments = moments.filter((moment) => moment.relationId === relationId);
+    const relationMomentIds = new Set(relationMoments.map((moment) => moment.id));
+    const relationCommentIds = new Set(
+      moments.flatMap((moment) => getMomentComments(moment)
+        .filter((comment) => comment.relationId === relationId)
+        .map((comment) => `${moment.id}:${comment.id}`)),
+    );
+
+    clearMessagesAndLinkedArtifacts(friendId, relationId);
+    removeCharacterLifeEventsForRelations([relationId]);
+    removeCharacterTruthForRelations([relationId]);
+    removeProactiveTopicsForRelations([relationId]);
+    onSaveRelationships(relationships.map((relation) => relation.id === relationId
+      ? {
+        ...relation,
+        compressedMemory: undefined,
+        lastImmediateSummaryMsgId: undefined,
+        lastActiveTime: undefined,
+        updatedAt: Date.now(),
+      }
+      : relation));
+    onDeleteMomentsByRelation?.(relationId);
+    onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
+
+    setMomentTranslations((previous) => Object.fromEntries(
+      Object.entries(previous).filter(([momentId]) => !relationMomentIds.has(momentId)),
+    ));
+    setMomentFavorites((previous) => previous.filter((favorite) => !relationMomentIds.has(favorite.momentId)));
+    setCommentTranslations((previous) => Object.fromEntries(
+      Object.entries(previous).filter(([key]) => {
+        const separator = key.indexOf(":");
+        const momentId = separator >= 0 ? key.slice(0, separator) : key;
+        return !relationMomentIds.has(momentId) && !relationCommentIds.has(key);
+      }),
+    ));
+
+    const innerVoices = loadInnerVoiceRecords([]).value;
+    const remainingInnerVoices = removeInnerVoicesByRelation(innerVoices, relationId);
+    if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
+
+    const imageRecords = loadImageGenerationRecords([]).value;
+    const removedImageRecords = imageRecords.filter((record) => record.relationId === relationId);
+    if (removedImageRecords.length) {
+      saveImageGenerationRecords(removeImageGenerationRecordsByRelation(imageRecords, relationId));
+      removedImageRecords.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete relation image asset:", error)));
+    }
+
+    const diaryCleanup = cleanupDiaryForRelations({
+      relationIds: [relationId],
+      entries: loadDiaryEntries().value,
+      shares: loadDiaryShares().value,
+      tasks: loadDiaryGenerationTasks().value,
+      translations: loadDiaryTranslations().value,
+    });
+    saveDiaryEntries(diaryCleanup.entries);
+    saveDiaryShares(diaryCleanup.shares);
+    saveDiaryGenerationTasks(diaryCleanup.tasks);
+    saveDiaryTranslations(diaryCleanup.translations);
+
+    setRedPacketStatuses((previous) => {
+      const next = removePaymentStatusesByRelation(previous, relationId);
+      writeJson(RED_PACKET_STATUSES_KEY, next);
+      return next;
+    });
+    onDeleteRelationshipMusic?.(relationId);
+
+    const forumShares = loadForumShares().value;
+    const forumThreads = loadForumThreads().value;
+    const forumReplies = loadForumReplies().value;
+    const forumMutation: { shares?: typeof forumShares; threads?: typeof forumThreads; replies?: typeof forumReplies; generationTasks?: ReturnType<typeof loadForumGenerationTasks>["value"]; actorStates?: ReturnType<typeof loadForumActorStates>["value"]; activityTasks?: ReturnType<typeof loadForumActivityTasks>["value"] } = {};
+    const remainingForumShares = removeForumSharesByRelation(forumShares, relationId);
+    if (remainingForumShares.length !== forumShares.length) forumMutation.shares = remainingForumShares;
+    const unlinkedForumThreads = unlinkForumPrivateAuthorByRelation(forumThreads, relationId);
+    if (unlinkedForumThreads.some((thread, index) => thread !== forumThreads[index])) forumMutation.threads = unlinkedForumThreads;
+    const unlinkedForumReplies = forumReplies.map((reply) =>
+      reply.privateActor?.kind === "relationship" && reply.privateActor.relationId === relationId
+        ? (() => { const { privateActor: _privateActor, ...publicReply } = reply; return publicReply; })()
+        : reply);
+    if (unlinkedForumReplies.some((reply, index) => reply !== forumReplies[index])) forumMutation.replies = unlinkedForumReplies;
+    forumMutation.generationTasks = removeForumGenerationTasksByRelation(loadForumGenerationTasks().value, relationId);
+    forumMutation.actorStates = loadForumActorStates().value.filter((state) =>
+      state.actor.kind !== "relationship" || state.actor.relationId !== relationId);
+    forumMutation.activityTasks = loadForumActivityTasks().value.map((task) => ({
+      ...task,
+      pendingEvents: task.pendingEvents.filter((event) =>
+        event.privateActor?.kind !== "relationship" || event.privateActor.relationId !== relationId),
+    }));
+    commitForumMutation(forumMutation);
+
+    offlineStories
+      .filter((story) => story.relationId === relationId)
+      .forEach((story) => onDeleteOfflineStory?.(story.id));
+    removeStoredValue(getOfflineModeStorageKey(relationId));
+    removeStoredValue(getOfflineStoryStorageKey(relationId));
+
+    const memoLedger = readJson<Record<string, unknown>>(USER_MEMO_MENTION_LEDGER_KEY, {}).value;
+    if (Object.prototype.hasOwnProperty.call(memoLedger, relationId)) {
+      const { [relationId]: _removed, ...remainingLedger } = memoLedger;
+      writeJson(USER_MEMO_MENTION_LEDGER_KEY, remainingLedger);
+    }
+    proactiveMessageInFlightRef.current.delete(relationId);
+    setInitiatedChatIds((previous) => previous.filter((id) => id !== relationId));
+    setLastReadTimestamps((previous) => {
+      const next = { ...previous };
+      delete next[relationId];
+      return next;
+    });
+  };
+
 
   const longPressTimerRef = useRef<any>(null);
 
@@ -3666,13 +3849,25 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
   };
 
-  const handleMomentCommentPointerDown = (momentId: string, commentId: string) => {
+  const handleMomentCommentPointerDown = (
+    event: React.PointerEvent,
+    momentId: string,
+    comment: MomentComment,
+  ) => {
+    const clientX = event.clientX;
+    const clientY = event.clientY;
     suppressCommentClickRef.current = false;
     if (commentLongPressTimerRef.current) clearTimeout(commentLongPressTimerRef.current);
     commentLongPressTimerRef.current = setTimeout(() => {
       suppressCommentClickRef.current = true;
       commentLongPressTimerRef.current = null;
-      setCommentDeleteTarget({ momentId, commentId });
+      setCommentContextMenu({
+        momentId,
+        commentId: comment.id,
+        text: comment.content,
+        x: clientX,
+        y: clientY,
+      });
     }, 550);
   };
 
@@ -3776,6 +3971,38 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     } catch (err) {
       console.error("Translate moment failed:", err);
       showToast(err instanceof Error ? err.message : "翻译失败，请检查 API 配置");
+    }
+  };
+
+  const handleTranslateMomentComment = async (momentId: string, commentId: string, text: string) => {
+    setCommentContextMenu(null);
+    const translationKey = getMomentCommentTranslationKey(momentId, commentId);
+    if (commentTranslations[translationKey]) {
+      setCommentTranslations((previous) => {
+        const next = { ...previous };
+        delete next[translationKey];
+        return next;
+      });
+      return;
+    }
+
+    showToast("正在翻译中...");
+    try {
+      const res = await apiTranslate({
+        text,
+        apiKey: settings.apiKey || "",
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+      });
+      if (res?.text) {
+        setCommentTranslations((previous) => ({ ...previous, [translationKey]: res.text }));
+        showToast("翻译完成");
+      } else {
+        showToast("翻译无结果");
+      }
+    } catch (error) {
+      console.error("Translate moment comment failed:", error);
+      showToast(error instanceof Error ? error.message : "翻译失败，请检查 API 配置");
     }
   };
 
@@ -4865,6 +5092,9 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       return undefined;
     }
   };
+
+  const getMomentCommentTranslationKey = (momentId: string, commentId: string) =>
+    `${momentId}:${commentId}`;
 
   const readMomentImageSize = (image: string): Promise<{ width: number; height: number } | undefined> =>
     new Promise((resolve) => {
@@ -6944,7 +7174,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                     onClick={() => setShowClearHistoryModal(true)}
                      className="w-full h-[52px] px-4 flex items-center justify-between text-[16px] font-medium text-[#FF3B30] transition-colors hover:bg-red-50 active:bg-red-100"
                   >
-                     <span>清空对话记录</span>
+                      <span>清空好友全部记忆</span>
                      <ChevronRight className="w-5 h-5 text-[#C7C7CC]" />
                   </button>
 
@@ -6982,46 +7212,34 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       </svg>
                     </div>
                     <div className="space-y-1">
-                      <h3 className="font-bold text-slate-800 text-sm">清空对话记录</h3>
-                      <p className="text-[11px] text-slate-500 leading-relaxed">
-                        请选择如何处理当前对话。提炼整理记忆可让角色长久记住你们的互动与好感。
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-2.5 pt-2">
-                      <button
-                        onClick={async () => {
-                          setShowClearHistoryModal(false);
-                          // Step 1: Extract memories to Memory Vault
-                          const count = await handleExtractMemories();
-                          // Step 2: Clear messages
-                          if (onClearMessages) {
-                            clearMessagesAndLinkedArtifacts(activeChatCharId, activeRelationship?.id);
-                          }
-                          // Reset greeting checked state so a new proactive greeting can be generated immediately
-                          setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
-                          setSentGreetings((prev) => prev.filter((id) => id !== activeChatCharId));
-                          alert(`成功提取并整理了 ${count} 条核心记忆存入“记忆书”，当前对话已安全清除！`);
-                        }}
-                        disabled={isCompressingMemory}
-                        className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm disabled:opacity-50"
-                      >
-                        {isCompressingMemory ? "正在提炼并清空..." : "💡 提炼记忆存入记忆书再清空"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (window.confirm("确定要直接清空所有对话记录吗？该操作不可撤销，且不会保存任何新记忆。")) {
-                            setShowClearHistoryModal(false);
-                            if (onClearMessages) {
-                              clearMessagesAndLinkedArtifacts(activeChatCharId, activeRelationship?.id);
-                            }
-                            // Reset greeting checked state so a new proactive greeting can be generated immediately
-                            setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
-                            setSentGreetings((prev) => prev.filter((id) => id !== activeChatCharId));
-                          }
-                        }}
-                        className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-xs transition-colors border border-red-200"
-                      >
-                        直接彻底清空
+                        <h3 className="font-bold text-slate-800 text-sm">清空好友全部记忆</h3>
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                         将清除与当前好友关系相关的聊天、朋友圈、记忆、线下剧本、日记及其他生成记录，但不会删除好友、人设或关系设置。
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2.5 pt-2">
+                       <button
+                         onClick={() => {
+                           if (!activeCharacter || activeCharacter.isGroupChat) return;
+                           const currentIdentityRelation = relationForCharacter(activeCharacter.id);
+                           const relationToClear = activeRelationship?.userIdentityId === activeIdentityId
+                             ? activeRelationship
+                             : currentIdentityRelation;
+                           const relationId = relationToClear?.id || activeChatRelationId;
+                           if (!relationId) {
+                             showToast("找不到当前好友关系，无法执行安全清理。");
+                             return;
+                           }
+                           if (!window.confirm("确定要清空该好友的全部记忆吗？聊天、朋友圈、记忆、线下剧本、日记及其他相关记录都会永久删除，好友和人设不会删除。")) return;
+                           clearFriendScopedMemory(activeCharacter.id, relationId);
+                           setShowClearHistoryModal(false);
+                           setEmptyGreetingCheckedCharIds((previous) => previous.filter((id) => id !== activeChatCharId));
+                           setSentGreetings((previous) => previous.filter((id) => id !== activeChatCharId));
+                           showToast("已清空好友全部记忆");
+                         }}
+                         className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-xs transition-colors border border-red-200"
+                       >
+                         直接彻底清空
                       </button>
                       <button
                         onClick={() => setShowClearHistoryModal(false)}
@@ -9301,18 +9519,23 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                       <div
                                         key={comm.id}
                                         onClick={() => handleMomentCommentClick(mom.id, comm)}
-                                        onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
+                                        onPointerDown={(event) => handleMomentCommentPointerDown(event, mom.id, comm)}
                                         onPointerUp={clearMomentCommentLongPress}
                                         onPointerLeave={clearMomentCommentLongPress}
                                         onPointerCancel={clearMomentCommentLongPress}
                                         onContextMenu={(event) => event.preventDefault()}
                                         className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
-                                        title={`点击回复；长按删除评论`}
+                                        title={`点击回复；长按翻译或删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">
                                           {commAuthorName}
                                         </span>
                                         <span className="text-slate-700">{comm.content}</span>
+                                        {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)] && (
+                                          <span className="mt-0.5 block whitespace-pre-wrap text-slate-500">
+                                            {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)]}
+                                          </span>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -10212,16 +10435,21 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                       <div
                                         key={comm.id}
                                         onClick={() => handleMomentCommentClick(mom.id, comm)}
-                                        onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
+                                        onPointerDown={(event) => handleMomentCommentPointerDown(event, mom.id, comm)}
                                         onPointerUp={clearMomentCommentLongPress}
                                         onPointerLeave={clearMomentCommentLongPress}
                                         onPointerCancel={clearMomentCommentLongPress}
                                         onContextMenu={(event) => event.preventDefault()}
                                         className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
-                                        title={`点击回复；长按删除评论`}
+                                        title={`点击回复；长按翻译或删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">{commAuthorName}</span>
                                         <span className="text-slate-700">{comm.content}</span>
+                                        {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)] && (
+                                          <span className="mt-0.5 block whitespace-pre-wrap text-slate-500">
+                                            {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)]}
+                                          </span>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -11023,6 +11251,46 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
               取消
             </button>
           </div>
+        </div>
+      )}
+
+      {commentContextMenu && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/10 flex items-center justify-center backdrop-blur-[1px]"
+          onClick={() => setCommentContextMenu(null)}
+          onContextMenu={(event) => { event.preventDefault(); setCommentContextMenu(null); }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[160px] text-stone-800 space-y-1"
+            style={{
+              position: "absolute",
+              top: Math.max(10, Math.min(window.innerHeight - 150, commentContextMenu.y - 10)),
+              left: Math.max(10, Math.min(window.innerWidth - 180, commentContextMenu.x - 80)),
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => handleTranslateMomentComment(commentContextMenu.momentId, commentContextMenu.commentId, commentContextMenu.text)}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+            >
+              <Languages className="w-3.5 h-3.5 text-stone-500" />
+              <span>{commentTranslations[getMomentCommentTranslationKey(commentContextMenu.momentId, commentContextMenu.commentId)] ? "显示原文" : "AI 翻译"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCommentContextMenu(null);
+                setCommentDeleteTarget({ momentId: commentContextMenu.momentId, commentId: commentContextMenu.commentId });
+              }}
+              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-red-50 rounded-lg flex items-center gap-2 text-red-500 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <span>删除评论</span>
+            </button>
+          </motion.div>
         </div>
       )}
 

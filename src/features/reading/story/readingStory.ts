@@ -24,6 +24,8 @@ import { ensureDistinctReadingStoryChoices } from "./readingStoryChoices";
 const createId = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 const targetChapters: Record<ReadingStoryLength, number> = { short: 3, medium: 8, long: 20 };
 const text = (value: string, max: number): string => value.trim().slice(0, max);
+const sameScope = (left: ReadingStoryScope, right: ReadingStoryScope): boolean =>
+  left.userIdentityId === right.userIdentityId && left.storyId === right.storyId;
 
 export class ReadingStoryError extends Error {
   constructor(message: string, public readonly code: "invalid" | "missing" | "storage" | "conflict") {
@@ -182,9 +184,23 @@ export function createReadingStorySave(input: { scope: ReadingStoryScope; label:
 }
 
 export function loadReadingStorySave(input: { scope: ReadingStoryScope; saveId: string }): ReadingStoryState {
-  const save = listReadingStorySaves(input.scope).find((candidate) => candidate.id === input.saveId);
+  const loaded = loadReadingStoryStore();
+  const save = loaded.value.saves.find((candidate) => sameScope(candidate, input.scope) && candidate.id === input.saveId);
   if (!save) throw new ReadingStoryError("存档不存在", "missing");
-  return persist(saveReadingStory(save.state), save.state);
+  const scopedTurns = loaded.value.turns
+    .filter((turn) => sameScope(turn, input.scope))
+    .sort((left, right) => left.turnIndex - right.turnIndex);
+  const savedTurnIndex = scopedTurns.find((turn) => turn.id === save.turnId)?.turnIndex;
+  const remainingTurns = savedTurnIndex === undefined
+    ? loaded.value.turns
+    : loaded.value.turns.filter((turn) => !sameScope(turn, input.scope) || turn.turnIndex <= savedTurnIndex);
+  const restoredState = structuredClone(save.state);
+  const nextStore = {
+    ...loaded.value,
+    stories: [...loaded.value.stories.filter((candidate) => !sameScope(candidate, input.scope)), restoredState],
+    turns: remainingTurns,
+  };
+  return persist(saveReadingStoryStore(nextStore), restoredState);
 }
 
 export function updateReadingStoryMetadata(input: { scope: ReadingStoryScope; title?: string; status?: "active" | "paused"; generationPreferences?: Partial<ReadingStoryGenerationPreferences>; now?: number }): ReadingStoryState {

@@ -2298,7 +2298,12 @@ export default function App() {
       (remaining, moment) => removeMemoriesForMoment(remaining, moment),
       previous,
     ));
-    setMoments((previous) => previous.filter((moment) => moment.relationId !== relationId));
+    setMoments((previous) => previous
+      .filter((moment) => moment.relationId !== relationId)
+      .map((moment) => ({
+        ...moment,
+        comments: moment.comments.filter((comment) => comment.relationId !== relationId),
+      })));
   };
 
   const handleAddCommentToMoment = (momentId: string, comment: MomentComment) => {

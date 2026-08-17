@@ -135,10 +135,23 @@ export function createReadingCoStorySave(input: { scope: ReadingCoStoryScope; la
 }
 
 export function loadReadingCoStorySave(input: { scope: ReadingCoStoryScope; saveId: string; now?: number }): ReadingCoStoryState {
-  const save = listReadingCoStorySaves(input.scope).find((candidate) => candidate.id === input.saveId);
+  const loaded = loadReadingCoStoryStore();
+  const save = loaded.value.saves.find((candidate) => sameScope(candidate, input.scope) && candidate.id === input.saveId);
   if (!save) throw new ReadingCoStoryError("共同故事存档不存在", "missing");
+  const scopedTurns = loaded.value.turns
+    .filter((turn) => sameScope(turn, input.scope))
+    .sort((left, right) => left.turnIndex - right.turnIndex);
+  const savedTurnIndex = scopedTurns.find((turn) => turn.turnId === save.turnId)?.turnIndex;
+  const remainingTurns = savedTurnIndex === undefined
+    ? loaded.value.turns
+    : loaded.value.turns.filter((turn) => !sameScope(turn, input.scope) || turn.turnIndex <= savedTurnIndex);
   const restored = { ...structuredClone(save.state), updatedAt: input.now ?? Date.now() };
-  return persist(saveReadingCoStory(restored), restored);
+  const nextStore = {
+    ...loaded.value,
+    stories: [...loaded.value.stories.filter((candidate) => !sameScope(candidate, input.scope)), restored],
+    turns: remainingTurns,
+  };
+  return persist(saveReadingCoStoryStore(nextStore), restored);
 }
 
 export function updateReadingCoStoryMetadata(input: { scope: ReadingCoStoryScope; title?: string; status?: "active" | "paused"; generationPreferences?: Partial<ReadingStoryGenerationPreferences>; now?: number }): ReadingCoStoryState {
