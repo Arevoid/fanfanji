@@ -67,12 +67,12 @@ export function useChatController({
   useEffect(() => {
     setChatInputText("");
     setQuotedMessage(null);
-    return () => {
-      replyAbortControllerRef.current?.abort();
-      replyAbortControllerRef.current = null;
-      replyInFlightRef.current = false;
-      setIsReplyInFlight(false);
-    };
+    // Do not abort a reply when this controller unmounts. AppChat is a view
+    // layer: navigating home, opening another app, or switching browser tabs
+    // must not cancel the character's API request. The parent App and its
+    // message repository stay mounted, so the captured response can still be
+    // persisted and will be visible when the conversation is opened again.
+    // Cancellation remains explicit through stopReply().
   }, [scopeKey]);
 
   const quoteBelongsToRuntime = (message: Message): boolean => runtimeContext.isGroup
