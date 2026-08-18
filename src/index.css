@@ -48,6 +48,19 @@
   --app-font-family: var(--app-default-font-family);
 }
 
+/* Older iOS Safari versions do not understand dynamic viewport units. Keep
+   the standalone launch surface full-height there as well; newer browsers
+   continue to use the visual-viewport value written by the controller. */
+@supports not (height: 100dvh) {
+  :root {
+    --app-viewport-height: -webkit-fill-available;
+  }
+
+  html, body, #root {
+    min-height: -webkit-fill-available;
+  }
+}
+
 html {
   font-size: var(--app-root-font-size);
 }
