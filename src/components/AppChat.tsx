@@ -2098,10 +2098,10 @@ export default function AppChat({
       : relation));
   };
 
-  // Proactive contact catch-up on load (supports background clear / offline delivery)
-  useEffect(() => {
-    if (activeRelationships.length === 0) return;
-
+  // Proactive contact catch-up on load (supports background clear / offline delivery).
+  // Keep this in the same scheduler boundary as the recurring pass so a tab
+  // cannot accidentally create a second independent timer during re-renders.
+  const runProactiveCatchupPass = async () => {
     activeRelationships.forEach((relation) => {
       const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters));
       if (!friend || friend.isGroupChat) return;
@@ -2128,7 +2128,15 @@ export default function AppChat({
         triggerProactiveFor(relation.id, catchupPrompt, sched);
       }
     });
-  }, [activeRelationships, characters, relationships]);
+  };
+
+  useBackgroundScheduler({
+    id: "chat-proactive-catchup",
+    enabled: activeRelationships.length > 0,
+    intervalMs: 15 * 60 * 1000,
+    initialDelayMs: 0,
+    run: runProactiveCatchupPass,
+  });
 
   // Background proactive check (every minute). The scheduler owns the timer
   // and prevents overlapping passes; the trigger policy below is unchanged.
@@ -2362,28 +2370,35 @@ export default function AppChat({
   };
 
   // Enabled contacts may call while their chat is open, with relationship-scoped
-  // persistence, quiet-hours checks, daily limits and rejection backoff.
-  useEffect(() => {
+  // persistence, quiet-hours checks, daily limits and rejection backoff. The
+  // scheduler preserves the old one-minute cadence without recreating a timer
+  // whenever relationship state is persisted.
+  const runProactiveCallPass = async () => {
     if (!activeChatCharId || !activeCharacter || !activeRelationship || !activeVoiceCallScope || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
-    const timer = setInterval(() => {
-      if (activeAttachModal || isOfflineStoryActiveFor(activeVoiceCallScope.relationId)) return;
-      const now = Date.now();
-      const latestMessageAt = messagesRef.current
-        .filter((message) => message.relationId === activeVoiceCallScope.relationId && !message.isOffline)
-        .reduce((latest, message) => Math.max(latest, message.timestamp), 0) || undefined;
-      if (!canTriggerProactiveVoiceCall({
-        now,
-        relation: activeRelationship,
-        latestMessageAt,
-        startTime: activeCharacter.proactiveStartTime,
-        endTime: activeCharacter.proactiveEndTime,
-        randomValue: Math.random(),
-      })) return;
-      updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallTriggerPatch(activeRelationship, now));
-      beginVoiceCall(true);
-    }, 60 * 1000);
-    return () => clearInterval(timer);
-  }, [activeChatCharId, activeCharacter?.enableProactiveCall, activeCharacter?.isGroupChat, activeCharacter?.proactiveStartTime, activeCharacter?.proactiveEndTime, activeAttachModal, activeIdentityId, activeVoiceCallScope?.relationId, activeRelationship?.lastProactiveCallAt, activeRelationship?.proactiveCallBackoffUntil, activeRelationship?.proactiveCallCount, activeRelationship?.proactiveCallDayKey]);
+    if (activeAttachModal || isOfflineStoryActiveFor(activeVoiceCallScope.relationId)) return;
+    const now = Date.now();
+    const latestMessageAt = messagesRef.current
+      .filter((message) => message.relationId === activeVoiceCallScope.relationId && !message.isOffline)
+      .reduce((latest, message) => Math.max(latest, message.timestamp), 0) || undefined;
+    if (!canTriggerProactiveVoiceCall({
+      now,
+      relation: activeRelationship,
+      latestMessageAt,
+      startTime: activeCharacter.proactiveStartTime,
+      endTime: activeCharacter.proactiveEndTime,
+      randomValue: Math.random(),
+    })) return;
+    updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallTriggerPatch(activeRelationship, now));
+    beginVoiceCall(true);
+  };
+
+  useBackgroundScheduler({
+    id: "chat-proactive-call",
+    enabled: Boolean(activeChatCharId && activeCharacter && activeRelationship && activeVoiceCallScope && !activeCharacter.isGroupChat && activeCharacter.enableProactiveCall),
+    intervalMs: 60 * 1000,
+    initialDelayMs: 60 * 1000,
+    run: runProactiveCallPass,
+  });
 
   const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[], signal?: AbortSignal) => {
     if (!activeChatCharId || !activeCharacter) return;
