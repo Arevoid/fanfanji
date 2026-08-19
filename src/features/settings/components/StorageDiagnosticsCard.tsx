@@ -5,6 +5,7 @@ interface StorageDiagnosticsCardProps {
   backupVersion: number;
   lastBackupAt: string | null;
   onRefresh: () => void;
+  onRequestPersistence: () => void;
   onCleanMigratedCopies: () => void;
 }
 
@@ -13,6 +14,7 @@ export function StorageDiagnosticsCard({
   backupVersion,
   lastBackupAt,
   onRefresh,
+  onRequestPersistence,
   onCleanMigratedCopies,
 }: StorageDiagnosticsCardProps) {
   return (
@@ -40,6 +42,7 @@ export function StorageDiagnosticsCard({
             {diagnostics.health.indexedDb.length > 0 && <div>IndexedDB：{diagnostics.health.indexedDb.map((database) => `${database.name}（${database.records} 条）`).join("、")}</div>}
             {diagnostics.health.findings.slice(0, 5).map((finding) => <div key={`${finding.key}-${finding.kind}`} className="text-amber-700">待检查：{finding.key} · {finding.detail}</div>)}
             {diagnostics.localStorageEntries.slice(0, 3).map((entry) => <div key={entry.key} className="truncate">最大项目：{entry.key}（{formatStorageBytes(entry.bytes)}）</div>)}
+            {!diagnostics.persisted && <button type="button" onClick={onRequestPersistence} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">申请浏览器持久化存储</button>}
             <button type="button" onClick={onCleanMigratedCopies} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">清理已迁移副本</button>
           </div>
         )}

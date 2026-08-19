@@ -11,7 +11,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "tsx scripts/runAllTests.ts",
-    "check": "npm run lint && npm test && npm run build"
+    "release:check": "tsx scripts/releaseCheck.ts",
+    "check": "npm run lint && npm test && npm run build && npm run release:check"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

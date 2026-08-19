@@ -490,6 +490,20 @@ export default function AppSettings({
       console.warn("Unable to inspect browser storage.", error);
     }
   };
+  const requestStoragePersistence = async () => {
+    if (typeof navigator === "undefined" || !navigator.storage?.persist) {
+      alert("当前浏览器不支持持久化存储申请。");
+      return;
+    }
+    try {
+      const granted = await navigator.storage.persist();
+      await refreshStorageDiagnostics();
+      alert(granted ? "已申请并启用持久化存储。" : "浏览器未授予持久化存储，现有数据不会被删除。");
+    } catch (error) {
+      console.warn("Unable to request persistent browser storage.", error);
+      alert("持久化存储申请失败，现有数据不会被删除。");
+    }
+  };
   const effectiveBubbleStylePreset = bubbleStylePreset || settings.globalChatStylePreset || "default";
 
   // PWA states
@@ -3551,6 +3565,7 @@ export default function AppSettings({
                 backupVersion={SYSTEM_BACKUP_VERSION}
                 lastBackupAt={lastBackupAt}
                 onRefresh={() => void refreshStorageDiagnostics()}
+                onRequestPersistence={() => void requestStoragePersistence()}
                 onCleanMigratedCopies={() => {
                   const removed = removeMigratedStorageCopies();
                   void refreshStorageDiagnostics();
