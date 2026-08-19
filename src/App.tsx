@@ -483,6 +483,7 @@ export default function App() {
   const [chatModuleActivated, setChatModuleActivated] = useState(false);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
+  const [pendingOfflineStoryId, setPendingOfflineStoryId] = useState<string | null>(null);
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
@@ -3639,6 +3640,10 @@ export default function App() {
                     onSaveAppointment={handleSaveAppointment}
                     offlineStories={offlineStories}
                     onSaveOfflineStory={handleSaveOfflineStory}
+                    onOpenOfflineStory={(storyId) => {
+                      setPendingOfflineStoryId(storyId);
+                      setActiveApp("offline");
+                    }}
                     onDeleteOfflineStory={handleDeleteOfflineStory}
                     onDeleteCharacter={handleDeleteCharacter}
                     onDeleteRelationshipMusic={handleDeleteRelationshipMusic}
@@ -3850,6 +3855,7 @@ export default function App() {
                       relationships={relationships}
                       settings={settings}
                       offlineStories={offlineStories}
+                      openStoryId={pendingOfflineStoryId}
                       messages={messages}
                       activeChatCharId={activeChatCharId}
                       worldBookEntries={worldBookEntries}

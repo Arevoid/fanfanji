@@ -252,7 +252,8 @@ interface AppChatProps {
   appointments?: Appointment[];
   onSaveAppointment?: (appointment: Appointment) => boolean;
   offlineStories?: OfflineStory[];
-  onSaveOfflineStory?: (story: OfflineStory) => void;
+  onSaveOfflineStory?: (story: OfflineStory) => boolean | void | Promise<boolean>;
+  onOpenOfflineStory?: (storyId: string) => void;
   onDeleteOfflineStory?: (storyId: string) => void;
   onDeleteCharacter?: (id: string, skipConfirm?: boolean) => void;
   onDeleteRelationshipMusic?: (relationId: string) => void;
@@ -303,6 +304,7 @@ export default function AppChat({
   onSaveAppointment,
   offlineStories = [],
   onSaveOfflineStory,
+  onOpenOfflineStory,
   onDeleteOfflineStory,
   onDeleteCharacter,
   onDeleteRelationshipMusic,
@@ -1489,7 +1491,7 @@ export default function AppChat({
   const isOfflineModeActive = false;
   const isInputNarration = false;
   const activeOfflineStoryId = null;
-  const handleStartOfflineFromMsg = (
+  const handleStartOfflineFromMsg = async (
     msg: Message,
     appointment?: Appointment,
     handoffMessages?: readonly Message[],
@@ -1513,6 +1515,7 @@ export default function AppChat({
       if (existingStory && activeRelationship) {
         writeString(getOfflineModeStorageKey(activeRelationship.id), "true");
         writeString(getOfflineStoryStorageKey(activeRelationship.id), existingStory.id);
+        onOpenOfflineStory?.(existingStory.id);
         onNavigateToApp?.("offline");
         return;
       }
@@ -1605,7 +1608,12 @@ export default function AppChat({
     };
     
     if (onSaveOfflineStory) {
-      onSaveOfflineStory(newStory);
+      const saveResult = onSaveOfflineStory(newStory);
+      const saved = saveResult instanceof Promise ? await saveResult : saveResult !== false;
+      if (!saved) {
+        showToast("线下故事保存失败，请稍后重试");
+        return;
+      }
     }
     
     if (activeRelationship) {
@@ -1616,6 +1624,7 @@ export default function AppChat({
     showToast("已无痛切换到线下故事模式");
 
     if (onNavigateToApp) {
+      onOpenOfflineStory?.(newStory.id);
       onNavigateToApp("offline");
     }
   };

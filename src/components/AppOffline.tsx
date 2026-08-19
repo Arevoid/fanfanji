@@ -59,6 +59,8 @@ interface AppOfflineProps {
   worldBookEntries?: WorldBookEntry[];
   appointments?: Appointment[];
   onSaveAppointment?: (appointment: Appointment) => boolean;
+  /** Story requested by the previous chat screen; consumed by the story opener. */
+  openStoryId?: string | null;
 }
 
 interface OfflineStylePreset {
@@ -106,6 +108,7 @@ export default function AppOffline({
   worldBookEntries = [],
   appointments = [],
   onSaveAppointment,
+  openStoryId = null,
 }: AppOfflineProps) {
   const selectableCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
   const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
