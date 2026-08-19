@@ -54,6 +54,7 @@ const HEALTH_COLLECTION_KEYS = [
 function inspectStorageHealth(storage: Storage): StorageHealthReport {
   const findings: StorageHealthFinding[] = [];
   let checkedCollections = 0;
+  const collections = new Map<string, Record<string, unknown>[]>();
   for (const key of HEALTH_COLLECTION_KEYS) {
     const raw = storage.getItem(key);
     if (!raw) continue;
@@ -66,7 +67,9 @@ function inspectStorageHealth(storage: Storage): StorageHealthReport {
       continue;
     }
     if (!Array.isArray(parsed)) continue;
-    const ids = parsed
+    const records = parsed.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)));
+    collections.set(key, records);
+    const ids = records
       .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
       .map((entry) => entry.id)
       .filter((id): id is string => typeof id === "string" && id.length > 0);
@@ -75,6 +78,30 @@ function inspectStorageHealth(storage: Storage): StorageHealthReport {
       findings.push({ key, kind: "duplicate-id", count: duplicateCount, detail: "发现重复 ID，仅提供检查结果，不自动合并。" });
     }
   }
+
+  const reportMissingReferences = (sourceKey: string, referenceField: string, targetKey: string, label: string) => {
+    const source = collections.get(sourceKey);
+    const target = collections.get(targetKey);
+    if (!source || !target) return;
+    const targetIds = new Set(target.map((entry) => entry.id).filter((id): id is string => typeof id === "string" && id.length > 0));
+    const missingCount = source.filter((entry) => {
+      const reference = entry[referenceField];
+      return typeof reference === "string" && reference.length > 0 && !targetIds.has(reference);
+    }).length;
+    if (missingCount > 0) {
+      findings.push({
+        key: sourceKey,
+        kind: "orphan-reference",
+        count: missingCount,
+        detail: `${label}存在 ${missingCount} 条引用无法对应，仅提供检查结果，不自动删除。`,
+      });
+    }
+  };
+
+  reportMissingReferences(storageKeys.messages, "relationId", storageKeys.characterRelationships, "关系");
+  reportMissingReferences(storageKeys.offlineStories, "relationId", storageKeys.characterRelationships, "线下关系");
+  reportMissingReferences(storageKeys.forumReplies, "threadId", storageKeys.forumThreads, "论坛主题");
+  reportMissingReferences(storageKeys.moments, "characterId", storageKeys.characters, "角色");
   return { checkedCollections, findings, indexedDb: [] };
 }
 
