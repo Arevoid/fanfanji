@@ -9,7 +9,9 @@ const MOMENT_METADATA_KEY = "moments-v4";
 let cachedMoments: Moment[] | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<Moment[]>> | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
+const idleWriteQueue = Promise.resolve();
+let writeQueue: Promise<void> = idleWriteQueue;
+let pendingMoments: Moment[] | null = null;
 let mutationVersion = 0;
 
 const cloneMoments = (moments: Moment[]): Moment[] => typeof structuredClone === "function"
@@ -19,8 +21,20 @@ const cloneMoments = (moments: Moment[]): Moment[] => typeof structuredClone ===
 const loadLegacyMoments = (fallback: Moment[]): StorageResult<Moment[]> => readArray(storageKeys.moments, fallback);
 
 const enqueueWrite = (moments: Moment[]): Promise<void> => {
-  const snapshot = cloneMoments(moments);
-  writeQueue = writeQueue.catch(() => undefined).then(() => readingAssetDb.saveMetadataValue(MOMENT_METADATA_KEY, snapshot));
+  pendingMoments = cloneMoments(moments);
+  if (writeQueue !== idleWriteQueue) return writeQueue;
+  writeQueue = (async () => {
+    while (pendingMoments) {
+      const snapshot = pendingMoments;
+      pendingMoments = null;
+      await readingAssetDb.saveMetadataValue(MOMENT_METADATA_KEY, snapshot);
+    }
+  })().catch((error) => {
+    pendingMoments = null;
+    throw error;
+  }).finally(() => {
+    writeQueue = idleWriteQueue;
+  });
   return writeQueue;
 };
 

@@ -9,7 +9,9 @@ const CHARACTER_METADATA_KEY = "character-archive-v4";
 let cachedCharacters: Character[] | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<Character[]>> | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
+const idleWriteQueue = Promise.resolve();
+let writeQueue: Promise<void> = idleWriteQueue;
+let pendingCharacters: Character[] | null = null;
 let mutationVersion = 0;
 
 const cloneCharacters = (characters: Character[]): Character[] => typeof structuredClone === "function"
@@ -23,8 +25,20 @@ const loadLegacyCharacters = (fallback: Character[]): StorageResult<Character[]>
 };
 
 const enqueueWrite = (characters: Character[]): Promise<void> => {
-  const snapshot = cloneCharacters(characters);
-  writeQueue = writeQueue.catch(() => undefined).then(() => readingAssetDb.saveMetadataValue(CHARACTER_METADATA_KEY, snapshot));
+  pendingCharacters = cloneCharacters(characters);
+  if (writeQueue !== idleWriteQueue) return writeQueue;
+  writeQueue = (async () => {
+    while (pendingCharacters) {
+      const snapshot = pendingCharacters;
+      pendingCharacters = null;
+      await readingAssetDb.saveMetadataValue(CHARACTER_METADATA_KEY, snapshot);
+    }
+  })().catch((error) => {
+    pendingCharacters = null;
+    throw error;
+  }).finally(() => {
+    writeQueue = idleWriteQueue;
+  });
   return writeQueue;
 };
 
