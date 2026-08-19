@@ -158,11 +158,11 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   reading: loadAppReading,
 };
 
-// Warm all app chunks after the first paint so switching between installed
-// pages does not expose a blank Suspense frame on slower mobile browsers.
+// Warm only the most frequently opened app after the first paint. Other app
+// chunks are still prefetched on pointer-down and loaded on demand, avoiding
+// a large post-startup memory spike on long-running mobile sessions.
 const IDLE_PRELOAD_APP_IDS = [
-  "chat", "archives", "worldbook", "music", "forum", "notes", "diary",
-  "store", "settings", "memory", "offline", "schedule", "reading",
+  "chat",
 ] as const;
 
 const preloadApp = (appId: string) => {
