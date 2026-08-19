@@ -81,13 +81,13 @@ button, input, textarea, select {
   font: inherit;
 }
 
-/* iOS Safari zooms focused controls whose computed font-size is below 16px.
-   The forum and offline composers intentionally use compact typography, but
-   must remain at least 16px while focused so the keyboard does not enlarge
-   the bottom input area or shift the page unexpectedly. */
+/* iOS Safari zooms focused text controls whose computed font-size is below
+   16px. Keep every text-entry control at the platform's no-zoom minimum on
+   small screens. Non-text controls keep their compact geometry. */
 @media (max-width: 767px) {
-  .offline-composer-input-field,
-  .forum-composer-input {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  textarea,
+  select {
     font-size: 16px !important;
     -webkit-text-size-adjust: 100%;
   }
