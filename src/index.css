@@ -81,6 +81,18 @@ button, input, textarea, select {
   font: inherit;
 }
 
+/* iOS Safari zooms focused controls whose computed font-size is below 16px.
+   The forum and offline composers intentionally use compact typography, but
+   must remain at least 16px while focused so the keyboard does not enlarge
+   the bottom input area or shift the page unexpectedly. */
+@media (max-width: 767px) {
+  .offline-composer-input-field,
+  .forum-composer-input {
+    font-size: 16px !important;
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
 /* Tailwind arbitrary pixel sizes are fixed values by default. Scale the set
    used by the app so they participate in the same global typography reflow. */
 [class~="text-[7.5px]"] { font-size: calc(7.5px * var(--app-font-scale)); }

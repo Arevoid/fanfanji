@@ -1312,8 +1312,27 @@ export default function AppSettings({
     }
   };
 
+  const handleDockIconUpload = async (appKey: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImagePreservingTransparency(file, 120, 120, 0.8);
+      const updatedIcons = { ...(settings.dockIcons || {}), [appKey]: compressed };
+      handleSave({ dockIcons: updatedIcons });
+    } catch (err) {
+      console.error("Dock icon compression failed:", err);
+    } finally {
+      // Allow selecting the same file again after replacing an icon.
+      e.target.value = "";
+    }
+  };
+
   const handleRestoreAllIcons = () => {
-    handleSave({ customIcons: {} });
+    handleSave({ customIcons: {}, dockIcons: {} });
+  };
+
+  const handleRestoreDockIcons = () => {
+    handleSave({ dockIcons: {} });
   };
 
   const handleTestConnection = async () => {
@@ -1401,6 +1420,13 @@ export default function AppSettings({
     { key: "offline", label: "线下" },
     { key: "store", label: "应用商店" },
     { key: "settings", label: "设置" }
+  ];
+
+  const dockAppKeys = [
+    { key: "chat", label: "聊天" },
+    { key: "music", label: "音乐" },
+    { key: "archives", label: "档案馆" },
+    { key: "settings", label: "设置" },
   ];
 
   const handleBack = () => {
@@ -2206,6 +2232,68 @@ export default function AppSettings({
                                 type="file"
                                 accept="image/*"
                                 onChange={(e) => handleIconUpload(item.key, e)}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Dock 栏应用图标 */}
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+                    <div className="flex items-start justify-between gap-3 pb-1 border-b border-slate-50">
+                      <div>
+                        <span className="text-xs font-bold text-slate-700">Dock 栏应用图标</span>
+                        <p className="mt-1 text-[10px] leading-relaxed text-slate-400">可单独替换底部 Dock 栏图标；未设置时沿用桌面应用图标。</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRestoreDockIcons}
+                        className="shrink-0 text-[10px] text-slate-400 hover:text-neutral-950 font-semibold"
+                      >
+                        恢复默认
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2.5">
+                      {dockAppKeys.map((item) => {
+                        const customImg = settings.dockIcons?.[item.key] || "";
+                        const inheritedImg = !customImg ? settings.customIcons[item.key] : "";
+                        const previewImg = customImg || inheritedImg;
+                        const isTransparentIcon = isTransparencyPreservedImage(previewImg);
+                        return (
+                          <div
+                            key={item.key}
+                            className="flex flex-col items-center bg-slate-50/60 p-2 rounded-[24px] border border-slate-100 hover:bg-slate-50 relative group cursor-pointer"
+                          >
+                            <label className="cursor-pointer flex flex-col items-center w-full">
+                              <div
+                                className={`w-10 h-10 flex items-center justify-center overflow-hidden shrink-0 transition-colors ${
+                                  isTransparentIcon
+                                    ? "bg-transparent border-0 shadow-none"
+                                    : "bg-white border border-slate-200 shadow-sm group-hover:border-neutral-950"
+                                }`}
+                                style={{ borderRadius: isTransparentIcon ? 0 : "var(--app-icon-radius, 35%)" }}
+                              >
+                                {previewImg ? (
+                                  <img
+                                    src={previewImg}
+                                    alt={item.label}
+                                    className={`w-full h-full ${isTransparentIcon ? "object-contain" : "object-cover"}`}
+                                  />
+                                ) : (
+                                  <Sliders className="w-4 h-4 text-slate-400" />
+                                )}
+                              </div>
+                              <span className="text-[9px] font-bold text-slate-600 mt-1.5 tracking-tight truncate w-full text-center">
+                                {item.label}
+                              </span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => void handleDockIconUpload(item.key, e)}
                                 className="hidden"
                               />
                             </label>

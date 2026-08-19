@@ -13,6 +13,7 @@ import type { Appointment, AppointmentMode } from "../domain/schedule/scheduleTy
 import { getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
 import { isAppointmentReadyForOfflineEntry, startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
+import { containsNonChineseText } from "../utils/textLanguage";
 import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDistribution";
@@ -4667,13 +4668,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         );
 
         currentChatMessages.forEach((msg) => {
-          const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(msg.content);
-          const hasKorean = /[\uac00-\ud7af]/.test(msg.content);
-          const hasChinese = /[\u4e00-\u9fa5]/.test(msg.content);
-          const hasEnglish = /[a-zA-Z]{3,}/.test(msg.content);
-          const isNonChinese = hasJapanese || hasKorean || (!hasChinese && hasEnglish);
-
-          if (isNonChinese) {
+          if (containsNonChineseText(msg.content)) {
             apiTranslate({
               text: msg.content,
               apiKey: settings.apiKey || "",

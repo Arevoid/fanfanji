@@ -95,6 +95,7 @@ import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/s
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
 import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
+import { containsNonChineseText } from "./utils/textLanguage";
 import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
 import {
   migrateLegacyClassicBubblePreset,
@@ -275,6 +276,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   selectedModel: "gemini-3.5-flash",
   wallpaper: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
   customIcons: {},
+  dockIcons: {},
   globalChatStylePreset: "default",
   bubbleCss: "",
   globalCss: ``,
@@ -2140,14 +2142,7 @@ export default function App() {
       !messageToSave.content.startsWith("data:image/") &&
       !messageToSave.content.startsWith("[红包]")
     ) {
-      // Check if text is non-Chinese
-      const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(messageToSave.content);
-      const hasKorean = /[\uac00-\ud7af]/.test(messageToSave.content);
-      const hasChinese = /[\u4e00-\u9fa5]/.test(messageToSave.content);
-      const hasEnglish = /[a-zA-Z]{3,}/.test(messageToSave.content);
-      const isNonChinese = hasJapanese || hasKorean || (!hasChinese && hasEnglish);
-
-      if (isNonChinese) {
+      if (containsNonChineseText(messageToSave.content)) {
         apiTranslate({
           text: messageToSave.content,
           apiKey: settings.apiKey || "",
@@ -3520,8 +3515,13 @@ export default function App() {
                 const iconSizeStyle = isHiddenNames 
                   ? { width: "60px", height: "60px" } 
                   : { width: "52px", height: "52px" };
+                // Dock icons may have their own override. Legacy customIcons
+                // remain the fallback so existing users keep their current
+                // appearance after this setting is introduced.
+                const getDockIcon = (appId: string) =>
+                  settings.dockIcons?.[appId] || settings.customIcons[appId] || "";
                 const isTransparentDockIcon = (appId: string) =>
-                  isTransparencyPreservedImage(settings.customIcons[appId]);
+                  isTransparencyPreservedImage(getDockIcon(appId));
 
                 return (
                   <div 
@@ -3546,8 +3546,8 @@ export default function App() {
                           }`}
                           style={{ borderRadius: isTransparentDockIcon("chat") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
-                          {settings.customIcons["chat"] ? (
-                            <img src={settings.customIcons["chat"]} alt="" className={`w-full h-full ${isTransparentDockIcon("chat") ? "object-contain" : "object-cover"}`} />
+                          {getDockIcon("chat") ? (
+                            <img src={getDockIcon("chat")} alt="" className={`w-full h-full ${isTransparentDockIcon("chat") ? "object-contain" : "object-cover"}`} />
                           ) : (
                             <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                               {AppIcons.chat()}
@@ -3570,8 +3570,8 @@ export default function App() {
                           }`}
                           style={{ borderRadius: isTransparentDockIcon("music") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
-                          {settings.customIcons["music"] ? (
-                            <img src={settings.customIcons["music"]} alt="" className={`w-full h-full ${isTransparentDockIcon("music") ? "object-contain" : "object-cover"}`} />
+                          {getDockIcon("music") ? (
+                            <img src={getDockIcon("music")} alt="" className={`w-full h-full ${isTransparentDockIcon("music") ? "object-contain" : "object-cover"}`} />
                           ) : (
                             <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                               {AppIcons.music()}
@@ -3594,8 +3594,8 @@ export default function App() {
                           }`}
                           style={{ borderRadius: isTransparentDockIcon("archives") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                         >
-                          {settings.customIcons["archives"] ? (
-                            <img src={settings.customIcons["archives"]} alt="" className={`w-full h-full ${isTransparentDockIcon("archives") ? "object-contain" : "object-cover"}`} />
+                          {getDockIcon("archives") ? (
+                            <img src={getDockIcon("archives")} alt="" className={`w-full h-full ${isTransparentDockIcon("archives") ? "object-contain" : "object-cover"}`} />
                           ) : (
                             <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                               {AppIcons.archives()}
@@ -3618,8 +3618,8 @@ export default function App() {
                         }`}
                         style={{ borderRadius: isTransparentDockIcon("settings") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                       >
-                        {settings.customIcons["settings"] ? (
-                          <img src={settings.customIcons["settings"]} alt="" className={`w-full h-full ${isTransparentDockIcon("settings") ? "object-contain" : "object-cover"}`} />
+                        {getDockIcon("settings") ? (
+                          <img src={getDockIcon("settings")} alt="" className={`w-full h-full ${isTransparentDockIcon("settings") ? "object-contain" : "object-cover"}`} />
                         ) : (
                           <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                             {AppIcons.settings()}
