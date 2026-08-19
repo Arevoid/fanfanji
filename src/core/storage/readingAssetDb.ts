@@ -186,6 +186,18 @@ class ReadingAssetDB {
     });
   }
 
+  async deleteMetadataValue(key: string): Promise<void> {
+    if (!key) return;
+    const database = await this.initMetadata();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(METADATA_STORE, "readwrite");
+      transaction.objectStore(METADATA_STORE).delete(key);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
   async saveCover(bookId: string, blob: Blob): Promise<void> {
     if (!bookId || !(blob instanceof Blob) || !blob.type.startsWith("image/")) throw new Error("Invalid reading cover");
     const database = await this.initCover();

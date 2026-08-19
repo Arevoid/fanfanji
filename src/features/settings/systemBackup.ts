@@ -157,10 +157,35 @@ export function parseSystemBackup(value: unknown): {
 }
 
 export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexedDb): Promise<void> {
-  for (const key of SYSTEM_BACKUP_INDEXED_DB_KEYS) {
-    if (!Object.hasOwn(indexedDb, key)) continue;
-    const value = indexedDb[key];
-    if (value === null || value === undefined) continue;
-    await readingAssetDb.saveMetadataValue(key, cloneJson(value));
+  const previousValues = new Map<string, unknown | null>();
+  const keysToRestore = SYSTEM_BACKUP_INDEXED_DB_KEYS.filter((key) => Object.hasOwn(indexedDb, key));
+  for (const key of keysToRestore) {
+    previousValues.set(key, await readingAssetDb.loadMetadataValue<unknown>(key));
+  }
+
+  try {
+    for (const key of keysToRestore) {
+      const value = indexedDb[key];
+      if (value === null || value === undefined) {
+        await readingAssetDb.deleteMetadataValue(key);
+      } else {
+        await readingAssetDb.saveMetadataValue(key, cloneJson(value));
+      }
+    }
+  } catch (error) {
+    // Restore the exact pre-import values. This is a compensating transaction:
+    // it never deletes a key unless that key was absent before the import.
+    for (const [key, previousValue] of previousValues) {
+      try {
+        if (previousValue === null || previousValue === undefined) {
+          await readingAssetDb.deleteMetadataValue(key);
+        } else {
+          await readingAssetDb.saveMetadataValue(key, previousValue);
+        }
+      } catch (rollbackError) {
+        console.error("IndexedDB backup restore rollback failed:", rollbackError);
+      }
+    }
+    throw error;
   }
 }
