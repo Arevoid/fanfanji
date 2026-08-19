@@ -34,6 +34,26 @@ export interface IndexedDbRestoreReport {
 export type SystemBackupLocalStorage = Record<string, string | null>;
 export type SystemBackupIndexedDb = Record<string, unknown>;
 
+const LEGACY_MESSAGE_STORAGE_KEYS = new Set(["phone_messages", "phone_messages_v3"]);
+
+/**
+ * Keeps large content out of LocalStorage during restore when the backup has
+ * already supplied the durable entry-store copy. Offline stories always use
+ * their durable restore path, including legacy backups, so they are never
+ * written back to LocalStorage as a second full copy.
+ */
+export function filterSystemBackupLocalStorageForRestore(
+  entries: readonly [string, string | null][],
+  indexedDb: SystemBackupIndexedDb,
+): [string, string | null][] {
+  const hasMessageEntryBackup = Array.isArray(indexedDb["message-entry-v1"]);
+  return entries.filter(([key]) => {
+    if (key === "phone_offline_stories") return false;
+    if (hasMessageEntryBackup && LEGACY_MESSAGE_STORAGE_KEYS.has(key)) return false;
+    return true;
+  });
+}
+
 export interface SystemBackupEnvelope {
   format: typeof SYSTEM_BACKUP_FORMAT;
   version: typeof SYSTEM_BACKUP_VERSION;

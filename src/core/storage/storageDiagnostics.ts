@@ -2,6 +2,10 @@ import { readString, remove } from "./storageAdapter";
 import { loadStorageMigrationState, type StorageMigrationState } from "./storageMigrationState";
 import { loadStorageMigrationLock, type StorageMigrationLock } from "./storageMigrationLock";
 import { storageKeys } from "./storageKeys";
+import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./contentStorageFlags";
+import { messageEntryDb } from "./messageEntryDb";
+import { offlineStoryDb } from "./offlineStoryDb";
+import { readingAssetDb } from "./readingAssetDb";
 
 export interface LocalStorageUsageEntry {
   key: string;
@@ -354,16 +358,27 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
   };
 }
 
-/** Removes only the explicitly migrated offline-story copy. */
-export function removeMigratedStorageCopies(): string[] {
-  // Characters, moments, and messages are cleaned by their own migration
-  // paths after a successful IndexedDB write. Keep this manual action narrow
-  // so the diagnostics page cannot remove an unverified fallback copy.
-  const keys = ["phone_offline_stories"];
+/**
+ * Removes retained content copies only after the corresponding entry store
+ * can be read. This is intentionally manual; migration itself never calls it.
+ */
+export async function removeMigratedStorageCopies(): Promise<string[]> {
   const removed: string[] = [];
-  keys.forEach((key) => {
-    if (localStorage.getItem(key) !== null && remove(key).success) removed.push(key);
-  });
+  if (isMessageEntryStoreEnabled()) {
+    await messageEntryDb.loadAll();
+    const legacyMetadata = await readingAssetDb.loadMetadataValue("messages-v4");
+    await readingAssetDb.deleteMetadataValue("messages-v4");
+    [storageKeys.messages, storageKeys.legacyMessages].forEach((key) => {
+      if (localStorage.getItem(key) !== null && remove(key).success) removed.push(key);
+    });
+    if (legacyMetadata !== null) removed.push("FanfanjiReadingMetadataDB/messages-v4");
+  }
+  if (isOfflineStoryEntryStoreEnabled()) {
+    await offlineStoryDb.loadAll();
+    await offlineStoryDb.clearLegacyCopy();
+    if (localStorage.getItem(storageKeys.offlineStories) !== null && remove(storageKeys.offlineStories).success) removed.push(storageKeys.offlineStories);
+    removed.push("FanfanjiOfflineStoryDB/stories");
+  }
   return removed;
 }
 

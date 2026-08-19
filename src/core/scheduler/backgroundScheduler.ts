@@ -16,6 +16,7 @@ export interface BackgroundTaskOptions {
   initialDelayMs?: number;
   maxAttempts?: number;
   run: () => void | Promise<void>;
+  onState?: (snapshot: BackgroundTaskSnapshot) => void;
 }
 
 /**
@@ -42,6 +43,7 @@ export class BackgroundScheduler {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    this.publish();
     this.schedule(this.options.initialDelayMs ?? this.options.intervalMs);
   }
 
@@ -50,10 +52,19 @@ export class BackgroundScheduler {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     if (this.snapshot.status !== "expired") this.snapshot.status = "cancelled";
+    this.publish();
   }
 
   getSnapshot(): BackgroundTaskSnapshot {
     return { ...this.snapshot };
+  }
+
+  private publish(): void {
+    try {
+      this.options.onState?.(this.getSnapshot());
+    } catch {
+      // Diagnostics must never break the task it observes.
+    }
   }
 
   private schedule(delayMs: number): void {
@@ -68,6 +79,7 @@ export class BackgroundScheduler {
     this.snapshot.status = "running";
     this.snapshot.attempts += 1;
     this.snapshot.lastStartedAt = Date.now();
+    this.publish();
     try {
       await this.options.run();
       this.snapshot.status = this.stopped ? "cancelled" : "success";
@@ -80,6 +92,7 @@ export class BackgroundScheduler {
     } finally {
       this.running = false;
       this.snapshot.lastFinishedAt = Date.now();
+      this.publish();
       if (!this.stopped && this.snapshot.status !== "expired") this.schedule(this.options.intervalMs);
     }
   }

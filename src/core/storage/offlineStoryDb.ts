@@ -33,6 +33,10 @@ class OfflineStoryDB {
       };
       request.onsuccess = () => {
         this.db = request.result;
+        this.db.onversionchange = () => {
+          this.db?.close();
+          this.db = null;
+        };
         resolve(request.result);
       };
       request.onerror = () => reject(request.error);
@@ -86,6 +90,17 @@ class OfflineStoryDB {
 
   async clearAll(): Promise<void> {
     if (this.useEntryStore()) return offlineStoryEntryDb.clearAll();
+    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, "readwrite");
+      transaction.objectStore(this.storeName).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    }));
+  }
+
+  /** Clears only the retained legacy copy; the migrated entry store is never touched. */
+  async clearLegacyCopy(): Promise<void> {
     return this.enqueueWrite((db) => new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, "readwrite");
       transaction.objectStore(this.storeName).clear();

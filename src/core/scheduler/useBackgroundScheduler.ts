@@ -23,12 +23,11 @@ export function useBackgroundScheduler({ id, enabled, intervalMs, initialDelayMs
       intervalMs,
       initialDelayMs,
       run: () => runRef.current(),
+      onState: (snapshot) => onStateRef.current?.(snapshot),
     });
     scheduler.start();
-    onStateRef.current?.(scheduler.getSnapshot());
     return () => {
       scheduler.stop();
-      onStateRef.current?.(scheduler.getSnapshot());
     };
   }, [enabled, id, intervalMs, initialDelayMs]);
 }

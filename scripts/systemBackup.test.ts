@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { indexedDB } from "fake-indexeddb";
 import {
   buildSystemBackup,
+  filterSystemBackupLocalStorageForRestore,
   parseSystemBackup,
   restoreSystemBackupIndexedDb,
   splitSystemBackupJson,
@@ -35,6 +36,25 @@ assert.equal(backup.localStorage.phone_reading_analysis_store_v1, undefined, "on
 
 const fullBackup = await buildSystemBackup(storage, ["phone_reading_analysis_store_v1"]);
 assert.equal(fullBackup.localStorage.phone_reading_analysis_store_v1, JSON.stringify({ version: 1, tasks: [] }));
+
+assert.deepEqual(
+  filterSystemBackupLocalStorageForRestore([
+    ["phone_messages_v3", "large-chat"],
+    ["phone_offline_stories", "large-offline"],
+    ["phone_settings", "settings"],
+  ], { "message-entry-v1": [], "offline-story-entry-v1": [] }),
+  [["phone_settings", "settings"]],
+  "entry-store backups must not recreate large LocalStorage content copies",
+);
+assert.deepEqual(
+  filterSystemBackupLocalStorageForRestore([
+    ["phone_messages_v3", "legacy-chat"],
+    ["phone_offline_stories", "legacy-offline"],
+    ["phone_settings", "settings"],
+  ], {}),
+  [["phone_messages_v3", "legacy-chat"], ["phone_settings", "settings"]],
+  "legacy chat remains restorable when an entry-store payload is absent",
+);
 
 const parsed = parseSystemBackup(backup);
 assert.equal(parsed.legacy, false);

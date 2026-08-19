@@ -50,4 +50,18 @@ assert.equal(result.modules.find((module) => module.id === "offlineStories")?.so
 assert.equal(result.modules.find((module) => module.id === "messages")?.sources.find((source) => source.source === "localStorage")?.records, 1);
 assert.equal(values.get("phone_messages_v3"), JSON.stringify([{ id: "legacy-message" }]));
 assert.equal(values.get("phone_offline_stories"), JSON.stringify([{ id: "legacy-story" }]));
+
+await new Promise<void>((resolve, reject) => {
+  const request = indexedDB.open("FanfanjiReadingMetadataDB");
+  request.onsuccess = () => {
+    const database = request.result;
+    const transaction = database.transaction("metadata", "readwrite");
+    transaction.objectStore("metadata").delete("messages-v4");
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => reject(transaction.error);
+  };
+  request.onerror = () => reject(request.error);
+});
+const missingSnapshotResult = await runStoragePreflight();
+assert.equal(missingSnapshotResult.modules.find((module) => module.id === "messages")?.sources.find((source) => source.label === "IndexedDB 消息快照")?.records, 0);
 console.log("PASS storage migration preflight reads message/offline sources without modifying data");

@@ -5,6 +5,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let runs = 0;
 let concurrent = 0;
 let maxConcurrent = 0;
+const states: string[] = [];
 const scheduler = new BackgroundScheduler({
   id: "test-task",
   initialDelayMs: 0,
@@ -16,6 +17,7 @@ const scheduler = new BackgroundScheduler({
     await wait(12);
     concurrent -= 1;
   },
+  onState: (snapshot) => states.push(snapshot.status),
 });
 scheduler.start();
 await wait(40);
@@ -23,6 +25,8 @@ scheduler.stop();
 assert.ok(runs >= 2);
 assert.equal(maxConcurrent, 1);
 assert.ok(["success", "cancelled"].includes(scheduler.getSnapshot().status));
+assert.ok(states.includes("running"));
+assert.ok(states.includes("success") || states.includes("cancelled"));
 
 const failing = new BackgroundScheduler({ id: "failing-task", initialDelayMs: 0, intervalMs: 5, maxAttempts: 1, run: () => { throw new Error("expected"); } });
 failing.start();

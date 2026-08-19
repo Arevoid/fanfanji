@@ -120,7 +120,13 @@ export async function migrateContentStorage(
   }
 
   const state = createMigrationState();
+  const previousMessageEntryEnabled = isMessageEntryStoreEnabled();
+  const previousOfflineStoryEntryEnabled = isOfflineStoryEntryStoreEnabled();
+  let previousMessages: Message[] | null = null;
+  let previousOfflineStories: OfflineStory[] | null = null;
   try {
+    if (previousMessageEntryEnabled) previousMessages = await messageEntryDb.loadAll();
+    if (previousOfflineStoryEntryEnabled) previousOfflineStories = await offlineStoryEntryDb.loadAll();
     const previousState = loadStorageMigrationState();
     if (previousState
       && previousState.id === CONTENT_STORAGE_MIGRATION_ID
@@ -178,13 +184,27 @@ export async function migrateContentStorage(
     };
   } catch (error) {
     try {
-      await messageEntryDb.clearAll();
-      await offlineStoryEntryDb.clearAll();
+      if (previousMessageEntryEnabled && previousMessages) {
+        await messageEntryDb.replaceAll(previousMessages);
+        enableMessageEntryStore();
+      } else if (previousMessageEntryEnabled) {
+        console.error("[storage] Existing chat entry store could not be snapshotted; leaving it untouched.");
+      } else {
+        await messageEntryDb.clearAll();
+        disableMessageEntryStore();
+      }
+      if (previousOfflineStoryEntryEnabled && previousOfflineStories) {
+        await offlineStoryEntryDb.replaceAll(previousOfflineStories);
+        enableOfflineStoryEntryStore();
+      } else if (previousOfflineStoryEntryEnabled) {
+        console.error("[storage] Existing offline story entry store could not be snapshotted; leaving it untouched.");
+      } else {
+        await offlineStoryEntryDb.clearAll();
+        disableOfflineStoryEntryStore();
+      }
     } catch (cleanupError) {
-      console.error("[storage] Failed to clear partial content migration targets.", cleanupError);
+      console.error("[storage] Failed to restore partial content migration targets.", cleanupError);
     }
-    disableMessageEntryStore();
-    disableOfflineStoryEntryStore();
     state.phase = "failed";
     state.updatedAt = Date.now();
     state.error = error instanceof Error ? error.message : String(error);

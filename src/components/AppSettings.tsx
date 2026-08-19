@@ -74,7 +74,7 @@ import {
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../features/chat/styles/liquidGlassDefaults";
 import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
-import { buildSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb, splitSystemBackupJson } from "../features/settings/systemBackup";
+import { buildSystemBackup, filterSystemBackupLocalStorageForRestore, parseSystemBackup, restoreSystemBackupIndexedDb, splitSystemBackupJson } from "../features/settings/systemBackup";
 import { SYSTEM_BACKUP_VERSION } from "../features/settings/systemBackup";
 import { writeString } from "../core/storage/storageAdapter";
 import { storageKeys } from "../core/storage/storageKeys";
@@ -465,7 +465,7 @@ async function assertBackupStorageCapacity(entries: readonly [string, string | n
   const estimate = await navigator.storage.estimate();
   if (!estimate.quota || estimate.usage === undefined) return;
   const additionalBytes = entries
-    .filter(([key, value]) => key !== "phone_offline_stories" && typeof value === "string")
+    .filter(([, value]) => typeof value === "string")
     .reduce((total, [key, value]) => total + Math.max(0, (value?.length || 0) - (localStorage.getItem(key)?.length || 0)) * 2, 0);
   if (estimate.usage + additionalBytes > estimate.quota * 0.95) {
     throw new Error("浏览器本地存储空间不足，请先清理存储数据后再导入。线下故事会单独保存，不占用本地配置空间。");
@@ -3511,20 +3511,19 @@ export default function AppSettings({
                             }
 
                             if (confirm("确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置 and 世界书数据且不可撤销！")) {
-                              await assertBackupStorageCapacity(entries);
+                              const entriesToWrite = filterSystemBackupLocalStorageForRestore(entries, parsedBackup.indexedDb);
+                              await assertBackupStorageCapacity(entriesToWrite);
                               const snapshot = snapshotLocalStorage();
                               const writtenKeys: string[] = [];
                               const previousOfflineStories = await offlineStoryDb.loadAll();
                               let indexedDbRestoreReport = { restoredKeys: [] as string[], skippedKeys: [] as string[] };
-                              const restoredOfflineStories = entries.find(([key]) => key === "phone_offline_stories")?.[1];
+                              const hasOfflineEntryBackup = Array.isArray(parsedBackup.indexedDb["offline-story-entry-v1"]);
+                              const restoredOfflineStories = hasOfflineEntryBackup
+                                ? undefined
+                                : entries.find(([key]) => key === "phone_offline_stories")?.[1];
 
                               try {
-                                for (const [key, value] of entries) {
-                                  // Full offline stories are restored to
-                                  // IndexedDB below. Keeping them in
-                                  // LocalStorage duplicates the payload and
-                                  // is the direct cause of quota failures.
-                                  if (key === "phone_offline_stories") continue;
+                                for (const [key, value] of entriesToWrite) {
                                   if (typeof value === "string") {
                                     writtenKeys.push(key);
                                     localStorage.setItem(key, sanitizeSystemBackupValue(
@@ -3604,10 +3603,14 @@ export default function AppSettings({
                 onRunContentMigration={() => void runContentStorageMigration()}
                 contentMigrationRunning={isContentStorageMigrationRunning}
                 onRequestPersistence={() => void requestStoragePersistence()}
-                onCleanMigratedCopies={() => {
-                  const removed = removeMigratedStorageCopies();
-                  void refreshStorageDiagnostics();
-                  alert(removed.length ? `已清理 ${removed.length} 个已迁移副本。` : "没有可清理的已迁移副本。");
+                onCleanMigratedCopies={async () => {
+                  try {
+                    const removed = await removeMigratedStorageCopies();
+                    void refreshStorageDiagnostics();
+                    alert(removed.length ? `已清理 ${removed.length} 个已迁移副本。` : "没有可清理的已迁移副本。");
+                  } catch (error) {
+                    alert(`清理已迁移副本失败：${error instanceof Error ? error.message : String(error)}。原始数据未自动删除。`);
+                  }
                 }}
               />
 

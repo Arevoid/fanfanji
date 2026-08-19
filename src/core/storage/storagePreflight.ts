@@ -50,6 +50,7 @@ const OFFLINE_DATABASE = "FanfanjiOfflineStoryDB";
 const OFFLINE_STORE = "stories";
 
 function summarizeArray(value: unknown, source: StoragePreflightSource, label: string, bytesOverride?: number): StoragePreflightSourceSummary {
+  if (value === undefined) return missingSummary(label);
   const isArray = Array.isArray(value);
   const records = isArray ? value : [];
   const ids = records
@@ -60,7 +61,12 @@ function summarizeArray(value: unknown, source: StoragePreflightSource, label: s
     ? records.filter((record) => !record || typeof record !== "object" || Array.isArray(record)).length
     : 1;
   const serialized = (() => {
-    try { return JSON.stringify(value); } catch { return ""; }
+    try {
+      const result = JSON.stringify(value);
+      return typeof result === "string" ? result : "";
+    } catch {
+      return "";
+    }
   })();
   return {
     source,

@@ -130,13 +130,29 @@ class OfflineStoryEntryDB {
       const metadataStore = transaction.objectStore(OFFLINE_STORY_METADATA_STORE_NAME);
       const messageStore = transaction.objectStore(OFFLINE_STORY_MESSAGE_STORE_NAME);
       const existingKeysRequest = messageStore.index("byStoryId").getAllKeys(story.id);
-      existingKeysRequest.onsuccess = () => {
-        existingKeysRequest.result.forEach((key) => messageStore.delete(key));
-        const position = 0;
-        metadataStore.put(toMetadata(story, position));
+      const existingMetadataRequest = metadataStore.get(story.id);
+      let existingKeys: IDBValidKey[] | null = null;
+      let existingPosition = 0;
+      let readyRequests = 0;
+      const commit = () => {
+        if (existingKeys === null || readyRequests < 2) return;
+        existingKeys.forEach((key) => messageStore.delete(key));
+        metadataStore.put(toMetadata(story, existingPosition));
         toMessageEntries(story).forEach((entry) => messageStore.put(entry));
       };
+      existingKeysRequest.onsuccess = () => {
+        existingKeys = existingKeysRequest.result;
+        readyRequests += 1;
+        commit();
+      };
+      existingMetadataRequest.onsuccess = () => {
+        const metadata = existingMetadataRequest.result as OfflineStoryMetadataRecord | undefined;
+        existingPosition = metadata && Number.isFinite(metadata.position) ? metadata.position : 0;
+        readyRequests += 1;
+        commit();
+      };
       existingKeysRequest.onerror = () => transaction.abort();
+      existingMetadataRequest.onerror = () => transaction.abort();
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error || new Error("Offline story entry write aborted"));
@@ -172,4 +188,3 @@ class OfflineStoryEntryDB {
 }
 
 export const offlineStoryEntryDb = new OfflineStoryEntryDB();
-
