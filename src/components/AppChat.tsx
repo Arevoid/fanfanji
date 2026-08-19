@@ -1909,9 +1909,16 @@ export default function AppChat({
   // Memory Compression and Proactive Chat states
   const [isCompressingMemory, setIsCompressingMemory] = useState(false);
   const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
+  // Stop background generation after an authentication failure so a missing
+  // or invalid provider key cannot create a repeated request/logging loop.
+  const backgroundGenerationBlockedRef = useRef(false);
   // Prevent a burst of streamed/direct replies from opening duplicate offline
   // stories before the navigation state has caught up.
   const offlineAutoStartInFlightRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    backgroundGenerationBlockedRef.current = false;
+  }, [settings.apiKey, settings.apiEndpoint, settings.selectedModel]);
   const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
   const [showDisbandGroupModal, setShowDisbandGroupModal] = useState(false);
   const [, setEditingMemoryText] = useState("");
@@ -4987,7 +4994,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
   // Automated background proactive message generator for any character
   const triggerProactiveFor = async (relationId: string, customTaskText?: string, backdateTimestamp?: number) => {
-    if (isOfflineStoryActiveFor(relationId) || proactiveMessageInFlightRef.current.has(relationId)) return;
+    if (backgroundGenerationBlockedRef.current || isOfflineStoryActiveFor(relationId) || proactiveMessageInFlightRef.current.has(relationId)) return;
     const relationship = relationships.find((relation) => relation.id === relationId);
     const friend = relationship && characters.find((character) => character.id === relationship.characterId);
     if (!friend || friend.isGroupChat) return;
@@ -5162,7 +5169,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           : undefined;
         if (topicRecord) appendProactiveTopicRecord(topicRecord);
       }
-    } catch (err) {
+    } catch (err: any) {
+      const errorText = err?.message ? String(err.message).toLowerCase() : String(err).toLowerCase();
+      if (errorText.includes("api key") || errorText.includes("api_key") || errorText.includes("authentication") || errorText.includes("401")) {
+        backgroundGenerationBlockedRef.current = true;
+      }
       console.error("Proactive message auto-trigger error:", err);
     } finally {
       proactiveMessageInFlightRef.current.delete(relationId);
@@ -5576,6 +5587,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           errMsgStr.toLowerCase().includes("key") ||
                           errMsgStr.toLowerCase().includes("invalid") ||
                           errMsgStr.toLowerCase().includes("authentication fails");
+      if (isAuthError) backgroundGenerationBlockedRef.current = true;
       if (isAuthError) {
         showToast(`⚠️ [动态生成失败] 「${friend.name}」发布朋友圈时 API 验证失败，请在设置中检查您的 API Key 是否正确。`);
       } else {
@@ -5608,7 +5620,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
   };
 
   const checkAndTriggerCharacterMoments = async () => {
-    if (activeRelationships.length === 0) return;
+    if (backgroundGenerationBlockedRef.current || activeRelationships.length === 0) return;
 
     // Always evaluate the relationship that has waited longest first. The old
     // fixed-order loop plus `break` starved later friends whenever an earlier
