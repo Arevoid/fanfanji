@@ -141,6 +141,9 @@ button, input, textarea, select {
 }
 
 .app-viewport-overlay {
+  /* Portalled dialogs sit outside the app root. Follow the visual viewport
+     when the mobile browser shifts it to keep an input focused above the IME. */
+  top: var(--app-viewport-offset-top, 0px);
   bottom: auto;
   height: var(--app-viewport-height, 100dvh);
   max-height: var(--app-viewport-height, 100dvh);
