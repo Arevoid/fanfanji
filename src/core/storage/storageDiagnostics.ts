@@ -19,6 +19,13 @@ export interface StorageDiagnostics {
   health: StorageHealthReport;
 }
 
+export interface IndexedDbHealthEntry {
+  name: string;
+  version: number;
+  stores: number;
+  records: number;
+}
+
 export interface StorageHealthFinding {
   key: string;
   kind: "invalid-json" | "duplicate-id" | "orphan-reference";
@@ -29,6 +36,7 @@ export interface StorageHealthFinding {
 export interface StorageHealthReport {
   checkedCollections: number;
   findings: StorageHealthFinding[];
+  indexedDb: IndexedDbHealthEntry[];
 }
 
 const HEALTH_COLLECTION_KEYS = [
@@ -67,7 +75,67 @@ function inspectStorageHealth(storage: Storage): StorageHealthReport {
       findings.push({ key, kind: "duplicate-id", count: duplicateCount, detail: "发现重复 ID，仅提供检查结果，不自动合并。" });
     }
   }
-  return { checkedCollections, findings };
+  return { checkedCollections, findings, indexedDb: [] };
+}
+
+async function inspectIndexedDbHealth(): Promise<IndexedDbHealthEntry[]> {
+  if (typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function") return [];
+  const knownNames = new Set([
+    "FanfanjiOfflineStoryDB",
+    "FanfanjiReadingDB",
+    "FanfanjiReadingCoverDB",
+    "FanfanjiReadingMetadataDB",
+  ]);
+  const databases = await indexedDB.databases().catch(() => []);
+  const existingNames = databases
+    .map((database) => database.name)
+    .filter((name): name is string => typeof name === "string" && knownNames.has(name));
+  const results: IndexedDbHealthEntry[] = [];
+  await Promise.all(existingNames.map(async (name) => {
+    const entry = await new Promise<IndexedDbHealthEntry | null>((resolve) => {
+      const request = indexedDB.open(name);
+      request.onsuccess = () => {
+        const database = request.result;
+        const storeNames = Array.from(database.objectStoreNames);
+        if (storeNames.length === 0) {
+          database.close();
+          resolve({ name, version: database.version, stores: 0, records: 0 });
+          return;
+        }
+        let records = 0;
+        let remaining = storeNames.length;
+        let failed = false;
+        const transaction = database.transaction(storeNames, "readonly");
+        storeNames.forEach((storeName) => {
+          const countRequest = transaction.objectStore(storeName).count();
+          countRequest.onsuccess = () => {
+            records += countRequest.result;
+            remaining -= 1;
+            if (remaining === 0 && !failed) {
+              database.close();
+              resolve({ name, version: database.version, stores: storeNames.length, records });
+            }
+          };
+          countRequest.onerror = () => {
+            failed = true;
+            database.close();
+            resolve(null);
+          };
+        });
+        transaction.onerror = () => {
+          if (!failed) {
+            failed = true;
+            database.close();
+            resolve(null);
+          }
+        };
+      };
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    });
+    if (entry) results.push(entry);
+  }));
+  return results.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export async function inspectStorage(): Promise<StorageDiagnostics> {
@@ -94,7 +162,8 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
   const dataSchemaVersion = readString("phone_data_schema_version");
   const health = typeof window !== "undefined"
     ? inspectStorageHealth(window.localStorage)
-    : { checkedCollections: 0, findings: [] };
+    : { checkedCollections: 0, findings: [], indexedDb: [] };
+  health.indexedDb = await inspectIndexedDbHealth();
   return {
     localStorageBytes,
     localStorageEntries: entries,
