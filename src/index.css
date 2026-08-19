@@ -81,6 +81,14 @@ button, input, textarea, select {
   font: inherit;
 }
 
+/* Keep custom long-press menus from being replaced by the browser callout. */
+.chat-long-press-target {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
 /* iOS Safari zooms focused text controls whose computed font-size is below
    16px. Keep every text-entry control at the platform's no-zoom minimum on
    small screens. Non-text controls keep their compact geometry. */

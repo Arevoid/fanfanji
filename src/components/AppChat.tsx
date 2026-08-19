@@ -1952,6 +1952,7 @@ export default function AppChat({
     y: number;
   } | null>(null);
   const commentLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commentLongPressOriginRef = useRef<{ x: number; y: number } | null>(null);
   const suppressCommentClickRef = useRef(false);
 
   const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() =>
@@ -3876,7 +3877,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   };
 
 
-  const longPressTimerRef = useRef<any>(null);
+  const LONG_PRESS_DELAY = 500;
+  const LONG_PRESS_MOVE_TOLERANCE = 10;
+  const longPressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleMomentTextPointerDown = (
     e: React.PointerEvent,
@@ -3890,9 +3894,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     const clientX = e.clientX;
     const clientY = e.clientY;
 
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressOriginRef.current = { x: clientX, y: clientY };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture is unavailable in a few older mobile browsers.
+    }
 
     longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressOriginRef.current = null;
       setMomentContextMenu({
         momentId,
         text,
@@ -3903,7 +3916,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         isOwn,
         timestamp,
       });
-    }, 600);
+    }, LONG_PRESS_DELAY);
   };
 
   const handleMomentTextPointerUpOrLeave = () => {
@@ -3911,12 +3924,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+    longPressOriginRef.current = null;
   };
 
-  const handleMomentTextPointerMove = () => {
-    if (longPressTimerRef.current) {
+  const handleMomentTextPointerMove = (event: React.PointerEvent) => {
+    const origin = longPressOriginRef.current;
+    if (longPressTimerRef.current && origin
+      && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
+      longPressOriginRef.current = null;
     }
   };
 
@@ -3929,9 +3946,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     const clientY = event.clientY;
     suppressCommentClickRef.current = false;
     if (commentLongPressTimerRef.current) clearTimeout(commentLongPressTimerRef.current);
+    commentLongPressOriginRef.current = { x: clientX, y: clientY };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is unavailable in a few older mobile browsers.
+    }
     commentLongPressTimerRef.current = setTimeout(() => {
       suppressCommentClickRef.current = true;
       commentLongPressTimerRef.current = null;
+      commentLongPressOriginRef.current = null;
       setCommentContextMenu({
         momentId,
         commentId: comment.id,
@@ -3946,6 +3970,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     if (commentLongPressTimerRef.current) {
       clearTimeout(commentLongPressTimerRef.current);
       commentLongPressTimerRef.current = null;
+    }
+    commentLongPressOriginRef.current = null;
+  };
+
+  const handleMomentCommentPointerMove = (event: React.PointerEvent) => {
+    const origin = commentLongPressOriginRef.current;
+    if (commentLongPressTimerRef.current && origin
+      && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
+      clearMomentCommentLongPress();
     }
   };
 
@@ -7793,25 +7826,50 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       if (e.pointerType === "mouse" && e.button !== 0) return;
                       const clientX = e.clientX;
                       const clientY = e.clientY;
-                      const timer = setTimeout(() => {
-                        setActiveMenuMsg(msg);
-                        setMenuPosition({ x: clientX, y: clientY });
-                      }, 500);
-                      (e.currentTarget as any)._longPressTimer = timer;
+      const origin = { x: e.clientX, y: e.clientY };
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Pointer capture is unavailable in a few older mobile browsers.
+      }
+      const timer = setTimeout(() => {
+        setActiveMenuMsg(msg);
+        setMenuPosition({ x: clientX, y: clientY });
+      }, LONG_PRESS_DELAY);
+      (e.currentTarget as any)._longPressTimer = timer;
+      (e.currentTarget as any)._longPressOrigin = origin;
                     }}
                     onPointerUp={(e) => {
                       const timer = (e.currentTarget as any)._longPressTimer;
                       if (timer) clearTimeout(timer);
+                      (e.currentTarget as any)._longPressTimer = null;
+                      (e.currentTarget as any)._longPressOrigin = null;
                     }}
                     onPointerCancel={(e) => {
                       const timer = (e.currentTarget as any)._longPressTimer;
                       if (timer) clearTimeout(timer);
+                      (e.currentTarget as any)._longPressTimer = null;
+                      (e.currentTarget as any)._longPressOrigin = null;
                     }}
                     onPointerLeave={(e) => {
                       const timer = (e.currentTarget as any)._longPressTimer;
-                      if (timer) clearTimeout(timer);
+                      const origin = (e.currentTarget as any)._longPressOrigin as { x: number; y: number } | undefined;
+                      if (timer && origin && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
+                        clearTimeout(timer);
+                        (e.currentTarget as any)._longPressTimer = null;
+                        (e.currentTarget as any)._longPressOrigin = null;
+                      }
                     }}
-                    className="flex items-center gap-1 group relative cursor-pointer select-none"
+                    onPointerMove={(e) => {
+                      const timer = (e.currentTarget as any)._longPressTimer;
+                      const origin = (e.currentTarget as any)._longPressOrigin as { x: number; y: number } | undefined;
+                      if (timer && origin && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
+                        clearTimeout(timer);
+                        (e.currentTarget as any)._longPressTimer = null;
+                        (e.currentTarget as any)._longPressOrigin = null;
+                      }
+                    }}
+                    className="chat-long-press-target flex items-center gap-1 group relative cursor-pointer select-none"
                   >
                     {/* Actual chat bubble + user-controlled corner decoration slot */}
                     <div className={`bubble-deco-wrapper relative w-fit max-w-full overflow-visible ${messageGroupClass}`}>
@@ -9448,7 +9506,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
                           {/* Content text */}
                           <p 
-                            className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
+                            className="chat-long-press-target text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
                             title="长按/右键 弹出菜单"
                             onContextMenu={(e) => handleMomentTextContextMenu(
                               e,
@@ -9567,9 +9625,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                         onPointerDown={(event) => handleMomentCommentPointerDown(event, mom.id, comm)}
                                         onPointerUp={clearMomentCommentLongPress}
                                         onPointerLeave={clearMomentCommentLongPress}
+                                        onPointerMove={handleMomentCommentPointerMove}
                                         onPointerCancel={clearMomentCommentLongPress}
                                         onContextMenu={(event) => event.preventDefault()}
-                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
+                                        className="chat-long-press-target py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
                                         title={`点击回复；长按翻译或删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">
@@ -10364,7 +10423,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
                           {/* Content text */}
                           <p 
-                            className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
+                            className="chat-long-press-target text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
                             title="长按/右键 弹出菜单"
                             onContextMenu={(e) => handleMomentTextContextMenu(
                               e,
@@ -10483,9 +10542,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                         onPointerDown={(event) => handleMomentCommentPointerDown(event, mom.id, comm)}
                                         onPointerUp={clearMomentCommentLongPress}
                                         onPointerLeave={clearMomentCommentLongPress}
+                                        onPointerMove={handleMomentCommentPointerMove}
                                         onPointerCancel={clearMomentCommentLongPress}
                                         onContextMenu={(event) => event.preventDefault()}
-                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
+                                        className="chat-long-press-target py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
                                         title={`点击回复；长按翻译或删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">{commAuthorName}</span>
