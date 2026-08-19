@@ -237,6 +237,7 @@ interface AppChatProps {
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => void;
   onClose: () => void;
   onSaveSettings: (settings: UserSettings) => void;
+  onSwitchIdentity?: (id: string) => void;
   onNavigateToApp: (appId: string) => void;
   worldBookEntries?: WorldBookEntry[];
   onClearMessages?: (charId: string, keepLastCount?: number, relationId?: string) => void;
@@ -288,6 +289,7 @@ export default function AppChat({
   onUpdateMessage,
   onClose,
   onSaveSettings,
+  onSwitchIdentity,
   onNavigateToApp,
   worldBookEntries = [],
   onClearMessages,
@@ -5954,6 +5956,28 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 overflow: visible;
               }
 
+              ${!hasUserCustomChatCss && activeBubbleTailEnabled ? `
+                #conv-screen .chat-bubble-other.msg-group-top::before,
+                #conv-screen .chat-bubble-self.msg-group-top::after {
+                  content: "";
+                  position: absolute;
+                  top: ${settings.bubbleTailVertical === "center" ? "50%" : settings.bubbleTailVertical === "bottom" ? "auto" : "14px"};
+                  ${settings.bubbleTailVertical === "center" ? "transform: translateY(-50%) rotate(45deg);" : settings.bubbleTailVertical === "bottom" ? "bottom: 14px; transform: rotate(45deg);" : "transform: rotate(45deg);"}
+                  width: 10px;
+                  height: 10px;
+                  z-index: 0;
+                  pointer-events: none;
+                }
+                #conv-screen .chat-bubble-other.msg-group-top::before {
+                  left: -5px;
+                  background: var(--chat-ai-bg);
+                }
+                #conv-screen .chat-bubble-self.msg-group-top::after {
+                  right: -5px;
+                  background: var(--chat-user-bg);
+                }
+              ` : ""}
+
               /*
                * Themeable chat composer surface.  The semantic variables are
                * intentionally defined at the chat root so a user's scoped CSS
@@ -8353,7 +8377,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
             </div>
           )}
 
-          <BubbleTipPortalLayer enabled={!isShowingCardModal && activeBubbleTailEnabled} />
+          <BubbleTipPortalLayer enabled={!isShowingCardModal && hasUserCustomChatCss && activeBubbleTailEnabled} />
 
           {showImageGenerator && (
             <div className="absolute inset-0 z-[90] flex items-end bg-black/35 p-4" onClick={() => setShowImageGenerator(false)}>
@@ -9885,7 +9909,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                 setEditMyAvatar(idty.avatar);
                                 setEditMySignature(idty.signature || "");
                                 setEditMyBio(idty.bio || "");
-                                onSaveSettings({
+                                if (onSwitchIdentity) onSwitchIdentity(idty.id);
+                                else onSaveSettings({
                                   ...settings,
                                   activeIdentityId: idty.id,
                                   name: idty.name,
@@ -10632,7 +10657,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           setEditMySignature(idty.signature);
                           setEditMyBio(idty.bio);
                           
-                          onSaveSettings({
+                          if (onSwitchIdentity) onSwitchIdentity(idty.id);
+                          else onSaveSettings({
                             ...settings,
                             activeIdentityId: idty.id,
                             name: idty.name,

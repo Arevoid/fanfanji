@@ -2582,6 +2582,20 @@ export default function App() {
     signature: settings.signature,
     bio: settings.bio,
   };
+  const handleSwitchIdentity = (identityId: string) => {
+    const identity = settings.identities?.find((item) => item.id === identityId);
+    if (!identity) return;
+    setActiveChatCharId(null);
+    setActiveChatRelationId(null);
+    setSettings((previous) => ({
+      ...previous,
+      activeIdentityId: identity.id,
+      name: identity.name,
+      avatar: identity.avatar,
+      signature: identity.signature || "",
+      bio: identity.bio || "",
+    }));
+  };
   // Keep forum activity processing alive while the user navigates between apps.
   // The engine still respects document visibility and persists all pending work.
   useForumActivityEngine({
@@ -3625,6 +3639,7 @@ export default function App() {
                     onUpdateMessage={handleUpdateMessage}
                     onClose={() => setActiveApp(null)}
                     onSaveSettings={setSettings}
+                    onSwitchIdentity={handleSwitchIdentity}
                     onNavigateToApp={setActiveApp}
                     worldBookEntries={worldBookEntries}
                     onClearMessages={handleClearMessages}
@@ -3819,6 +3834,7 @@ export default function App() {
                         characters.find((character) => character.id === activeChatCharId)?.chatStylePreset,
                         settings.globalChatStylePreset,
                       )}
+                      onSwitchIdentity={handleSwitchIdentity}
                       presets={presets}
                       onSaveSettings={setSettings}
                       onSavePreset={handleSavePreset}

@@ -100,6 +100,7 @@ interface AppSettingsProps {
   onSaveSettings: (update: UserSettingsUpdate) => boolean;
   onSavePreset: (preset: StylePreset) => void;
   onDeletePreset: (id: string) => void;
+  onSwitchIdentity?: (id: string) => void;
   onClose: () => void;
 }
 
@@ -457,6 +458,7 @@ export default function AppSettings({
   onSaveSettings,
   onSavePreset,
   onDeletePreset,
+  onSwitchIdentity,
   onClose,
 }: AppSettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(null);
@@ -1248,6 +1250,10 @@ export default function AppSettings({
   };
 
   const handleSwitchIdentity = (id: string) => {
+    if (onSwitchIdentity) {
+      onSwitchIdentity(id);
+      return;
+    }
     const idty = (settings.identities || []).find(i => i.id === id);
     if (idty) {
       setName(idty.name);
