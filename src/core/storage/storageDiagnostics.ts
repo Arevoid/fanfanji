@@ -1,5 +1,6 @@
 import { readString, remove } from "./storageAdapter";
 import { loadStorageMigrationState, type StorageMigrationState } from "./storageMigrationState";
+import { loadStorageMigrationLock, type StorageMigrationLock } from "./storageMigrationLock";
 import { storageKeys } from "./storageKeys";
 
 export interface LocalStorageUsageEntry {
@@ -15,6 +16,7 @@ export interface StorageDiagnostics {
   persisted?: boolean;
   dataSchemaVersion?: string | null;
   migrationState?: StorageMigrationState | null;
+  migrationLock?: StorageMigrationLock | null;
   pressure: "normal" | "warning" | "critical" | "unknown";
   health: StorageHealthReport;
 }
@@ -344,6 +346,7 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
     persisted,
     dataSchemaVersion: dataSchemaVersion.valid ? dataSchemaVersion.value : null,
     migrationState: loadStorageMigrationState(),
+    migrationLock: loadStorageMigrationLock(),
     health,
     pressure: ratio === undefined ? "unknown" : ratio >= 0.95 ? "critical" : ratio >= 0.8 ? "warning" : "normal",
   };
