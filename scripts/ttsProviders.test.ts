@@ -32,7 +32,7 @@ assert.match(
 assert.match(appChatSource, /callSpeechGenerationRef\.current \+= 1/, "clearing a call must invalidate in-flight speech synthesis");
 assert.match(appChatSource, /const blob = await getSpeechForText[\s\S]*if \(isCancelledCallSpeech\(\)\) return/, "late TTS results must be discarded after hang-up");
 assert.match(appChatSource, /if \(callTtsObjectUrlRef\.current\)[\s\S]*URL\.revokeObjectURL/, "hang-up must revoke the active call audio URL");
-assert.match(appChatSource, /if \(isCancelledCallTurn\(\)\) break/, "hang-up must stop unsent bubbles from the cancelled call turn");
+assert.match(appChatSource, /if \(isCancelledCallTurn\(\) \|\| signal\?\.aborted\) break/, "hang-up must stop unsent bubbles from the cancelled call turn");
 const canonicalCharacter: any = { id: "profile", name: "角色", mosslandVoiceId: "canonical-voice" };
 const contactCharacter: any = { id: "contact", name: "联系人", isContactInstance: true, profileSourceId: "profile" };
 assert.equal(

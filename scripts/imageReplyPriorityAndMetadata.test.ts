@@ -52,7 +52,7 @@ assert.equal(actual.message.conversationId, "direct:rel-a");
 const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const chatController = readFileSync(new URL("../src/features/chat/hooks/useChatController.ts", import.meta.url), "utf8");
 assert.match(chatController, /replyInFlightRef\.current/, "send-and-reply must synchronously reject duplicate taps");
-assert.match(chatController, /await generateResponseForUserMessage\(userMessage, history\)/, "the request lock must remain held until reply completion");
+assert.match(chatController, /await generateResponseForUserMessage\(userMessage, history, abortController\.signal\)/, "the request lock must remain held until reply completion");
 const priorityStart = chatController.indexOf("if (shouldGenerateExplicitImage)");
 const priorityEnd = chatController.indexOf("const updatedOfflineMessages", priorityStart);
 assert.ok(priorityStart >= 0 && priorityEnd > priorityStart, "explicit image branch must precede normal reply");

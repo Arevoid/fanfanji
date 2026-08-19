@@ -56,7 +56,7 @@ assert.equal(getForumTranslation({
 }), undefined, "translations are identity isolated");
 
 const settingsSource = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
-assert.doesNotMatch(settingsSource, /"phone_forum_translations"/);
+assert.match(settingsSource, /"phone_forum_translations"/);
 const helperSource = readFileSync(new URL("../src/utils/apiHelper.ts", import.meta.url), "utf8");
 assert.match(helperSource, /proxyOnly/);
 console.log("PASS forum translations cache, identity isolation, invalidation, deletion, and proxy-only boundary");

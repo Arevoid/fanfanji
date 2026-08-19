@@ -111,7 +111,7 @@ assert.match(chat, /settings\.otherBubbleBg[\s\S]*getBubbleBackgroundStyle\(sett
 assert.match(chat, /color: \$\{settings\.otherBubbleColor\} !important/);
 assert.match(app, /bubbleStylePreset=\{resolveActiveChatStylePreset/);
 assert.match(settings, /effectiveBubbleStylePreset/);
-assert.match(serviceWorker, /fanfan-phone-v9/);
+assert.match(serviceWorker, /fanfan-phone-v11/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("self"\)/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("other"\)/);
 assert.match(settings, /液态玻璃气泡设置/);
