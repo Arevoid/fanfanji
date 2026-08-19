@@ -3488,6 +3488,8 @@ export default function AppSettings({
                               const snapshot = snapshotLocalStorage();
                               const writtenKeys: string[] = [];
                               const previousOfflineStories = await offlineStoryDb.loadAll();
+                              let indexedDbRestoreReport = { restoredKeys: [] as string[], skippedKeys: [] as string[] };
+                              const restoredOfflineStories = entries.find(([key]) => key === "phone_offline_stories")?.[1];
 
                               try {
                                 for (const [key, value] of entries) {
@@ -3505,8 +3507,7 @@ export default function AppSettings({
                                     ) || value);
                                   }
                                 }
-                                await restoreSystemBackupIndexedDb(parsedBackup.indexedDb);
-                                const restoredOfflineStories = entries.find(([key]) => key === "phone_offline_stories")?.[1];
+                                indexedDbRestoreReport = await restoreSystemBackupIndexedDb(parsedBackup.indexedDb);
                                 if (typeof restoredOfflineStories === "string") {
                                   const parsedStories = JSON.parse(restoredOfflineStories) as unknown;
                                   if (!Array.isArray(parsedStories)) throw new Error("线下故事备份格式无效");
@@ -3546,7 +3547,11 @@ export default function AppSettings({
                               }
                               // JSON backups intentionally exclude media/sticker blobs. Offline stories
                               // are restored to their durable store above before the app reloads.
-                              alert("导入成功！应用即将刷新加载新数据。");
+                              const restoredModuleCount = indexedDbRestoreReport.restoredKeys.length + (typeof restoredOfflineStories === "string" ? 1 : 0);
+                              const skippedModuleText = indexedDbRestoreReport.skippedKeys.length > 0
+                                ? `，跳过 ${indexedDbRestoreReport.skippedKeys.length} 个未知 IndexedDB 模块`
+                                : "";
+                              alert(`导入成功！已恢复 ${writtenKeys.length + restoredModuleCount} 个模块${skippedModuleText}。应用即将刷新加载新数据。`);
                               window.location.reload();
                             }
                           } catch (err: any) {

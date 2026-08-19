@@ -19,6 +19,11 @@ export const SYSTEM_BACKUP_INDEXED_DB_KEYS = [
   "reading-co-story-store",
 ] as const;
 
+export interface IndexedDbRestoreReport {
+  restoredKeys: string[];
+  skippedKeys: string[];
+}
+
 export type SystemBackupLocalStorage = Record<string, string | null>;
 export type SystemBackupIndexedDb = Record<string, unknown>;
 
@@ -156,9 +161,10 @@ export function parseSystemBackup(value: unknown): {
   return { localStorage, indexedDb, legacy: true };
 }
 
-export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexedDb): Promise<void> {
+export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexedDb): Promise<IndexedDbRestoreReport> {
   const previousValues = new Map<string, unknown | null>();
   const keysToRestore = SYSTEM_BACKUP_INDEXED_DB_KEYS.filter((key) => Object.hasOwn(indexedDb, key));
+  const skippedKeys = Object.keys(indexedDb).filter((key) => !SYSTEM_BACKUP_INDEXED_DB_KEYS.includes(key as typeof SYSTEM_BACKUP_INDEXED_DB_KEYS[number]));
   for (const key of keysToRestore) {
     previousValues.set(key, await readingAssetDb.loadMetadataValue<unknown>(key));
   }
@@ -172,6 +178,7 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
         await readingAssetDb.saveMetadataValue(key, cloneJson(value));
       }
     }
+    return { restoredKeys: [...keysToRestore], skippedKeys };
   } catch (error) {
     // Restore the exact pre-import values. This is a compensating transaction:
     // it never deletes a key unless that key was absent before the import.
