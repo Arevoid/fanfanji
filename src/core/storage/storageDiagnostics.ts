@@ -250,6 +250,8 @@ async function inspectIndexedDbHealth(existingDatabaseNames?: Set<string>): Prom
   const knownNames = new Set([
     "FanfanImageAssets",
     "StickerAppDB",
+    "FanfanjiMessageEntryDB",
+    "FanfanjiOfflineStoryEntryDB",
     "FanfanjiOfflineStoryDB",
     "FanfanjiReadingDB",
     "FanfanjiReadingCoverDB",

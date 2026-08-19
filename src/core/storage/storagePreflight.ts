@@ -1,6 +1,7 @@
 import { loadStorageMigrationState } from "./storageMigrationState";
 import { readString } from "./storageAdapter";
 import { storageKeys } from "./storageKeys";
+import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./contentStorageFlags";
 
 export type StoragePreflightModuleId = "messages" | "offlineStories";
 export type StoragePreflightSource = "indexeddb" | "localStorage" | "missing" | "unavailable" | "error";
@@ -30,6 +31,8 @@ export interface StoragePreflightResult {
   availableBytes?: number;
   estimatedAdditionalBytes: number;
   recommendedFreeBytes: number;
+  messageEntryStoreEnabled: boolean;
+  offlineStoryEntryStoreEnabled: boolean;
   modules: StoragePreflightModuleSummary[];
   warnings: string[];
 }
@@ -232,6 +235,8 @@ export async function runStoragePreflight(): Promise<StoragePreflightResult> {
     availableBytes,
     estimatedAdditionalBytes,
     recommendedFreeBytes,
+    messageEntryStoreEnabled: isMessageEntryStoreEnabled(),
+    offlineStoryEntryStoreEnabled: isOfflineStoryEntryStoreEnabled(),
     modules,
     warnings,
   };

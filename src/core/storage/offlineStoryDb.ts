@@ -1,10 +1,16 @@
 import type { OfflineStory } from "../../types";
+import { isOfflineStoryEntryStoreEnabled } from "./contentStorageFlags";
+import { offlineStoryEntryDb } from "./offlineStoryEntryDb";
 
 class OfflineStoryDB {
   private readonly dbName = "FanfanjiOfflineStoryDB";
   private readonly storeName = "stories";
   private db: IDBDatabase | null = null;
   private writeQueue: Promise<void> = Promise.resolve();
+
+  private useEntryStore(): boolean {
+    return typeof indexedDB !== "undefined" && isOfflineStoryEntryStoreEnabled();
+  }
 
   private enqueueWrite(operation: (db: IDBDatabase) => Promise<void>): Promise<void> {
     const next = this.writeQueue.then(async () => operation(await this.init()));
@@ -34,6 +40,7 @@ class OfflineStoryDB {
   }
 
   async loadAll(): Promise<OfflineStory[]> {
+    if (this.useEntryStore()) return offlineStoryEntryDb.loadAll();
     const db = await this.init();
     return new Promise((resolve, reject) => {
       const request = db.transaction(this.storeName, "readonly").objectStore(this.storeName).getAll();
@@ -43,6 +50,7 @@ class OfflineStoryDB {
   }
 
   async save(story: OfflineStory): Promise<void> {
+    if (this.useEntryStore()) return offlineStoryEntryDb.save(story);
     return this.enqueueWrite((db) => new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, "readwrite");
       transaction.objectStore(this.storeName).put(story);
@@ -53,6 +61,7 @@ class OfflineStoryDB {
   }
 
   async replaceAll(stories: readonly OfflineStory[]): Promise<void> {
+    if (this.useEntryStore()) return offlineStoryEntryDb.replaceAll(stories);
     return this.enqueueWrite((db) => new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, "readwrite");
       const store = transaction.objectStore(this.storeName);
@@ -65,6 +74,7 @@ class OfflineStoryDB {
   }
 
   async delete(storyId: string): Promise<void> {
+    if (this.useEntryStore()) return offlineStoryEntryDb.delete(storyId);
     return this.enqueueWrite((db) => new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, "readwrite");
       transaction.objectStore(this.storeName).delete(storyId);
@@ -75,6 +85,7 @@ class OfflineStoryDB {
   }
 
   async clearAll(): Promise<void> {
+    if (this.useEntryStore()) return offlineStoryEntryDb.clearAll();
     return this.enqueueWrite((db) => new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, "readwrite");
       transaction.objectStore(this.storeName).clear();

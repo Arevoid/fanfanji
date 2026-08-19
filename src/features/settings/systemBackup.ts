@@ -4,6 +4,10 @@ import { flushMoments } from "../../core/storage/repositories/momentRepository";
 import { flushReadingStore } from "../../core/storage/repositories/readingRepository";
 import { flushCoReadingStore } from "../../core/storage/repositories/readingCoReadingRepository";
 import { flushReadingCoStoryStore } from "../../core/storage/repositories/readingCoStoryRepository";
+import { flushMessages } from "../../core/storage/repositories/messageRepository";
+import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled, enableMessageEntryStore, enableOfflineStoryEntryStore, disableMessageEntryStore, disableOfflineStoryEntryStore } from "../../core/storage/contentStorageFlags";
+import { messageEntryDb } from "../../core/storage/messageEntryDb";
+import { offlineStoryEntryDb } from "../../core/storage/offlineStoryEntryDb";
 
 export const SYSTEM_BACKUP_FORMAT = "fanfanji-system-backup" as const;
 export const SYSTEM_BACKUP_VERSION = 3 as const;
@@ -15,10 +19,12 @@ export const SYSTEM_BACKUP_JSON_CHUNK_SIZE = 256 * 1024;
 export const SYSTEM_BACKUP_INDEXED_DB_KEYS = [
   "character-archive-v4",
   "moments-v4",
+  "messages-v4",
   "reading-store",
   "reading-co-reading-store",
   "reading-co-story-store",
 ] as const;
+export const SYSTEM_BACKUP_CONTENT_ENTRY_KEYS = ["message-entry-v1", "offline-story-entry-v1"] as const;
 
 export interface IndexedDbRestoreReport {
   restoredKeys: string[];
@@ -85,6 +91,7 @@ export async function buildSystemBackup(
   const localStorageBeforeFlush = readLocalStorage(storage, localStorageKeys);
   await Promise.all([
     flushCharacters(),
+    flushMessages(),
     flushMoments(),
     flushReadingStore(),
     flushCoReadingStore(),
@@ -94,6 +101,10 @@ export async function buildSystemBackup(
     key,
     await readingAssetDb.loadMetadataValue<unknown>(key),
   ] as const));
+  const contentEntries = await Promise.all([
+    isMessageEntryStoreEnabled() ? messageEntryDb.loadAll().then((value) => [SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], value] as const) : Promise.resolve([SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], null] as const),
+    isOfflineStoryEntryStoreEnabled() ? offlineStoryEntryDb.loadAll().then((value) => [SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[1], value] as const) : Promise.resolve([SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[1], null] as const),
+  ]);
 
   const localStorageAfterFlush = readLocalStorage(storage, localStorageKeys);
   const localStorage = Object.fromEntries(localStorageKeys.map((key) => [
@@ -106,9 +117,10 @@ export async function buildSystemBackup(
     version: SYSTEM_BACKUP_VERSION,
     exportedAt: Date.now(),
     localStorage,
-    indexedDb: Object.fromEntries(
-      indexedDbEntries.filter(([, value]) => value !== null && value !== undefined).map(([key, value]) => [key, cloneJson(value)]),
-    ),
+    indexedDb: Object.fromEntries([
+      ...indexedDbEntries,
+      ...contentEntries,
+    ].filter(([, value]) => value !== null && value !== undefined).map(([key, value]) => [key, cloneJson(value)])),
   };
   return { ...envelope, checksum: checksumPayload(envelope) };
 }
@@ -178,7 +190,10 @@ export function parseSystemBackup(value: unknown): {
 export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexedDb): Promise<IndexedDbRestoreReport> {
   const previousValues = new Map<string, unknown | null>();
   const keysToRestore = SYSTEM_BACKUP_INDEXED_DB_KEYS.filter((key) => Object.hasOwn(indexedDb, key));
-  const skippedKeys = Object.keys(indexedDb).filter((key) => !SYSTEM_BACKUP_INDEXED_DB_KEYS.includes(key as typeof SYSTEM_BACKUP_INDEXED_DB_KEYS[number]));
+  const contentKeysToRestore = SYSTEM_BACKUP_CONTENT_ENTRY_KEYS.filter((key) => Object.hasOwn(indexedDb, key));
+  const knownKeys = new Set<string>([...SYSTEM_BACKUP_INDEXED_DB_KEYS, ...SYSTEM_BACKUP_CONTENT_ENTRY_KEYS]);
+  const skippedKeys = Object.keys(indexedDb).filter((key) => !knownKeys.has(key));
+  let legacyMessageEntryRestored = false;
   for (const key of keysToRestore) {
     previousValues.set(key, await readingAssetDb.loadMetadataValue<unknown>(key));
   }
@@ -192,7 +207,32 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
         await readingAssetDb.saveMetadataValue(key, cloneJson(value));
       }
     }
-    return { restoredKeys: [...keysToRestore], skippedKeys };
+    // A pre-entry-store backup may contain the retained messages-v4 snapshot
+    // but no entry-store payload. If the current device already uses the new
+    // path, import that legacy snapshot into it so importing an old backup
+    // cannot silently leave the current chat data in place.
+    if (!contentKeysToRestore.includes("message-entry-v1")
+      && Array.isArray(indexedDb["messages-v4"])
+      && isMessageEntryStoreEnabled()) {
+      previousValues.set("message-entry-v1", await messageEntryDb.loadAll());
+      await messageEntryDb.replaceAll(indexedDb["messages-v4"] as never[]);
+      legacyMessageEntryRestored = true;
+    }
+    for (const key of contentKeysToRestore) {
+      if (!Array.isArray(indexedDb[key])) throw new Error(`备份中的 ${key} 数据格式无效`);
+      if (key === "message-entry-v1") {
+        previousValues.set(key, isMessageEntryStoreEnabled() ? await messageEntryDb.loadAll() : null);
+        await messageEntryDb.replaceAll(indexedDb[key] as never[]);
+        const enabled = enableMessageEntryStore();
+        if (!enabled.success) throw new Error(`无法启用聊天条目库：${enabled.error || "write"}`);
+      } else if (key === "offline-story-entry-v1") {
+        previousValues.set(key, isOfflineStoryEntryStoreEnabled() ? await offlineStoryEntryDb.loadAll() : null);
+        await offlineStoryEntryDb.replaceAll(indexedDb[key] as never[]);
+        const enabled = enableOfflineStoryEntryStore();
+        if (!enabled.success) throw new Error(`无法启用线下条目库：${enabled.error || "write"}`);
+      }
+    }
+    return { restoredKeys: [...keysToRestore, ...contentKeysToRestore, ...(legacyMessageEntryRestored ? ["message-entry-v1"] : [])], skippedKeys };
   } catch (error) {
     // Restore the exact pre-import values. This is a compensating transaction:
     // it never deletes a key unless that key was absent before the import.
@@ -205,6 +245,44 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
         }
       } catch (rollbackError) {
         console.error("IndexedDB backup restore rollback failed:", rollbackError);
+      }
+    }
+    for (const key of contentKeysToRestore) {
+      try {
+        const previousValue = previousValues.get(key);
+        if (key === "message-entry-v1") {
+          if (Array.isArray(previousValue)) {
+            await messageEntryDb.replaceAll(previousValue as never[]);
+            enableMessageEntryStore();
+          } else {
+            await messageEntryDb.clearAll();
+            disableMessageEntryStore();
+          }
+        } else if (key === "offline-story-entry-v1") {
+          if (Array.isArray(previousValue)) {
+            await offlineStoryEntryDb.replaceAll(previousValue as never[]);
+            enableOfflineStoryEntryStore();
+          } else {
+            await offlineStoryEntryDb.clearAll();
+            disableOfflineStoryEntryStore();
+          }
+        }
+      } catch (rollbackError) {
+        console.error("Content entry backup restore rollback failed:", rollbackError);
+      }
+    }
+    if (legacyMessageEntryRestored) {
+      try {
+        const previousValue = previousValues.get("message-entry-v1");
+        if (Array.isArray(previousValue)) {
+          await messageEntryDb.replaceAll(previousValue as never[]);
+          enableMessageEntryStore();
+        } else {
+          await messageEntryDb.clearAll();
+          disableMessageEntryStore();
+        }
+      } catch (rollbackError) {
+        console.error("Legacy message entry backup rollback failed:", rollbackError);
       }
     }
     throw error;

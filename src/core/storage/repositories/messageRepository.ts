@@ -5,6 +5,8 @@ import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readingAssetDb } from "../readingAssetDb";
 import { remove } from "../storageAdapter";
 import { createLatestSnapshotWriter } from "../latestSnapshotWriter";
+import { isMessageEntryStoreEnabled } from "../contentStorageFlags";
+import { messageEntryDb } from "../messageEntryDb";
 
 const MESSAGE_METADATA_KEY = "messages-v4";
 let cachedMessages: Message[] | null = null;
@@ -20,8 +22,19 @@ const messageWriter = createLatestSnapshotWriter(
   cloneMessages,
   (snapshot) => readingAssetDb.saveMetadataValue(MESSAGE_METADATA_KEY, snapshot),
 );
+const messageEntryWriter = createLatestSnapshotWriter(
+  cloneMessages,
+  (snapshot) => messageEntryDb.saveSnapshot(snapshot),
+);
 
 export function loadMessages(fallback: Message[]): StorageResult<Message[]> {
+  if (isMessageEntryStoreEnabled() && typeof indexedDB !== "undefined") {
+    if (metadataReady && cachedMessages) return { value: cloneMessages(cachedMessages), found: true, valid: true };
+    // The entry store is asynchronous. Return the caller's fallback without
+    // reading the legacy snapshot; initializeMessages performs the single
+    // authoritative read for this session.
+    return { value: fallback, found: false, valid: true };
+  }
   if (metadataReady && cachedMessages) return { value: cloneMessages(cachedMessages), found: true, valid: true };
   const current = readArray<Message>(storageKeys.messages, fallback);
   if (current.found || !current.valid) return current;
@@ -39,7 +52,8 @@ export function saveMessages(messages: Message[]): StorageWriteResult {
     mutationVersion += 1;
     cachedMessages = cloneMessages(messages);
     metadataReady = true;
-    messageWriter.enqueue(cachedMessages).catch((error) => console.warn("[storage] Failed to persist messages in IndexedDB.", error));
+    const writer = isMessageEntryStoreEnabled() ? messageEntryWriter : messageWriter;
+    writer.enqueue(cachedMessages).catch((error) => console.warn("[storage] Failed to persist messages in IndexedDB.", error));
     return { success: true };
   }
   return writeArray(storageKeys.messages, messages);
@@ -52,6 +66,15 @@ export async function initializeMessages(fallback: Message[]): Promise<StorageRe
   const initializationMutationVersion = mutationVersion;
   initializationPromise = (async () => {
     try {
+      if (isMessageEntryStoreEnabled()) {
+        const stored = await messageEntryDb.loadAll();
+        if (mutationVersion !== initializationMutationVersion && cachedMessages) {
+          return { value: cloneMessages(cachedMessages), found: true, valid: true };
+        }
+        cachedMessages = cloneMessages(stored);
+        metadataReady = true;
+        return { value: cloneMessages(stored), found: true, valid: true };
+      }
       const stored = await readingAssetDb.loadMetadataValue<Message[]>(MESSAGE_METADATA_KEY);
       if (mutationVersion !== initializationMutationVersion && cachedMessages) {
         return { value: cloneMessages(cachedMessages), found: true, valid: true };
@@ -87,7 +110,8 @@ export async function initializeMessages(fallback: Message[]): Promise<StorageRe
 export async function flushMessages(): Promise<StorageWriteResult> {
   if (typeof indexedDB === "undefined") return { success: true };
   try {
-    await messageWriter.flush();
+    await (isMessageEntryStoreEnabled() ? messageEntryWriter : messageWriter).flush();
+    if (isMessageEntryStoreEnabled()) return { success: true };
     remove(storageKeys.messages);
     remove(storageKeys.legacyMessages);
     return { success: true };

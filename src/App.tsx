@@ -15,6 +15,7 @@ import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repos
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
 import { offlineStoryDb } from "./core/storage/offlineStoryDb";
+import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./core/storage/contentStorageFlags";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, saveConversationSummaries, retractConversationSummariesBySourceMessageIds } from "./core/storage/repositories/conversationSummaryRepository";
@@ -437,9 +438,12 @@ export default function App() {
     return true;
   };
 
-  const [messages, setMessages] = useState<Message[]>(() => loadMessages(DEFAULT_MESSAGES).value.filter((message) =>
-    !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
-  ));
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const initial = isMessageEntryStoreEnabled() && typeof indexedDB !== "undefined"
+      ? []
+      : loadMessages(DEFAULT_MESSAGES).value;
+    return initial.filter((message) => !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)));
+  });
 
   useEffect(() => {
     let active = true;
@@ -515,7 +519,11 @@ export default function App() {
   }, [activeApp]);
 
   // Offline Stories State & Handlers
-  const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => loadOfflineStories([]).value);
+  const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => (
+    isOfflineStoryEntryStoreEnabled() && typeof indexedDB !== "undefined"
+      ? []
+      : loadOfflineStories([]).value
+  ));
   const offlineStoriesRef = useRef(offlineStories);
   const offlineStoriesHydratedRef = useRef(false);
   const deletedOfflineStoryIdsRef = useRef(new Set<string>());

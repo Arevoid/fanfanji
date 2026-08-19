@@ -9,6 +9,8 @@ interface StorageDiagnosticsCardProps {
   lastBackupAt: string | null;
   onRefresh: () => void;
   onRunPreflight: () => void;
+  onRunContentMigration: () => void;
+  contentMigrationRunning: boolean;
   onRequestPersistence: () => void;
   onCleanMigratedCopies: () => void;
 }
@@ -21,6 +23,8 @@ export function StorageDiagnosticsCard({
   lastBackupAt,
   onRefresh,
   onRunPreflight,
+  onRunContentMigration,
+  contentMigrationRunning,
   onRequestPersistence,
   onCleanMigratedCopies,
 }: StorageDiagnosticsCardProps) {
@@ -65,9 +69,11 @@ export function StorageDiagnosticsCard({
             <div>检查时间：{new Date(preflight.capturedAt).toLocaleString()}</div>
             <div>预计新增占用：{formatStorageBytes(preflight.estimatedAdditionalBytes)}；建议可用空间：{formatStorageBytes(preflight.recommendedFreeBytes)}</div>
             {preflight.availableBytes !== undefined && <div>当前可用空间：{formatStorageBytes(preflight.availableBytes)}</div>}
+            <div>聊天条目库：{preflight.messageEntryStoreEnabled ? "已启用" : "未启用"}；线下条目库：{preflight.offlineStoryEntryStoreEnabled ? "已启用" : "未启用"}</div>
             {preflight.modules.map((module) => <div key={module.id}>{module.label}：当前约 {formatStorageBytes(module.estimatedCurrentBytes)}；{module.sources.filter((source) => source.source !== "missing").map((source) => `${source.label} ${source.records} 条`).join("、") || "未发现数据源"}</div>)}
             {preflight.warnings.map((warning) => <div key={warning} className="text-amber-700">提醒：{warning}</div>)}
             <div className="pt-1 text-slate-400">本次预检只读，不会迁移、覆盖或清理任何数据。</div>
+            {(!preflight.messageEntryStoreEnabled || !preflight.offlineStoryEntryStoreEnabled) && <button type="button" disabled={contentMigrationRunning} onClick={onRunContentMigration} className="mt-2 rounded-[10px] bg-slate-900 px-3 py-2 font-bold text-white disabled:opacity-50">{contentMigrationRunning ? "迁移进行中…" : "备份后开始聊天/线下存储迁移"}</button>}
           </div>
         )}
       </div>

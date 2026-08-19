@@ -59,6 +59,7 @@ import { clearApplicationData } from "../features/settings/clearApplicationData"
 import { offlineStoryDb } from "../core/storage/offlineStoryDb";
 import { inspectStorage, removeMigratedStorageCopies, type StorageDiagnostics } from "../core/storage/storageDiagnostics";
 import { runStoragePreflight, type StoragePreflightResult } from "../core/storage/storagePreflight";
+import { migrateContentStorage } from "../core/storage/contentStorageMigration";
 import { mergeOfflineStoryCollections } from "../core/storage/repositories/offlineRepository";
 import { normalizeMosslandApiEndpoint } from "../features/voice/ttsConfig";
 import {
@@ -484,6 +485,7 @@ export default function AppSettings({
   const [activeTab, setActiveTab] = useState<SettingsTab>(null);
   const [storageDiagnostics, setStorageDiagnostics] = useState<StorageDiagnostics | null>(null);
   const [storagePreflight, setStoragePreflight] = useState<StoragePreflightResult | null>(null);
+  const [isContentStorageMigrationRunning, setIsContentStorageMigrationRunning] = useState(false);
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
 
   const refreshStorageDiagnostics = async () => {
@@ -499,6 +501,21 @@ export default function AppSettings({
     } catch (error) {
       console.warn("Unable to run storage migration preflight.", error);
       alert("迁移预检失败，现有数据未被修改。请先导出备份后重试。");
+    }
+  };
+  const runContentStorageMigration = async () => {
+    if (isContentStorageMigrationRunning) return;
+    if (!confirm("迁移前会自动下载一份完整备份。迁移将保留旧聊天和旧线下故事副本，不会修改角色、世界书、记忆或 API 配置。确认开始吗？")) return;
+    setIsContentStorageMigrationRunning(true);
+    try {
+      await downloadSystemBackup(LIGHT_BACKUP_KEYS);
+      const report = await migrateContentStorage({ preflight: storagePreflight || undefined });
+      alert(`迁移完成：${report.messageCount} 条聊天消息、${report.offlineStoryCount} 个线下故事（${report.offlineStoryMessageCount} 条线下消息）。旧数据副本已保留，应用将刷新。`);
+      window.location.reload();
+    } catch (error: any) {
+      alert(`迁移失败，旧数据未删除：${error?.message || "未知错误"}`);
+      setIsContentStorageMigrationRunning(false);
+      await refreshStorageDiagnostics();
     }
   };
   const requestStoragePersistence = async () => {
@@ -3584,6 +3601,8 @@ export default function AppSettings({
                 lastBackupAt={lastBackupAt}
                 onRefresh={() => void refreshStorageDiagnostics()}
                 onRunPreflight={() => void runStorageMigrationPreflight()}
+                onRunContentMigration={() => void runContentStorageMigration()}
+                contentMigrationRunning={isContentStorageMigrationRunning}
                 onRequestPersistence={() => void requestStoragePersistence()}
                 onCleanMigratedCopies={() => {
                   const removed = removeMigratedStorageCopies();
