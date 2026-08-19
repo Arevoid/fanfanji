@@ -70,7 +70,7 @@ export class BackgroundScheduler {
     this.snapshot.lastStartedAt = Date.now();
     try {
       await this.options.run();
-      this.snapshot.status = "success";
+      this.snapshot.status = this.stopped ? "cancelled" : "success";
       this.snapshot.attempts = 0;
       this.snapshot.lastError = undefined;
     } catch (error) {

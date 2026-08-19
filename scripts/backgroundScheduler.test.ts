@@ -29,4 +29,18 @@ failing.start();
 await wait(15);
 failing.stop();
 assert.equal(failing.getSnapshot().status, "expired");
-console.log("PASS background scheduler serializes work, recovers timers, and expires repeated failures");
+
+let releaseCancellationRun: (() => void) | null = null;
+const cancellationRun = new BackgroundScheduler({
+  id: "cancellation-task",
+  initialDelayMs: 0,
+  intervalMs: 5,
+  run: () => new Promise<void>((resolve) => { releaseCancellationRun = resolve; }),
+});
+cancellationRun.start();
+await wait(5);
+cancellationRun.stop();
+releaseCancellationRun?.();
+await wait(5);
+assert.equal(cancellationRun.getSnapshot().status, "cancelled");
+console.log("PASS background scheduler serializes work, recovers timers, expires repeated failures, and cancels in-flight work");
