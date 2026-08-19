@@ -57,7 +57,7 @@ import {
 } from "../features/settings/settingsNavigation";
 import { clearApplicationData } from "../features/settings/clearApplicationData";
 import { offlineStoryDb } from "../core/storage/offlineStoryDb";
-import { formatStorageBytes, inspectStorage, removeMigratedStorageCopies, type StorageDiagnostics } from "../core/storage/storageDiagnostics";
+import { inspectStorage, removeMigratedStorageCopies, type StorageDiagnostics } from "../core/storage/storageDiagnostics";
 import { mergeOfflineStoryCollections } from "../core/storage/repositories/offlineRepository";
 import { normalizeMosslandApiEndpoint } from "../features/voice/ttsConfig";
 import {
@@ -76,6 +76,7 @@ import { buildSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb } fr
 import { SYSTEM_BACKUP_VERSION } from "../features/settings/systemBackup";
 import { writeString } from "../core/storage/storageAdapter";
 import { storageKeys } from "../core/storage/storageKeys";
+import { StorageDiagnosticsCard } from "../features/settings/components/StorageDiagnosticsCard";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -3545,33 +3546,17 @@ export default function AppSettings({
                 </div>
               </div>
 
-              <div className="settings-section-header">存储空间</div>
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">本地存储诊断</h3>
-                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">完整聊天、角色和线下故事优先保存在 IndexedDB，不再重复占用 LocalStorage。</p>
-                  </div>
-                  <button type="button" onClick={() => void refreshStorageDiagnostics()} className="rounded-[10px] bg-slate-100 px-3 py-2 text-[10px] font-bold text-slate-600">检查空间</button>
-                </div>
-                {storageDiagnostics && (
-                  <div className="rounded-[12px] bg-slate-50 p-3 text-[10px] text-slate-600 space-y-1">
-                    <div>LocalStorage：{formatStorageBytes(storageDiagnostics.localStorageBytes)}</div>
-                    <div>浏览器总占用：{storageDiagnostics.usage === undefined ? "不可用" : formatStorageBytes(storageDiagnostics.usage)} / {storageDiagnostics.quota === undefined ? "未知" : formatStorageBytes(storageDiagnostics.quota)}</div>
-                    <div>数据版本：{storageDiagnostics.dataSchemaVersion || "未设置（兼容模式）"}</div>
-                    <div>备份版本：v{SYSTEM_BACKUP_VERSION}</div>
-                    <div>最近备份：{lastBackupAt ? new Date(Number(lastBackupAt)).toLocaleString() : "暂无记录"}</div>
-                    <div>持久化许可：{storageDiagnostics.persisted === undefined ? "未知" : storageDiagnostics.persisted ? "已启用" : "未启用"}</div>
-                    {storageDiagnostics.migrationState && <div>迁移状态：{storageDiagnostics.migrationState.phase}（{storageDiagnostics.migrationState.completedModules.length} 个模块已完成）</div>}
-                    <div>状态：{storageDiagnostics.pressure === "critical" ? "空间严重不足" : storageDiagnostics.pressure === "warning" ? "空间偏高" : storageDiagnostics.pressure === "normal" ? "正常" : "未知"}</div>
-                    <div>健康扫描：已检查 {storageDiagnostics.health.checkedCollections} 个数据集合，发现 {storageDiagnostics.health.findings.length} 项待检查问题</div>
-                    {storageDiagnostics.health.indexedDb.length > 0 && <div>IndexedDB：{storageDiagnostics.health.indexedDb.map((database) => `${database.name}（${database.records} 条）`).join("、")}</div>}
-                    {storageDiagnostics.health.findings.slice(0, 5).map((finding) => <div key={`${finding.key}-${finding.kind}`} className="text-amber-700">待检查：{finding.key} · {finding.detail}</div>)}
-                    {storageDiagnostics.localStorageEntries.slice(0, 3).map((entry) => <div key={entry.key} className="truncate">最大项目：{entry.key}（{formatStorageBytes(entry.bytes)}）</div>)}
-                    <button type="button" onClick={() => { const removed = removeMigratedStorageCopies(); void refreshStorageDiagnostics(); alert(removed.length ? `已清理 ${removed.length} 个已迁移副本。` : "没有可清理的已迁移副本。"); }} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">清理已迁移副本</button>
-                  </div>
-                )}
-              </div>
+              <StorageDiagnosticsCard
+                diagnostics={storageDiagnostics}
+                backupVersion={SYSTEM_BACKUP_VERSION}
+                lastBackupAt={lastBackupAt}
+                onRefresh={() => void refreshStorageDiagnostics()}
+                onCleanMigratedCopies={() => {
+                  const removed = removeMigratedStorageCopies();
+                  void refreshStorageDiagnostics();
+                  alert(removed.length ? `已清理 ${removed.length} 个已迁移副本。` : "没有可清理的已迁移副本。");
+                }}
+              />
 
               <div className="settings-section-header">桌面模块</div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
