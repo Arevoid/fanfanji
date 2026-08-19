@@ -276,7 +276,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   selectedModel: "gemini-3.5-flash",
   wallpaper: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
   customIcons: {},
-  dockIcons: {},
+  dockApps: ["chat", "music", "archives", "settings"],
   globalChatStylePreset: "default",
   bubbleCss: "",
   globalCss: ``,
@@ -3515,13 +3515,9 @@ export default function App() {
                 const iconSizeStyle = isHiddenNames 
                   ? { width: "60px", height: "60px" } 
                   : { width: "52px", height: "52px" };
-                // Dock icons may have their own override. Legacy customIcons
-                // remain the fallback so existing users keep their current
-                // appearance after this setting is introduced.
-                const getDockIcon = (appId: string) =>
-                  settings.dockIcons?.[appId] || settings.customIcons[appId] || "";
-                const isTransparentDockIcon = (appId: string) =>
-                  isTransparencyPreservedImage(getDockIcon(appId));
+                const dockAppIds = (settings.dockApps?.length === 4
+                  ? settings.dockApps
+                  : ["chat", "music", "archives", "settings"]);
 
                 return (
                   <div 
@@ -3535,98 +3531,33 @@ export default function App() {
                       borderRadius: settings.dockBorderRadius !== undefined ? `${settings.dockBorderRadius}px` : "26px"
                     }}
                   >
-                    <div className="flex items-center justify-center w-full h-full">
-                      {installedAppIds.includes("chat") ? (
-                        <button
-                          onClick={() => setActiveApp("chat")}
-                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                            isTransparentDockIcon("chat")
-                              ? "transparent-custom-icon"
-                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                          }`}
-                          style={{ borderRadius: isTransparentDockIcon("chat") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                        >
-                          {getDockIcon("chat") ? (
-                            <img src={getDockIcon("chat")} alt="" className={`w-full h-full ${isTransparentDockIcon("chat") ? "object-contain" : "object-cover"}`} />
-                          ) : (
-                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                              {AppIcons.chat()}
-                            </div>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="shrink-0" style={iconSizeStyle} />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center w-full h-full">
-                      {installedAppIds.includes("music") ? (
-                        <button
-                          onClick={() => setActiveApp("music")}
-                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                            isTransparentDockIcon("music")
-                              ? "transparent-custom-icon"
-                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                          }`}
-                          style={{ borderRadius: isTransparentDockIcon("music") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                        >
-                          {getDockIcon("music") ? (
-                            <img src={getDockIcon("music")} alt="" className={`w-full h-full ${isTransparentDockIcon("music") ? "object-contain" : "object-cover"}`} />
-                          ) : (
-                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                              {AppIcons.music()}
-                            </div>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="shrink-0" style={iconSizeStyle} />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center w-full h-full">
-                      {installedAppIds.includes("archives") ? (
-                        <button
-                          onClick={() => setActiveApp("archives")}
-                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                            isTransparentDockIcon("archives")
-                              ? "transparent-custom-icon"
-                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                          }`}
-                          style={{ borderRadius: isTransparentDockIcon("archives") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                        >
-                          {getDockIcon("archives") ? (
-                            <img src={getDockIcon("archives")} alt="" className={`w-full h-full ${isTransparentDockIcon("archives") ? "object-contain" : "object-cover"}`} />
-                          ) : (
-                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                              {AppIcons.archives()}
-                            </div>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="shrink-0" style={iconSizeStyle} />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center w-full h-full">
-                      <button
-                        onPointerDown={() => preloadApp("settings")}
-                        onClick={() => setActiveApp("settings")}
-                        className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                          isTransparentDockIcon("settings")
-                            ? "transparent-custom-icon"
-                            : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                        }`}
-                        style={{ borderRadius: isTransparentDockIcon("settings") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                      >
-                        {getDockIcon("settings") ? (
-                          <img src={getDockIcon("settings")} alt="" className={`w-full h-full ${isTransparentDockIcon("settings") ? "object-contain" : "object-cover"}`} />
-                        ) : (
-                          <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                            {AppIcons.settings()}
-                          </div>
-                        )}
-                      </button>
-                    </div>
+                    {dockAppIds.map((appId) => {
+                      const appIcon = AppIcons[appId as keyof typeof AppIcons];
+                      const customIcon = settings.customIcons[appId];
+                      const isTransparentIcon = isTransparencyPreservedImage(customIcon);
+                      return (
+                        <div key={appId} className="flex items-center justify-center w-full h-full">
+                          <button
+                            onPointerDown={() => preloadApp(appId)}
+                            onClick={() => setActiveApp(appId)}
+                            className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
+                              isTransparentIcon
+                                ? "transparent-custom-icon"
+                                : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
+                            }`}
+                            style={{ borderRadius: isTransparentIcon ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
+                          >
+                            {customIcon ? (
+                              <img src={customIcon} alt="" className={`w-full h-full ${isTransparentIcon ? "object-contain" : "object-cover"}`} />
+                            ) : (
+                              <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
+                                {appIcon ? appIcon() : AppIcons.chat()}
+                              </div>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })()}

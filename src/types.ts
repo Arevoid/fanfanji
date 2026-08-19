@@ -649,8 +649,8 @@ export interface UserSettings {
   /** Distinguishes an explicit user/preset wallpaper from legacy placeholder defaults. */
   wallpaperSource?: "user" | "preset" | "legacy-default";
   customIcons: Record<string, string>; // appKey -> image base64/URL or empty
-  /** Optional Dock-specific icon overrides. Missing entries inherit customIcons for backwards compatibility. */
-  dockIcons?: Record<string, string>;
+  /** Four applications that remain pinned in the bottom Dock. */
+  dockApps?: string[];
   bubbleCss: string; // Custom bubble CSS
   globalCss: string; // Custom global CSS
   /** CSS scoped to active chat conversation screens only. */
