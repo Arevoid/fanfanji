@@ -49,6 +49,21 @@ assert.equal(explicitHandoff.state, "arrival_claimed");
 assert.equal(explicitHandoff.userRequestedOffline, true);
 assert.equal(explicitHandoff.characterClaimedArrival, true);
 
+const screenshotNaturalLanguageHandoff = deriveProactiveOfflinePresenceEvidence({
+  messages: [
+    message("u-5", "user", "发起线下见面！", 13),
+    message("c-7", "character", "已经在门口了，我直接进来了。", 14),
+  ],
+});
+assert.equal(screenshotNaturalLanguageHandoff.userRequestedOffline, true);
+assert.equal(screenshotNaturalLanguageHandoff.characterClaimedArrival, true);
+assert.equal(screenshotNaturalLanguageHandoff.state, "arrival_claimed");
+
+const naturalArrivalWithoutPronoun = deriveProactiveOfflinePresenceEvidence({
+  messages: [message("c-8", "character", "已经到你家门口了", 15)],
+});
+assert.equal(naturalArrivalWithoutPronoun.characterClaimedArrival, true);
+
 const futurePlan = deriveProactiveOfflinePresenceEvidence({
   messages: [
     message("u-2", "user", "下次你来我家吧。", 4),
