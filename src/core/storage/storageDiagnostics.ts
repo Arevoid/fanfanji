@@ -1,5 +1,6 @@
 import { readString, remove } from "./storageAdapter";
 import { loadStorageMigrationState, type StorageMigrationState } from "./storageMigrationState";
+import { storageKeys } from "./storageKeys";
 
 export interface LocalStorageUsageEntry {
   key: string;
@@ -15,6 +16,58 @@ export interface StorageDiagnostics {
   dataSchemaVersion?: string | null;
   migrationState?: StorageMigrationState | null;
   pressure: "normal" | "warning" | "critical" | "unknown";
+  health: StorageHealthReport;
+}
+
+export interface StorageHealthFinding {
+  key: string;
+  kind: "invalid-json" | "duplicate-id" | "orphan-reference";
+  count: number;
+  detail: string;
+}
+
+export interface StorageHealthReport {
+  checkedCollections: number;
+  findings: StorageHealthFinding[];
+}
+
+const HEALTH_COLLECTION_KEYS = [
+  storageKeys.characters,
+  storageKeys.messages,
+  storageKeys.moments,
+  storageKeys.characterRelationships,
+  storageKeys.offlineStories,
+  storageKeys.worldBookEntries,
+  storageKeys.diaryEntries,
+  storageKeys.forumThreads,
+  storageKeys.forumReplies,
+] as const;
+
+function inspectStorageHealth(storage: Storage): StorageHealthReport {
+  const findings: StorageHealthFinding[] = [];
+  let checkedCollections = 0;
+  for (const key of HEALTH_COLLECTION_KEYS) {
+    const raw = storage.getItem(key);
+    if (!raw) continue;
+    checkedCollections += 1;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      findings.push({ key, kind: "invalid-json", count: 1, detail: "无法解析 JSON，建议先导出原始备份。" });
+      continue;
+    }
+    if (!Array.isArray(parsed)) continue;
+    const ids = parsed
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
+      .map((entry) => entry.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+    const duplicateCount = ids.length - new Set(ids).size;
+    if (duplicateCount > 0) {
+      findings.push({ key, kind: "duplicate-id", count: duplicateCount, detail: "发现重复 ID，仅提供检查结果，不自动合并。" });
+    }
+  }
+  return { checkedCollections, findings };
 }
 
 export async function inspectStorage(): Promise<StorageDiagnostics> {
@@ -39,6 +92,9 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
     ? await navigator.storage.persisted().catch(() => undefined)
     : undefined;
   const dataSchemaVersion = readString("phone_data_schema_version");
+  const health = typeof window !== "undefined"
+    ? inspectStorageHealth(window.localStorage)
+    : { checkedCollections: 0, findings: [] };
   return {
     localStorageBytes,
     localStorageEntries: entries,
@@ -47,6 +103,7 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
     persisted,
     dataSchemaVersion: dataSchemaVersion.valid ? dataSchemaVersion.value : null,
     migrationState: loadStorageMigrationState(),
+    health,
     pressure: ratio === undefined ? "unknown" : ratio >= 0.95 ? "critical" : ratio >= 0.8 ? "warning" : "normal",
   };
 }
