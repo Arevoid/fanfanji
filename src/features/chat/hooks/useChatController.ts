@@ -55,7 +55,6 @@ export function useChatController({
   runtimeContext,
   onReplyStopped,
 }: UseChatControllerOptions) {
-  const [chatInputText, setChatInputText] = useState("");
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
   const replyInFlightRef = useRef(false);
   const replyAbortControllerRef = useRef<AbortController | null>(null);
@@ -65,7 +64,6 @@ export function useChatController({
     ? `group:${runtimeContext.groupId || runtimeContext.characterId || ""}:${runtimeContext.conversationId || ""}`
     : `direct:${runtimeContext.userIdentityId}:${runtimeContext.relationId || ""}:${runtimeContext.conversationId || ""}`;
   useEffect(() => {
-    setChatInputText("");
     setQuotedMessage(null);
     // Do not abort a reply when this controller unmounts. AppChat is a view
     // layer: navigating home, opening another app, or switching browser tabs
@@ -82,16 +80,15 @@ export function useChatController({
       && (!message.conversationId || message.conversationId === runtimeContext.conversationId);
 
   // Handle Send Message (User sends only, no immediate reply)
-  const handleSendOnly = async (event?: FormEvent) => {
+  const handleSendOnly = async (inputText: string, event?: FormEvent) => {
     if (event) event.preventDefault();
-    if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
+    if (!inputText.trim() || !activeChatCharId || !activeCharacter) return;
 
     const safeQuotedMessage = quotedMessage && quoteBelongsToRuntime(quotedMessage) ? quotedMessage : null;
     const userMsgText = safeQuotedMessage && activeCharacter
-      ? formatQuotedChatInput(chatInputText.trim(), safeQuotedMessage, activeCharacter)
-      : chatInputText.trim();
+      ? formatQuotedChatInput(inputText.trim(), safeQuotedMessage, activeCharacter)
+      : inputText.trim();
     if (quotedMessage) setQuotedMessage(null);
-    setChatInputText("");
 
     const userMessage = createChatUserMessage({
       context: runtimeContext,
@@ -110,7 +107,7 @@ export function useChatController({
   };
 
   // Handle Send Message and Trigger AI reply
-  const handleSendAndReply = async (event?: FormEvent) => {
+  const handleSendAndReply = async (inputText: string, event?: FormEvent) => {
     if (event) event.preventDefault();
     if (!activeChatCharId || !activeCharacter || replyInFlightRef.current) return;
     replyInFlightRef.current = true;
@@ -119,13 +116,13 @@ export function useChatController({
     replyAbortControllerRef.current = abortController;
 
     try {
-      if (!chatInputText.trim()) {
+      if (!inputText.trim()) {
         // If user input is empty, trigger AI response directly (continue the story)
         await generateResponseForUserMessage(null, currentChatMessages, abortController.signal);
         return;
       }
 
-      const rawUserRequest = chatInputText.trim();
+      const rawUserRequest = inputText.trim();
       const pendingImageRequest = !isOfflineModeActive
         ? getPendingExplicitImageRequest(rawUserRequest, currentChatMessages)
         : null;
@@ -135,7 +132,6 @@ export function useChatController({
         ? formatQuotedChatInput(rawUserRequest, safeQuotedMessage, activeCharacter)
         : rawUserRequest;
       if (quotedMessage) setQuotedMessage(null);
-      setChatInputText("");
 
       const userMessage = createChatUserMessage({
         context: runtimeContext,
@@ -181,8 +177,6 @@ export function useChatController({
   };
 
   return {
-    chatInputText,
-    setChatInputText,
     quotedMessage,
     setQuotedMessage,
     handleSendOnly,

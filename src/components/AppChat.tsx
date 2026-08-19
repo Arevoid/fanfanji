@@ -117,8 +117,7 @@ import { ConversationList } from "../features/chat/components/ConversationList";
 import { MessageList } from "../features/chat/components/MessageList";
 import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
-import { ChatComposer } from "../features/chat/components/ChatComposer";
-import { ChatTextInput } from "../features/chat/components/ChatTextInput";
+import { ChatComposer, ChatInputBar } from "../features/chat/components/ChatComposer";
 import { BubbleTipPortalLayer } from "../features/chat/components/BubbleTipPortalLayer";
 import {
   VISUAL_VIEWPORT_CHANGE_EVENT,
@@ -3666,8 +3665,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   };
 
   const {
-    chatInputText,
-    setChatInputText,
     quotedMessage,
     setQuotedMessage,
     handleSendOnly,
@@ -8327,87 +8324,24 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 {imageGenerationError}
               </div>
             )}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendOnly(e);
+            <ChatInputBar
+              placeholder={
+                isOfflineModeActive
+                  ? (isInputNarration ? "输入旁白..." : "输入发言，继续剧本对话...")
+                  : `发送消息给 ${activeCharacter.name}...`
+              }
+              isTyping={isTyping}
+              isReplyInFlight={isReplyInFlight}
+              showAttachPanel={showAttachPanel}
+              onToggleAttach={() => {
+                setShowAttachPanel(!showAttachPanel);
+                setShowStickerSelector(false);
               }}
-              className="w-full min-w-0 max-w-full box-border px-3 py-2 flex items-center gap-2 chat-composer__form"
-            >
-              {/* Plus (+) Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAttachPanel(!showAttachPanel);
-                  setShowStickerSelector(false);
-                }}
-                className={`w-10 h-10 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn chat-composer__button chat-composer__attach-button ${
-                  showAttachPanel
-                    ? "chat-composer__button--open rotate-45"
-                    : "chat-composer__button--idle"
-                }`}
-                title="附加菜单"
-              >
-                <span className="cv-plus-icon flex items-center justify-center w-full h-full">
-                  <ChatIcon src={getChatIcon("plus")} className="w-3.5 h-3.5"><Plus className="w-3.5 h-3.5" /></ChatIcon>
-                </span>
-              </button>
-
-              {/* Chat Input text box */}
-              <ChatTextInput
-                type="text"
-                value={chatInputText}
-                onChange={(e) => setChatInputText(e.target.value)}
-                placeholder={
-                  isOfflineModeActive
-                    ? (isInputNarration
-                        ? "输入旁白..."
-                        : "输入发言，继续剧本对话...")
-                    : `发送消息给 ${activeCharacter.name}...`
-                }
-                className="min-w-0 w-0 flex-1 h-10 px-4 text-xs chat-input chat-composer__input"
-              />
-
-              {/* Send Button 1 (User send only - gray background with white upward arrow) */}
-              <button
-                type="button"
-                // Keep the composer focused on mobile. Preventing the pointer
-                // default stops the button from stealing focus (and closing
-                // the on-screen keyboard) while the click still submits the
-                // user's message.
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={(e) => handleSendOnly(e)}
-                disabled={!chatInputText.trim() || isTyping}
-                className="w-10 h-10 transition-all flex items-center justify-center shrink-0 cv-send-only-btn chat-composer__button chat-composer__send-only-button chat-composer__send-button"
-                title="仅发送消息 (不立即得到回复)"
-              >
-                <span className="cv-send-only-icon flex items-center justify-center w-full h-full">
-                  <ChatIcon src={getChatIcon("send")} className="w-4 h-4"><ArrowUp className="w-4 h-4 stroke-[2.5]" /></ChatIcon>
-                </span>
-              </button>
-
-              {/* Send Button 2 (Send and AI Reply - black background with white paper plane) */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  if (isReplyInFlight) {
-                    e.preventDefault();
-                    stopReply();
-                    return;
-                  }
-                  handleSendAndReply(e);
-                }}
-                disabled={!isReplyInFlight && isTyping}
-                className={`w-10 h-10 transition-all flex items-center justify-center shrink-0 send-button chat-composer__button chat-composer__send-reply-button chat-composer__send-button ${isReplyInFlight ? "chat-composer__stop-reply-button" : ""}`}
-                title={isReplyInFlight ? "停止生成回复" : "发送消息并获取回复"}
-              >
-                <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
-                  {isReplyInFlight
-                    ? <Square className="w-3.5 h-3.5 fill-current text-current" />
-                    : <ChatIcon src={getChatIcon("send")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>}
-                </span>
-              </button>
-            </form>
+              onSendOnly={handleSendOnly}
+              onSendAndReply={handleSendAndReply}
+              onStopReply={stopReply}
+              getChatIcon={(key) => getChatIcon(key)}
+            />
 
             {/* Attach Panel */}
             {showAttachPanel && (
@@ -9883,7 +9817,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                         </div>
                       ) : (
                         settings.identities?.map((idty) => {
-                          const isActive = idty.name === settings.name;
+                          const isActive = idty.id === activeIdentityId;
                           return (
                             <div
                               key={idty.id}
