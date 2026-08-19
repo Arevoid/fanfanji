@@ -20,7 +20,8 @@ import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDi
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
-import { canTriggerProactiveVoiceCall, createProactiveCallRejectionPatch, createProactiveCallTriggerPatch, isEmotionallyChargedCallContext, resolveOutgoingCallResolution } from "../features/chat/services/proactiveVoiceCallPolicy";
+import { createProactiveCallRejectionPatch, isEmotionallyChargedCallContext, resolveOutgoingCallResolution } from "../features/chat/services/proactiveVoiceCallPolicy";
+import { useProactiveCallScheduler } from "../features/chat/hooks/useProactiveCallScheduler";
 import type { VoiceCallStatus } from "../features/chat/services/messageTypes";
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
 import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
@@ -2369,37 +2370,6 @@ export default function AppChat({
     setCallingInputText("");
   };
 
-  // Enabled contacts may call while their chat is open, with relationship-scoped
-  // persistence, quiet-hours checks, daily limits and rejection backoff. The
-  // scheduler preserves the old one-minute cadence without recreating a timer
-  // whenever relationship state is persisted.
-  const runProactiveCallPass = async () => {
-    if (!activeChatCharId || !activeCharacter || !activeRelationship || !activeVoiceCallScope || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
-    if (activeAttachModal || isOfflineStoryActiveFor(activeVoiceCallScope.relationId)) return;
-    const now = Date.now();
-    const latestMessageAt = messagesRef.current
-      .filter((message) => message.relationId === activeVoiceCallScope.relationId && !message.isOffline)
-      .reduce((latest, message) => Math.max(latest, message.timestamp), 0) || undefined;
-    if (!canTriggerProactiveVoiceCall({
-      now,
-      relation: activeRelationship,
-      latestMessageAt,
-      startTime: activeCharacter.proactiveStartTime,
-      endTime: activeCharacter.proactiveEndTime,
-      randomValue: Math.random(),
-    })) return;
-    updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallTriggerPatch(activeRelationship, now));
-    beginVoiceCall(true);
-  };
-
-  useBackgroundScheduler({
-    id: "chat-proactive-call",
-    enabled: Boolean(activeChatCharId && activeCharacter && activeRelationship && activeVoiceCallScope && !activeCharacter.isGroupChat && activeCharacter.enableProactiveCall),
-    intervalMs: 60 * 1000,
-    initialDelayMs: 60 * 1000,
-    run: runProactiveCallPass,
-  });
-
   const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[], signal?: AbortSignal) => {
     if (!activeChatCharId || !activeCharacter) return;
     if (signal?.aborted) return;
@@ -4182,6 +4152,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // Enabled contacts may call while their chat is open, with relationship-scoped
+  // persistence, quiet-hours checks, daily limits and rejection backoff.
+  useProactiveCallScheduler({
+    character: activeCharacter,
+    relationship: activeRelationship,
+    voiceCallScope: activeVoiceCallScope,
+    activeAttachModal,
+    messagesRef,
+    isOfflineStoryActiveFor,
+    updateRelationshipSession,
+    beginVoiceCall,
+  });
 
   // Pre-seed moments if state empty
   const allMoments = (moments.length === 0 ? PRESEED_MOMENTS : moments)
