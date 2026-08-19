@@ -1614,10 +1614,10 @@ export default function AppChat({
 
   /**
    * Start a relation-scoped offline story only after the online transcript
-   * confirms that both speakers are physically present.  This deliberately
-   * does not trigger on a character-only claim: the user must have clearly
-   * confirmed arrival/entry as well, preventing a role-play line or future
-   * plan from unexpectedly taking over the chat screen.
+   * confirms a concrete present-tense handoff. A character's clear arrival
+   * claim can complete an explicit user “发起线下” request; otherwise both
+   * speakers still need concrete presence claims. Future plans and ordinary
+   * affection never switch the workspace by themselves.
    */
   const maybeAutoStartOfflineFromPresence = (input: {
     relationship: CharacterRelationship;
@@ -1628,7 +1628,9 @@ export default function AppChat({
     if (activeRelationship.id !== input.relationship.id || !input.relationship.enableProactiveOffline) return;
     if (isOfflineStoryActiveFor(input.relationship.id)) return;
     const evidence = deriveProactiveOfflinePresenceEvidence({ messages: input.messages });
-    if (evidence.state !== "co_location_confirmed") return;
+    const hasConfirmedHandoff = evidence.state === "co_location_confirmed"
+      || (evidence.userRequestedOffline && evidence.characterClaimedArrival);
+    if (!hasConfirmedHandoff) return;
     if (offlineAutoStartInFlightRef.current.has(input.relationship.id)) return;
 
     offlineAutoStartInFlightRef.current.add(input.relationship.id);

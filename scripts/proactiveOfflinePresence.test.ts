@@ -20,6 +20,7 @@ const confirmed = deriveProactiveOfflinePresenceEvidence({
 });
 assert.equal(confirmed.state, "co_location_confirmed");
 assert.equal(confirmed.userConfirmedArrival, true);
+assert.equal(confirmed.userRequestedOffline, false);
 assert.equal(confirmed.characterClaimedArrival, true);
 
 const downstairsHandoff = deriveProactiveOfflinePresenceEvidence({
@@ -36,6 +37,17 @@ const characterOnly = deriveProactiveOfflinePresenceEvidence({
 });
 assert.equal(characterOnly.state, "arrival_claimed");
 assert.equal(characterOnly.userConfirmedArrival, false);
+assert.equal(characterOnly.userRequestedOffline, false);
+
+const explicitHandoff = deriveProactiveOfflinePresenceEvidence({
+  messages: [
+    message("u-4", "user", "发起线下见面！", 11),
+    message("c-6", "character", "我就站在你面前，还要怎么发起？", 12),
+  ],
+});
+assert.equal(explicitHandoff.state, "arrival_claimed");
+assert.equal(explicitHandoff.userRequestedOffline, true);
+assert.equal(explicitHandoff.characterClaimedArrival, true);
 
 const futurePlan = deriveProactiveOfflinePresenceEvidence({
   messages: [
