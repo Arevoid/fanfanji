@@ -26,6 +26,15 @@ export interface IndexedDbHealthEntry {
   records: number;
 }
 
+export interface IndexedDbResourceHealthEntry {
+  database: string;
+  store: string;
+  stored: number;
+  referenced: number;
+  orphaned: number;
+  missing: number;
+}
+
 export interface StorageHealthFinding {
   key: string;
   kind: "invalid-json" | "duplicate-id" | "orphan-reference";
@@ -37,6 +46,7 @@ export interface StorageHealthReport {
   checkedCollections: number;
   findings: StorageHealthFinding[];
   indexedDb: IndexedDbHealthEntry[];
+  resources: IndexedDbResourceHealthEntry[];
 }
 
 const HEALTH_COLLECTION_KEYS = [
@@ -49,6 +59,8 @@ const HEALTH_COLLECTION_KEYS = [
   storageKeys.diaryEntries,
   storageKeys.forumThreads,
   storageKeys.forumReplies,
+  storageKeys.forumProfiles,
+  storageKeys.imageGenerationRecords,
 ] as const;
 
 function inspectStorageHealth(storage: Storage): StorageHealthReport {
@@ -102,21 +114,150 @@ function inspectStorageHealth(storage: Storage): StorageHealthReport {
   reportMissingReferences(storageKeys.offlineStories, "relationId", storageKeys.characterRelationships, "线下关系");
   reportMissingReferences(storageKeys.forumReplies, "threadId", storageKeys.forumThreads, "论坛主题");
   reportMissingReferences(storageKeys.moments, "characterId", storageKeys.characters, "角色");
-  return { checkedCollections, findings, indexedDb: [] };
+  return { checkedCollections, findings, indexedDb: [], resources: [] };
 }
 
-async function inspectIndexedDbHealth(): Promise<IndexedDbHealthEntry[]> {
+function collectReferencedAssetIds(storage: Storage): Set<string> {
+  const referenced = new Set<string>();
+  const fieldsByKey: Array<[string, string]> = [
+    [storageKeys.characters, "imageReferenceAssetId"],
+    [storageKeys.messages, "imageAssetId"],
+    [storageKeys.imageGenerationRecords, "imageAssetId"],
+    [storageKeys.forumProfiles, "avatarAssetId"],
+  ];
+  for (const [key, field] of fieldsByKey) {
+    const raw = storage.getItem(key);
+    if (!raw) continue;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) continue;
+      parsed.forEach((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+        const value = (entry as Record<string, unknown>)[field];
+        if (typeof value === "string" && value.length > 0) referenced.add(value);
+      });
+    } catch {
+      // The collection-level scan reports invalid JSON separately.
+    }
+  }
+  return referenced;
+}
+
+function getExistingDatabaseNames(): Promise<Set<string>> {
+  if (typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function") return Promise.resolve(new Set());
+  return indexedDB.databases()
+    .then((databases) => new Set(databases
+      .map((database) => database.name)
+      .filter((name): name is string => typeof name === "string")))
+    .catch(() => new Set());
+}
+
+function readStoreKeys(databaseName: string, storeName: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    const request = indexedDB.open(databaseName);
+    request.onsuccess = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(storeName)) {
+        database.close();
+        resolve([]);
+        return;
+      }
+      const transaction = database.transaction(storeName, "readonly");
+      const keysRequest = transaction.objectStore(storeName).getAllKeys();
+      keysRequest.onsuccess = () => {
+        database.close();
+        resolve(keysRequest.result
+          .filter((key): key is string => typeof key === "string" && key.length > 0));
+      };
+      keysRequest.onerror = () => {
+        database.close();
+        resolve([]);
+      };
+    };
+    request.onerror = () => resolve([]);
+    request.onblocked = () => resolve([]);
+  });
+}
+
+function readStickerGroupReferences(databaseName: string): Promise<Set<string>> {
+  return new Promise((resolve) => {
+    const request = indexedDB.open(databaseName);
+    request.onsuccess = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains("stickerGroups")) {
+        database.close();
+        resolve(new Set());
+        return;
+      }
+      const transaction = database.transaction("stickerGroups", "readonly");
+      const groupsRequest = transaction.objectStore("stickerGroups").getAll();
+      groupsRequest.onsuccess = () => {
+        const ids = new Set<string>();
+        for (const group of groupsRequest.result || []) {
+          if (!group || typeof group !== "object" || !Array.isArray((group as { stickers?: unknown }).stickers)) continue;
+          for (const sticker of (group as { stickers: unknown[] }).stickers) {
+            if (!sticker || typeof sticker !== "object") continue;
+            const id = (sticker as { id?: unknown }).id;
+            if (typeof id === "string" && id.length > 0) ids.add(id);
+          }
+        }
+        database.close();
+        resolve(ids);
+      };
+      groupsRequest.onerror = () => {
+        database.close();
+        resolve(new Set());
+      };
+    };
+    request.onerror = () => resolve(new Set());
+    request.onblocked = () => resolve(new Set());
+  });
+}
+
+async function inspectIndexedDbResources(storage: Storage, existingNames: Set<string>): Promise<IndexedDbResourceHealthEntry[]> {
+  const resources: IndexedDbResourceHealthEntry[] = [];
+  if (existingNames.has("FanfanImageAssets")) {
+    const storedIds = new Set(await readStoreKeys("FanfanImageAssets", "images"));
+    const referencedIds = collectReferencedAssetIds(storage);
+    resources.push({
+      database: "FanfanImageAssets",
+      store: "images",
+      stored: storedIds.size,
+      referenced: referencedIds.size,
+      orphaned: [...storedIds].filter((id) => !referencedIds.has(id)).length,
+      missing: [...referencedIds].filter((id) => !storedIds.has(id)).length,
+    });
+  }
+  if (existingNames.has("StickerAppDB")) {
+    const storedIds = new Set(await readStoreKeys("StickerAppDB", "stickerImages"));
+    const referencedIds = await readStickerGroupReferences("StickerAppDB");
+    resources.push({
+      database: "StickerAppDB",
+      store: "stickerImages",
+      stored: storedIds.size,
+      referenced: referencedIds.size,
+      orphaned: [...storedIds].filter((id) => !referencedIds.has(id)).length,
+      missing: [...referencedIds].filter((id) => !storedIds.has(id)).length,
+    });
+  }
+  return resources;
+}
+
+async function inspectIndexedDbHealth(existingDatabaseNames?: Set<string>): Promise<IndexedDbHealthEntry[]> {
   if (typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function") return [];
   const knownNames = new Set([
+    "FanfanImageAssets",
+    "StickerAppDB",
     "FanfanjiOfflineStoryDB",
     "FanfanjiReadingDB",
     "FanfanjiReadingCoverDB",
     "FanfanjiReadingMetadataDB",
   ]);
-  const databases = await indexedDB.databases().catch(() => []);
-  const existingNames = databases
-    .map((database) => database.name)
-    .filter((name): name is string => typeof name === "string" && knownNames.has(name));
+  const existingNames = existingDatabaseNames
+    ? [...existingDatabaseNames].filter((name) => knownNames.has(name))
+    : (await indexedDB.databases().catch(() => []))
+      .map((database) => database.name)
+      .filter((name): name is string => typeof name === "string" && knownNames.has(name));
   const results: IndexedDbHealthEntry[] = [];
   await Promise.all(existingNames.map(async (name) => {
     const entry = await new Promise<IndexedDbHealthEntry | null>((resolve) => {
@@ -189,8 +330,12 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
   const dataSchemaVersion = readString("phone_data_schema_version");
   const health = typeof window !== "undefined"
     ? inspectStorageHealth(window.localStorage)
-    : { checkedCollections: 0, findings: [], indexedDb: [] };
-  health.indexedDb = await inspectIndexedDbHealth();
+    : { checkedCollections: 0, findings: [], indexedDb: [], resources: [] };
+  const existingDatabaseNames = await getExistingDatabaseNames();
+  health.indexedDb = await inspectIndexedDbHealth(existingDatabaseNames);
+  health.resources = typeof window !== "undefined"
+    ? await inspectIndexedDbResources(window.localStorage, existingDatabaseNames)
+    : [];
   return {
     localStorageBytes,
     localStorageEntries: entries,

@@ -72,7 +72,7 @@ import {
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../features/chat/styles/liquidGlassDefaults";
 import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
-import { buildSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb } from "../features/settings/systemBackup";
+import { buildSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb, splitSystemBackupJson } from "../features/settings/systemBackup";
 import { SYSTEM_BACKUP_VERSION } from "../features/settings/systemBackup";
 import { writeString } from "../core/storage/storageAdapter";
 import { storageKeys } from "../core/storage/storageKeys";
@@ -293,7 +293,7 @@ async function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][
       console.warn("Unable to include the durable offline-story copy in this backup.", error);
     }
   }
-  const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
+  const blob = new Blob(splitSystemBackupJson(JSON.stringify(backupData, null, 2)), { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");

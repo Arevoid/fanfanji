@@ -31,6 +31,7 @@ import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { collectOfflineWorldBookContext, formatOfflineWorldBookEntries } from "../features/offline/prompts/offlineWorldBookContext";
 import { applyOfflineStoryRegeneration, prepareOfflineStoryRegeneration } from "../domain/offlineStory/offlineStoryRegeneration";
 import { createOfflineGroupParticipantMemories } from "../features/offline/services/offlineGroupMemorySync";
+import { canAccessOfflineStoryFromCurrentRelation, isGroupOfflineStory as isGroupOfflineStoryScope, resolveOfflineRelationChoices } from "../features/offline/services/offlineStoryWorkspaceScope";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import type { Appointment } from "../domain/schedule/scheduleTypes";
@@ -127,35 +128,15 @@ export default function AppOffline({
     return selectableCharacters[0]?.id || "";
   });
   const activeIdentityId = settings.activeIdentityId || "identity-1";
-  const belongsToActiveIdentity = (ownerIdentityId?: string) =>
-    (ownerIdentityId || "identity-1") === activeIdentityId;
-  const isGroupOfflineStory = (story: OfflineStory) => {
-    const owner = characters.find((character) => character.id === story.characterId);
-    return Boolean(
-      owner?.isGroupChat
-      || (!story.relationId && (story.characterIds?.length || 0) > 1),
-    );
-  };
-  const relationChoices = Array.from(new Map(
-    relationships
-      .filter((relation) => relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId)
-      .map((relation) => [`${relation.userIdentityId}\u0000${relation.characterId}`, relation]),
-  ).values());
-  const canAccessStoryFromCurrentRelation = (story: OfflineStory) => {
-    const storyCharacter = characters.find((character) => character.id === story.characterId);
-    // Group stories are owned by the group container and intentionally have no
-    // direct relationship. They still must belong to the active identity.
-    if (isGroupOfflineStory(story)) {
-      return Boolean(storyCharacter?.isGroupChat && belongsToActiveIdentity(storyCharacter.ownerIdentityId));
-    }
-    // Every direct story must be owned by the selected current relation. A
-    // missing relationId is legacy direct data and is not opened cross-identity.
-    return Boolean(
-      story.relationId
-      && story.relationId === selectedRelationId
-      && relationChoices.some((relation) => relation.id === story.relationId),
-    );
-  };
+  const isGroupOfflineStory = (story: OfflineStory) => isGroupOfflineStoryScope(story, characters);
+  const relationChoices = resolveOfflineRelationChoices(relationships, selectedCharId, activeIdentityId);
+  const canAccessStoryFromCurrentRelation = (story: OfflineStory) => canAccessOfflineStoryFromCurrentRelation({
+    story,
+    characters,
+    selectedRelationId,
+    relationChoices,
+    activeIdentityId,
+  });
   const [selectedRelationId, setSelectedRelationId] = useState<string>(() => activeChatRelationId || "");
   useEffect(() => {
     const preferred = activeChatRelationId && relationships.some((relation) => relation.id === activeChatRelationId && relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId)

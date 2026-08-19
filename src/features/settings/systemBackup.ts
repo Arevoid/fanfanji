@@ -8,6 +8,7 @@ import { flushReadingCoStoryStore } from "../../core/storage/repositories/readin
 export const SYSTEM_BACKUP_FORMAT = "fanfanji-system-backup" as const;
 export const SYSTEM_BACKUP_VERSION = 3 as const;
 export const SYSTEM_BACKUP_SUPPORTED_VERSIONS = new Set([2, SYSTEM_BACKUP_VERSION]);
+export const SYSTEM_BACKUP_JSON_CHUNK_SIZE = 256 * 1024;
 
 /** IndexedDB metadata used by the chat and social modules. Reading books and
  * binary assets remain in the dedicated Reading archive flow. */
@@ -35,6 +36,19 @@ export interface SystemBackupEnvelope {
   indexedDb: SystemBackupIndexedDb;
   /** Optional integrity marker. Legacy v2/v3 backups without it remain valid. */
   checksum?: string;
+}
+
+/** Splits the already-serialized backup into bounded Blob parts. The file
+ * format is unchanged; this only avoids constructing a second giant backing
+ * string when the browser creates a download Blob. */
+export function splitSystemBackupJson(serialized: string, chunkSize = SYSTEM_BACKUP_JSON_CHUNK_SIZE): string[] {
+  if (!Number.isFinite(chunkSize) || chunkSize <= 0) throw new Error("备份分块大小无效");
+  const normalizedChunkSize = Math.floor(chunkSize);
+  const chunks: string[] = [];
+  for (let offset = 0; offset < serialized.length; offset += normalizedChunkSize) {
+    chunks.push(serialized.slice(offset, offset + normalizedChunkSize));
+  }
+  return chunks.length > 0 ? chunks : [""];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

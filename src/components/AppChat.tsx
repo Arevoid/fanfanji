@@ -108,7 +108,7 @@ import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from 
 import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
 import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryTranslations, saveDiaryEntries, saveDiaryGenerationTasks, saveDiaryShares, saveDiaryTranslations } from "../core/storage/repositories/diaryRepository";
 import { cleanupDiaryForRelations } from "../domain/diary/diaryCleanup";
-import { useBackgroundScheduler } from "../core/scheduler/useBackgroundScheduler";
+import { useProactiveChatScheduler } from "../features/chat/hooks/useProactiveChatScheduler";
 import { Button, Card, Modal } from "./ui";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
@@ -2131,14 +2131,6 @@ export default function AppChat({
     });
   };
 
-  useBackgroundScheduler({
-    id: "chat-proactive-catchup",
-    enabled: activeRelationships.length > 0,
-    intervalMs: 15 * 60 * 1000,
-    initialDelayMs: 0,
-    run: runProactiveCatchupPass,
-  });
-
   // Background proactive check (every minute). The scheduler owns the timer
   // and prevents overlapping passes; the trigger policy below is unchanged.
   const runBackgroundProactivePass = async () => {
@@ -2215,12 +2207,10 @@ export default function AppChat({
       await checkAndTriggerCharacterMoments();
   };
 
-  useBackgroundScheduler({
-    id: "chat-background-proactive",
+  useProactiveChatScheduler({
     enabled: activeRelationships.length > 0,
-    intervalMs: 60000,
-    initialDelayMs: 3000,
-    run: runBackgroundProactivePass,
+    runCatchupPass: runProactiveCatchupPass,
+    runBackgroundPass: runBackgroundProactivePass,
   });
 
   // Calling timer
@@ -7626,8 +7616,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           {/* Active Chat Messages body */}
           <div className={`chat-content-scope chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} relative flex min-h-0 flex-1 flex-col`}>
           <MessageList
+            key={`${activeChatCharId ?? "none"}:${activeRelationship?.id ?? activeChatRelationId ?? "none"}:${isOfflineModeActive ? "offline" : "online"}`}
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
+            renderWindowSize={120}
             className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-4 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg

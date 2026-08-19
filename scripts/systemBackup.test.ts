@@ -4,6 +4,7 @@ import {
   buildSystemBackup,
   parseSystemBackup,
   restoreSystemBackupIndexedDb,
+  splitSystemBackupJson,
 } from "../src/features/settings/systemBackup";
 import { readingAssetDb } from "../src/core/storage/readingAssetDb";
 
@@ -40,6 +41,9 @@ assert.equal(parsed.legacy, false);
 assert.deepEqual(parsed.indexedDb["moments-v4"], moments);
 assert.equal(typeof backup.checksum, "string");
 assert.throws(() => parseSystemBackup({ ...backup, localStorage: { ...backup.localStorage, phone_worldbook_entries: "changed" } }), /校验失败/);
+const serializedBackup = "备份内容".repeat(20);
+assert.equal(splitSystemBackupJson(serializedBackup, 7).join(""), serializedBackup);
+assert.throws(() => splitSystemBackupJson(serializedBackup, 0), /分块大小无效/);
 
 const legacy = parseSystemBackup({
   phone_worldbook_entries: JSON.stringify([{ id: "legacy-world" }]),
