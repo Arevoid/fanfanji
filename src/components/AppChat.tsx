@@ -107,6 +107,7 @@ import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from 
 import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
 import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryTranslations, saveDiaryEntries, saveDiaryGenerationTasks, saveDiaryShares, saveDiaryTranslations } from "../core/storage/repositories/diaryRepository";
 import { cleanupDiaryForRelations } from "../domain/diary/diaryCleanup";
+import { useBackgroundScheduler } from "../core/scheduler/useBackgroundScheduler";
 import { Button, Card, Modal } from "./ui";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
@@ -2129,12 +2130,9 @@ export default function AppChat({
     });
   }, [activeRelationships, characters, relationships]);
 
-  // Background proactive check (every minute)
-  useEffect(() => {
-    const initialMomentCheck = setTimeout(() => {
-      void checkAndTriggerCharacterMoments();
-    }, 3000);
-    const checkProactive = setInterval(() => {
+  // Background proactive check (every minute). The scheduler owns the timer
+  // and prevents overlapping passes; the trigger policy below is unchanged.
+  const runBackgroundProactivePass = async () => {
       const now = new Date();
       const hh = now.getHours().toString().padStart(2, "0");
       const mm = now.getMinutes().toString().padStart(2, "0");
@@ -2205,13 +2203,16 @@ export default function AppChat({
       });
 
       // Run character moments check
-      void checkAndTriggerCharacterMoments();
-    }, 60000);
-    return () => {
-      clearTimeout(initialMomentCheck);
-      clearInterval(checkProactive);
-    };
-  }, [activeRelationships, characters, moments, relationships]);
+      await checkAndTriggerCharacterMoments();
+  };
+
+  useBackgroundScheduler({
+    id: "chat-background-proactive",
+    enabled: activeRelationships.length > 0,
+    intervalMs: 60000,
+    initialDelayMs: 3000,
+    run: runBackgroundProactivePass,
+  });
 
   // Calling timer
   useEffect(() => {

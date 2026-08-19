@@ -38,6 +38,8 @@ assert.equal(fullBackup.localStorage.phone_reading_analysis_store_v1, JSON.strin
 const parsed = parseSystemBackup(backup);
 assert.equal(parsed.legacy, false);
 assert.deepEqual(parsed.indexedDb["moments-v4"], moments);
+assert.equal(typeof backup.checksum, "string");
+assert.throws(() => parseSystemBackup({ ...backup, localStorage: { ...backup.localStorage, phone_worldbook_entries: "changed" } }), /校验失败/);
 
 const legacy = parseSystemBackup({
   phone_worldbook_entries: JSON.stringify([{ id: "legacy-world" }]),

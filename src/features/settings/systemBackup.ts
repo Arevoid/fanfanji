@@ -28,6 +28,8 @@ export interface SystemBackupEnvelope {
   exportedAt: number;
   localStorage: SystemBackupLocalStorage;
   indexedDb: SystemBackupIndexedDb;
+  /** Optional integrity marker. Legacy v2/v3 backups without it remain valid. */
+  checksum?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -36,6 +38,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function checksumPayload(value: Pick<SystemBackupEnvelope, "format" | "version" | "exportedAt" | "localStorage" | "indexedDb">): string {
+  const serialized = JSON.stringify(value);
+  let hash = 2166136261;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 function readLocalStorage(storage: Storage, keys: readonly string[]): SystemBackupLocalStorage {
@@ -70,7 +82,7 @@ export async function buildSystemBackup(
     localStorageAfterFlush[key] ?? localStorageBeforeFlush[key] ?? null,
   ])) as SystemBackupLocalStorage;
 
-  return {
+  const envelope = {
     format: SYSTEM_BACKUP_FORMAT,
     version: SYSTEM_BACKUP_VERSION,
     exportedAt: Date.now(),
@@ -79,6 +91,7 @@ export async function buildSystemBackup(
       indexedDbEntries.filter(([, value]) => value !== null && value !== undefined).map(([key, value]) => [key, cloneJson(value)]),
     ),
   };
+  return { ...envelope, checksum: checksumPayload(envelope) };
 }
 
 /**
@@ -100,6 +113,17 @@ export function parseSystemBackup(value: unknown): {
       if (entry !== null && typeof entry !== "string") throw new Error("系统备份中的本地数据格式无效！");
       return [key, entry];
     })) as SystemBackupLocalStorage;
+    if (value.checksum !== undefined) {
+      if (typeof value.checksum !== "string" || value.checksum !== checksumPayload({
+        format: SYSTEM_BACKUP_FORMAT,
+        version: value.version as typeof SYSTEM_BACKUP_VERSION,
+        exportedAt: value.exportedAt as number,
+        localStorage,
+        indexedDb: value.indexedDb,
+      })) {
+        throw new Error("备份校验失败，文件可能已损坏或被修改！");
+      }
+    }
     return {
       localStorage,
       indexedDb: cloneJson(value.indexedDb),
