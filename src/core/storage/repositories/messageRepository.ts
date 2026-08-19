@@ -2,8 +2,28 @@ import type { Message } from "../../../types";
 import { storageKeys } from "../storageKeys";
 import { writeArray, readArray } from "./repositoryUtils";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
+import { readingAssetDb } from "../readingAssetDb";
+import { remove } from "../storageAdapter";
+
+const MESSAGE_METADATA_KEY = "messages-v4";
+let cachedMessages: Message[] | null = null;
+let metadataReady = false;
+let initializationPromise: Promise<StorageResult<Message[]>> | null = null;
+let writeQueue: Promise<void> = Promise.resolve();
+let mutationVersion = 0;
+
+const cloneMessages = (messages: Message[]): Message[] => typeof structuredClone === "function"
+  ? structuredClone(messages)
+  : JSON.parse(JSON.stringify(messages)) as Message[];
+
+const enqueueWrite = (messages: Message[]): Promise<void> => {
+  const snapshot = cloneMessages(messages);
+  writeQueue = writeQueue.catch(() => undefined).then(() => readingAssetDb.saveMetadataValue(MESSAGE_METADATA_KEY, snapshot));
+  return writeQueue;
+};
 
 export function loadMessages(fallback: Message[]): StorageResult<Message[]> {
+  if (metadataReady && cachedMessages) return { value: cloneMessages(cachedMessages), found: true, valid: true };
   const current = readArray<Message>(storageKeys.messages, fallback);
   if (current.found || !current.valid) return current;
 
@@ -16,5 +36,64 @@ export function loadMessages(fallback: Message[]): StorageResult<Message[]> {
 }
 
 export function saveMessages(messages: Message[]): StorageWriteResult {
+  if (typeof indexedDB !== "undefined") {
+    mutationVersion += 1;
+    cachedMessages = cloneMessages(messages);
+    metadataReady = true;
+    enqueueWrite(cachedMessages).catch((error) => console.warn("[storage] Failed to persist messages in IndexedDB.", error));
+    return { success: true };
+  }
   return writeArray(storageKeys.messages, messages);
+}
+
+export async function initializeMessages(fallback: Message[]): Promise<StorageResult<Message[]>> {
+  if (typeof indexedDB === "undefined") return loadMessages(fallback);
+  if (metadataReady && cachedMessages) return { value: cloneMessages(cachedMessages), found: true, valid: true };
+  if (initializationPromise) return initializationPromise;
+  const initializationMutationVersion = mutationVersion;
+  initializationPromise = (async () => {
+    try {
+      const stored = await readingAssetDb.loadMetadataValue<Message[]>(MESSAGE_METADATA_KEY);
+      if (mutationVersion !== initializationMutationVersion && cachedMessages) {
+        return { value: cloneMessages(cachedMessages), found: true, valid: true };
+      }
+      if (Array.isArray(stored)) {
+        cachedMessages = cloneMessages(stored);
+        metadataReady = true;
+        remove(storageKeys.messages);
+        remove(storageKeys.legacyMessages);
+        return { value: cloneMessages(stored), found: true, valid: true };
+      }
+      const legacy = readArray<Message>(storageKeys.messages, fallback);
+      const source = legacy.found && legacy.valid
+        ? legacy
+        : readArray<Message>(storageKeys.legacyMessages, fallback);
+      cachedMessages = cloneMessages(source.value);
+      metadataReady = true;
+      await enqueueWrite(cachedMessages);
+      if (source.found && source.valid) {
+        remove(storageKeys.messages);
+        remove(storageKeys.legacyMessages);
+      }
+      return { value: cloneMessages(source.value), found: source.found, valid: source.valid };
+    } catch (error) {
+      console.warn("[storage] Message IndexedDB initialization failed; using localStorage for this session.", error);
+      metadataReady = false;
+      return loadMessages(fallback);
+    }
+  })();
+  return initializationPromise;
+}
+
+export async function flushMessages(): Promise<StorageWriteResult> {
+  if (typeof indexedDB === "undefined") return { success: true };
+  try {
+    await writeQueue;
+    remove(storageKeys.messages);
+    remove(storageKeys.legacyMessages);
+    return { success: true };
+  } catch (error) {
+    const name = error && typeof error === "object" ? String((error as { name?: unknown }).name || "") : "";
+    return { success: false, error: name === "QuotaExceededError" ? "quota" : "write" };
+  }
 }

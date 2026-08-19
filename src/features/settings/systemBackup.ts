@@ -6,7 +6,8 @@ import { flushCoReadingStore } from "../../core/storage/repositories/readingCoRe
 import { flushReadingCoStoryStore } from "../../core/storage/repositories/readingCoStoryRepository";
 
 export const SYSTEM_BACKUP_FORMAT = "fanfanji-system-backup" as const;
-export const SYSTEM_BACKUP_VERSION = 2 as const;
+export const SYSTEM_BACKUP_VERSION = 3 as const;
+export const SYSTEM_BACKUP_SUPPORTED_VERSIONS = new Set([2, SYSTEM_BACKUP_VERSION]);
 
 /** IndexedDB metadata used by the chat and social modules. Reading books and
  * binary assets remain in the dedicated Reading archive flow. */
@@ -92,7 +93,7 @@ export function parseSystemBackup(value: unknown): {
   if (!isRecord(value)) throw new Error("无效的备份文件格式！");
 
   if (value.format === SYSTEM_BACKUP_FORMAT) {
-    if (value.version !== SYSTEM_BACKUP_VERSION || !isRecord(value.localStorage) || !isRecord(value.indexedDb)) {
+    if (typeof value.version !== "number" || !SYSTEM_BACKUP_SUPPORTED_VERSIONS.has(value.version) || !isRecord(value.localStorage) || !isRecord(value.indexedDb)) {
       throw new Error("不支持的系统备份版本或格式！");
     }
     const localStorage: SystemBackupLocalStorage = Object.fromEntries(Object.entries(value.localStorage).map(([key, entry]) => {

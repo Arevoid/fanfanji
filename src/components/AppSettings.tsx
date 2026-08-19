@@ -57,6 +57,7 @@ import {
 } from "../features/settings/settingsNavigation";
 import { clearApplicationData } from "../features/settings/clearApplicationData";
 import { offlineStoryDb } from "../core/storage/offlineStoryDb";
+import { formatStorageBytes, inspectStorage, removeMigratedStorageCopies, type StorageDiagnostics } from "../core/storage/storageDiagnostics";
 import { mergeOfflineStoryCollections } from "../core/storage/repositories/offlineRepository";
 import { normalizeMosslandApiEndpoint } from "../features/voice/ttsConfig";
 import {
@@ -451,6 +452,18 @@ function snapshotLocalStorage(): Map<string, string> {
   return snapshot;
 }
 
+async function assertBackupStorageCapacity(entries: readonly [string, string | null][]): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.storage?.estimate) return;
+  const estimate = await navigator.storage.estimate();
+  if (!estimate.quota || estimate.usage === undefined) return;
+  const additionalBytes = entries
+    .filter(([key, value]) => key !== "phone_offline_stories" && typeof value === "string")
+    .reduce((total, [key, value]) => total + Math.max(0, (value?.length || 0) - (localStorage.getItem(key)?.length || 0)) * 2, 0);
+  if (estimate.usage + additionalBytes > estimate.quota * 0.95) {
+    throw new Error("浏览器本地存储空间不足，请先清理存储数据后再导入。线下故事会单独保存，不占用本地配置空间。");
+  }
+}
+
 export default function AppSettings({
   settings,
   bubbleStylePreset,
@@ -462,7 +475,16 @@ export default function AppSettings({
   onClose,
 }: AppSettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(null);
+  const [storageDiagnostics, setStorageDiagnostics] = useState<StorageDiagnostics | null>(null);
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
+
+  const refreshStorageDiagnostics = async () => {
+    try {
+      setStorageDiagnostics(await inspectStorage());
+    } catch (error) {
+      console.warn("Unable to inspect browser storage.", error);
+    }
+  };
   const effectiveBubbleStylePreset = bubbleStylePreset || settings.globalChatStylePreset || "default";
 
   // PWA states
@@ -3441,11 +3463,18 @@ export default function AppSettings({
                             }
 
                             if (confirm("确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置 and 世界书数据且不可撤销！")) {
+                              await assertBackupStorageCapacity(entries);
                               const snapshot = snapshotLocalStorage();
                               const writtenKeys: string[] = [];
+                              const previousOfflineStories = await offlineStoryDb.loadAll();
 
                               try {
                                 for (const [key, value] of entries) {
+                                  // Full offline stories are restored to
+                                  // IndexedDB below. Keeping them in
+                                  // LocalStorage duplicates the payload and
+                                  // is the direct cause of quota failures.
+                                  if (key === "phone_offline_stories") continue;
                                   if (typeof value === "string") {
                                     writtenKeys.push(key);
                                     localStorage.setItem(key, sanitizeSystemBackupValue(
@@ -3474,6 +3503,11 @@ export default function AppSettings({
                                   } catch (rollbackError) {
                                     console.error("Backup restore rollback failed:", rollbackError);
                                   }
+                                }
+                                try {
+                                  await offlineStoryDb.replaceAll(previousOfflineStories);
+                                } catch (offlineRollbackError) {
+                                  console.error("Backup restore offline-story rollback failed:", offlineRollbackError);
                                 }
                                 throw writeError;
                               }
@@ -3504,6 +3538,26 @@ export default function AppSettings({
                     />
                   </label>
                 </div>
+              </div>
+
+              <div className="settings-section-header">存储空间</div>
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">本地存储诊断</h3>
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">完整聊天、角色和线下故事优先保存在 IndexedDB，不再重复占用 LocalStorage。</p>
+                  </div>
+                  <button type="button" onClick={() => void refreshStorageDiagnostics()} className="rounded-[10px] bg-slate-100 px-3 py-2 text-[10px] font-bold text-slate-600">检查空间</button>
+                </div>
+                {storageDiagnostics && (
+                  <div className="rounded-[12px] bg-slate-50 p-3 text-[10px] text-slate-600 space-y-1">
+                    <div>LocalStorage：{formatStorageBytes(storageDiagnostics.localStorageBytes)}</div>
+                    <div>浏览器总占用：{storageDiagnostics.usage === undefined ? "不可用" : formatStorageBytes(storageDiagnostics.usage)} / {storageDiagnostics.quota === undefined ? "未知" : formatStorageBytes(storageDiagnostics.quota)}</div>
+                    <div>状态：{storageDiagnostics.pressure === "critical" ? "空间严重不足" : storageDiagnostics.pressure === "warning" ? "空间偏高" : storageDiagnostics.pressure === "normal" ? "正常" : "未知"}</div>
+                    {storageDiagnostics.localStorageEntries.slice(0, 3).map((entry) => <div key={entry.key} className="truncate">最大项目：{entry.key}（{formatStorageBytes(entry.bytes)}）</div>)}
+                    <button type="button" onClick={() => { const removed = removeMigratedStorageCopies(); void refreshStorageDiagnostics(); alert(removed.length ? `已清理 ${removed.length} 个已迁移副本。` : "没有可清理的已迁移副本。"); }} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">清理已迁移副本</button>
+                  </div>
+                )}
               </div>
 
               <div className="settings-section-header">桌面模块</div>

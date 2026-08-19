@@ -6,14 +6,14 @@ import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storag
 import { remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
-import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
+import { initializeMessages, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import { initializeMomentRepository, loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
 import { removeMemoriesForMoment } from "./features/moments/services/momentMemory";
 import { sanitizeMomentPublishText } from "./features/moments/services/momentContent";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
-import { loadOfflineStories, mergeOfflineStoryCollections, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
+import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
 import { offlineStoryDb } from "./core/storage/offlineStoryDb";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
@@ -435,6 +435,17 @@ export default function App() {
     !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
   ));
 
+  useEffect(() => {
+    let active = true;
+    void initializeMessages(DEFAULT_MESSAGES).then((result) => {
+      if (!active || !result.valid) return;
+      setMessages(result.value.filter((message) =>
+        !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
+      ));
+    });
+    return () => { active = false; };
+  }, []);
+
   const [moments, setMoments] = useState<Moment[]>(() => loadMoments([]).value);
 
   const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
@@ -513,7 +524,6 @@ export default function App() {
   const relationshipsPersistenceReady = useRef(false);
 
   const persistOfflineStories = async (stories: OfflineStory[], changedStory?: OfflineStory): Promise<boolean> => {
-    const localResult = saveOfflineStories(stories);
     let durableSuccess = false;
     try {
       if (changedStory) await offlineStoryDb.save(changedStory);
@@ -522,8 +532,7 @@ export default function App() {
     } catch (error) {
       console.error("Failed to save offline stories to IndexedDB:", error);
     }
-    if (!localResult.success) console.error("Failed to save offline stories to localStorage:", localResult.error);
-    return localResult.success || durableSuccess;
+    return durableSuccess;
   };
 
   const replaceOfflineStories = (stories: readonly OfflineStory[]): void => {
@@ -534,8 +543,6 @@ export default function App() {
     });
     offlineStoriesRef.current = nextStories;
     setOfflineStories(nextStories);
-    const localResult = saveOfflineStories(nextStories);
-    if (!localResult.success) console.error("Failed to save offline stories to localStorage:", localResult.error);
     if (offlineStoriesHydratedRef.current) {
       void offlineStoryDb.replaceAll(nextStories).catch((error) => {
         console.error("Failed to replace offline stories in IndexedDB:", error);
@@ -566,8 +573,9 @@ export default function App() {
       offlineStoriesHydratedRef.current = true;
       offlineStoriesRef.current = merged;
       setOfflineStories(merged);
-      const localResult = saveOfflineStories(merged);
-      if (!localResult.success) console.warn("Offline stories exceed localStorage capacity; IndexedDB remains authoritative.");
+      // IndexedDB is authoritative for full offline-story payloads. Remove
+      // the legacy LocalStorage copy after the merge completes.
+      removeStoredValue("phone_offline_stories");
       await offlineStoryDb.replaceAll(merged);
     }).catch((error) => {
       offlineStoriesHydratedRef.current = true;
@@ -2587,14 +2595,20 @@ export default function App() {
     if (!identity) return;
     setActiveChatCharId(null);
     setActiveChatRelationId(null);
-    setSettings((previous) => ({
-      ...previous,
+    const nextSettings = {
+      ...settingsRef.current,
       activeIdentityId: identity.id,
       name: identity.name,
       avatar: identity.avatar,
       signature: identity.signature || "",
       bio: identity.bio || "",
-    }));
+    };
+    settingsRef.current = nextSettings;
+    setSettingsState(nextSettings);
+    const saved = saveSettings(nextSettings);
+    if (!saved.success) {
+      alert("身份已切换，但当前浏览器存储空间不足，刷新页面后可能无法保留本次切换。请先清理存储空间。");
+    }
   };
   // Keep forum activity processing alive while the user navigates between apps.
   // The engine still respects document visibility and persists all pending work.
