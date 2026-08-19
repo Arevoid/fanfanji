@@ -908,9 +908,10 @@ export default function AppChat({
   const getPendingOfflineHandoff = (): OfflineStory | undefined => {
     const pending = selectPendingOfflineHandoffStory({
       stories: offlineStories,
-      relationId: activeRelationship?.id,
-      characterId: activeRelationship?.characterId,
-      conversationId: activeRelationship?.conversationId,
+      relationId: activeCharacter?.isGroupChat ? undefined : activeRelationship?.id,
+      groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
+      characterId: activeCharacter?.isGroupChat ? activeCharacter.id : activeRelationship?.characterId,
+      conversationId: activeCharacter?.isGroupChat ? `group:${activeCharacter.id}` : activeRelationship?.conversationId,
     });
     if (pending) return pending;
 
@@ -920,8 +921,12 @@ export default function AppChat({
     const now = Date.now();
     const recentUntrackedStory = [...offlineStories]
       .filter((story) => !story.onlineHandoff && story.mode === "continue" && Boolean(story.archivedAt))
-      .filter((story) => story.relationId === activeRelationship?.id && story.characterId === activeRelationship?.characterId)
-      .filter((story) => !activeRelationship?.conversationId || !story.conversationId || story.conversationId === activeRelationship.conversationId)
+      .filter((story) => activeCharacter?.isGroupChat
+        ? story.relationId === undefined && story.characterId === activeCharacter.id && story.conversationId === `group:${activeCharacter.id}`
+        : story.relationId === activeRelationship?.id && story.characterId === activeRelationship?.characterId)
+      .filter((story) => activeCharacter?.isGroupChat
+        ? true
+        : !activeRelationship?.conversationId || !story.conversationId || story.conversationId === activeRelationship.conversationId)
       .filter((story) => now - (story.archivedAt || 0) >= 0 && now - (story.archivedAt || 0) <= 2 * 60 * 60 * 1000)
       .filter((story) => currentChatMessages.filter((message) => message.sender === "character" && message.timestamp > (story.archivedAt || 0)).length <= 3)
       .sort((left, right) => (right.archivedAt || 0) - (left.archivedAt || 0))[0];
@@ -978,7 +983,7 @@ export default function AppChat({
     });
   };
   const getInterveningOfflineHandoff = (currentOnlineAt?: number) => {
-    if (!currentOnlineAt || !activeRelationship?.id) return undefined;
+    if (!currentOnlineAt || (!activeRelationship?.id && !activeCharacter?.isGroupChat)) return undefined;
     const currentDate = new Date(currentOnlineAt);
     const currentDayStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
     const previousOnlineAt = [...currentChatMessages]
@@ -987,7 +992,8 @@ export default function AppChat({
     return selectInterveningOfflineHandoff({
       stories: offlineStories,
       memories: memories || [],
-      relationId: activeRelationship.id,
+      relationId: activeCharacter?.isGroupChat ? undefined : activeRelationship?.id,
+      groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
       after: previousOnlineAt,
       before: currentOnlineAt,
     });
@@ -1096,7 +1102,7 @@ export default function AppChat({
         ? message.relationId === activeRelationship.id
         : message.characterId === groupId && activeCharacter?.isGroupChat,
       );
-      const interveningOfflineHandoff = relationId ? getInterveningOfflineHandoff(triggerMessage.timestamp) : undefined;
+      const interveningOfflineHandoff = relationId || activeCharacter?.isGroupChat ? getInterveningOfflineHandoff(triggerMessage.timestamp) : undefined;
       const latestOfflineMemory = interveningOfflineHandoff?.memory || (relationId
         ? selectFreshOfflineHandoffMemory({
           memories: memories || [],
@@ -1104,7 +1110,7 @@ export default function AppChat({
           queryText: triggerMessage.content,
         })
         : undefined);
-      const pendingOfflineStory = relationId ? getPendingOfflineHandoff() : undefined;
+      const pendingOfflineStory = relationId || activeCharacter?.isGroupChat ? getPendingOfflineHandoff() : undefined;
       const offlineContinuityContext = pendingOfflineStory
         ? buildPendingOfflineTimelineHandoff(
           pendingOfflineStory,
@@ -1581,6 +1587,16 @@ export default function AppChat({
         : activeRelationship?.conversationId,
       // A group is only a container; the actual offline actors are its members.
       characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
+      ...(activeCharacter.isGroupChat ? {
+        participantSnapshots: offlineParticipantIds
+          .map((participantId) => characters.find((character) => character.id === participantId))
+          .filter((character): character is Character => Boolean(character))
+          .map((character) => ({
+            id: character.id,
+            name: character.remark || character.name,
+            avatar: character.avatar,
+          })),
+      } : {}),
       title: appointment
         ? `${getCurrentAppointmentProposal(appointment)?.activity || appointment.title} - ${new Date().toLocaleDateString()}`
         : `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,

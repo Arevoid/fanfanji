@@ -877,6 +877,12 @@ export interface OfflineStory {
   relationId?: string;
   conversationId?: string;
   characterIds?: string[];
+  /** Frozen display data for multiplayer story cards; live characters remain authoritative for prompts. */
+  participantSnapshots?: Array<{
+    id: string;
+    name: string;
+    avatar?: string;
+  }>;
   title: string;
   createdAt: number;
   updatedAt: number;

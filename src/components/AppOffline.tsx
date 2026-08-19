@@ -112,9 +112,9 @@ export default function AppOffline({
   openStoryId = null,
   onOpenOfflineStoryHandled,
 }: AppOfflineProps) {
-  // Workspace navigation may open a group container, while the creation flow
-  // remains direct-character-only for now. Keeping these lists separate avoids
-  // broadening new-story behavior while allowing existing group stories to run.
+  // The workspace can host both direct and group story containers. Creation
+  // keeps the two scopes explicit so a group never falls through a direct
+  // relationship path.
   const selectableCharacters = characters.filter((character) => !character.isContactInstance);
   const creationCharacters = selectableCharacters.filter((character) => !character.isGroupChat);
   const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
@@ -127,6 +127,15 @@ export default function AppOffline({
     return selectableCharacters[0]?.id || "";
   });
   const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const belongsToActiveIdentity = (ownerIdentityId?: string) =>
+    (ownerIdentityId || "identity-1") === activeIdentityId;
+  const isGroupOfflineStory = (story: OfflineStory) => {
+    const owner = characters.find((character) => character.id === story.characterId);
+    return Boolean(
+      owner?.isGroupChat
+      || (!story.relationId && (story.characterIds?.length || 0) > 1),
+    );
+  };
   const relationChoices = Array.from(new Map(
     relationships
       .filter((relation) => relation.characterId === selectedCharId && relation.userIdentityId === activeIdentityId)
@@ -134,8 +143,11 @@ export default function AppOffline({
   ).values());
   const canAccessStoryFromCurrentRelation = (story: OfflineStory) => {
     const storyCharacter = characters.find((character) => character.id === story.characterId);
-    // Group containers keep their existing shared/group routing semantics.
-    if (storyCharacter?.isGroupChat) return true;
+    // Group stories are owned by the group container and intentionally have no
+    // direct relationship. They still must belong to the active identity.
+    if (isGroupOfflineStory(story)) {
+      return Boolean(storyCharacter?.isGroupChat && belongsToActiveIdentity(storyCharacter.ownerIdentityId));
+    }
     // Every direct story must be owned by the selected current relation. A
     // missing relationId is legacy direct data and is not opened cross-identity.
     return Boolean(
@@ -165,9 +177,12 @@ export default function AppOffline({
 
   useEffect(() => {
     if (showCreateModal) {
-      setSelectedCharIds([selectedCharId]);
+      const selectedCharacter = selectableCharacters.find((character) => character.id === selectedCharId);
+      setSelectedCharIds(selectedCharacter?.isGroupChat
+        ? (selectedCharacter.memberIds || []).filter((id) => characters.some((character) => character.id === id))
+        : [selectedCharId]);
     }
-  }, [showCreateModal, selectedCharId]);
+  }, [showCreateModal, selectedCharId, characters]);
   const [newMode, setNewMode] = useState<"director" | "continue" | "if">("director");
   const [newIfPrompt, setNewIfPrompt] = useState("");
   const [newStartFromChat, setNewStartFromChat] = useState<boolean>(false);
@@ -212,7 +227,7 @@ export default function AppOffline({
       setSelectedCharId(selectableCharacters[0]?.id || "");
     }
     if (activeStoryRef.current && (
-      (!characters.find((character) => character.id === activeStoryRef.current?.characterId)?.isGroupChat
+      (!isGroupOfflineStory(activeStoryRef.current)
         && !selectableCharacterIds.has(resolveOfflineStoryCharacterId(activeStoryRef.current, characters)))
       || !canAccessStoryFromCurrentRelation(activeStoryRef.current)
     )) {
@@ -462,6 +477,13 @@ export default function AppOffline({
       showToast("此线下剧情属于另一个人设关系，不能跨身份进入。");
       return false;
     }
+    // A requested story is authoritative: restore its group container before
+    // rendering so the directory selection cannot remain on the first role.
+    const storyContainer = characters.find((character) => character.id === story.characterId);
+    if (storyContainer && selectableCharacters.some((character) => character.id === storyContainer.id)) {
+      setSelectedCharId(storyContainer.id);
+      if (isGroupOfflineStory(story)) setSelectedRelationId("");
+    }
     activeStoryRef.current = story;
     setActiveStory(story);
     if (story.relationId) {
@@ -598,13 +620,21 @@ export default function AppOffline({
   // Create new offline story
   const handleCreateStory = () => {
     const selectedCharacter = characters.find((character) => character.id === selectedCharId);
-    if (!selectedCharId || selectedCharacter?.isGroupChat) {
+    if (!selectedCharId || !selectedCharacter) {
       showToast("请先选择一个角色！");
       return;
     }
-    const relationship = relationChoices.find((relation) => relation.id === selectedRelationId);
-    if (!relationship) {
-      showToast("Please select the current identity's relationship first.");
+    const isGroupStory = Boolean(selectedCharacter.isGroupChat);
+    const participantIds = isGroupStory ? selectedCharIds : [selectedCharId];
+    if (isGroupStory && participantIds.length < 2) {
+      showToast("多人线下至少需要选择两名参与角色。");
+      return;
+    }
+    const relationship = isGroupStory
+      ? undefined
+      : relationChoices.find((relation) => relation.id === selectedRelationId);
+    if (!isGroupStory && !relationship) {
+      showToast("请先选择当前身份的角色关系。");
       return;
     }
 
@@ -619,12 +649,16 @@ export default function AppOffline({
     if (newStartFromChat) {
       // Prefer the live app state: it includes the latest message even before a
       // persistence effect has finished. Local storage remains a fallback.
-      const liveMessages = messages.filter(m => m.relationId === selectedRelationId);
+      const liveMessages = isGroupStory
+        ? messages.filter((message) => message.characterId === selectedCharId && !message.isOffline)
+        : messages.filter(m => m.relationId === selectedRelationId);
       const storedMessages = liveMessages.length === 0 ? loadMessages([]) : null;
       if (liveMessages.length > 0 || storedMessages?.found) {
         try {
           const parsed = liveMessages.length > 0 ? liveMessages : storedMessages?.value || [];
-          const relationMessages = parsed.filter(m => m.relationId === selectedRelationId);
+          const relationMessages = isGroupStory
+            ? parsed.filter((message) => message.characterId === selectedCharId && !message.isOffline)
+            : parsed.filter(m => m.relationId === selectedRelationId);
           const relevantMsgs = relationMessages
             .slice(-OFFLINE_HANDOFF_MESSAGE_LIMIT);
           
@@ -635,10 +669,20 @@ export default function AppOffline({
           }));
           importedContext = {
             messages: importedMessages,
-            memories: memories.filter(m => m.relationId === selectedRelationId).map(m => m.content),
+            memories: isGroupStory
+              ? memories
+                .filter((memory) => participantIds.some((participantId) =>
+                  relationships.some((relation) => relation.id === memory.relationId
+                    && relation.characterId === participantId
+                    && relation.userIdentityId === activeIdentityId),
+                ))
+                .map((memory) => memory.content)
+              : memories.filter(m => m.relationId === selectedRelationId).map(m => m.content),
             handoffFacts: buildOfflineHandoffFacts(relationMessages),
             worldBook: getLatestWorldBookEntries(worldBookEntries || [])
-              .filter(entry => isWorldBookEntryForCharacter(entry, selectedCharId))
+              .filter(entry => isGroupStory
+                ? isWorldBookEntryForAnyCharacter(entry, new Set(participantIds))
+                : isWorldBookEntryForCharacter(entry, selectedCharId))
               .map(entry => `${entry.title}: ${entry.content}`),
             importedAt: Date.now()
           };
@@ -651,25 +695,38 @@ export default function AppOffline({
     const newStory: OfflineStory = {
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: selectedCharId,
-      relationId: relationship.id,
-      conversationId: relationship.conversationId || getConversationId(relationship.id),
-      characterIds: [selectedCharId],
+      ...(relationship ? { relationId: relationship.id } : {}),
+      conversationId: isGroupStory
+        ? `group:${selectedCharacter.id}`
+        : relationship!.conversationId || getConversationId(relationship!.id),
+      characterIds: participantIds,
+      ...(isGroupStory ? {
+        participantSnapshots: storyCharsList.map((character) => ({
+          id: character.id,
+          name: character.remark || character.name,
+          avatar: character.avatar,
+        })),
+      } : {}),
       title: titleToUse,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: newMode,
       worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, selectedCharIds)),
+        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set(participantIds))),
       knowledgeSnapshot: Array.from(new Set([
         ...loadKnowledgeClaims().value
-          .filter((claim) => claim.relationId === relationship.id
+          .filter((claim) => !isGroupStory && claim.relationId === relationship!.id
             && claim.characterId === relationship.characterId
             && claim.userIdentityId === relationship.userIdentityId
             && claim.status === "active"
             && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
           .map((claim) => claim.statement),
         ...memories
-          .filter((memory) => memory.relationId === relationship.id && memory.isManual === true)
+          .filter((memory) => memory.isManual === true && (isGroupStory
+            ? participantIds.some((participantId) => relationships.some((relation) =>
+              relation.id === memory.relationId && relation.characterId === participantId && relation.userIdentityId === activeIdentityId,
+            ))
+            : memory.relationId === relationship!.id))
           .map((memory) => memory.content),
       ])),
       ifPrompt: newMode === "if" ? newIfPrompt : undefined,
@@ -677,15 +734,22 @@ export default function AppOffline({
       sourceChatMsgCount: newStartFromChat ? importedContext?.messages.length : undefined,
       importedContext,
       enableTimeAwareness: newStartFromChat
-        ? Boolean(characters.find(c => c.id === selectedCharId)?.enableTimeAwareness)
+        ? isGroupStory
+          ? participantIds.some((participantId) => Boolean(characters.find((character) => character.id === participantId)?.enableTimeAwareness))
+          : Boolean(characters.find(c => c.id === selectedCharId)?.enableTimeAwareness)
         : newTimeAwareness,
       // Imported chat is context only; newly written plot remains in this independent archive.
       messages: []
     };
 
     saveActiveStorySnapshot(newStory);
-    writeString(getOfflineModeStorageKey(relationship.id), "true");
-    writeString(getOfflineStoryStorageKey(relationship.id), newStory.id);
+    if (relationship) {
+      writeString(getOfflineModeStorageKey(relationship.id), "true");
+      writeString(getOfflineStoryStorageKey(relationship.id), newStory.id);
+    } else {
+      writeString(getOfflineGroupModeStorageKey(selectedCharacter.id), "true");
+      writeString(getOfflineGroupStoryStorageKey(selectedCharacter.id), newStory.id);
+    }
     setShowCreateModal(false);
 
     // Reset fields
@@ -1433,10 +1497,10 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
               </div>
 
               <button 
-                onClick={() => selectedChar && !selectedChar.isGroupChat && setShowCreateModal(true)}
-                disabled={!selectedChar || selectedChar.isGroupChat}
+                onClick={() => selectedChar && setShowCreateModal(true)}
+                disabled={!selectedChar}
                 className="w-8 h-8 rounded-full bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
-                title={selectedChar?.isGroupChat ? "群聊故事暂不支持从此处新建" : selectedChar ? "新建故事" : "请先在档案馆创建角色"}
+                title={selectedChar ? (selectedChar.isGroupChat ? "新建多人故事" : "新建故事") : "请先在档案馆创建角色"}
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -1545,6 +1609,16 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                   {charStories.map(story => {
                     const storyModeLabel = story.mode === "director" ? "导演" : story.mode === "if" ? "IF线" : "续写";
                     const storyModeColor = story.mode === "director" ? "bg-rose-50 text-rose-600 border-rose-200/60" : story.mode === "if" ? "bg-amber-50 text-amber-600 border-amber-200/60" : "bg-teal-50 text-teal-600 border-teal-200/60";
+                    const storyParticipantIds = resolveOfflineStoryCharacterIds(story, characters);
+                    const storyParticipants = storyParticipantIds
+                      .map((participantId) => characters.find((character) => character.id === participantId))
+                      .filter((character): character is Character => Boolean(character));
+                    const participantSnapshots = story.participantSnapshots || storyParticipants.map((character) => ({
+                      id: character.id,
+                      name: character.remark || character.name,
+                      avatar: character.avatar,
+                    }));
+                    const isMultiplayerStory = storyParticipantIds.length > 1;
                     return (
                       <div
                         key={story.id}
@@ -1582,6 +1656,30 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                             <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
                             <span>共 {story.messages.length} 段剧情记录</span>
                           </div>
+
+                          {isMultiplayerStory && (
+                            <div className="flex items-center gap-2 pt-1" aria-label={`参与角色：${participantSnapshots.map((participant) => participant.name).join("、")}`}>
+                              <div className="flex -space-x-2">
+                                {participantSnapshots.slice(0, 6).map((participant) => (
+                                  <img
+                                    key={participant.id}
+                                    src={participant.avatar || ""}
+                                    alt={participant.name}
+                                    title={participant.name}
+                                    className="h-7 w-7 rounded-full border-2 border-white bg-slate-100 object-cover shadow-sm"
+                                  />
+                                ))}
+                                {participantSnapshots.length > 6 && (
+                                  <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[9px] font-bold text-slate-600">
+                                    +{participantSnapshots.length - 6}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="min-w-0 truncate text-[10px] text-slate-500">
+                                {participantSnapshots.map((participant) => participant.name).join("、")}
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex flex-col items-end justify-between h-full space-y-4">
@@ -2129,7 +2227,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
 
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>
-        {showCreateModal && selectedChar && !selectedChar.isGroupChat && (
+        {showCreateModal && selectedChar && (
           <div className="app-viewport-overlay fixed inset-x-0 top-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
@@ -2151,8 +2249,15 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                 </button>
               </div>
 
-              <div className="space-y-3.5 text-xs">
+                <div className="space-y-3.5 text-xs">
                 <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">故事类型</label>
+                  <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-[10px] font-bold text-indigo-700">
+                    {selectedChar.isGroupChat ? `多人线下 · ${selectedChar.remark || selectedChar.name}` : "单人线下"}
+                  </div>
+                </div>
+
+                {!selectedChar.isGroupChat ? <div className="space-y-1">
                   <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">角色</label>
                   <select
                     value={selectedCharId}
@@ -2161,9 +2266,33 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                   >
                     {creationCharacters.map((character) => <option key={character.id} value={character.id}>{character.remark || character.name}</option>)}
                   </select>
-                </div>
+                </div> : (
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">参与角色</label>
+                    <div className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                      {(selectedChar.memberIds || []).map((memberId) => {
+                        const member = characters.find((character) => character.id === memberId);
+                        if (!member) return null;
+                        const checked = selectedCharIds.includes(member.id);
+                        return <label key={member.id} className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setSelectedCharIds((current) => checked
+                              ? current.filter((id) => id !== member.id)
+                              : [...current, member.id])}
+                            className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                          />
+                          <img src={member.avatar} alt="" className="h-5 w-5 rounded-full object-cover" />
+                          <span className="font-bold text-slate-700">{member.remark || member.name}</span>
+                        </label>;
+                      })}
+                    </div>
+                    <p className="text-[9px] text-slate-400">已选择 {selectedCharIds.length} 名参与角色，至少需要 2 名。</p>
+                  </div>
+                )}
 
-                <div className="space-y-1">
+                {!selectedChar.isGroupChat && <div className="space-y-1">
                   <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">当前身份关系</label>
                   <select
                     value={selectedRelationId}
@@ -2176,7 +2305,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                       return <option key={relation.id} value={relation.id}>{identity?.name || relation.userIdentityId}</option>;
                     })}
                   </select>
-                </div>
+                </div>}
 
                 {/* Title input */}
                 <div className="space-y-1">

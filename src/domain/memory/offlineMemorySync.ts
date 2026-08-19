@@ -46,11 +46,12 @@ export function hasOfflineStorySummary(story: OfflineStory, memories: readonly M
 export function selectFreshOfflineHandoffMemory(input: {
   memories: readonly MemoryItem[];
   relationId?: string;
+  storyId?: string;
   queryText?: string;
   now?: number;
   maxAgeMs?: number;
 }): MemoryItem | undefined {
-  if (!input.relationId) return undefined;
+  if (!input.relationId && !input.storyId) return undefined;
   const now = input.now ?? Date.now();
   const maxAgeMs = input.maxAgeMs ?? 2 * 60 * 60 * 1000;
   const normalizedQuery = (input.queryText || "").toLocaleLowerCase();
@@ -61,7 +62,9 @@ export function selectFreshOfflineHandoffMemory(input: {
     ),
   ]));
   return [...input.memories]
-    .filter((memory) => memory.relationId === input.relationId && memory.content.includes("offline-story:"))
+    .filter((memory) => input.relationId
+      ? memory.relationId === input.relationId && memory.content.includes("offline-story:")
+      : memory.content.includes(`offline-story:${input.storyId}:`))
     .filter((memory) => {
       const age = now - memory.timestamp;
       if (age >= 0 && age < maxAgeMs) return true;
@@ -81,14 +84,19 @@ export function selectInterveningOfflineHandoff(input: {
   stories: readonly OfflineStory[];
   memories: readonly MemoryItem[];
   relationId?: string;
+  groupId?: string;
   after?: number;
   before?: number;
 }): { story: OfflineStory; memory: MemoryItem; occurredAt: number } | undefined {
-  if (!input.relationId) return undefined;
+  if (!input.relationId && !input.groupId) return undefined;
   const after = input.after ?? 0;
   const before = input.before ?? Date.now();
   for (const story of [...input.stories]
-    .filter((candidate) => candidate.relationId === input.relationId)
+    .filter((candidate) => input.relationId
+      ? candidate.relationId === input.relationId
+      : candidate.relationId === undefined
+        && candidate.characterId === input.groupId
+        && candidate.conversationId === `group:${input.groupId}`)
     .map((candidate) => ({
       story: candidate,
       occurredAt: candidate.onlineHandoff?.endedAt
@@ -110,15 +118,20 @@ export function selectInterveningOfflineHandoff(input: {
 export function selectPendingOfflineHandoffStory(input: {
   stories: readonly OfflineStory[];
   relationId?: string;
+  groupId?: string;
   characterId?: string;
   conversationId?: string;
   now?: number;
   maxAgeMs?: number;
 }): OfflineStory | undefined {
-  if (!input.relationId || !input.characterId) return undefined;
+  if ((!input.relationId && !input.groupId) || !input.characterId) return undefined;
   const latest = [...input.stories]
     .filter((story) => Boolean(story.onlineHandoff))
-    .filter((story) => story.relationId === input.relationId && story.characterId === input.characterId)
+    .filter((story) => input.groupId
+      ? story.relationId === undefined
+        && story.characterId === input.groupId
+        && story.conversationId === `group:${input.groupId}`
+      : story.relationId === input.relationId && story.characterId === input.characterId)
     .filter((story) => !input.conversationId || !story.conversationId || story.conversationId === input.conversationId)
     .sort((left, right) => (right.onlineHandoff?.endedAt || 0) - (left.onlineHandoff?.endedAt || 0))[0];
   // Once the newest handoff is acknowledged, older pending records must not
