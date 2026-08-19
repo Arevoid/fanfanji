@@ -22,7 +22,9 @@ const CO_READING_METADATA_KEY = "reading-co-reading-store";
 let cachedStore: CoReadingStore | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<CoReadingStore>> | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
+const idleWriteQueue = Promise.resolve();
+let writeQueue: Promise<void> = idleWriteQueue;
+let pendingStore: CoReadingStore | null = null;
 
 function loadLegacyCoReadingStore(): StorageResult<CoReadingStore> {
   const loaded = readJson<unknown>(storageKeys.readingCoReadingStore, createEmptyCoReadingStore());
@@ -30,8 +32,20 @@ function loadLegacyCoReadingStore(): StorageResult<CoReadingStore> {
 }
 
 function enqueueCoReadingWrite(store: CoReadingStore): Promise<void> {
-  const snapshot = typeof structuredClone === "function" ? structuredClone(store) : JSON.parse(JSON.stringify(store)) as CoReadingStore;
-  writeQueue = writeQueue.catch(() => undefined).then(() => readingAssetDb.saveMetadataValue(CO_READING_METADATA_KEY, snapshot));
+  pendingStore = typeof structuredClone === "function" ? structuredClone(store) : JSON.parse(JSON.stringify(store)) as CoReadingStore;
+  if (writeQueue !== idleWriteQueue) return writeQueue;
+  writeQueue = (async () => {
+    while (pendingStore) {
+      const snapshot = pendingStore;
+      pendingStore = null;
+      await readingAssetDb.saveMetadataValue(CO_READING_METADATA_KEY, snapshot);
+    }
+  })().catch((error) => {
+    pendingStore = null;
+    throw error;
+  }).finally(() => {
+    writeQueue = idleWriteQueue;
+  });
   return writeQueue;
 }
 
