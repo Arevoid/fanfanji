@@ -21,6 +21,8 @@ export interface CharacterRelationship {
   proactiveCallDayKey?: string;
   proactiveCallCount?: number;
   proactiveCallBackoffUntil?: number;
+  /** Whether one delayed retry is allowed after an emotionally charged hang-up. */
+  proactiveCallRetryAvailable?: boolean;
   lastImmediateSummaryMsgId?: string;
   compressedMemory?: string;
 }

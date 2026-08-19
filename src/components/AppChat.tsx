@@ -20,7 +20,7 @@ import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDi
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
-import { canTriggerProactiveVoiceCall, createProactiveCallRejectionPatch, createProactiveCallTriggerPatch, resolveOutgoingCallResolution } from "../features/chat/services/proactiveVoiceCallPolicy";
+import { canTriggerProactiveVoiceCall, createProactiveCallRejectionPatch, createProactiveCallTriggerPatch, isEmotionallyChargedCallContext, resolveOutgoingCallResolution } from "../features/chat/services/proactiveVoiceCallPolicy";
 import type { VoiceCallStatus } from "../features/chat/services/messageTypes";
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
 import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
@@ -2257,7 +2257,7 @@ export default function AppChat({
     setShowAttachPanel(false);
   };
 
-  const finishVoiceCall = (requestedStatus: VoiceCallStatus) => {
+  const finishVoiceCall = (requestedStatus: VoiceCallStatus, options: { userEndedCall?: boolean } = {}) => {
     if (!activeChatCharId || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
       clearCallSpeechQueue();
       resetCallTtsPlayback();
@@ -2290,8 +2290,17 @@ export default function AppChat({
       const claim = createDeterministicArtifactClaim({ message: callRecord, scope: activeDirectScope });
       if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture voice-call knowledge claim.");
     }
-    if (isIncomingCall && status !== "completed") {
-      updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallRejectionPatch(Date.now()));
+    if (isIncomingCall && (status !== "completed" || options.userEndedCall)) {
+      const recentContext = messagesRef.current
+        .filter((message) => message.relationId === activeVoiceCallScope.relationId && !message.isOffline)
+        .slice(-12)
+        .map((message) => message.content)
+        .concat(callTranscript.map((item) => getCallTranscriptText(item.content || "")))
+        .join("\n");
+      updateRelationshipSession(
+        activeVoiceCallScope.relationId,
+        createProactiveCallRejectionPatch(Date.now(), isEmotionallyChargedCallContext(recentContext)),
+      );
     }
     clearCallSpeechQueue();
     if (activeTtsAudio) activeTtsAudio.pause();
@@ -2302,7 +2311,7 @@ export default function AppChat({
     setVoiceCallRelationId(null);
   };
 
-  const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled");
+  const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled", { userEndedCall: true });
 
   // Resolve an outgoing invitation instead of making every character answer automatically.
   useEffect(() => {
