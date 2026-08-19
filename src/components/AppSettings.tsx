@@ -73,6 +73,9 @@ import {
 } from "../features/chat/styles/liquidGlassDefaults";
 import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
 import { buildSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb } from "../features/settings/systemBackup";
+import { SYSTEM_BACKUP_VERSION } from "../features/settings/systemBackup";
+import { writeString } from "../core/storage/storageAdapter";
+import { storageKeys } from "../core/storage/storageKeys";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -296,6 +299,7 @@ async function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][
   link.download = `xiaoshouji_backup_${dateStr}.json`;
   document.body.appendChild(link);
   link.click();
+  writeString(storageKeys.lastBackupAt, String(Date.now()));
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
@@ -553,6 +557,7 @@ export default function AppSettings({
   const [fontOperationPending, setFontOperationPending] = useState(false);
   const [fontOperationMessage, setFontOperationMessage] = useState<string | null>(null);
   const [showBackupExportOptions, setShowBackupExportOptions] = useState(false);
+  const [lastBackupAt, setLastBackupAt] = useState(() => localStorage.getItem(storageKeys.lastBackupAt));
   const [isClearingApplicationData, setIsClearingApplicationData] = useState(false);
   const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
   const [widgetOpacity, setWidgetOpacity] = useState(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70);
@@ -3554,6 +3559,8 @@ export default function AppSettings({
                     <div>LocalStorage：{formatStorageBytes(storageDiagnostics.localStorageBytes)}</div>
                     <div>浏览器总占用：{storageDiagnostics.usage === undefined ? "不可用" : formatStorageBytes(storageDiagnostics.usage)} / {storageDiagnostics.quota === undefined ? "未知" : formatStorageBytes(storageDiagnostics.quota)}</div>
                     <div>数据版本：{storageDiagnostics.dataSchemaVersion || "未设置（兼容模式）"}</div>
+                    <div>备份版本：v{SYSTEM_BACKUP_VERSION}</div>
+                    <div>最近备份：{lastBackupAt ? new Date(Number(lastBackupAt)).toLocaleString() : "暂无记录"}</div>
                     <div>持久化许可：{storageDiagnostics.persisted === undefined ? "未知" : storageDiagnostics.persisted ? "已启用" : "未启用"}</div>
                     {storageDiagnostics.migrationState && <div>迁移状态：{storageDiagnostics.migrationState.phase}（{storageDiagnostics.migrationState.completedModules.length} 个模块已完成）</div>}
                     <div>状态：{storageDiagnostics.pressure === "critical" ? "空间严重不足" : storageDiagnostics.pressure === "warning" ? "空间偏高" : storageDiagnostics.pressure === "normal" ? "正常" : "未知"}</div>
