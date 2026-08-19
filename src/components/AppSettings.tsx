@@ -58,6 +58,7 @@ import {
 import { clearApplicationData } from "../features/settings/clearApplicationData";
 import { offlineStoryDb } from "../core/storage/offlineStoryDb";
 import { inspectStorage, removeMigratedStorageCopies, type StorageDiagnostics } from "../core/storage/storageDiagnostics";
+import { runStoragePreflight, type StoragePreflightResult } from "../core/storage/storagePreflight";
 import { mergeOfflineStoryCollections } from "../core/storage/repositories/offlineRepository";
 import { normalizeMosslandApiEndpoint } from "../features/voice/ttsConfig";
 import {
@@ -482,6 +483,7 @@ export default function AppSettings({
 }: AppSettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(null);
   const [storageDiagnostics, setStorageDiagnostics] = useState<StorageDiagnostics | null>(null);
+  const [storagePreflight, setStoragePreflight] = useState<StoragePreflightResult | null>(null);
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
 
   const refreshStorageDiagnostics = async () => {
@@ -489,6 +491,14 @@ export default function AppSettings({
       setStorageDiagnostics(await inspectStorage());
     } catch (error) {
       console.warn("Unable to inspect browser storage.", error);
+    }
+  };
+  const runStorageMigrationPreflight = async () => {
+    try {
+      setStoragePreflight(await runStoragePreflight());
+    } catch (error) {
+      console.warn("Unable to run storage migration preflight.", error);
+      alert("迁移预检失败，现有数据未被修改。请先导出备份后重试。");
     }
   };
   const requestStoragePersistence = async () => {
@@ -3568,10 +3578,12 @@ export default function AppSettings({
 
               <StorageDiagnosticsCard
                 diagnostics={storageDiagnostics}
+                preflight={storagePreflight}
                 appVersion={APP_VERSION}
                 backupVersion={SYSTEM_BACKUP_VERSION}
                 lastBackupAt={lastBackupAt}
                 onRefresh={() => void refreshStorageDiagnostics()}
+                onRunPreflight={() => void runStorageMigrationPreflight()}
                 onRequestPersistence={() => void requestStoragePersistence()}
                 onCleanMigratedCopies={() => {
                   const removed = removeMigratedStorageCopies();

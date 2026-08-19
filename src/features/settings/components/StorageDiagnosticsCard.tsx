@@ -1,21 +1,26 @@
 import { formatStorageBytes, type StorageDiagnostics } from "../../../core/storage/storageDiagnostics";
+import type { StoragePreflightResult } from "../../../core/storage/storagePreflight";
 
 interface StorageDiagnosticsCardProps {
   diagnostics: StorageDiagnostics | null;
+  preflight: StoragePreflightResult | null;
   appVersion: string;
   backupVersion: number;
   lastBackupAt: string | null;
   onRefresh: () => void;
+  onRunPreflight: () => void;
   onRequestPersistence: () => void;
   onCleanMigratedCopies: () => void;
 }
 
 export function StorageDiagnosticsCard({
   diagnostics,
+  preflight,
   appVersion,
   backupVersion,
   lastBackupAt,
   onRefresh,
+  onRunPreflight,
   onRequestPersistence,
   onCleanMigratedCopies,
 }: StorageDiagnosticsCardProps) {
@@ -28,7 +33,10 @@ export function StorageDiagnosticsCard({
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">本地存储诊断</h3>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-400">完整聊天、角色和线下故事优先保存在 IndexedDB，不再重复占用 LocalStorage。</p>
           </div>
-          <button type="button" onClick={onRefresh} className="rounded-[10px] bg-slate-100 px-3 py-2 text-[10px] font-bold text-slate-600">检查空间</button>
+          <div className="flex gap-2">
+            <button type="button" onClick={onRefresh} className="rounded-[10px] bg-slate-100 px-3 py-2 text-[10px] font-bold text-slate-600">检查空间</button>
+            <button type="button" onClick={onRunPreflight} className="rounded-[10px] bg-slate-100 px-3 py-2 text-[10px] font-bold text-slate-600">迁移预检</button>
+          </div>
         </div>
         {diagnostics && (
           <div className="rounded-[12px] bg-slate-50 p-3 text-[10px] text-slate-600 space-y-1">
@@ -48,6 +56,17 @@ export function StorageDiagnosticsCard({
             {diagnostics.localStorageEntries.slice(0, 3).map((entry) => <div key={entry.key} className="truncate">最大项目：{entry.key}（{formatStorageBytes(entry.bytes)}）</div>)}
             {!diagnostics.persisted && <button type="button" onClick={onRequestPersistence} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">申请浏览器持久化存储</button>}
             <button type="button" onClick={onCleanMigratedCopies} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">清理已迁移副本</button>
+          </div>
+        )}
+        {preflight && (
+          <div className="rounded-[12px] border border-slate-100 bg-white p-3 text-[10px] text-slate-600 space-y-1">
+            <div className="font-bold">迁移预检：{preflight.status === "ready" ? "可进入下一步评估" : preflight.status === "warning" ? "存在提醒" : preflight.status === "blocked" ? "暂不可迁移" : "无法确认"}</div>
+            <div>检查时间：{new Date(preflight.capturedAt).toLocaleString()}</div>
+            <div>预计新增占用：{formatStorageBytes(preflight.estimatedAdditionalBytes)}；建议可用空间：{formatStorageBytes(preflight.recommendedFreeBytes)}</div>
+            {preflight.availableBytes !== undefined && <div>当前可用空间：{formatStorageBytes(preflight.availableBytes)}</div>}
+            {preflight.modules.map((module) => <div key={module.id}>{module.label}：当前约 {formatStorageBytes(module.estimatedCurrentBytes)}；{module.sources.filter((source) => source.source !== "missing").map((source) => `${source.label} ${source.records} 条`).join("、") || "未发现数据源"}</div>)}
+            {preflight.warnings.map((warning) => <div key={warning} className="text-amber-700">提醒：{warning}</div>)}
+            <div className="pt-1 text-slate-400">本次预检只读，不会迁移、覆盖或清理任何数据。</div>
           </div>
         )}
       </div>
