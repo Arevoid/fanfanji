@@ -1,4 +1,5 @@
-import { remove } from "./storageAdapter";
+import { readString, remove } from "./storageAdapter";
+import { loadStorageMigrationState, type StorageMigrationState } from "./storageMigrationState";
 
 export interface LocalStorageUsageEntry {
   key: string;
@@ -10,6 +11,9 @@ export interface StorageDiagnostics {
   localStorageEntries: LocalStorageUsageEntry[];
   usage?: number;
   quota?: number;
+  persisted?: boolean;
+  dataSchemaVersion?: string | null;
+  migrationState?: StorageMigrationState | null;
   pressure: "normal" | "warning" | "critical" | "unknown";
 }
 
@@ -31,11 +35,18 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
   const usage = estimate.usage;
   const quota = estimate.quota;
   const ratio = usage !== undefined && quota ? usage / quota : undefined;
+  const persisted = typeof navigator !== "undefined" && navigator.storage?.persisted
+    ? await navigator.storage.persisted().catch(() => undefined)
+    : undefined;
+  const dataSchemaVersion = readString("phone_data_schema_version");
   return {
     localStorageBytes,
     localStorageEntries: entries,
     usage,
     quota,
+    persisted,
+    dataSchemaVersion: dataSchemaVersion.valid ? dataSchemaVersion.value : null,
+    migrationState: loadStorageMigrationState(),
     pressure: ratio === undefined ? "unknown" : ratio >= 0.95 ? "critical" : ratio >= 0.8 ? "warning" : "normal",
   };
 }

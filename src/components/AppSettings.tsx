@@ -3553,6 +3553,9 @@ export default function AppSettings({
                   <div className="rounded-[12px] bg-slate-50 p-3 text-[10px] text-slate-600 space-y-1">
                     <div>LocalStorage：{formatStorageBytes(storageDiagnostics.localStorageBytes)}</div>
                     <div>浏览器总占用：{storageDiagnostics.usage === undefined ? "不可用" : formatStorageBytes(storageDiagnostics.usage)} / {storageDiagnostics.quota === undefined ? "未知" : formatStorageBytes(storageDiagnostics.quota)}</div>
+                    <div>数据版本：{storageDiagnostics.dataSchemaVersion || "未设置（兼容模式）"}</div>
+                    <div>持久化许可：{storageDiagnostics.persisted === undefined ? "未知" : storageDiagnostics.persisted ? "已启用" : "未启用"}</div>
+                    {storageDiagnostics.migrationState && <div>迁移状态：{storageDiagnostics.migrationState.phase}（{storageDiagnostics.migrationState.completedModules.length} 个模块已完成）</div>}
                     <div>状态：{storageDiagnostics.pressure === "critical" ? "空间严重不足" : storageDiagnostics.pressure === "warning" ? "空间偏高" : storageDiagnostics.pressure === "normal" ? "正常" : "未知"}</div>
                     {storageDiagnostics.localStorageEntries.slice(0, 3).map((entry) => <div key={entry.key} className="truncate">最大项目：{entry.key}（{formatStorageBytes(entry.bytes)}）</div>)}
                     <button type="button" onClick={() => { const removed = removeMigratedStorageCopies(); void refreshStorageDiagnostics(); alert(removed.length ? `已清理 ${removed.length} 个已迁移副本。` : "没有可清理的已迁移副本。"); }} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">清理已迁移副本</button>

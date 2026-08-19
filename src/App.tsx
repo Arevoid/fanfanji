@@ -393,7 +393,10 @@ export default function App() {
   useEffect(() => {
     let active = true;
     initializeCharacterRepository(DEFAULT_CHARACTERS).then((result) => {
-      if (active && result.valid) setCharacters(result.value);
+      if (active && result.valid) {
+        skipNextCharactersPersistenceRef.current = true;
+        setCharacters(result.value);
+      }
     });
     return () => { active = false; };
   }, []);
@@ -401,7 +404,10 @@ export default function App() {
   useEffect(() => {
     let active = true;
     initializeMomentRepository([]).then((result) => {
-      if (active && result.valid) setMoments(result.value);
+      if (active && result.valid) {
+        skipNextMomentsPersistenceRef.current = true;
+        setMoments(result.value);
+      }
     });
     return () => { active = false; };
   }, []);
@@ -439,6 +445,7 @@ export default function App() {
     let active = true;
     void initializeMessages(DEFAULT_MESSAGES).then((result) => {
       if (!active || !result.valid) return;
+      skipNextMessagesPersistenceRef.current = true;
       setMessages(result.value.filter((message) =>
         !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
       ));
@@ -515,6 +522,9 @@ export default function App() {
   const charactersPersistenceReady = useRef(false);
   const messagesPersistenceReady = useRef(false);
   const momentsPersistenceReady = useRef(false);
+  const skipNextCharactersPersistenceRef = useRef(false);
+  const skipNextMessagesPersistenceRef = useRef(false);
+  const skipNextMomentsPersistenceRef = useRef(false);
   const presetsPersistenceReady = useRef(false);
   const worldBookPersistenceReady = useRef(false);
   const memoriesPersistenceReady = useRef(false);
@@ -576,7 +586,10 @@ export default function App() {
       // IndexedDB is authoritative for full offline-story payloads. Remove
       // the legacy LocalStorage copy after the merge completes.
       removeStoredValue("phone_offline_stories");
-      await offlineStoryDb.replaceAll(merged);
+      const durableInMergeOrder = [...durableStories].sort((left, right) => right.updatedAt - left.updatedAt);
+      if (JSON.stringify(durableInMergeOrder) !== JSON.stringify(merged)) {
+        await offlineStoryDb.replaceAll(merged);
+      }
     }).catch((error) => {
       offlineStoriesHydratedRef.current = true;
       console.warn("Unable to hydrate the durable offline-story store; using localStorage only.", error);
@@ -1840,6 +1853,10 @@ export default function App() {
       charactersPersistenceReady.current = true;
       return;
     }
+    if (skipNextCharactersPersistenceRef.current) {
+      skipNextCharactersPersistenceRef.current = false;
+      return;
+    }
     const result = saveCharacters(characters);
     if (!result.success) console.error("Failed to save characters to localStorage:", result.error);
   }, [characters]);
@@ -1849,6 +1866,10 @@ export default function App() {
       messagesPersistenceReady.current = true;
       return;
     }
+    if (skipNextMessagesPersistenceRef.current) {
+      skipNextMessagesPersistenceRef.current = false;
+      return;
+    }
     const result = saveMessages(messages);
     if (!result.success) console.error("Failed to save messages to localStorage:", result.error);
   }, [messages]);
@@ -1856,6 +1877,10 @@ export default function App() {
   useEffect(() => {
     if (!momentsPersistenceReady.current) {
       momentsPersistenceReady.current = true;
+      return;
+    }
+    if (skipNextMomentsPersistenceRef.current) {
+      skipNextMomentsPersistenceRef.current = false;
       return;
     }
     const result = saveMoments(moments);

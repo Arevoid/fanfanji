@@ -4,6 +4,15 @@ class OfflineStoryDB {
   private readonly dbName = "FanfanjiOfflineStoryDB";
   private readonly storeName = "stories";
   private db: IDBDatabase | null = null;
+  private writeQueue: Promise<void> = Promise.resolve();
+
+  private enqueueWrite(operation: (db: IDBDatabase) => Promise<void>): Promise<void> {
+    const next = this.writeQueue.then(async () => operation(await this.init()));
+    // Keep the queue usable after a failed write while preserving the error for
+    // the caller that initiated this operation.
+    this.writeQueue = next.catch(() => undefined);
+    return next;
+  }
 
   private async init(): Promise<IDBDatabase> {
     if (this.db) return this.db;
@@ -34,19 +43,17 @@ class OfflineStoryDB {
   }
 
   async save(story: OfflineStory): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
+    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, "readwrite");
       transaction.objectStore(this.storeName).put(story);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
-    });
+    }));
   }
 
   async replaceAll(stories: readonly OfflineStory[]): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
+    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, "readwrite");
       const store = transaction.objectStore(this.storeName);
       store.clear();
@@ -54,29 +61,27 @@ class OfflineStoryDB {
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
-    });
+    }));
   }
 
   async delete(storyId: string): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
+    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, "readwrite");
       transaction.objectStore(this.storeName).delete(storyId);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
-    });
+    }));
   }
 
   async clearAll(): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
+    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, "readwrite");
       transaction.objectStore(this.storeName).clear();
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
-    });
+    }));
   }
 }
 

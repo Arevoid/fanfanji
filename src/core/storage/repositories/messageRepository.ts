@@ -9,7 +9,9 @@ const MESSAGE_METADATA_KEY = "messages-v4";
 let cachedMessages: Message[] | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<Message[]>> | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
+const idleWriteQueue = Promise.resolve();
+let writeQueue: Promise<void> = idleWriteQueue;
+let pendingMessages: Message[] | null = null;
 let mutationVersion = 0;
 
 const cloneMessages = (messages: Message[]): Message[] => typeof structuredClone === "function"
@@ -17,8 +19,20 @@ const cloneMessages = (messages: Message[]): Message[] => typeof structuredClone
   : JSON.parse(JSON.stringify(messages)) as Message[];
 
 const enqueueWrite = (messages: Message[]): Promise<void> => {
-  const snapshot = cloneMessages(messages);
-  writeQueue = writeQueue.catch(() => undefined).then(() => readingAssetDb.saveMetadataValue(MESSAGE_METADATA_KEY, snapshot));
+  pendingMessages = cloneMessages(messages);
+  if (writeQueue !== idleWriteQueue) return writeQueue;
+  writeQueue = (async () => {
+    while (pendingMessages) {
+      const snapshot = pendingMessages;
+      pendingMessages = null;
+      await readingAssetDb.saveMetadataValue(MESSAGE_METADATA_KEY, snapshot);
+    }
+  })().catch((error) => {
+    pendingMessages = null;
+    throw error;
+  }).finally(() => {
+    writeQueue = idleWriteQueue;
+  });
   return writeQueue;
 };
 

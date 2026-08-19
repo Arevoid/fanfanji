@@ -56,6 +56,7 @@ export const storageKeys = {
   readingCoStoryStore: "phone_reading_co_story_store_v1",
   presets: "phone_presets",
   dataSchemaVersion: "phone_data_schema_version",
+  migrationState: "phone_storage_migration_state",
   offlineModeActive: (relationId: string) => `offline_mode_active_${relationId}`,
   offlineStoryId: (relationId: string) => `offline_story_id_${relationId}`,
   albumWidgetPhotos: (id: string) => `album_widget_photos_${id}`,
