@@ -1,6 +1,11 @@
 import { readString, writeString } from "./storageAdapter";
 import { storageKeys } from "./storageKeys";
 import { loadStorageMigrationState, saveStorageMigrationState, type StorageMigrationState } from "./storageMigrationState";
+import {
+  createStorageMigrationOwnerId,
+  releaseStorageMigrationLock,
+  tryAcquireStorageMigrationLock,
+} from "./storageMigrationLock";
 
 export interface StorageMigration {
   fromVersion: number;
@@ -85,6 +90,7 @@ export function runMigrations(): StorageMigrationRunResult {
   }
 
   let appliedVersion = currentVersion;
+  const ownerId = createStorageMigrationOwnerId();
   const orderedMigrations = migrations
     .filter((item) => item.fromVersion >= appliedVersion)
     .sort((a, b) => a.fromVersion - b.fromVersion);
@@ -103,6 +109,18 @@ export function runMigrations(): StorageMigrationRunResult {
         sourceVersion: currentVersion,
         targetVersion: migration.toVersion,
         error: `Migration ${previousState.id} is ${previousState.phase}; explicit recovery is required`,
+      };
+    }
+
+    const lockResult = tryAcquireStorageMigrationLock(ownerId);
+    if (!lockResult.acquired || !lockResult.lock) {
+      return {
+        status: "blocked",
+        sourceVersion: currentVersion,
+        targetVersion: migration.toVersion,
+        error: lockResult.reason === "expired"
+          ? "An expired migration lock requires explicit takeover"
+          : "Another page is running a storage migration",
       };
     }
 
@@ -155,6 +173,8 @@ export function runMigrations(): StorageMigrationRunResult {
         console.error("[storage] Failed to persist migration failure state.", stateError);
       }
       return { status: "failed", sourceVersion: currentVersion, targetVersion: migration.toVersion, error: migrationState.error };
+    } finally {
+      releaseStorageMigrationLock(lockResult.lock.id, ownerId);
     }
 
     appliedVersion = migration.toVersion;

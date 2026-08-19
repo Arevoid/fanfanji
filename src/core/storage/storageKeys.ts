@@ -57,6 +57,7 @@ export const storageKeys = {
   presets: "phone_presets",
   dataSchemaVersion: "phone_data_schema_version",
   migrationState: "phone_storage_migration_state",
+  migrationLock: "phone_storage_migration_lock",
   lastBackupAt: "phone_last_backup_at",
   offlineModeActive: (relationId: string) => `offline_mode_active_${relationId}`,
   offlineStoryId: (relationId: string) => `offline_story_id_${relationId}`,
