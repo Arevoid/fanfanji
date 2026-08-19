@@ -150,6 +150,13 @@ button, input, textarea, select {
   min-height: 0;
 }
 
+/* Some mobile browsers keep fixed app shells at their layout-viewport height
+   while the IME occupies the visual viewport. Lift the chat composer only by
+   the measured overlap; when the shell resizes normally this remains zero. */
+#conv-screen .chat-input-area {
+  transform: translateY(calc(-1 * var(--chat-keyboard-lift, 0px)));
+}
+
 /* Legacy feature dialogs still use Tailwind's `fixed inset-0` shell. Keep the
    overlay itself inside the same visual viewport without adding keyboard padding
    on top of the root-height reduction. */

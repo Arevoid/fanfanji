@@ -4099,7 +4099,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   // Auto scroll in chats with smart detection
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!activeChatCharId || !container) return;
+    if (!activeChatCharId || !container) {
+      // Closing a chat must make the next visit a fresh open, including when
+      // the user opens the same character again.
+      if (!activeChatCharId) {
+        lastActiveCharIdRef.current = null;
+        lastMsgCountRef.current = 0;
+      }
+      return;
+    }
 
     const currentChatMsgs = messages.filter((message) => !message.isOffline && (activeRelationship
       ? message.relationId === activeRelationship.id
@@ -4119,12 +4127,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     lastMsgCountRef.current = msgCount;
 
     if (isFreshOpen || isUserSent || isNearBottom || isTyping) {
-      setTimeout(() => {
-        const currentContainer = scrollContainerRef.current;
-        if (currentContainer) {
-          scrollContainerToBottom(currentContainer, isFreshOpen ? "auto" : "smooth");
-        }
-      }, 50);
+      const behavior = isFreshOpen ? "auto" : "smooth";
+      // The message list can finish its layout one or more frames after the
+      // chat shell mounts, especially on mobile.
+      const scrollAfterLayout = () => {
+        requestAnimationFrame(() => {
+          const currentContainer = scrollContainerRef.current;
+          if (currentContainer) scrollContainerToBottom(currentContainer, behavior);
+        });
+      };
+      scrollAfterLayout();
+      const timer = window.setTimeout(scrollAfterLayout, 80);
+      return () => window.clearTimeout(timer);
     }
   }, [messages.length, activeChatCharId, activeChatRelationId, isTyping]);
 
@@ -4139,6 +4153,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const container = scrollContainerRef.current;
       if (!container) return;
       const metrics = (event as CustomEvent<VisualViewportMetrics>).detail;
+      const visualViewport = window.visualViewport;
+      const composer = document.querySelector<HTMLElement>(
+        "#conv-screen .chat-input-area",
+      );
+      if (composer) {
+        requestAnimationFrame(() => {
+          const viewportBottom = visualViewport
+            ? visualViewport.offsetTop + visualViewport.height
+            : window.innerHeight;
+          const overlap = Math.max(0, composer.getBoundingClientRect().bottom - viewportBottom);
+          document.documentElement.style.setProperty("--chat-keyboard-lift", `${Math.ceil(overlap)}px`);
+        });
+      }
       const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
       // Keyboard shrink increases this distance by roughly the keyboard inset.
       // Compensate for it without dragging a reader away from older history.
@@ -4154,6 +4181,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     window.addEventListener(VISUAL_VIEWPORT_CHANGE_EVENT, handleViewportChange);
     return () => {
       window.removeEventListener(VISUAL_VIEWPORT_CHANGE_EVENT, handleViewportChange);
+      document.documentElement.style.removeProperty("--chat-keyboard-lift");
     };
   }, [activeChatCharId]);
 
