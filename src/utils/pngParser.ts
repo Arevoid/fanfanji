@@ -502,8 +502,19 @@ export function compressImagePreservingTransparency(
 export const isTransparencyPreservedImage = (value?: string | null): boolean =>
   /^data:image\/png(?:;|,)/i.test(value || "");
 
-// @ts-ignore
-import mammothCode from "mammoth/mammoth.browser.min.js?raw";
+let mammothCodePromise: Promise<string> | null = null;
+
+const loadMammothCode = async (): Promise<string> => {
+  if (!mammothCodePromise) {
+    // Keep the large browser parser out of the initial bundle. It is only
+    // needed when a user imports a DOCX file; the OOXML path remains the
+    // immediate compatibility fallback if this optional chunk fails.
+    // @ts-ignore Vite resolves the ?raw asset at build time.
+    mammothCodePromise = import("mammoth/mammoth.browser.min.js?raw")
+      .then((module) => module.default);
+  }
+  return mammothCodePromise;
+};
 
 const decodeDocxXml = (value: string): string => value
   .replace(/&lt;/g, "<")
@@ -559,6 +570,7 @@ export async function safeParseDocx(arrayBuffer: ArrayBuffer): Promise<string> {
   // @ts-ignore
   if (!g.mammoth) {
     try {
+      const mammothCode = await loadMammothCode();
       const fn = new Function("exports", "module", "define", mammothCode);
       fn(undefined, undefined, undefined);
     } catch (e) {

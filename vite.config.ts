@@ -21,5 +21,24 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // Keep large, infrequently changing libraries out of the application
+          // entry chunk. This changes only asset boundaries; module behavior,
+          // storage keys, and runtime feature loading remain unchanged.
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('@google/genai')) return 'vendor-ai';
+            if (id.includes('motion')) return 'vendor-motion';
+            if (id.includes('lucide-react')) return 'vendor-icons';
+            if (id.includes('mammoth')) return 'vendor-docx';
+            if (id.includes('jszip')) return 'vendor-zip';
+            if (id.includes('lz-string')) return 'vendor-compression';
+            return 'vendor';
+          },
+        },
+      },
+    },
   };
 });
