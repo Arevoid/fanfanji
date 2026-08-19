@@ -89,6 +89,44 @@ button, input, textarea, select {
   touch-action: manipulation;
 }
 
+/* Built-in bubble tails. These are intentionally part of the app chrome so
+   enabling “气泡尖角” works even when the user has not supplied custom CSS. */
+.cv-bubble-tip-portal-layer,
+.cv-bubble-tip-portal {
+  pointer-events: none;
+  overflow: visible;
+}
+
+.cv-bubble-tip-portal-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+}
+
+.cv-bubble-tip-portal {
+  position: absolute;
+}
+
+.bubble-tip {
+  position: absolute;
+  top: 14px;
+  width: 0;
+  height: 0;
+  z-index: 10;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+}
+
+.bubble-tip.other-tip {
+  left: -7px;
+  border-right: 8px solid var(--bubble-tip-bg, #ffffff);
+}
+
+.bubble-tip.self-tip {
+  left: 0;
+  border-left: 8px solid var(--bubble-tip-bg, #95ec69);
+}
+
 /* iOS Safari zooms focused text controls whose computed font-size is below
    16px. Keep every text-entry control at the platform's no-zoom minimum on
    small screens. Non-text controls keep their compact geometry. */
