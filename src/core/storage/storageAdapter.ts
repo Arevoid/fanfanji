@@ -63,6 +63,8 @@ export function writeString(key: string, value: string): StorageWriteResult {
     return { success: false, error: "read" };
   }
 
+  if (previousValue === value) return { success: true };
+
   const rollback = (): boolean => {
     try {
       if (previousValue === null) storage.removeItem(key);
