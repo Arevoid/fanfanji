@@ -3856,6 +3856,9 @@ export default function App() {
                       settings={settings}
                       offlineStories={offlineStories}
                       openStoryId={pendingOfflineStoryId}
+                      onOpenOfflineStoryHandled={(storyId) => {
+                        setPendingOfflineStoryId((current) => current === storyId ? null : current);
+                      }}
                       messages={messages}
                       activeChatCharId={activeChatCharId}
                       worldBookEntries={worldBookEntries}

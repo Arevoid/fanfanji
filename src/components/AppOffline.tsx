@@ -61,6 +61,7 @@ interface AppOfflineProps {
   onSaveAppointment?: (appointment: Appointment) => boolean;
   /** Story requested by the previous chat screen; consumed by the story opener. */
   openStoryId?: string | null;
+  onOpenOfflineStoryHandled?: (storyId: string) => void;
 }
 
 interface OfflineStylePreset {
@@ -109,6 +110,7 @@ export default function AppOffline({
   appointments = [],
   onSaveAppointment,
   openStoryId = null,
+  onOpenOfflineStoryHandled,
 }: AppOfflineProps) {
   const selectableCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
   const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
@@ -206,7 +208,8 @@ export default function AppOffline({
       setSelectedCharId(selectableCharacters[0]?.id || "");
     }
     if (activeStoryRef.current && (
-      !selectableCharacterIds.has(resolveOfflineStoryCharacterId(activeStoryRef.current, characters))
+      (!characters.find((character) => character.id === activeStoryRef.current?.characterId)?.isGroupChat
+        && !selectableCharacterIds.has(resolveOfflineStoryCharacterId(activeStoryRef.current, characters)))
       || !canAccessStoryFromCurrentRelation(activeStoryRef.current)
     )) {
       clearActiveStorySnapshot();
@@ -427,6 +430,7 @@ export default function AppOffline({
   // Direct workspaces are scoped by Character → Relationship. Group stories
   // retain their legacy relation-less container route.
   useEffect(() => {
+    if (activeStoryRef.current || openStoryId) return;
     const scopeKey = selectedRelationId || `legacy:${selectedCharId}`;
     if (selectedCharId && scopeKey !== lastLoadedStoryScope) {
       setLastLoadedStoryScope(scopeKey);
@@ -441,13 +445,13 @@ export default function AppOffline({
       }
       clearActiveStorySnapshot();
     }
-  }, [selectedCharId, selectedRelationId, offlineStories, lastLoadedStoryScope]);
+  }, [selectedCharId, selectedRelationId, offlineStories, lastLoadedStoryScope, openStoryId]);
 
   // Handle opening a story
-  const handleOpenStory = (story: OfflineStory) => {
+  const handleOpenStory = (story: OfflineStory): boolean => {
     if (!canAccessStoryFromCurrentRelation(story)) {
       showToast("此线下剧情属于另一个人设关系，不能跨身份进入。");
-      return;
+      return false;
     }
     activeStoryRef.current = story;
     setActiveStory(story);
@@ -455,7 +459,20 @@ export default function AppOffline({
       writeString(getOfflineModeStorageKey(story.relationId), "true");
       writeString(getOfflineStoryStorageKey(story.relationId), story.id);
     }
+    return true;
   };
+
+  // A chat-to-offline transition identifies the exact story to open. This
+  // path is separate from relation-scoped localStorage restoration because
+  // group stories intentionally have no direct relationId.
+  useEffect(() => {
+    if (!openStoryId || activeStoryRef.current) return;
+    const requestedStory = offlineStories.find((story) => story.id === openStoryId);
+    if (!requestedStory) return;
+    if (handleOpenStory(requestedStory)) {
+      onOpenOfflineStoryHandled?.(requestedStory.id);
+    }
+  }, [openStoryId, offlineStories, characters, selectedRelationId, relationChoices]);
 
   const clearOfflineSession = (story: OfflineStory) => {
     if (story.relationId) {
