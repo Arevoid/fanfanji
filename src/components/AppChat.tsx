@@ -40,6 +40,7 @@ import { loadUserMemoPromptContext, USER_MEMO_MENTION_LEDGER_KEY } from "../feat
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
+import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../domain/offlineStory/offlineHandoffContext";
 import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage, buildProactiveChatSystemInstruction, finalizeCharacterChatSystemInstruction } from "../features/chat/prompts/chatPromptBuilders";
 import { buildProactiveOfflineInvitationPrompt } from "../features/chat/prompts/proactiveOfflineInvitationPrompt";
@@ -1523,14 +1524,20 @@ export default function AppChat({
       : [activeChatCharId];
     const offlineParticipantSet = new Set(offlineParticipantIds);
     // The direct menu action used to import only the clicked message. Snapshot
-    // the whole configured context window so the offline scene has a real handoff.
-    const contextLimit = activeCharacter.contextMemoryLimit || 20;
-    const recentOnlineMessages = (handoffMessages ? [...handoffMessages] : messages)
+    // a durable relation window so the offline scene has a real handoff.
+    const handoffSourceMessages = (handoffMessages ? [...handoffMessages] : messages)
       .filter((item) => !item.isOffline && (activeRelationship
         ? item.relationId === activeRelationship.id
-        : item.characterId === activeChatCharId && activeCharacter?.isGroupChat))
-      .slice(-contextLimit * 2);
+        : item.characterId === activeChatCharId && activeCharacter?.isGroupChat));
+    // A handoff is a durable continuity boundary, not the normal short-term
+    // chat context. Keep a generous raw snapshot (facts are extracted from the
+    // complete relation history below) so a 50-message conversation does not
+    // silently lose its earlier commitments.
+    const recentOnlineMessages = handoffSourceMessages.slice(-OFFLINE_HANDOFF_MESSAGE_LIMIT);
     const sourceMessages = recentOnlineMessages.length > 0 ? recentOnlineMessages : [msg];
+    const handoffFacts = buildOfflineHandoffFacts(
+      handoffSourceMessages.length > 0 ? handoffSourceMessages : [msg],
+    );
     const snapshotTimestamp = Date.now();
     const importedMessages = sourceMessages.map((item, index) => ({
       ...item,
@@ -1553,6 +1560,7 @@ export default function AppChat({
       memories: activeRelationship
         ? memories.filter((memory) => memory.relationId === activeRelationship.id).map((memory) => memory.content)
         : [],
+      ...(handoffFacts.length > 0 ? { handoffFacts } : {}),
       ...(memberMemories ? { memberMemories } : {}),
       worldBook: getLatestWorldBookEntries(worldBookEntries || [])
         .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set([activeChatCharId, ...offlineParticipantSet])))

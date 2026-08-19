@@ -909,6 +909,8 @@ export interface OfflineStory {
   importedContext?: {
     messages: Message[];
     memories: string[];
+    /** Deterministic facts extracted at the online → offline handoff. */
+    handoffFacts?: OfflineHandoffFact[];
     /** Group imports keep each member's relationship-private memory separate. */
     memberMemories?: Record<string, string[]>;
     worldBook: string[];
@@ -940,6 +942,17 @@ export interface Sticker {
   url: string; // Dynamic ObjectURL or base64/url
   /** Cached multimodal understanding. Chat prompts use this instead of an inaccessible blob/url. */
   semanticDescription?: string;
+}
+
+export interface OfflineHandoffFact {
+  id: string;
+  sourceMessageIds: string[];
+  speaker: "user" | "character";
+  kind: "schedule" | "plan" | "preference" | "context";
+  content: string;
+  /** Human-readable absolute local time resolved from relative words such as 明天/明晚. */
+  normalizedTime?: string;
+  sourceTimestamp: number;
 }
 
 export interface StickerGroup {

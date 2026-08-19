@@ -36,6 +36,7 @@ import { remove as removeStoredValue, writeJson, writeString } from "../core/sto
 import type { Appointment } from "../domain/schedule/scheduleTypes";
 import { completeAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { isWorldBookEntryForAnyCharacter, isWorldBookEntryForCharacter } from "../domain/worldbook/worldBookVisibility";
+import { buildOfflineHandoffFacts, formatOfflineHandoffFactsForPrompt, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../domain/offlineStory/offlineHandoffContext";
 
 interface AppOfflineProps {
   characters: Character[];
@@ -587,10 +588,9 @@ export default function AppOffline({
       if (liveMessages.length > 0 || storedMessages?.found) {
         try {
           const parsed = liveMessages.length > 0 ? liveMessages : storedMessages?.value || [];
-          const contextLimit = characters.find(c => c.id === selectedCharId)?.contextMemoryLimit || 20;
-          const relevantMsgs = parsed
-            .filter(m => m.relationId === selectedRelationId)
-            .slice(-contextLimit * 2); // preserve the configured number of dialogue rounds
+          const relationMessages = parsed.filter(m => m.relationId === selectedRelationId);
+          const relevantMsgs = relationMessages
+            .slice(-OFFLINE_HANDOFF_MESSAGE_LIMIT);
           
           const importedMessages = relevantMsgs.map(m => ({
             ...m,
@@ -600,6 +600,7 @@ export default function AppOffline({
           importedContext = {
             messages: importedMessages,
             memories: memories.filter(m => m.relationId === selectedRelationId).map(m => m.content),
+            handoffFacts: buildOfflineHandoffFacts(relationMessages),
             worldBook: getLatestWorldBookEntries(worldBookEntries || [])
               .filter(entry => isWorldBookEntryForCharacter(entry, selectedCharId))
               .map(entry => `${entry.title}: ${entry.content}`),
@@ -1225,8 +1226,18 @@ ${wbPrompts}\n`;
         sysPrompt += `\n\n【互通的线上记忆库】：以下是各个参与角色的线上对话中发生并提取的核心事实，请将其有机融入作为故事的背景事实支撑：\n${allMemoriesParts.join("\n")}`;
       }
 
-      // Never fetch live online chat while writing offline. Use the import snapshot only.
-      const importedOnlineMessages = updatedStory.importedContext?.messages.slice(-15) || [];
+      // Never fetch live online chat while writing offline. Use the import
+      // snapshot only. Structured handoff facts are durable and are always
+      // placed before the conversational tail so older commitments survive
+      // later continuation turns.
+      const handoffFacts = updatedStory.importedContext?.handoffFacts?.length
+        ? updatedStory.importedContext.handoffFacts
+        : buildOfflineHandoffFacts(updatedStory.importedContext?.messages || []);
+      const handoffFactsPrompt = formatOfflineHandoffFactsForPrompt(handoffFacts);
+      if (handoffFactsPrompt) {
+        sysPrompt += `\n\n${handoffFactsPrompt}`;
+      }
+      const importedOnlineMessages = updatedStory.importedContext?.messages.slice(-40) || [];
       if (importedOnlineMessages.length > 0) {
         const lines = importedOnlineMessages.map((message) => {
           const senderCharacter = storyCharsList.find((character) =>
