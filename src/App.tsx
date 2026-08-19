@@ -532,6 +532,11 @@ export default function App() {
   const characterIdentityMigrationLogRef = useRef(new Set<string>());
   const memorySettingsPersistenceReady = useRef(false);
   const relationshipsPersistenceReady = useRef(false);
+  const tracksPersistenceReady = useRef(false);
+  const playlistsPersistenceReady = useRef(false);
+  const dualMusicConfigsPersistenceReady = useRef(false);
+  const identityMusicStatesPersistenceReady = useRef(false);
+  const relationshipMusicStatesPersistenceReady = useRef(false);
 
   const persistOfflineStories = async (stories: OfflineStory[], changedStory?: OfflineStory): Promise<boolean> => {
     let durableSuccess = false;
@@ -1897,6 +1902,10 @@ export default function App() {
   }, [presets]);
 
   useEffect(() => {
+    if (!tracksPersistenceReady.current) {
+      tracksPersistenceReady.current = true;
+      return;
+    }
     try {
       writeJson("phone_music_tracks", tracks.map((track) =>
         track.isLocal ? { ...track, url: "" } : track));
@@ -1905,11 +1914,33 @@ export default function App() {
     }
   }, [tracks]);
 
-  useEffect(() => { saveDualMusicWidgetConfigs(dualMusicConfigs); }, [dualMusicConfigs]);
-  useEffect(() => { saveIdentityMusicStates(identityMusicStates); }, [identityMusicStates]);
-  useEffect(() => { saveRelationshipMusicStates(relationshipMusicStates); }, [relationshipMusicStates]);
+  useEffect(() => {
+    if (!dualMusicConfigsPersistenceReady.current) {
+      dualMusicConfigsPersistenceReady.current = true;
+      return;
+    }
+    saveDualMusicWidgetConfigs(dualMusicConfigs);
+  }, [dualMusicConfigs]);
+  useEffect(() => {
+    if (!identityMusicStatesPersistenceReady.current) {
+      identityMusicStatesPersistenceReady.current = true;
+      return;
+    }
+    saveIdentityMusicStates(identityMusicStates);
+  }, [identityMusicStates]);
+  useEffect(() => {
+    if (!relationshipMusicStatesPersistenceReady.current) {
+      relationshipMusicStatesPersistenceReady.current = true;
+      return;
+    }
+    saveRelationshipMusicStates(relationshipMusicStates);
+  }, [relationshipMusicStates]);
 
   useEffect(() => {
+    if (!playlistsPersistenceReady.current) {
+      playlistsPersistenceReady.current = true;
+      return;
+    }
     try {
       writeJson("phone_music_playlists", playlists);
     } catch (e) {
