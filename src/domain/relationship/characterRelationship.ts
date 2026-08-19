@@ -31,6 +31,8 @@ export const getDefaultRelationId = (characterId: string) => `relation_default_$
 export const getConversationId = (relationId: string) => `direct:${relationId}`;
 export const getOfflineModeStorageKey = (relationId: string) => `offline_mode_active_${relationId}`;
 export const getOfflineStoryStorageKey = (relationId: string) => `offline_story_id_${relationId}`;
+export const getOfflineGroupModeStorageKey = (groupId: string) => `offline_group_mode_active_${groupId}`;
+export const getOfflineGroupStoryStorageKey = (groupId: string) => `offline_group_story_id_${groupId}`;
 
 export function findRelationship(
   relationships: readonly CharacterRelationship[],

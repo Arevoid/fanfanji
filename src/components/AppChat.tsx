@@ -1575,7 +1575,9 @@ export default function AppChat({
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: activeChatCharId,
       relationId: activeRelationship?.id,
-      conversationId: activeRelationship?.conversationId,
+      conversationId: activeCharacter.isGroupChat
+        ? `group:${activeCharacter.id}`
+        : activeRelationship?.conversationId,
       // A group is only a container; the actual offline actors are its members.
       characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
       title: appointment

@@ -19,7 +19,7 @@ import { OfflineReadingPreferences, OfflineReadingSettings } from "./offline/Off
 import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
-import { findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { findRelationshipForCanonicalCharacter, getConversationId, getOfflineGroupModeStorageKey, getOfflineGroupStoryStorageKey, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { applyConfirmedOfflineRelationshipTransition } from "../domain/relationship/offlineRelationshipTransition";
 import type { KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
 import { countOfflineStoriesForRelation } from "../domain/relationship/offlineStoryScope";
@@ -438,7 +438,12 @@ export default function AppOffline({
     const scopeKey = selectedRelationId || `legacy:${selectedCharId}`;
     if (selectedCharId && scopeKey !== lastLoadedStoryScope) {
       setLastLoadedStoryScope(scopeKey);
-      const savedStoryId = selectedRelationId ? localStorage.getItem(getOfflineStoryStorageKey(selectedRelationId)) : null;
+      const selectedCharacter = characters.find((character) => character.id === selectedCharId);
+      const savedStoryId = selectedCharacter?.isGroupChat
+        ? localStorage.getItem(getOfflineGroupStoryStorageKey(selectedCharacter.id))
+        : selectedRelationId
+          ? localStorage.getItem(getOfflineStoryStorageKey(selectedRelationId))
+          : null;
       if (savedStoryId) {
         const story = offlineStories.find(s => s.id === savedStoryId);
         if (story && canAccessStoryFromCurrentRelation(story)) {
@@ -462,6 +467,9 @@ export default function AppOffline({
     if (story.relationId) {
       writeString(getOfflineModeStorageKey(story.relationId), "true");
       writeString(getOfflineStoryStorageKey(story.relationId), story.id);
+    } else if (characters.find((character) => character.id === story.characterId)?.isGroupChat) {
+      writeString(getOfflineGroupModeStorageKey(story.characterId), "true");
+      writeString(getOfflineGroupStoryStorageKey(story.characterId), story.id);
     }
     return true;
   };
@@ -482,6 +490,9 @@ export default function AppOffline({
     if (story.relationId) {
       removeStoredValue(getOfflineStoryStorageKey(story.relationId));
       writeString(getOfflineModeStorageKey(story.relationId), "false");
+    } else if (characters.find((character) => character.id === story.characterId)?.isGroupChat) {
+      removeStoredValue(getOfflineGroupStoryStorageKey(story.characterId));
+      writeString(getOfflineGroupModeStorageKey(story.characterId), "false");
     }
   };
 
