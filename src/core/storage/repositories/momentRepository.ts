@@ -4,14 +4,12 @@ import { writeArray, readArray } from "./repositoryUtils";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readingAssetDb } from "../readingAssetDb";
 import { remove } from "../storageAdapter";
+import { createLatestSnapshotWriter } from "../latestSnapshotWriter";
 
 const MOMENT_METADATA_KEY = "moments-v4";
 let cachedMoments: Moment[] | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<Moment[]>> | null = null;
-const idleWriteQueue = Promise.resolve();
-let writeQueue: Promise<void> = idleWriteQueue;
-let pendingMoments: Moment[] | null = null;
 let mutationVersion = 0;
 
 const cloneMoments = (moments: Moment[]): Moment[] => typeof structuredClone === "function"
@@ -20,23 +18,10 @@ const cloneMoments = (moments: Moment[]): Moment[] => typeof structuredClone ===
 
 const loadLegacyMoments = (fallback: Moment[]): StorageResult<Moment[]> => readArray(storageKeys.moments, fallback);
 
-const enqueueWrite = (moments: Moment[]): Promise<void> => {
-  pendingMoments = cloneMoments(moments);
-  if (writeQueue !== idleWriteQueue) return writeQueue;
-  writeQueue = (async () => {
-    while (pendingMoments) {
-      const snapshot = pendingMoments;
-      pendingMoments = null;
-      await readingAssetDb.saveMetadataValue(MOMENT_METADATA_KEY, snapshot);
-    }
-  })().catch((error) => {
-    pendingMoments = null;
-    throw error;
-  }).finally(() => {
-    writeQueue = idleWriteQueue;
-  });
-  return writeQueue;
-};
+const momentWriter = createLatestSnapshotWriter(
+  cloneMoments,
+  (snapshot) => readingAssetDb.saveMetadataValue(MOMENT_METADATA_KEY, snapshot),
+);
 
 export const loadMoments = (fallback: Moment[]): StorageResult<Moment[]> => {
   if (metadataReady && cachedMoments) return { value: cloneMoments(cachedMoments), found: true, valid: true };
@@ -48,7 +33,7 @@ export const saveMoments = (moments: Moment[]): StorageWriteResult => {
   mutationVersion += 1;
   cachedMoments = cloneMoments(moments);
   metadataReady = true;
-  enqueueWrite(cachedMoments).catch((error) => console.warn("[storage] Failed to persist Moments in IndexedDB.", error));
+  momentWriter.enqueue(cachedMoments).catch((error) => console.warn("[storage] Failed to persist Moments in IndexedDB.", error));
   return { success: true };
 };
 
@@ -71,7 +56,7 @@ export async function initializeMomentRepository(fallback: Moment[]): Promise<St
       const legacy = loadLegacyMoments(fallback);
       cachedMoments = cloneMoments(legacy.value);
       metadataReady = true;
-      await enqueueWrite(cachedMoments);
+      await momentWriter.enqueue(cachedMoments);
       if (legacy.found && legacy.valid) remove(storageKeys.moments);
       return legacy;
     } catch (error) {
@@ -86,7 +71,7 @@ export async function initializeMomentRepository(fallback: Moment[]): Promise<St
 export async function flushMoments(): Promise<StorageWriteResult> {
   if (typeof indexedDB === "undefined") return { success: true };
   try {
-    await writeQueue;
+    await momentWriter.flush();
     remove(storageKeys.moments);
     return { success: true };
   } catch (error) {

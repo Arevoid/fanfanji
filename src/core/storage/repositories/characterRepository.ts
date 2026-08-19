@@ -4,14 +4,12 @@ import { writeArray, readArray } from "./repositoryUtils";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readingAssetDb } from "../readingAssetDb";
 import { remove } from "../storageAdapter";
+import { createLatestSnapshotWriter } from "../latestSnapshotWriter";
 
 const CHARACTER_METADATA_KEY = "character-archive-v4";
 let cachedCharacters: Character[] | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<Character[]>> | null = null;
-const idleWriteQueue = Promise.resolve();
-let writeQueue: Promise<void> = idleWriteQueue;
-let pendingCharacters: Character[] | null = null;
 let mutationVersion = 0;
 
 const cloneCharacters = (characters: Character[]): Character[] => typeof structuredClone === "function"
@@ -24,23 +22,10 @@ const loadLegacyCharacters = (fallback: Character[]): StorageResult<Character[]>
   return readArray<Character>(storageKeys.legacyCharacters, fallback);
 };
 
-const enqueueWrite = (characters: Character[]): Promise<void> => {
-  pendingCharacters = cloneCharacters(characters);
-  if (writeQueue !== idleWriteQueue) return writeQueue;
-  writeQueue = (async () => {
-    while (pendingCharacters) {
-      const snapshot = pendingCharacters;
-      pendingCharacters = null;
-      await readingAssetDb.saveMetadataValue(CHARACTER_METADATA_KEY, snapshot);
-    }
-  })().catch((error) => {
-    pendingCharacters = null;
-    throw error;
-  }).finally(() => {
-    writeQueue = idleWriteQueue;
-  });
-  return writeQueue;
-};
+const characterWriter = createLatestSnapshotWriter(
+  cloneCharacters,
+  (snapshot) => readingAssetDb.saveMetadataValue(CHARACTER_METADATA_KEY, snapshot),
+);
 
 export function loadCharacters(fallback: Character[]): StorageResult<Character[]> {
   if (metadataReady && cachedCharacters) return { value: cachedCharacters, found: true, valid: true };
@@ -52,7 +37,7 @@ export function saveCharacters(characters: Character[]): StorageWriteResult {
   mutationVersion += 1;
   cachedCharacters = cloneCharacters(characters);
   metadataReady = true;
-  enqueueWrite(cachedCharacters).catch((error) => console.warn("[storage] Failed to persist characters in IndexedDB.", error));
+  characterWriter.enqueue(cachedCharacters).catch((error) => console.warn("[storage] Failed to persist characters in IndexedDB.", error));
   return { success: true };
 }
 
@@ -77,7 +62,7 @@ export async function initializeCharacterRepository(fallback: Character[]): Prom
       const legacy = loadLegacyCharacters(fallback);
       cachedCharacters = cloneCharacters(legacy.value);
       metadataReady = true;
-      await enqueueWrite(cachedCharacters);
+      await characterWriter.enqueue(cachedCharacters);
       if (legacy.found && legacy.valid) {
         remove(storageKeys.characters);
         remove(storageKeys.legacyCharacters);
@@ -95,7 +80,7 @@ export async function initializeCharacterRepository(fallback: Character[]): Prom
 export async function flushCharacters(): Promise<StorageWriteResult> {
   if (typeof indexedDB === "undefined") return { success: true };
   try {
-    await writeQueue;
+    await characterWriter.flush();
     remove(storageKeys.characters);
     remove(storageKeys.legacyCharacters);
     return { success: true };

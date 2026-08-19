@@ -4,37 +4,22 @@ import { writeArray, readArray } from "./repositoryUtils";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readingAssetDb } from "../readingAssetDb";
 import { remove } from "../storageAdapter";
+import { createLatestSnapshotWriter } from "../latestSnapshotWriter";
 
 const MESSAGE_METADATA_KEY = "messages-v4";
 let cachedMessages: Message[] | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<Message[]>> | null = null;
-const idleWriteQueue = Promise.resolve();
-let writeQueue: Promise<void> = idleWriteQueue;
-let pendingMessages: Message[] | null = null;
 let mutationVersion = 0;
 
 const cloneMessages = (messages: Message[]): Message[] => typeof structuredClone === "function"
   ? structuredClone(messages)
   : JSON.parse(JSON.stringify(messages)) as Message[];
 
-const enqueueWrite = (messages: Message[]): Promise<void> => {
-  pendingMessages = cloneMessages(messages);
-  if (writeQueue !== idleWriteQueue) return writeQueue;
-  writeQueue = (async () => {
-    while (pendingMessages) {
-      const snapshot = pendingMessages;
-      pendingMessages = null;
-      await readingAssetDb.saveMetadataValue(MESSAGE_METADATA_KEY, snapshot);
-    }
-  })().catch((error) => {
-    pendingMessages = null;
-    throw error;
-  }).finally(() => {
-    writeQueue = idleWriteQueue;
-  });
-  return writeQueue;
-};
+const messageWriter = createLatestSnapshotWriter(
+  cloneMessages,
+  (snapshot) => readingAssetDb.saveMetadataValue(MESSAGE_METADATA_KEY, snapshot),
+);
 
 export function loadMessages(fallback: Message[]): StorageResult<Message[]> {
   if (metadataReady && cachedMessages) return { value: cloneMessages(cachedMessages), found: true, valid: true };
@@ -54,7 +39,7 @@ export function saveMessages(messages: Message[]): StorageWriteResult {
     mutationVersion += 1;
     cachedMessages = cloneMessages(messages);
     metadataReady = true;
-    enqueueWrite(cachedMessages).catch((error) => console.warn("[storage] Failed to persist messages in IndexedDB.", error));
+    messageWriter.enqueue(cachedMessages).catch((error) => console.warn("[storage] Failed to persist messages in IndexedDB.", error));
     return { success: true };
   }
   return writeArray(storageKeys.messages, messages);
@@ -84,7 +69,7 @@ export async function initializeMessages(fallback: Message[]): Promise<StorageRe
         : readArray<Message>(storageKeys.legacyMessages, fallback);
       cachedMessages = cloneMessages(source.value);
       metadataReady = true;
-      await enqueueWrite(cachedMessages);
+      await messageWriter.enqueue(cachedMessages);
       if (source.found && source.valid) {
         remove(storageKeys.messages);
         remove(storageKeys.legacyMessages);
@@ -102,7 +87,7 @@ export async function initializeMessages(fallback: Message[]): Promise<StorageRe
 export async function flushMessages(): Promise<StorageWriteResult> {
   if (typeof indexedDB === "undefined") return { success: true };
   try {
-    await writeQueue;
+    await messageWriter.flush();
     remove(storageKeys.messages);
     remove(storageKeys.legacyMessages);
     return { success: true };

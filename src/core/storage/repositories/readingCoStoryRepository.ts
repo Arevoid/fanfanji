@@ -11,6 +11,7 @@ import { readingAssetDb } from "../readingAssetDb";
 import { readJson, remove, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
+import { createLatestSnapshotWriter } from "../latestSnapshotWriter";
 
 const CO_STORY_METADATA_KEY = "reading-co-story-store";
 const sameScope = (left: ReadingCoStoryScope, right: ReadingCoStoryScope): boolean =>
@@ -22,9 +23,6 @@ const sameScope = (left: ReadingCoStoryScope, right: ReadingCoStoryScope): boole
 let cachedStore: ReadingCoStoryStore | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<ReadingCoStoryStore>> | null = null;
-const idleWriteQueue = Promise.resolve();
-let writeQueue: Promise<void> = idleWriteQueue;
-let pendingStore: ReadingCoStoryStore | null = null;
 
 function loadLegacyStore(): StorageResult<ReadingCoStoryStore> {
   const loaded = readJson<unknown>(storageKeys.readingCoStoryStore, createEmptyReadingCoStoryStore());
@@ -37,23 +35,10 @@ function cloneStore(store: ReadingCoStoryStore): ReadingCoStoryStore {
     : JSON.parse(JSON.stringify(store)) as ReadingCoStoryStore;
 }
 
-function enqueueWrite(store: ReadingCoStoryStore): Promise<void> {
-  pendingStore = cloneStore(store);
-  if (writeQueue !== idleWriteQueue) return writeQueue;
-  writeQueue = (async () => {
-    while (pendingStore) {
-      const snapshot = pendingStore;
-      pendingStore = null;
-      await readingAssetDb.saveMetadataValue(CO_STORY_METADATA_KEY, snapshot);
-    }
-  })().catch((error) => {
-    pendingStore = null;
-    throw error;
-  }).finally(() => {
-    writeQueue = idleWriteQueue;
-  });
-  return writeQueue;
-}
+const coStoryWriter = createLatestSnapshotWriter(
+  cloneStore,
+  (snapshot) => readingAssetDb.saveMetadataValue(CO_STORY_METADATA_KEY, snapshot),
+);
 
 export async function initializeReadingCoStoryStore(): Promise<StorageResult<ReadingCoStoryStore>> {
   if (typeof indexedDB === "undefined") return loadLegacyStore();
@@ -71,7 +56,7 @@ export async function initializeReadingCoStoryStore(): Promise<StorageResult<Rea
       if (legacy.found && !legacy.valid) return legacy;
       cachedStore = legacy.value;
       metadataReady = true;
-      await enqueueWrite(cachedStore);
+      await coStoryWriter.enqueue(cachedStore);
       if (legacy.found && legacy.valid) remove(storageKeys.readingCoStoryStore);
       return legacy;
     } catch (error) {
@@ -93,14 +78,14 @@ export function saveReadingCoStoryStore(store: ReadingCoStoryStore): StorageWrit
   if (typeof indexedDB === "undefined") return writeJson(storageKeys.readingCoStoryStore, normalized);
   cachedStore = normalized;
   metadataReady = true;
-  enqueueWrite(normalized).catch((error) => console.warn("[reading] Failed to persist story-world data in IndexedDB.", error));
+  coStoryWriter.enqueue(normalized).catch((error) => console.warn("[reading] Failed to persist story-world data in IndexedDB.", error));
   return { success: true };
 }
 
 export async function flushReadingCoStoryStore(): Promise<StorageWriteResult> {
   if (typeof indexedDB === "undefined") return { success: true };
   try {
-    await writeQueue;
+    await coStoryWriter.flush();
     remove(storageKeys.readingCoStoryStore);
     return { success: true };
   } catch (error) {

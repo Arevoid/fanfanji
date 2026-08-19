@@ -17,37 +17,22 @@ import { readingAssetDb } from "../readingAssetDb";
 import { readJson, remove, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
+import { createLatestSnapshotWriter } from "../latestSnapshotWriter";
 
 const CO_READING_METADATA_KEY = "reading-co-reading-store";
 let cachedStore: CoReadingStore | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<CoReadingStore>> | null = null;
-const idleWriteQueue = Promise.resolve();
-let writeQueue: Promise<void> = idleWriteQueue;
-let pendingStore: CoReadingStore | null = null;
 
 function loadLegacyCoReadingStore(): StorageResult<CoReadingStore> {
   const loaded = readJson<unknown>(storageKeys.readingCoReadingStore, createEmptyCoReadingStore());
   return { ...loaded, value: normalizeCoReadingStore(loaded.value) };
 }
 
-function enqueueCoReadingWrite(store: CoReadingStore): Promise<void> {
-  pendingStore = typeof structuredClone === "function" ? structuredClone(store) : JSON.parse(JSON.stringify(store)) as CoReadingStore;
-  if (writeQueue !== idleWriteQueue) return writeQueue;
-  writeQueue = (async () => {
-    while (pendingStore) {
-      const snapshot = pendingStore;
-      pendingStore = null;
-      await readingAssetDb.saveMetadataValue(CO_READING_METADATA_KEY, snapshot);
-    }
-  })().catch((error) => {
-    pendingStore = null;
-    throw error;
-  }).finally(() => {
-    writeQueue = idleWriteQueue;
-  });
-  return writeQueue;
-}
+const coReadingWriter = createLatestSnapshotWriter(
+  (store: CoReadingStore) => typeof structuredClone === "function" ? structuredClone(store) : JSON.parse(JSON.stringify(store)) as CoReadingStore,
+  (snapshot) => readingAssetDb.saveMetadataValue(CO_READING_METADATA_KEY, snapshot),
+);
 
 export async function initializeCoReadingStore(): Promise<StorageResult<CoReadingStore>> {
   if (typeof indexedDB === "undefined") return loadLegacyCoReadingStore();
@@ -65,7 +50,7 @@ export async function initializeCoReadingStore(): Promise<StorageResult<CoReadin
       if (legacy.found && !legacy.valid) return legacy;
       cachedStore = legacy.value;
       metadataReady = true;
-      await enqueueCoReadingWrite(cachedStore);
+      await coReadingWriter.enqueue(cachedStore);
       if (legacy.found && legacy.valid) remove(storageKeys.readingCoReadingStore);
       return legacy;
     } catch (error) {
@@ -87,14 +72,14 @@ export function saveCoReadingStore(store: CoReadingStore): StorageWriteResult {
   if (typeof indexedDB === "undefined") return writeJson(storageKeys.readingCoReadingStore, normalized);
   cachedStore = normalized;
   metadataReady = true;
-  enqueueCoReadingWrite(normalized).catch((error) => console.warn("[reading] Failed to persist co-reading data in IndexedDB.", error));
+  coReadingWriter.enqueue(normalized).catch((error) => console.warn("[reading] Failed to persist co-reading data in IndexedDB.", error));
   return { success: true };
 }
 
 export async function flushCoReadingStore(): Promise<StorageWriteResult> {
   if (typeof indexedDB === "undefined") return { success: true };
   try {
-    await writeQueue;
+    await coReadingWriter.flush();
     remove(storageKeys.readingCoReadingStore);
     return { success: true };
   } catch (error) {
