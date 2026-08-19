@@ -22,7 +22,9 @@ const sameScope = (left: ReadingCoStoryScope, right: ReadingCoStoryScope): boole
 let cachedStore: ReadingCoStoryStore | null = null;
 let metadataReady = false;
 let initializationPromise: Promise<StorageResult<ReadingCoStoryStore>> | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
+const idleWriteQueue = Promise.resolve();
+let writeQueue: Promise<void> = idleWriteQueue;
+let pendingStore: ReadingCoStoryStore | null = null;
 
 function loadLegacyStore(): StorageResult<ReadingCoStoryStore> {
   const loaded = readJson<unknown>(storageKeys.readingCoStoryStore, createEmptyReadingCoStoryStore());
@@ -36,8 +38,20 @@ function cloneStore(store: ReadingCoStoryStore): ReadingCoStoryStore {
 }
 
 function enqueueWrite(store: ReadingCoStoryStore): Promise<void> {
-  const snapshot = cloneStore(store);
-  writeQueue = writeQueue.catch(() => undefined).then(() => readingAssetDb.saveMetadataValue(CO_STORY_METADATA_KEY, snapshot));
+  pendingStore = cloneStore(store);
+  if (writeQueue !== idleWriteQueue) return writeQueue;
+  writeQueue = (async () => {
+    while (pendingStore) {
+      const snapshot = pendingStore;
+      pendingStore = null;
+      await readingAssetDb.saveMetadataValue(CO_STORY_METADATA_KEY, snapshot);
+    }
+  })().catch((error) => {
+    pendingStore = null;
+    throw error;
+  }).finally(() => {
+    writeQueue = idleWriteQueue;
+  });
   return writeQueue;
 }
 
