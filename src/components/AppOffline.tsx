@@ -112,7 +112,11 @@ export default function AppOffline({
   openStoryId = null,
   onOpenOfflineStoryHandled,
 }: AppOfflineProps) {
-  const selectableCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
+  // Workspace navigation may open a group container, while the creation flow
+  // remains direct-character-only for now. Keeping these lists separate avoids
+  // broadening new-story behavior while allowing existing group stories to run.
+  const selectableCharacters = characters.filter((character) => !character.isContactInstance);
+  const creationCharacters = selectableCharacters.filter((character) => !character.isGroupChat);
   const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
   const resolveCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
   const [selectedCharId, setSelectedCharId] = useState<string>(() => {
@@ -582,7 +586,8 @@ export default function AppOffline({
 
   // Create new offline story
   const handleCreateStory = () => {
-    if (!selectedCharId) {
+    const selectedCharacter = characters.find((character) => character.id === selectedCharId);
+    if (!selectedCharId || selectedCharacter?.isGroupChat) {
       showToast("请先选择一个角色！");
       return;
     }
@@ -1417,10 +1422,10 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
               </div>
 
               <button 
-                onClick={() => selectedChar && setShowCreateModal(true)}
-                disabled={!selectedChar}
+                onClick={() => selectedChar && !selectedChar.isGroupChat && setShowCreateModal(true)}
+                disabled={!selectedChar || selectedChar.isGroupChat}
                 className="w-8 h-8 rounded-full bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
-                title={selectedChar ? "新建故事" : "请先在档案馆创建角色"}
+                title={selectedChar?.isGroupChat ? "群聊故事暂不支持从此处新建" : selectedChar ? "新建故事" : "请先在档案馆创建角色"}
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -1436,7 +1441,12 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                     relation.userIdentityId === activeIdentityId
                     && resolveCanonicalCharacterId(relation.characterId, characters) === char.id,
                   );
-                  const charStoriesCount = charRelation
+                  const charStoriesCount = char.isGroupChat
+                    ? offlineStories.filter((story) =>
+                        canAccessStoryFromCurrentRelation(story)
+                        && resolveOfflineStoryCharacterId(story, characters) === char.id,
+                      ).length
+                    : charRelation
                     ? countOfflineStoriesForRelation({
                         stories: offlineStories,
                         relationId: charRelation.id,
@@ -2108,7 +2118,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
 
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>
-        {showCreateModal && selectedChar && (
+        {showCreateModal && selectedChar && !selectedChar.isGroupChat && (
           <div className="app-viewport-overlay fixed inset-x-0 top-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
@@ -2138,7 +2148,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
                     onChange={(event) => setSelectedCharId(event.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
                   >
-                    {selectableCharacters.map((character) => <option key={character.id} value={character.id}>{character.remark || character.name}</option>)}
+                    {creationCharacters.map((character) => <option key={character.id} value={character.id}>{character.remark || character.name}</option>)}
                   </select>
                 </div>
 
