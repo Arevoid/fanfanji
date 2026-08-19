@@ -51,4 +51,22 @@ assert.deepEqual(legacy.indexedDb["character-archive-v4"], [{ id: "legacy-charac
 await restoreSystemBackupIndexedDb({ "character-archive-v4": [{ id: "restored-character" }] });
 assert.deepEqual(await readingAssetDb.loadMetadataValue("character-archive-v4"), [{ id: "restored-character" }]);
 
+const originalSaveMetadataValue = readingAssetDb.saveMetadataValue.bind(readingAssetDb);
+let saveCount = 0;
+readingAssetDb.saveMetadataValue = (async (key: string, value: unknown) => {
+  saveCount += 1;
+  if (saveCount === 2) throw new Error("simulated IndexedDB write failure");
+  return originalSaveMetadataValue(key, value);
+}) as typeof readingAssetDb.saveMetadataValue;
+await assert.rejects(
+  restoreSystemBackupIndexedDb({
+    "character-archive-v4": [{ id: "should-rollback" }],
+    "moments-v4": [{ id: "second-write" }],
+  }),
+  /simulated IndexedDB write failure/,
+);
+readingAssetDb.saveMetadataValue = originalSaveMetadataValue;
+assert.deepEqual(await readingAssetDb.loadMetadataValue("character-archive-v4"), [{ id: "restored-character" }]);
+assert.deepEqual(await readingAssetDb.loadMetadataValue("moments-v4"), moments);
+
 console.log("PASS system backup round-trip includes IndexedDB metadata and legacy flat backups");
