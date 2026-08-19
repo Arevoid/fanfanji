@@ -2,6 +2,7 @@ import { formatStorageBytes, type StorageDiagnostics } from "../../../core/stora
 
 interface StorageDiagnosticsCardProps {
   diagnostics: StorageDiagnostics | null;
+  appVersion: string;
   backupVersion: number;
   lastBackupAt: string | null;
   onRefresh: () => void;
@@ -11,6 +12,7 @@ interface StorageDiagnosticsCardProps {
 
 export function StorageDiagnosticsCard({
   diagnostics,
+  appVersion,
   backupVersion,
   lastBackupAt,
   onRefresh,
@@ -32,6 +34,7 @@ export function StorageDiagnosticsCard({
           <div className="rounded-[12px] bg-slate-50 p-3 text-[10px] text-slate-600 space-y-1">
             <div>LocalStorage：{formatStorageBytes(diagnostics.localStorageBytes)}</div>
             <div>浏览器总占用：{diagnostics.usage === undefined ? "不可用" : formatStorageBytes(diagnostics.usage)} / {diagnostics.quota === undefined ? "未知" : formatStorageBytes(diagnostics.quota)}</div>
+            <div>应用版本：v{appVersion}</div>
             <div>数据版本：{diagnostics.dataSchemaVersion || "未设置（兼容模式）"}</div>
             <div>备份版本：v{backupVersion}</div>
             <div>最近备份：{lastBackupAt ? new Date(Number(lastBackupAt)).toLocaleString() : "暂无记录"}</div>

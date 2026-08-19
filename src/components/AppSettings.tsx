@@ -77,6 +77,7 @@ import { SYSTEM_BACKUP_VERSION } from "../features/settings/systemBackup";
 import { writeString } from "../core/storage/storageAdapter";
 import { storageKeys } from "../core/storage/storageKeys";
 import { StorageDiagnosticsCard } from "../features/settings/components/StorageDiagnosticsCard";
+import { APP_VERSION } from "../core/release/releaseInfo";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -3562,6 +3563,7 @@ export default function AppSettings({
 
               <StorageDiagnosticsCard
                 diagnostics={storageDiagnostics}
+                appVersion={APP_VERSION}
                 backupVersion={SYSTEM_BACKUP_VERSION}
                 lastBackupAt={lastBackupAt}
                 onRefresh={() => void refreshStorageDiagnostics()}

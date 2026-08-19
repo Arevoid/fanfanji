@@ -2,13 +2,18 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {fileURLToPath} from 'node:url';
+import {readFileSync} from 'node:fs';
 import {defineConfig} from 'vite';
 
 const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
+const packageVersion = (JSON.parse(readFileSync(path.join(projectDirectory, 'package.json'), 'utf8')) as { version?: string }).version || '0.0.0';
 
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    define: {
+      __APP_VERSION__: JSON.stringify(packageVersion),
+    },
     resolve: {
       alias: {
         '@': projectDirectory,
