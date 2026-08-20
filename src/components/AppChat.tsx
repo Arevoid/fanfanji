@@ -848,10 +848,92 @@ export default function AppChat({
         });
       if (!packet) continue;
 
+      const claimedAmount = claimRedPacket(packet, claimant.id);
+      if (claimedAmount <= 0) continue;
+
       processedRedPacketClaimNoticeIdsRef.current.add(noticeMessage.id);
-      claimRedPacket(packet, claimant.id);
+      const packetSender = packet.sender === "user"
+        ? settings.name
+        : characters.find((character) => character.id === packet.characterId);
+      const packetSenderName = typeof packetSender === "string"
+        ? packetSender
+        : packetSender?.remark || packetSender?.name || "对方";
+      const claimantName = claimant.remark || claimant.name;
+      const claimNotification = createGroupCharacterMessage({
+        id: `claim-notification-${noticeMessage.id}`,
+        characterId: activeCharacter.id,
+        senderId: claimant.id,
+        conversationId: `group:${activeCharacter.id}`,
+        content: packet.sender === "user"
+          ? `${claimantName}领取了你的红包`
+          : `${claimantName}领取了${packetSenderName}的红包`,
+        timestamp: Date.now(),
+        isNarration: true,
+      });
+      onSendMessageRaw(claimNotification);
+      // Wait for the persisted claim state before handling another notice;
+      // otherwise multiple notices in one render could reuse the same slot.
+      break;
     }
-  }, [activeCharacter, characters, claimRedPacket, currentChatMessages, redPacketClaims, settings.name]);
+  }, [activeCharacter, characters, claimRedPacket, currentChatMessages, onSendMessageRaw, redPacketClaims, settings.name]);
+
+  const settleGroupClaimBeforeReply = (reply: Message): Message | null => {
+    if (!activeCharacter?.isGroupChat || reply.sender !== "character") return null;
+    const notice = parseRedPacketClaimNotice(reply.content);
+    if (!notice) return null;
+    const claimant = (activeCharacter.memberIds || [])
+      .map((memberId) => characters.find((character) => character.id === memberId))
+      .find((character) => character && (
+        character.id === reply.senderId
+        || character.name === notice.claimantName
+        || character.remark === notice.claimantName
+      ));
+    if (!claimant) return null;
+
+    const packet = [...currentChatMessages]
+      .filter((message) => message.timestamp <= reply.timestamp && isRedPacketMarkup(message.content))
+      .reverse()
+      .find((message) => {
+        const payload = parseRedPacketPayload(message);
+        const claims = redPacketClaims[getPaymentStatusKey(message)] || [];
+        const packetSender = message.sender === "user"
+          ? settings.name
+          : characters.find((character) => character.id === message.characterId);
+        const packetSenderName = typeof packetSender === "string"
+          ? packetSender
+          : packetSender?.remark || packetSender?.name || "";
+        const senderMatches = !notice.senderName
+          || notice.senderName === packetSenderName
+          || notice.senderName === "我"
+          || notice.senderName === "我的";
+        return senderMatches
+          && !claims.some((claim) => claim.claimantId === claimant.id)
+          && claims.length < Math.max(1, payload.count)
+          && (!payload.recipientId || payload.recipientId === claimant.id);
+      });
+    if (!packet) return null;
+    const amount = claimRedPacket(packet, claimant.id);
+    if (amount <= 0) return null;
+
+    const packetSender = packet.sender === "user"
+      ? settings.name
+      : characters.find((character) => character.id === packet.characterId);
+    const packetSenderName = typeof packetSender === "string"
+      ? packetSender
+      : packetSender?.remark || packetSender?.name || "对方";
+    const claimantName = claimant.remark || claimant.name;
+    return createGroupCharacterMessage({
+      id: `claim-notification-${reply.id}`,
+      characterId: activeCharacter.id,
+      senderId: claimant.id,
+      conversationId: `group:${activeCharacter.id}`,
+      content: packet.sender === "user"
+        ? `${claimantName}领取了你的红包`
+        : `${claimantName}领取了${packetSenderName}的红包`,
+      timestamp: Date.now(),
+      isNarration: true,
+    });
+  };
 
   const { cssTemplateCopied, copyCssExampleTemplate } = useChatCssTemplateCopy({ showToast });
 
@@ -1272,7 +1354,13 @@ export default function AppChat({
             signal,
             onTypingMember: setTypingCharacterOverride,
             onTyping: setIsTyping,
-            onSend: onSendMessage,
+            onSend: (reply) => {
+              // Persist the claim before the reply becomes visible. The
+              // notification is appended only after the original reply.
+              const claimNotification = settleGroupClaimBeforeReply(reply);
+              onSendMessage(reply);
+              if (claimNotification) onSendMessage(claimNotification);
+            },
             onComplete: persistPublicGroupTurn,
           });
         }

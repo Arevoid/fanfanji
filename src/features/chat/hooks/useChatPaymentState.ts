@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Character, Message } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { readString, writeJson } from "../../../core/storage/storageAdapter";
@@ -68,6 +68,8 @@ export function useChatPaymentState({
       return {};
     }
   });
+  const redPacketClaimsRef = useRef(redPacketClaims);
+  redPacketClaimsRef.current = redPacketClaims;
 
   const updateRedPacketStatus = (message: Message, status: RedPacketStatus) => {
     setRedPacketStatuses((previous) => {
@@ -91,7 +93,7 @@ export function useChatPaymentState({
   const claimRedPacket = (message: Message, claimantId: string): number => {
     const packet = parseRedPacketPayload(message);
     const key = getPaymentStatusKey(message);
-    const previousClaims = redPacketClaims[key] || [];
+    const previousClaims = redPacketClaimsRef.current[key] || [];
     if (previousClaims.some((claim) => claim.claimantId === claimantId)) return 0;
     if (packet.recipientId && packet.recipientId !== claimantId) return 0;
     const maxClaims = packet.mode === "exclusive" ? 1 : Math.max(1, Math.floor(packet.count));
@@ -105,6 +107,7 @@ export function useChatPaymentState({
       : Number((0.01 + Math.random() * Math.max(0, remaining - 0.01 * (slotsLeft - 1))).toFixed(2));
     const claim: RedPacketClaim = { claimantId, amount, claimedAt: Date.now() };
     const nextClaims = [...previousClaims, claim];
+    redPacketClaimsRef.current = { ...redPacketClaimsRef.current, [key]: nextClaims };
     setRedPacketClaims((previous) => {
       const next = { ...previous, [key]: nextClaims };
       writeJson(RED_PACKET_CLAIMS_KEY, next);

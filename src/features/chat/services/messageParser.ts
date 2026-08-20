@@ -164,7 +164,7 @@ export function parseRedPacketClaimNotice(content: string): RedPacketClaimNotice
   // the structured notice. Do not treat invitations or prohibitions as a
   // claim: “快点领”, “不许领”, and “别领他的” are not settlement events.
   if (/(?:不许|不准|不能|别|不要|禁止|快点|赶紧)[^。！？\n]{0,16}(?:领|抢|拆)/u.test(normalized)) return null;
-  if (!/(?:领了|领取了|领到|抢到了|抢到|拆开了|拆了)/u.test(normalized)) return null;
+  if (!/(?:领了|领取了|领到|抢到了|抢到|拆开了|拆了|收了|收到|拿到了|拿到)/u.test(normalized)) return null;
   return { claimantName: "", senderName: "" };
 }
 
