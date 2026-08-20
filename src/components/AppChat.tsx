@@ -880,7 +880,9 @@ export default function AppChat({
   const settleGroupClaimBeforeReply = (reply: Message): Message | null => {
     if (!activeCharacter?.isGroupChat || reply.sender !== "character") return null;
     const notice = parseRedPacketClaimNotice(reply.content);
-    if (!notice) return null;
+    const shouldClaim = reply.redPacketAction === "claim_and_reply" || reply.redPacketAction === "claim_silent";
+    if (reply.redPacketAction && !shouldClaim) return null;
+    if (!shouldClaim && !notice) return null;
     const claimant = (activeCharacter.memberIds || [])
       .map((memberId) => characters.find((character) => character.id === memberId))
       .find((character) => character && (
@@ -902,7 +904,7 @@ export default function AppChat({
         const packetSenderName = typeof packetSender === "string"
           ? packetSender
           : packetSender?.remark || packetSender?.name || "";
-        const senderMatches = !notice.senderName
+          const senderMatches = !notice || !notice.senderName
           || notice.senderName === packetSenderName
           || notice.senderName === "我"
           || notice.senderName === "我的";
@@ -1322,6 +1324,13 @@ export default function AppChat({
       };
 
       if (groupResult.messages.length > 0) {
+        const silentGroupReplies = groupResult.messages.filter((message) => message.redPacketAction === "claim_silent" || message.redPacketAction === "silent");
+        silentGroupReplies.forEach((reply) => {
+          const claimNotification = reply.redPacketAction === "claim_silent"
+            ? settleGroupClaimBeforeReply(reply)
+            : null;
+          if (claimNotification) onSendMessage(claimNotification);
+        });
         if (groupResult.innerVoices?.length) {
           const latest = loadInnerVoiceRecords([]).value;
           const additions = groupResult.innerVoices
@@ -1345,7 +1354,9 @@ export default function AppChat({
         repliesScheduled = false;
         const validReplies = groupResult.messages
           .map((message, idx) => ({ message, member: groupResult.members[idx], idx }))
-          .filter((item): item is { message: Message; member: Character; idx: number } => Boolean(item.member));
+          .filter((item): item is { message: Message; member: Character; idx: number } => Boolean(item.member)
+            && item.message.redPacketAction !== "claim_silent"
+            && item.message.redPacketAction !== "silent");
 
         if (validReplies.length > 0) {
           repliesScheduled = true;

@@ -160,7 +160,7 @@ export async function generateIsolatedGroupChatReplies(input: {
   const result = await input.generateTurn({
     prompt: {
       scenario: "group-chat",
-      message: `${buildGroupChatTaskMessage(input.historyText, input.hasUserMessage)}\n\n【群聊本轮回复】本轮至少让 1 位成员实际发言；每位成员最多发送 6 条独立短消息，不限制整轮总消息数。请根据群成员各自的人设、关系、上下文剧情、时间状态和当前话题自然判断哪些成员发言、各发几条，不能固定为 3 人，也不能返回空回复。每条回复必须以 [SENDER_NAME: 角色原名] 开头；同一成员的每条消息都必须重复自己的发送者标签。不得替其他成员发言，不得输出群外角色。${INLINE_GROUP_INNER_VOICE_INSTRUCTION}${input.groupMembers.some((member) => member.enableAutoTranslate) ? "\n群内开启了全部翻译的成员必须同时提供 translation 字段，并保持对应回复的气泡结构。" : ""}`,
+      message: `${buildGroupChatTaskMessage(input.historyText, input.hasUserMessage)}\n\n【群聊本轮回复】本轮至少让 1 位成员实际发言；每位成员最多发送 6 条独立短消息，不限制整轮总消息数。请根据群成员各自的人设、关系、上下文剧情、时间状态和当前话题自然判断哪些成员发言、各发几条，不能固定为 3 人，也不能返回空回复。每条回复必须以 [SENDER_NAME: 角色原名] 开头；同一成员的每条消息都必须重复自己的发送者标签。不得替其他成员发言，不得输出群外角色。若上下文中存在红包，必须先为每个成员独立判断 redPacketAction，再决定是否生成可见发言：claim_and_reply=先领取并发言，claim_silent=先领取但潜水不发言，decline_and_reply=不领取但发言，silent=不领取且不发言。领取动作必须基于红包对象、专属限制、角色人设和当前剧情判断，不能因为“快点领/不许领/别领”等话术误触发。红包可以跨越多轮对话继续存在：如果历史中有尚未领取且仍未过期的红包，成员可以本轮先和其他人聊天后再领取，也可以隔几轮看到后再领取；不要因为中间出现了其他消息就忽略它。${INLINE_GROUP_INNER_VOICE_INSTRUCTION}${input.groupMembers.some((member) => member.enableAutoTranslate) ? "\n群内开启了全部翻译的成员必须同时提供 translation 字段，并保持对应回复的气泡结构。" : ""}`,
       history: [],
       systemInstruction: buildGroupChatSystemInstruction({
         userName: input.userName,
@@ -204,12 +204,13 @@ export async function generateGroupReplyCandidates(input: {
     structuredReply: structured?.find((reply) => reply.sender.toLowerCase() === item.member.name.toLowerCase()
       || (item.member.remark && reply.sender.toLowerCase() === item.member.remark.toLowerCase())),
     content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(item.reply.content.trim(), input.disableBracketActions))),
-  })).filter((item) => Boolean(item.content));
+  })).filter((item) => Boolean(item.content) || item.structuredReply?.redPacketAction === "claim_silent" || item.structuredReply?.redPacketAction === "silent");
   const messages = valid.map((item) => createGroupCharacterMessage({
     id: input.createId(item.index), characterId: input.groupId, senderId: item.member.id,
     conversationId: `group:${input.groupId}`,
     content: item.content, timestamp: input.currentTime(),
     translation: containsNonChineseText(item.content) ? item.structuredReply?.translation : undefined,
+    redPacketAction: item.structuredReply?.redPacketAction,
   }));
   return {
     members: valid.map((item) => item.member),
@@ -218,6 +219,8 @@ export async function generateGroupReplyCandidates(input: {
       const structuredReply = structured.find((reply) => reply.sender.toLowerCase() === item.member.name.toLowerCase()
         || (item.member.remark && reply.sender.toLowerCase() === item.member.remark.toLowerCase()));
       return structuredReply?.innerVoice && messages[index]
+      && messages[index].redPacketAction !== "claim_silent"
+      && messages[index].redPacketAction !== "silent"
       ? [{ message: messages[index], member: item.member, content: structuredReply.innerVoice }]
       : [];
     }) : [],

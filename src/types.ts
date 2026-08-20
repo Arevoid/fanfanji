@@ -106,6 +106,8 @@ export interface Message {
   timestamp: number;
   /** Optional structured metadata for red packets; legacy markup remains supported. */
   redPacket?: RedPacketPayload;
+  /** Group-turn decision, persisted only as harmless metadata on generated replies. */
+  redPacketAction?: "claim_and_reply" | "claim_silent" | "decline_and_reply" | "silent";
   isBookmarked?: boolean;
   isOffline?: boolean;
   /** Snapshot-only online context. It informs a story but is never rendered as story text. */

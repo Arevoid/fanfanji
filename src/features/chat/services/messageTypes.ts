@@ -27,6 +27,7 @@ export interface CharacterMessageInput {
   isOffline?: boolean;
   isNarration?: boolean;
   redPacket?: RedPacketPayload;
+  redPacketAction?: Message["redPacketAction"];
 }
 
 export interface UserMessageInput {
@@ -40,4 +41,5 @@ export interface UserMessageInput {
   isOffline?: boolean;
   isNarration?: boolean;
   redPacket?: RedPacketPayload;
+  redPacketAction?: Message["redPacketAction"];
 }
