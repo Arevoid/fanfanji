@@ -15,7 +15,7 @@ import { getCurrentAppointmentProposal } from "../domain/schedule/appointmentPol
 import { startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
-import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseRedPacketClaimNotice, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDistribution";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
@@ -448,6 +448,7 @@ export default function AppChat({
   const latestActiveRelationshipRef = useRef<CharacterRelationship | undefined>(activeRelationship);
   const latestMemoriesRef = useRef<MemoryItem[]>(memories || []);
   const consumedGroupWelcomeIdsRef = useRef(new Set<string>());
+  const processedRedPacketClaimNoticeIdsRef = useRef(new Set<string>());
   latestActiveCharacterRef.current = activeCharacter;
   latestActiveRelationshipRef.current = activeRelationship;
   latestMemoriesRef.current = memories || [];
@@ -802,6 +803,38 @@ export default function AppChat({
     showToast,
     onSendMessage: onSendMessageRaw,
   });
+
+  // Group-chat claim notices are generated as ordinary narration text. Treat
+  // them as settlement events so the red-packet detail view and chat notice
+  // cannot drift apart.
+  useEffect(() => {
+    if (!activeCharacter?.isGroupChat || currentChatMessages.length === 0) return;
+    for (const noticeMessage of currentChatMessages) {
+      if (processedRedPacketClaimNoticeIdsRef.current.has(noticeMessage.id)) continue;
+      const notice = parseRedPacketClaimNotice(noticeMessage.content);
+      if (!notice) continue;
+
+      const claimant = (activeCharacter.memberIds || [])
+        .map((memberId) => characters.find((character) => character.id === memberId))
+        .find((character) => character && (character.name === notice.claimantName || character.remark === notice.claimantName));
+      if (!claimant) continue;
+
+      const packet = [...currentChatMessages]
+        .filter((message) => message.timestamp <= noticeMessage.timestamp && isRedPacketMarkup(message.content))
+        .reverse()
+        .find((message) => {
+          const payload = parseRedPacketPayload(message);
+          const claims = redPacketClaims[getPaymentStatusKey(message)] || [];
+          const alreadyClaimed = claims.some((claim) => claim.claimantId === claimant.id);
+          return !alreadyClaimed && claims.length < Math.max(1, payload.count)
+            && (!payload.recipientId || payload.recipientId === claimant.id);
+        });
+      if (!packet) continue;
+
+      processedRedPacketClaimNoticeIdsRef.current.add(noticeMessage.id);
+      claimRedPacket(packet, claimant.id);
+    }
+  }, [activeCharacter, characters, claimRedPacket, currentChatMessages, redPacketClaims]);
 
   const { cssTemplateCopied, copyCssExampleTemplate } = useChatCssTemplateCopy({ showToast });
 
@@ -1340,6 +1373,9 @@ export default function AppChat({
       const capturedCharacter = activeCharacter;
       // Simulate partner claiming after 3 seconds
       setTimeout(() => {
+        // In a group, the AI's claim notice is the source of truth. Do not
+        // pre-claim a fixed member here and create a second settlement event.
+        if (capturedCharacter.isGroupChat) return;
         if (capturedRelationship && !relationships.some((relationship) => relationship.id === capturedRelationship.id
           && relationship.userIdentityId === capturedRelationship.userIdentityId
           && relationship.characterId === capturedRelationship.characterId)) return;
@@ -5334,6 +5370,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             <span className="sr-only">[{stickerName}]</span>
                           </div>
                         );
+                      })() : parseRedPacketClaimNotice(msg.content) ? (() => {
+                        const notice = parseRedPacketClaimNotice(msg.content)!;
+                        const bubbleStyle = isSelf
+                          ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-[#95ec69] text-[#191919] chat-bubble-self")
+                          : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100");
+                        return <div className={`chat-message--text px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-bubble relative ${bubbleStyle} ${messageGroupClass}`}>
+                          {notice.claimantName}领取了{notice.senderName}的红包
+                        </div>;
                       })() : isCallRecordMarkup(msg.content) ? (() => {
                         const callRecord = parseCallRecord(msg.content);
                         const { status, duration } = callRecord;

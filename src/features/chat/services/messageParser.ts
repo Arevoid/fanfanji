@@ -150,6 +150,17 @@ export const isRedPacketMarkup = (content: string): boolean => /^\[(?:红包|微
 export const isTransferMarkup = (content: string): boolean => /^\[(?:转账|微信转账)\]/.test(content);
 export const isCallRecordMarkup = (content: string): boolean => /^\[通话记录\]\|/.test(content);
 
+export interface RedPacketClaimNotice {
+  claimantName: string;
+  senderName: string;
+}
+
+export function parseRedPacketClaimNotice(content: string): RedPacketClaimNotice | null {
+  const matched = content.trim().match(/^\[红包消息：(.+?)领取了(.+?)的红包\]$/u);
+  if (!matched) return null;
+  return { claimantName: matched[1].trim(), senderName: matched[2].trim() };
+}
+
 const TEXT_IMAGE_PREFIX = "[文字图]|";
 
 export const createTextImageMarkup = (description: string): string =>
