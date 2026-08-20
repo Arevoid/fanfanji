@@ -31,8 +31,8 @@ export async function deliverDirectReplyCandidates(input: {
     message.timestamp = now();
     const callSpeechCompletion = input.onSendMessage(message);
     createdMessages.push(message);
-    input.onTyping(false);
     if (callSpeechCompletion) await callSpeechCompletion;
+    input.onTyping(false);
     if (input.shouldCancel() || input.signal?.aborted) break;
 
     if (index < input.candidates.messages.length - 1) {

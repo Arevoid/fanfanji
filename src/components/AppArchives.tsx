@@ -623,7 +623,7 @@ export default function AppArchives({
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 pb-20">
+      <div className="flex-1 overflow-y-auto p-4 pb-6">
         {isCreating ? (
           <form onSubmit={handleSubmit} className="settings-panel-card space-y-4 max-w-md mx-auto p-5 animate-slide-up">
             
@@ -861,7 +861,7 @@ export default function AppArchives({
               return null;
             }
             return (
-              <div className="space-y-4 max-w-md mx-auto animate-slide-up pb-10">
+              <div className="space-y-4 max-w-md mx-auto animate-slide-up pb-4">
                 {/* Profile Header Card */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center text-center relative overflow-hidden">
                   <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-r from-neutral-800 to-neutral-950 opacity-10" />

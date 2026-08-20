@@ -440,7 +440,7 @@ export default function AppChat({
   // bubbleCss remains a scoped legacy compatibility source.
   const userCustomChatCssSources = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss];
   const hasUserCustomChatCss = userCustomChatCssSources.some((css) => Boolean(css && css.trim()));
-  useChatCustomCss(userCustomChatCssSources);
+  useChatCustomCss(userCustomChatCssSources, activeCharacter?.chatBg);
 
   // Long-lived callbacks can outlive the render in which they were created.
   // Keep the latest character/settings available at the actual send boundary.
@@ -1105,6 +1105,7 @@ export default function AppChat({
   });
 
   const sendVoiceCallMessage = () => {
+    if (isTyping) return;
     const userMsg = createVoiceCallUserMessage({
       text: callingInputText,
       characterId: activeChatCharId,
@@ -6509,6 +6510,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         </div>
                       );
                     })}
+                    {isTyping && (
+                      <div className="flex justify-start animate-fade-in" aria-live="polite" aria-label="对方正在说话">
+                        <div className="inline-flex items-center gap-1 rounded-2xl rounded-bl-sm border border-white/10 bg-white/15 px-3 py-2 shadow-sm">
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/80" style={{ animationDelay: "0ms" }} />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/80" style={{ animationDelay: "150ms" }} />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/80" style={{ animationDelay: "300ms" }} />
+                          <span className="ml-1 text-[11px] text-white/60">对方正在说话</span>
+                        </div>
+                      </div>
+                    )}
                     <div ref={callTranscriptEndRef} aria-hidden="true" className="h-px" />
                   </div>
                   <div className="flex items-center gap-2">
@@ -6516,7 +6527,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       type="text"
                       value={callingInputText}
                       onChange={(e) => setCallingInputText(e.target.value)}
-                      placeholder="输入消息..."
+                      placeholder={isTyping ? "对方正在说话..." : "输入消息..."}
+                      disabled={isTyping}
                       className="flex-1 bg-white/10 hover:bg-white/15 focus:bg-white/20 text-white placeholder-white/30 border border-white/10 rounded-[14px] px-3 py-3 text-sm outline-none transition-all"
                       onKeyDown={(e) => {
                         if (e.key === "Enter") sendVoiceCallMessage();
@@ -6525,7 +6537,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     <button
                       type="button"
                       onClick={sendVoiceCallMessage}
-                      disabled={!callingInputText.trim()}
+                      disabled={!callingInputText.trim() || isTyping}
                       className="w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-white/10 disabled:text-white/30 flex items-center justify-center transition-all active:scale-95"
                       title="发送"
                     >
