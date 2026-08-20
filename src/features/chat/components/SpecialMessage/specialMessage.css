@@ -147,9 +147,9 @@
   right: 9px;
   bottom: auto;
   color: #c7d0cf;
-  font-family: "RedPacketPayFont", "Aidian SignatureTi Marker pen -Medium", "Segoe Script", "Bradley Hand", cursive;
+  font-family: "RedPacketPayFont" !important;
   font-size: 1.75rem;
-  font-weight: 500;
+  font-weight: 400;
   letter-spacing: 0;
   line-height: 1;
   opacity: 0.3;

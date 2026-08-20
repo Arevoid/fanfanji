@@ -156,9 +156,16 @@ export interface RedPacketClaimNotice {
 }
 
 export function parseRedPacketClaimNotice(content: string): RedPacketClaimNotice | null {
-  const matched = content.trim().match(/^\[红包消息：(.+?)领取了(.+?)的红包\]$/u);
-  if (!matched) return null;
-  return { claimantName: matched[1].trim(), senderName: matched[2].trim() };
+  const normalized = content.trim();
+  const matched = normalized.match(/^\[红包消息：(.+?)领取了(.+?)的红包\]$/u);
+  if (matched) return { claimantName: matched[1].trim(), senderName: matched[2].trim() };
+
+  // Models often emit a natural-language claim such as “领了” instead of
+  // the structured notice. Do not treat invitations or prohibitions as a
+  // claim: “快点领”, “不许领”, and “别领他的” are not settlement events.
+  if (/(?:不许|不准|不能|别|不要|禁止|快点|赶紧)[^。！？\n]{0,16}(?:领|抢|拆)/u.test(normalized)) return null;
+  if (!/(?:领了|领取了|领到|抢到了|抢到|拆开了|拆了)/u.test(normalized)) return null;
+  return { claimantName: "", senderName: "" };
 }
 
 const TEXT_IMAGE_PREFIX = "[文字图]|";

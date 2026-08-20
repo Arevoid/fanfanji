@@ -814,9 +814,16 @@ export default function AppChat({
       const notice = parseRedPacketClaimNotice(noticeMessage.content);
       if (!notice) continue;
 
+      const senderCharacter = noticeMessage.senderId
+        ? characters.find((character) => character.id === noticeMessage.senderId || character.name === noticeMessage.senderId)
+        : undefined;
       const claimant = (activeCharacter.memberIds || [])
         .map((memberId) => characters.find((character) => character.id === memberId))
-        .find((character) => character && (character.name === notice.claimantName || character.remark === notice.claimantName));
+        .find((character) => character && (
+          character.name === notice.claimantName
+          || character.remark === notice.claimantName
+          || (!notice.claimantName && (character.id === senderCharacter?.id || character.id === noticeMessage.senderId))
+        ));
       if (!claimant) continue;
 
       const packet = [...currentChatMessages]
@@ -826,7 +833,17 @@ export default function AppChat({
           const payload = parseRedPacketPayload(message);
           const claims = redPacketClaims[getPaymentStatusKey(message)] || [];
           const alreadyClaimed = claims.some((claim) => claim.claimantId === claimant.id);
-          return !alreadyClaimed && claims.length < Math.max(1, payload.count)
+          const packetSender = message.sender === "user"
+            ? settings.name
+            : characters.find((character) => character.id === message.characterId);
+          const packetSenderName = typeof packetSender === "string"
+            ? packetSender
+            : packetSender?.remark || packetSender?.name || "";
+          const senderMatches = !notice.senderName
+            || notice.senderName === packetSenderName
+            || notice.senderName === "我"
+            || notice.senderName === "我的";
+          return senderMatches && !alreadyClaimed && claims.length < Math.max(1, payload.count)
             && (!payload.recipientId || payload.recipientId === claimant.id);
         });
       if (!packet) continue;
@@ -834,7 +851,7 @@ export default function AppChat({
       processedRedPacketClaimNoticeIdsRef.current.add(noticeMessage.id);
       claimRedPacket(packet, claimant.id);
     }
-  }, [activeCharacter, characters, claimRedPacket, currentChatMessages, redPacketClaims]);
+  }, [activeCharacter, characters, claimRedPacket, currentChatMessages, redPacketClaims, settings.name]);
 
   const { cssTemplateCopied, copyCssExampleTemplate } = useChatCssTemplateCopy({ showToast });
 
@@ -5370,7 +5387,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             <span className="sr-only">[{stickerName}]</span>
                           </div>
                         );
-                      })() : parseRedPacketClaimNotice(msg.content) ? (() => {
+                      })() : parseRedPacketClaimNotice(msg.content)?.claimantName ? (() => {
                         const notice = parseRedPacketClaimNotice(msg.content)!;
                         const bubbleStyle = isSelf
                           ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-[#95ec69] text-[#191919] chat-bubble-self")
