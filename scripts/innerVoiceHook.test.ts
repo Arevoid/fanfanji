@@ -5,7 +5,8 @@ const hook = readFileSync(new URL("../src/features/chat/hooks/useInnerVoice.ts",
 const app = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 assert.match(hook, /findInnerVoiceByMessage/);
 assert.match(hook, /requestsRef/);
-assert.match(hook, /apiTranslate/);
+assert.doesNotMatch(hook, /apiTranslate|generateInnerVoice/);
 assert.match(app, /const innerVoiceController = useInnerVoice/);
 assert.match(app, /record=\{innerVoiceController\.record\}/);
-console.log("PASS inner voice generation and modal state are routed through the chat hook");
+assert.match(app, /createInlineInnerVoiceRecord/);
+console.log("PASS inner voice is read from cache and created during the chat turn");

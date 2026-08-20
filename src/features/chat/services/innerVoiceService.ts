@@ -7,6 +7,7 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerializer";
+import type { InlineInnerVoicePayload } from "./chatTurnResponseProtocol";
 
 export interface GenerateInnerVoiceInput {
   character: Character;
@@ -20,6 +21,36 @@ export interface GenerateInnerVoiceInput {
   settings: UserSettings;
   offlineContinuityContext?: string;
   worldBookEntries?: readonly WorldBookEntry[];
+}
+
+export function createInlineInnerVoiceRecord(input: {
+  character: Character;
+  triggerMessage: Message;
+  relationId?: string;
+  groupId?: string;
+  conversationId: string;
+  payload: InlineInnerVoicePayload;
+  settings: UserSettings;
+}): InnerVoiceRecord {
+  const summary = serializeMessageContentForPrompt(input.triggerMessage, {
+    mode: "history",
+    userName: input.settings.name,
+    characterName: input.character.name,
+  });
+  return {
+    id: createId("inner-voice"),
+    characterId: input.character.id,
+    relationId: input.relationId,
+    groupId: input.groupId,
+    messageId: input.triggerMessage.id,
+    conversationId: input.conversationId,
+    triggerMessageSummary: summary.slice(0, 120),
+    emotionalState: input.payload.emotionalState,
+    state: input.payload.emotionalState,
+    content: input.payload.content,
+    translation: input.payload.translation,
+    createdAt: Date.now(),
+  };
 }
 
 function parseInnerVoice(text: string): { content: string; emotionalState: string } | null {

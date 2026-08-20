@@ -13,6 +13,9 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
   const bubbles = cleanedText
     ? removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup))
     : [];
+  const translatedBubbles = context.translationText
+    ? splitAiReplyBubbles(context.translationText, context.keepPeriods).map(normalizePaymentMarkup)
+    : [];
   return {
     cleanedText,
     bubbleTexts: bubbles,
@@ -21,6 +24,7 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
       characterId: context.characterId,
       context: context.context,
       content: context.transformBubble ? context.transformBubble(bubbleText, index) : bubbleText,
+      translation: translatedBubbles[index],
       timestamp: context.currentTime(index),
     })),
   };

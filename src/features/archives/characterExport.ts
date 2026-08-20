@@ -15,7 +15,7 @@ const readString = (value: unknown): string => typeof value === "string" ? value
  */
 export const toPortableCharacterProfile = (character: Character): PortableCharacterProfile => ({
   name: character.name,
-  age: typeof character.age === "number" ? character.age : "",
+  age: character.age ?? "",
   avatar: character.avatar || "",
   gender: character.gender || "",
   mbti: character.mbti || "",
@@ -30,14 +30,16 @@ export const createCharacterFromImportedProfile = (value: unknown, id: string): 
   const profile = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-  const numericAge = typeof profile.age === "number" && Number.isFinite(profile.age)
-    ? profile.age
-    : "";
+  const importedAge = profile.age === "∞"
+    ? "∞"
+    : typeof profile.age === "number" && Number.isFinite(profile.age)
+      ? profile.age
+      : "";
 
   return {
     id,
     name: readString(profile.name) || "未命名角色",
-    age: numericAge,
+    age: importedAge,
     avatar: readString(profile.avatar),
     gender: readString(profile.gender),
     mbti: readString(profile.mbti),
@@ -69,7 +71,7 @@ export const extractRawDocumentCharacterMetadata = (text: string) => {
   const ageMatch = ageValue.match(/\d{1,3}/);
   return {
     name,
-    age: ageMatch ? Number(ageMatch[0]) : "" as const,
+    age: /^(?:∞|无限|永恒)$/i.test(ageValue.trim()) ? "∞" as const : ageMatch ? Number(ageMatch[0]) : "" as const,
     gender: readRawDocumentField(text, "性别|gender|sex"),
   };
 };

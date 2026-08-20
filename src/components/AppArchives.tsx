@@ -105,7 +105,7 @@ export default function AppArchives({
 
   // Form State
   const [name, setName] = useState("");
-  const [age, setAge] = useState<number | "">("");
+  const [age, setAge] = useState<number | "" | "∞">("");
   const [gender, setGender] = useState("");
   const [mbti, setMbti] = useState("");
   const [avatar, setAvatar] = useState("");
@@ -393,7 +393,7 @@ export default function AppArchives({
       setErrorMsg("请输入姓名！");
       return;
     }
-    if (age !== "" && isNaN(Number(age))) {
+    if (age !== "" && age !== "∞" && (!Number.isInteger(age) || age < 0)) {
       setErrorMsg("请输入正确的年龄！");
       return;
     }
@@ -405,7 +405,7 @@ export default function AppArchives({
     const savedChar: Character = {
       id: editingId || Date.now().toString(),
       name: name.trim(),
-      age: age === "" ? "" : Number(age),
+      age,
       gender,
       mbti,
       avatar: finalAvatar,
@@ -683,13 +683,21 @@ export default function AppArchives({
                 <label className="block text-xs font-semibold text-slate-500 mb-1">
                   年龄
                 </label>
+                <div className="flex gap-2">
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   value={age}
-                  onChange={(e) => setAge(e.target.value === "" ? "" : parseInt(e.target.value))}
+                  onChange={(e) => {
+                    const value = e.target.value.trim();
+                    if (value === "" || value === "∞") setAge(value as "" | "∞");
+                    else if (/^\d{1,3}$/.test(value)) setAge(Number(value));
+                  }}
                   placeholder="请输入年龄"
-                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+                  className="min-w-0 flex-1 px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
                 />
+                <button type="button" onClick={() => setAge(age === "∞" ? "" : "∞")} className={`w-11 rounded-[8px] border text-lg font-semibold ${age === "∞" ? "border-neutral-950 bg-neutral-950 text-white" : "border-slate-200 bg-slate-50 text-slate-600"}`} aria-label="设置年龄为无限">∞</button>
+                </div>
               </div>
             </div>
 
@@ -875,7 +883,7 @@ export default function AppArchives({
                     <span className="w-1 h-1 rounded-full bg-slate-300" />
                     <span>{char.gender}</span>
                     <span className="w-1 h-1 rounded-full bg-slate-300" />
-                    <span>{char.age}岁</span>
+                    <span>{char.age === "∞" ? "∞" : char.age ? `${char.age}岁` : "年龄未设置"}</span>
                   </p>
                 </div>
 
@@ -1138,7 +1146,7 @@ export default function AppArchives({
                         {char.mbti}
                       </span>
                       <span className="px-1.5 py-0.5 bg-[var(--badge-muted-bg)] text-[var(--badge-muted-text)] text-[10px] font-bold rounded-md">
-                        {char.age}岁
+                        {char.age === "∞" ? "∞" : char.age ? `${char.age}岁` : "年龄未设置"}
                       </span>
                     </div>
 

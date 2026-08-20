@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { createId } from "./core/id/createId";
-import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "./utils/apiHelper";
+import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
@@ -99,7 +99,6 @@ import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/s
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
 import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
-import { containsNonChineseText } from "./utils/textLanguage";
 import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
 import {
   migrateLegacyClassicBubblePreset,
@@ -2214,35 +2213,10 @@ export default function App() {
         setRelationships((previous) => previous.map((relation) => relation.id === messageToSave.relationId ? { ...relation, lastActiveTime: Date.now(), updatedAt: Date.now() } : relation));
       }
 
-    // Check if auto-translation is enabled and the message needs translation
-    const char = characters.find((c) => c.id === messageToSave.characterId);
-    if (
-      char &&
-      char.enableAutoTranslate &&
-      messageToSave.sender === "character" &&
-      !messageToSave.isNarration &&
-      !messageToSave.content.startsWith("data:image/") &&
-      !messageToSave.content.startsWith("[红包]")
-    ) {
-      if (containsNonChineseText(messageToSave.content)) {
-        apiTranslate({
-          text: messageToSave.content,
-          apiKey: settings.apiKey || "",
-          model: settings.selectedModel,
-          apiEndpoint: settings.apiEndpoint,
-        })
-          .then((res) => {
-            if (res && res.text && res.text !== messageToSave.content) {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === messageToSave.id && messageMatchesMutationScope(m, messageToSave) ? { ...m, translation: res.text } : m))
-              );
-            }
-          })
-          .catch((err) => {
-            console.error("Auto translation error:", err);
-          });
-      }
-    }
+    // New replies carry their translation in the same AI response envelope.
+    // Do not start a second request here; legacy messages can still be
+    // translated explicitly or by the one-time migration when auto-translate
+    // is enabled in chat settings.
   };
 
   const handleToggleBookmark = (id: string, scope?: MessageMutationScope) => {

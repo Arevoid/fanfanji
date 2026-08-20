@@ -73,7 +73,9 @@ import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
-import { loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords } from "../core/storage/repositories/innerVoiceRepository";
+import { findInnerVoiceByMessage, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords } from "../core/storage/repositories/innerVoiceRepository";
+import { createInlineInnerVoiceRecord } from "../features/chat/services/innerVoiceService";
+import { INLINE_INNER_VOICE_INSTRUCTION } from "../features/chat/services/chatTurnResponseProtocol";
 import { generateCharacterImageForDelivery } from "../features/chat/services/characterImageDeliveryService";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
@@ -943,6 +945,7 @@ export default function AppChat({
   });
   // New features: Notes attachment, Quoting, Bubble Menu, Note Reader, OOC Annotation
   const { voicePlayed, setVoicePlayed, voiceTranscribed, setVoiceTranscribed } = useChatVoiceMessageState();
+  const [collapsedTranslations, setCollapsedTranslations] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     bubbleLongPressRef.current.forEach(({ timer }) => clearTimeout(timer));
@@ -1182,6 +1185,26 @@ export default function AppChat({
       };
 
       if (groupResult.messages.length > 0) {
+        if (groupResult.innerVoices?.length) {
+          const latest = loadInnerVoiceRecords([]).value;
+          const additions = groupResult.innerVoices
+            .filter((item) => !findInnerVoiceByMessage(latest, {
+              kind: "group",
+              groupId: activeCharacter.id,
+              conversationId: `group:${activeCharacter.id}`,
+              characterId: item.member.id,
+              messageId: item.message.id,
+            }))
+            .map((item) => createInlineInnerVoiceRecord({
+              character: item.member,
+              triggerMessage: item.message,
+              groupId: activeCharacter.id,
+              conversationId: `group:${activeCharacter.id}`,
+              payload: item.content,
+              settings,
+            }));
+          if (additions.length) saveInnerVoiceRecords([...latest, ...additions]);
+        }
         repliesScheduled = false;
         const validReplies = groupResult.messages
           .map((message, idx) => ({ message, member: groupResult.members[idx], idx }))
@@ -1605,6 +1628,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       assembledInstructions.push(userKnowledgeBoundary);
       assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
       assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
+      assembledInstructions.push(`${INLINE_INNER_VOICE_INSTRUCTION}${activeCharacter.enableAutoTranslate ? "\n开启了全部翻译：必须同时提供 translation 字段，内容为 reply 的中文翻译，并保持相同段落/气泡结构。" : ""}`);
 
       // Recent dialogue is already present in the role-correct history. Do not
       // copy it into a system block: duplicate user wording encourages parroting
@@ -1691,6 +1715,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         prompt: { scenario: "direct-chat", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
         settings,
         signal,
+        includeInnerVoice: true,
       });
 
       if (signal?.aborted) return;
@@ -1797,6 +1822,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }),
             createId: () => createId("online"),
             currentTime: () => Date.now(),
+            translationText: data.translation,
             transformBubble: (bubbleText, idx) => {
               const isVoice = activeAttachModal !== "calling" && canConvertBubbleToVoice(turnCharacter, userMsg, messages, idx, bubbleText, replyContext);
               if (!isVoice) return bubbleText;
@@ -1814,6 +1840,22 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           if (signal?.aborted) return;
 
           if (createdMessages.length > 0) {
+            if (data.innerVoice && activeRelationship) {
+              const triggerMessage = createdMessages[createdMessages.length - 1];
+              const latest = loadInnerVoiceRecords([]).value;
+              const scope = { kind: "direct" as const, relationId: activeRelationship.id, messageId: triggerMessage.id };
+              if (!findInnerVoiceByMessage(latest, scope)) {
+                const record = createInlineInnerVoiceRecord({
+                  character: activeCharacter,
+                  triggerMessage,
+                  relationId: activeRelationship.id,
+                  conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
+                  payload: data.innerVoice,
+                  settings,
+                });
+                saveInnerVoiceRecords([...latest, record]);
+              }
+            }
             recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
             if (proactiveOfflineResponseParse.directive && pendingProactiveOfflineAppointment && userMsg) {
               const updatedAppointment = applyProactiveOfflineResponse({
@@ -5465,11 +5507,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               </>
                             ) : <div className="text-left">{msg.content}</div>;
                           })()}
-                          {msg.translation && (
+                          {msg.translation && !collapsedTranslations.has(msg.id) && (
                             <>
                               <div className={`my-1.5 border-t border-dashed ${isSelf ? "border-white/20" : "border-stone-200"}`} />
-                              <div className={`text-left text-[11px] leading-relaxed ${isSelf ? "text-white/90" : "text-stone-500"}`}>
-                                {msg.translation}
+                              <div className={`flex items-start gap-2 text-left text-[11px] leading-relaxed ${isSelf ? "text-white/90" : "text-stone-500"}`}>
+                                <span className="min-w-0 flex-1 whitespace-pre-wrap">{msg.translation}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setCollapsedTranslations((previous) => new Set(previous).add(msg.id))}
+                                  className="shrink-0 text-[10px] opacity-70 hover:opacity-100"
+                                  aria-label="收起翻译"
+                                >
+                                  收起
+                                </button>
                               </div>
                             </>
                           )}
@@ -8167,6 +8217,24 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               >
                 <Languages className="w-3.5 h-3.5 text-stone-500" />
                 <span>翻译</span>
+              </button>
+            )}
+
+            {activeMenuMsg.translation && (
+              <button
+                onClick={() => {
+                  setCollapsedTranslations((previous) => {
+                    const next = new Set(previous);
+                    if (next.has(activeMenuMsg.id)) next.delete(activeMenuMsg.id);
+                    else next.add(activeMenuMsg.id);
+                    return next;
+                  });
+                  setActiveMenuMsg(null);
+                }}
+                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-stone-700 rounded-lg flex items-center gap-2 transition-colors"
+              >
+                <Languages className="w-3.5 h-3.5 text-stone-500" />
+                <span>{collapsedTranslations.has(activeMenuMsg.id) ? "展开翻译" : "收起翻译"}</span>
               </button>
             )}
 

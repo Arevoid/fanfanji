@@ -11,6 +11,7 @@ import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerial
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import { buildGroupMemberPrivateContext, type GroupMemberPrivateContextInput } from "../prompts/groupMemberPrivateContext";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage } from "../prompts/chatPromptBuilders";
+import { INLINE_GROUP_INNER_VOICE_INSTRUCTION, parseGroupTurnResponse } from "./chatTurnResponseProtocol";
 
 export type GroupChatTurnGenerator = (input: {
   prompt: {
@@ -27,7 +28,7 @@ export type GroupChatTurnGenerator = (input: {
   createId: (index: number) => string;
   currentTime: () => number;
   signal?: AbortSignal;
-}) => Promise<{ messages: Message[]; members: Character[] }>;
+}) => Promise<{ messages: Message[]; members: Character[]; innerVoices?: Array<{ message: Message; member: Character; content: { content: string; emotionalState: string; translation?: string } }> }>;
 
 export function buildGroupChatHistoryContext(input: {
   sourceMessages: readonly Message[];
@@ -149,7 +150,7 @@ export async function generateIsolatedGroupChatReplies(input: {
   createReplyId: () => string;
   currentTime: () => number;
   signal?: AbortSignal;
-}): Promise<{ messages: Message[]; members: Character[] } | null> {
+}): Promise<{ messages: Message[]; members: Character[]; innerVoices?: Array<{ message: Message; member: Character; content: { content: string; emotionalState: string; translation?: string } }> } | null> {
   // One request is intentionally used for the whole public group turn. Sending
   // one request per member was expensive and also made the first-turn delivery
   // look stuck while several sequential calls were in flight. Private member
@@ -158,7 +159,7 @@ export async function generateIsolatedGroupChatReplies(input: {
   const result = await input.generateTurn({
     prompt: {
       scenario: "group-chat",
-      message: `${buildGroupChatTaskMessage(input.historyText, input.hasUserMessage)}\n\n【群聊本轮回复】请从群成员中选择 0—3 位自然会发言的人。直接输出正式回复；每条回复必须以 [SENDER_NAME: 角色原名] 开头。可以输出多位成员，也可以让某位成员输出多条短消息。不得替其他成员发言，不得输出群外角色。`,
+      message: `${buildGroupChatTaskMessage(input.historyText, input.hasUserMessage)}\n\n【群聊本轮回复】请从群成员中选择 0—3 位自然会发言的人。直接输出正式回复；每条回复必须以 [SENDER_NAME: 角色原名] 开头。可以输出多位成员，也可以让某位成员输出多条短消息。不得替其他成员发言，不得输出群外角色。${INLINE_GROUP_INNER_VOICE_INSTRUCTION}${input.groupMembers.some((member) => member.enableAutoTranslate) ? "\n群内开启了全部翻译的成员必须同时提供 translation 字段，并保持对应回复的气泡结构。" : ""}`,
       history: [],
       systemInstruction: buildGroupChatSystemInstruction({
         userName: input.userName,
@@ -189,20 +190,35 @@ export async function generateGroupReplyCandidates(input: {
   disableBracketActions: boolean;
   createId: (index: number) => string;
   currentTime: () => number;
-}): Promise<{ messages: Message[]; members: Character[] }> {
+}): Promise<{ messages: Message[]; members: Character[]; innerVoices?: Array<{ message: Message; member: Character; content: { content: string; emotionalState: string; translation?: string } }> }> {
   const data = await requestAiReply(input.requestAi, input.request);
   if (!data?.text) return { messages: [], members: [] };
-  const matched = matchGroupReplyMembers(parseGroupReplies(data.text), input.members);
+  const structured = parseGroupTurnResponse(data.text);
+  const rawReplies = structured
+    ? structured.map((reply) => ({ charName: reply.sender, content: reply.content }))
+    : parseGroupReplies(data.text);
+  const matched = matchGroupReplyMembers(rawReplies, input.members);
   const valid = matched.map((item) => ({
     ...item,
+    structuredReply: structured?.find((reply) => reply.sender.toLowerCase() === item.member.name.toLowerCase()
+      || (item.member.remark && reply.sender.toLowerCase() === item.member.remark.toLowerCase())),
     content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(item.reply.content.trim(), input.disableBracketActions))),
   })).filter((item) => Boolean(item.content));
+  const messages = valid.map((item) => createGroupCharacterMessage({
+    id: input.createId(item.index), characterId: input.groupId, senderId: item.member.id,
+    conversationId: `group:${input.groupId}`,
+    content: item.content, timestamp: input.currentTime(),
+    translation: item.structuredReply?.translation,
+  }));
   return {
     members: valid.map((item) => item.member),
-    messages: valid.map((item) => createGroupCharacterMessage({
-      id: input.createId(item.index), characterId: input.groupId, senderId: item.member.id,
-      conversationId: `group:${input.groupId}`,
-      content: item.content, timestamp: input.currentTime(),
-    })),
+    messages,
+    innerVoices: structured ? valid.flatMap((item, index) => {
+      const structuredReply = structured.find((reply) => reply.sender.toLowerCase() === item.member.name.toLowerCase()
+        || (item.member.remark && reply.sender.toLowerCase() === item.member.remark.toLowerCase()));
+      return structuredReply?.innerVoice && messages[index]
+      ? [{ message: messages[index], member: item.member, content: structuredReply.innerVoice }]
+      : [];
+    }) : [],
   };
 }

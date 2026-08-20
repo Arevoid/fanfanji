@@ -49,6 +49,7 @@ export function createCharacterTextMessage(input: CharacterMessageInput): Messag
     sender: "character",
     ...(input.senderId ? { senderId: input.senderId } : {}),
     content: input.content,
+    ...(input.translation ? { translation: input.translation } : {}),
     timestamp: input.timestamp,
     ...(input.isOffline !== undefined ? { isOffline: input.isOffline } : {}),
     ...(input.isNarration !== undefined ? { isNarration: input.isNarration } : {}),

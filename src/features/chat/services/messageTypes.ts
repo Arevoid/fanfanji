@@ -21,6 +21,7 @@ export interface CharacterMessageInput {
   relationId?: string;
   conversationId?: string;
   content: string;
+  translation?: string;
   timestamp: number;
   senderId?: string;
   isOffline?: boolean;

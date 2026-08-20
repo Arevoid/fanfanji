@@ -1,10 +1,8 @@
 import { useRef, useState } from "react";
 import type { Character, InnerVoiceRecord, MemoryItem, Message, UserSettings, WorldBookEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
-import { apiTranslate } from "../../../utils/apiHelper";
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
 import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, saveInnerVoiceRecords, type InnerVoiceScope } from "../../../core/storage/repositories/innerVoiceRepository";
-import { generateInnerVoice } from "../services/innerVoiceService";
 
 interface UseInnerVoiceOptions {
   characters: Character[];
@@ -24,6 +22,8 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<InnerVoiceRecord[]>([]);
+  // Retained as a compatibility marker for older callers; new turns are
+  // persisted during reply delivery and never start a second request here.
   const requestsRef = useRef(new Set<string>());
 
   const close = () => { setRecord(null); setCharacter(null); setMode("current"); setError(null); };
@@ -47,28 +47,8 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     setHistory(listHistory(stored));
     if (existing) { setRecord(existing); setLoading(false); return; }
     setRecord(null);
-    const requestKey = relationId ? `direct:${relationId}:${triggerMessage.id}` : `group:${groupId}:${canonicalCharacterId}:${triggerMessage.id}`;
-    if (requestsRef.current.has(requestKey)) return;
-    requestsRef.current.add(requestKey); setLoading(true);
-    try {
-      const recentMessages = messages.filter((message) => activeRelationship ? message.relationId === activeRelationship.id : message.characterId === groupId && activeCharacter?.isGroupChat);
-      const generated = await generateInnerVoice({ character: targetCharacter, relationship: activeRelationship, triggerMessage, recentMessages, conversationId, relationId, groupId, settings, offlineContinuityContext: getOfflineContinuityContext(triggerMessage), worldBookEntries });
-      if (!generated) { setError("心声生成结果无效，请稍后重试。"); return; }
-      if (targetCharacter.enableAutoTranslate) {
-        try {
-          const translated = await apiTranslate({ text: generated.content, apiKey: settings.apiKey || "", model: settings.selectedModel, apiEndpoint: settings.apiEndpoint });
-          if (translated.text && translated.text !== generated.content) generated.translation = translated.text;
-        } catch (translationError) { console.warn("Inner voice translation failed:", translationError); }
-      }
-      const latest = loadInnerVoiceRecords([]).value;
-      const cached = findInnerVoiceByMessage(latest, scope);
-      const nextRecord = cached || generated;
-      if (!cached) saveInnerVoiceRecords([...latest, nextRecord]);
-      setRecord(nextRecord); setHistory(listHistory(cached ? latest : [...latest, nextRecord]));
-    } catch (generationError) {
-      console.error("Inner voice generation failed:", generationError);
-      setError("暂时无法生成心声，不影响正常聊天。");
-    } finally { requestsRef.current.delete(requestKey); setLoading(false); }
+    setLoading(false);
+    setError("这条消息没有预生成心声；新消息会在回复时随同一轮请求生成。");
   };
 
   return { record, character, mode, setMode, loading, error, history, open, close, getEmotion };

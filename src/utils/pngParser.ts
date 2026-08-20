@@ -100,17 +100,19 @@ export const mapSillyTavernToCharacter = (json: any, defaultAvatar: string): Cha
   let bstory = data.creator_notes || data.creator || "";
   
   // Try mapping common fields
-  let ageNum: number | "" = "";
+  let ageNum: number | "" | "∞" = "";
   if (data.age !== undefined && data.age !== null && data.age !== "") {
-    const parsedAge = parseInt(String(data.age));
-    if (!isNaN(parsedAge)) {
-      ageNum = parsedAge;
+    const rawAge = String(data.age).trim();
+    if (/^(?:∞|无限|永恒)$/i.test(rawAge)) ageNum = "∞";
+    else {
+      const parsedAge = parseInt(rawAge);
+      if (!isNaN(parsedAge)) ageNum = parsedAge;
     }
   } else {
+    const infiniteAgeMatch = pDetails.match(/(?:年龄|Age|age|岁)[:：\s]*(∞|无限|永恒)/i);
     const ageMatch = pDetails.match(/(?:年龄|Age|age|岁)[:：\s]*(\d+)/i);
-    if (ageMatch) {
-      ageNum = parseInt(ageMatch[1]);
-    }
+    if (infiniteAgeMatch) ageNum = "∞";
+    else if (ageMatch) ageNum = parseInt(ageMatch[1]);
   }
 
   let genderStr = data.gender || "";
