@@ -71,7 +71,7 @@ export function ConversationList({
                     {subtitle && <span className="text-[var(--text-tertiary)] font-normal ml-1">· {subtitle}</span>}
                     {character.isGroupChat && <span className="text-[var(--text-tertiary)] font-normal ml-1">({1 + (character.memberIds?.length || 0)})</span>}
                   </h4>
-                  {lastMessage && <span className="text-[9px] text-[var(--text-tertiary)] font-medium">{new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
+                  {lastMessage && <span className="text-[9px] text-[var(--text-tertiary)] font-medium">{new Date(lastMessage.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}</span>}
                 </div>
                 <p className="text-[11px] text-[var(--text-secondary)] truncate mt-0.5 leading-normal">
                   {lastMessage ? (character.isGroupChat ? getGroupMessageSummary(lastMessage) : directMessageSummary) : ""}
