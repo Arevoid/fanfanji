@@ -13,6 +13,10 @@ const settings = readFileSync(
   new URL("../src/components/AppSettings.tsx", import.meta.url),
   "utf8",
 );
+const backupPanel = readFileSync(
+  new URL("../src/features/settings/components/SystemBackupPanel.tsx", import.meta.url),
+  "utf8",
+);
 
 assert.match(reader, /aria-label="搜索正文"/);
 assert.match(reader, /searchReadingContent\(displayContent, searchQuery\)/);
@@ -42,7 +46,7 @@ assert.match(
   library,
   /已恢复 \$\{restored\.restoredBooks\} 本书，正文、进度和标注均已写回本地/,
 );
-assert.match(settings, /阅读小说请在“阅读”应用导出含正文的阅读归档/);
+assert.match(backupPanel, /阅读小说请在“阅读”应用导出含正文的阅读归档/);
 assert.doesNotMatch(settings, /本机内的所有数据完整导出/);
 
 console.log("reading round 6 tools and archive interface tests passed");

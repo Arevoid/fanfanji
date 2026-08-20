@@ -12,7 +12,7 @@ import {
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { formatTimeWidgetDate } from "../features/home/timeWidgetDate";
 import { audioDb } from "../utils/audioDb";
-import { remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
+import { readString, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 import {
   compressImagePreservingTransparency,
@@ -190,8 +190,8 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
 /** A wide, date-led photo widget. Its image is intentionally unmasked so the
  * user controls contrast solely with the single date-text colour setting. */
 export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadius }: WidgetProps) {
-  const [backgroundImage, setBackgroundImage] = useState(() => localStorage.getItem(`calendar_album_image_${id}`) || ALBUM_IMAGES[2]);
-  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(localStorage.getItem(`calendar_album_font_color_${id}`)));
+  const [backgroundImage, setBackgroundImage] = useState(() => readString(`calendar_album_image_${id}`).value || ALBUM_IMAGES[2]);
+  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(readString(`calendar_album_font_color_${id}`).value));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draftBackgroundImage, setDraftBackgroundImage] = useState(backgroundImage);
   const [draftFontColor, setDraftFontColor] = useState(fontColor);
@@ -322,7 +322,7 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
 /** Frameless 2×4 clock matching the compact date-over-time reference layout. */
 export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
   const [now, setNow] = useState(() => new Date());
-  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(localStorage.getItem(`time_widget_font_color_${id}`), "#1c1917"));
+  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(readString(`time_widget_font_color_${id}`).value, "#1c1917"));
   const [draftFontColor, setDraftFontColor] = useState(fontColor);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const textRefs = useRef<Array<HTMLSpanElement | null>>([]);
@@ -556,13 +556,13 @@ export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, 
 
 
 export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widgetBorderRadius }: WidgetProps) {
-  const [targetDate, setTargetDate] = useState(() => localStorage.getItem(`anniversary_date_${id}`) || "2026-03-02");
-  const [title, setTitle] = useState(() => localStorage.getItem(`anniversary_title_${id}`) || "纪念日");
-  const [widgetType, setWidgetType] = useState<"anniversary" | "countdown">(() => (localStorage.getItem(`anniversary_type_${id}`) as "anniversary" | "countdown") || "anniversary");
-  const [backgroundImage, setBackgroundImage] = useState(() => localStorage.getItem(`anniversary_bg_${id}`) || "");
+  const [targetDate, setTargetDate] = useState(() => readString(`anniversary_date_${id}`).value || "2026-03-02");
+  const [title, setTitle] = useState(() => readString(`anniversary_title_${id}`).value || "纪念日");
+  const [widgetType, setWidgetType] = useState<"anniversary" | "countdown">(() => (readString(`anniversary_type_${id}`).value as "anniversary" | "countdown") || "anniversary");
+  const [backgroundImage, setBackgroundImage] = useState(() => readString(`anniversary_bg_${id}`).value || "");
   const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(
-    localStorage.getItem(`anniversary_color_${id}`),
-    localStorage.getItem(`anniversary_bg_${id}`) ? "#ffffff" : "#1c1917",
+    readString(`anniversary_color_${id}`).value,
+    readString(`anniversary_bg_${id}`).value ? "#ffffff" : "#1c1917",
   ));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draftTargetDate, setDraftTargetDate] = useState(targetDate);
@@ -889,7 +889,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
             const isInstalled = installedAppIds 
               ? installedAppIds.includes("notes") 
               : (() => {
-                  const raw = localStorage.getItem("phone_installed_apps");
+                  const raw = readString("phone_installed_apps").value;
                   if (raw) {
                     try {
                       const parsed = JSON.parse(raw);

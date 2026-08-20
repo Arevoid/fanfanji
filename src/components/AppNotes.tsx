@@ -12,7 +12,7 @@ import {
   Save, 
   CheckSquare,
 } from "lucide-react";
-import { remove as removeStoredValue, writeJson } from "../core/storage/storageAdapter";
+import { readString, remove as removeStoredValue, writeJson } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 
 interface Note {
@@ -39,7 +39,7 @@ const SEED_TODOS: Todo[] = [];
 export default function AppNotes({ onClose }: AppNotesProps) {
   // Navigation: "notes" or "todo"
   const [activeTab, setActiveTab] = useState<"notes" | "todo">(() => {
-    const savedTab = localStorage.getItem("memo_active_tab");
+    const savedTab = readString("memo_active_tab").value;
     removeStoredValue("memo_active_tab"); // consume once
     return (savedTab === "todo" ? "todo" : "notes");
   });
@@ -66,7 +66,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
 
   // Auto open todo creator if triggered from widget
   useEffect(() => {
-    const triggerEdit = localStorage.getItem("memo_open_todo_edit");
+    const triggerEdit = readString("memo_open_todo_edit").value;
     if (triggerEdit === "true" && activeTab === "todo") {
       setIsAddingTodo(true);
       removeStoredValue("memo_open_todo_edit"); // consume

@@ -1,4 +1,5 @@
 import express from "express";
+import { randomUUID } from "node:crypto";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
@@ -8,15 +9,26 @@ import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput,
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./src/utils/fetchWithTimeout";
+import { CONTENT_SECURITY_POLICY } from "./src/core/security/contentSecurityPolicy";
 
 dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 3000);
 
   // Use JSON parsing with size limits for custom base64 wallpapers or customized avatars
   app.use(express.json({ limit: "15mb" }));
+  app.use((req, res, next) => {
+    const requestId = req.header("x-request-id")?.trim() || randomUUID();
+    res.setHeader("x-request-id", requestId);
+    res.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+    res.locals.requestId = requestId;
+    next();
+  });
+  app.get("/healthz", (_req, res) => {
+    res.json({ status: "ok", service: "fanfanji", version: process.env.npm_package_version || "0.0.0" });
+  });
 
   const explicitImageRequest = (text: string) => {
     const image = "(?:照片|图片|图像|相片|自拍(?:照)?)";
@@ -825,9 +837,20 @@ ${text}
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[小手机] Server running on http://0.0.0.0:${PORT}`);
   });
+  const shutdown = (signal: string) => {
+    console.log(`[小手机] ${signal} received; closing server gracefully.`);
+    server.close((error) => {
+      if (error) {
+        console.error("[小手机] Graceful shutdown failed:", error);
+        process.exitCode = 1;
+      }
+    });
+  };
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
 startServer();

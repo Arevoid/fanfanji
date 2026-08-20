@@ -38,15 +38,183 @@ npm run build
 npm run check
 ```
 
-`npm run check` 依次执行 TypeScript 检查、全部脚本测试和生产构建，是提交前的统一验收入口。
+`npm run check` 先执行 `npm run install:check`（`npm ci --ignore-scripts --dry-run`），再依次执行 TypeScript 检查、全部脚本测试和生产构建，是提交前的统一验收入口。
 
-测试位于 `scripts/`，由 `scripts/runAllTests.ts` 自动收集。当前基线为 291 个测试。新增业务边界时不要只补 UI 测试，至少还要覆盖：
+测试位于 `scripts/`，由 `scripts/runAllTests.ts` 自动收集。2026-08-20 本地基线为 369 个测试，另有生产 smoke test。新增业务边界时不要只补 UI 测试，至少还要覆盖：
 
 - 两个用户身份之间的数据隔离；
 - 同一角色的两个不同关系之间的数据隔离；
 - 私密数据不能进入公开场景；
 - 旧存储数据的兼容读取；
 - 删除、重生成、失败重试和重复调用的幂等性。
+
+### 2.1 2026-08-20 长期运行计划复核
+
+本轮补齐内容存储迁移中断后的显式恢复：用户确认后可接管过期锁，已完成模块跳过重写，未完成模块继续迁移并重新校验，旧副本仍保留。
+
+本轮继续将 AppChat TTS 播放指示状态抽为 `useChatTtsPlaybackState`；不改变播放器、对象 URL、通话语音队列或 TTS 请求逻辑。最新门禁：`npm test` 400/400 通过，lint、build、release、smoke、security 全部通过。
+
+本轮再将 AppChat 跨会话 typing 指示状态抽为 `useChatTypingState`；异步回复仍按 identity/relation/conversation scope 隔离。最新门禁：`npm test` 401/401 通过，lint、build、release、smoke、security 全部通过。
+
+本轮再将 AppChat 位置输入、问候去重、Toast 和备忘录列表等瞬时 UI 状态抽为 `useChatTransientUiState`，不改变持久化或发送逻辑。最新门禁：`npm test` 402/402 通过，lint、build、release、smoke、security 全部通过。
+
+本轮再将 AppChat 手动归档与记忆提炼的进行中状态抽为 `useChatOperationState`，不改变实际操作逻辑。最新门禁：`npm test` 403/403 通过，lint、build、release、smoke、security 全部通过。
+
+本轮新增 Scheduler 长时间运行 soak 回归：模拟至少一天逻辑时间，验证串行执行、无重叠、租约释放和单条有界快照。最新门禁：`npm test` 404/404 通过，lint、build、release、smoke、security 全部通过。
+
+固定迁移数据集现已显式覆盖空数据、超长线下故事、贴纸引用和接近配额 payload，并保留损坏 JSON、重复 ID、悬空引用、图片和语音场景；定向与全量测试均通过。
+
+存储诊断页现已显示最近一次已完成迁移时间和是否存在未完成迁移。历史门禁：`npm test` 405/405 通过，当前门禁见本文最新增量记录。
+
+本轮补充迁移预检恢复安全边界回归：普通预检阻止未完成迁移，显式恢复仅解除该状态阻塞，容量不足仍保持阻止。历史门禁：`npm test` 405/405 通过。
+
+本轮补齐系统备份跨阶段回滚：导入前快照全部已知 IndexedDB 模块（含未启用条目库），后续模块失败时补偿恢复 IndexedDB、LocalStorage 和线下故事，避免半恢复状态。历史门禁：`npm test` 405/405 通过。
+
+本轮修复调度器对象描述变化导致的无意义重建：metadata、recoveryPayload、冷却和拒绝状态改为运行时更新，不再因普通渲染 stop/start 定时器。历史门禁：`npm test` 406/406 通过。
+
+本轮将 AppSettings 的系统备份导入、只读检查、完整/轻量导出和最近备份时间记录抽为 `useSystemBackupActions`，页面入口只保留参数和事件转发；备份格式、跨阶段回滚和 API Key 行为保持不变。历史门禁：`npm test` 406/406 通过。
+
+本轮补充发布清单与存储迁移版本追踪：`dist/release-manifest.json` 记录 `dataSchemaVersion: 0` 和 `migrationScriptVersion: content-entry-storage-v1`，`release:check` 强制校验两者；最新门禁：`npm test` 407/407 通过，lint、build、release、smoke、security 全部通过。
+
+本轮继续收紧数据健康与 IndexedDB 生命周期：健康扫描会纳入聊天/线下条目库中的图片引用，引用扫描不完整时禁止手动孤儿清理；图片、贴纸、音乐和字体数据库在 `versionchange/close` 后会清空缓存连接。最新门禁：`npm test` 407/407、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：聊天主题 JSON 与桌面模块备份的文件传输动作已抽为 `useSettingsTransferActions`，保持原有文件格式、确认提示、刷新和 API 配置行为。最新门禁：`npm test` 407/407、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppOffline`：故事快照更新、串行持久化队列和失败提示已抽为 `useOfflineStoryPersistence`，编辑、生成、记忆同步和退出流程继续复用同一保存边界。最新门禁：`npm test` 407/407、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppChat`：当前会话消息筛选和可见消息投影已抽为 `useChatMessageProjection`，只清理渲染层内部标记，原始消息、发送和持久化路径保持不变。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮补充 schema 兼容安全边界：迁移预检会阻止无法识别或高于当前代码支持范围的数据 schema，存储诊断页显示当前 schema 基线与迁移脚本版本。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮修复 Scheduler 同类型多实例恢复边界：同一 `taskType` 现在可保留多个工厂并按快照逐一匹配，单个实例卸载不会误删其他实例的恢复注册。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：图片 API 预设选择、草稿持久化、模型拉取、连接测试、协议推断和保存动作已抽为 `useSettingsImageApiActions`，保持现有 API 地址、Key 和图片预设格式行为。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：普通文本 API 预设选择、新增、删除、模型拉取和保存动作已抽为 `useSettingsTextApiActions`，保持现有自定义地址、Key、预设格式和保存行为。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：MiniMax/Mossland 语音配置保存动作已抽为 `useSettingsVoiceActions`，保持现有字段归一化、TTS 配置和 Key 行为。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：文本 API 连接测试动作已抽为 `useSettingsApiConnectionActions`，继续调用原有 `apiTestKey`，不新增地址限制、认证或 Key 处理。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：头像、壁纸和应用图标上传/压缩/恢复动作已抽为 `useSettingsAssetActions`，保持原有尺寸、质量、透明度和设置保存边界。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：样式预设保存动作已抽为 `useSettingsPresetActions`，保持原有 `StylePreset` 字段、默认主题色和保存回调。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：样式预设应用动作已抽为 `useSettingsApplyPresetAction`，保持经典预设结构化覆盖、壁纸来源和现有保存字段。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：身份切换动作已抽为 `useSettingsIdentityActions`，保持外部切换回调优先级和本地身份字段持久化行为。最新门禁：`npm test` 408/408、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppOffline`：消息编辑开始、保存和取消动作已抽为 `useOfflineMessageEditorActions`，继续复用故事快照串行持久化边界。最新门禁：`npm test` 409/409、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppOffline`：故事删除、标题和 IF 设定编辑动作已抽为 `useOfflineStoryManagementActions`，保持活动故事快照队列与非活动故事保存分流。最新门禁：`npm test` 410/410、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppOffline`：单条剧情记录删除动作已抽为 `useOfflineMessageActions`，继续复用故事快照持久化边界。最新门禁：`npm test` 411/411、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppOffline`：消息重新生成入口已抽为 `useOfflineRegenerationActions`，继续调用原有强制 AI 重生成流程。最新门禁：`npm test` 412/412、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppOffline`：工作区退出与回线上聊天流程已抽为 `useOfflineWorkspaceExitActions`，保持持久化等待、故事结束、会话清理和导航顺序。最新门禁：`npm test` 413/413、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppSettings`：清除应用数据流程已抽为 `useSettingsClearDataActions`，保持确认、清理失败恢复和重载行为。最新门禁：`npm test` 414/414、lint、build、release、smoke、security 全部通过。
+
+本轮继续完成阶段五的展示层增量化：`MessageList` 新增可选 header/content wrapper，并将线下故事消息列表接入同一套 120 条窗口化渲染与上滑扩展逻辑；线下故事仍以完整消息数组支撑生成、编辑和持久化，只有 DOM 挂载量受限。`workspaceScrollRef` 纳入 `useOfflineStoryRuntimeState`，不改变退出、自动滚动和生成状态行为。最新 `npm run lint` 与 `npm test` 414/414 通过。
+
+本轮新增 `offlineMessageWindow.test.tsx`：使用 10,000 条线下剧情记录验证仅挂载最近 120 条、保留绝对索引和完整数据源；覆盖长期计划中的 1000/5000/10000 条消息验收基线中的 10000 条场景。最新 `npm run lint` 与 `npm test` 415/415 通过。
+
+本轮继续拆分 AppChat：消息单条删除、多选删除、关联图片资产清理、红包状态清理和关系作用域校验已抽为 `useChatMessageCleanupActions`；页面仅负责状态组合与事件转发。新增 Hook 契约测试并迁移既有图片清理/多选删除断言。最新门禁：`npm test` 416/416、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppChat：保留关系记录但清理该关系全部业务数据的动作已抽为 `useChatRelationshipCleanupActions`，覆盖消息/资源、角色事件与事实、主动主题、记忆、心声、日记、红包、论坛私有作者与任务、线下故事、memo ledger、未读和主动消息运行态；删除好友流程仍保留独立的关系删除和群成员处理逻辑。新增关系清理 Hook 契约测试。最新门禁：`npm test` 417/417、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 AppChat：删除好友完整流程已抽为 `useChatDeleteFriendAction`，保留孤儿关系恢复、当前身份关系校验、跨域清理、群成员修剪和导航复位。新增删除好友 Hook 契约测试，并迁移角色事实清理断言。最新门禁：`npm test` 418/418、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppChat：朋友圈长按/右键菜单、评论手势、复制、收藏、翻译和删除动作已抽为 `useChatMomentActions`，保留现有 API 翻译、状态持久化和事件回调行为。新增朋友圈动作 Hook 契约测试。最新门禁：`npm test` 419/419、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppChat：群聊成员移除、成员邀请和对应系统旁白消息已抽为 `useChatGroupMemberActions`，保留成员列表更新、角色名称解析、旁白发送和邀请弹窗关闭行为。新增群聊成员动作 Hook 契约测试。最新门禁：`npm test` 420/420、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 AppOffline：故事创建动作已抽为 `useOfflineStoryCreationActions`，保留直聊/群聊校验、关系与身份作用域、聊天上下文导入、知识/世界书快照、离线存储标记和创建表单复位。新增故事创建 Hook 契约测试。最新门禁：`npm test` 421/421、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppOffline：记忆同步动作已抽为 `useOfflineStoryMemorySyncActions`，保留自动/手动同步意图、线下事实策略、多人关系分发、知识事实写入、摘要安全回退、持久化失败状态和完成事件记录；同步相关静态契约测试已迁移到新 Hook。最新门禁：`npm test` 422/422、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppOffline：剧情发送、线下提示词组装、线上上下文隔离、AI 生成、重生成和故事快照写入已原样搬迁到 `useOfflineStoryGenerationActions`，页面只负责依赖组合；相关静态契约测试已迁移到新 Hook，未改变原有提示词和持久化逻辑。最新门禁：`npm test` 422/422、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppChat：从消息/预约进入线下故事的关系校验、预约状态迁移、群聊成员记忆快照、线上上下文导入、故事创建和导航动作已原样搬迁到 `useChatStartOfflineFromMessage`；相关预约/主动线下契约测试已迁移到新 Hook。最新门禁：`npm test` 422/422、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppChat：消息翻译请求、翻译结果回写、空结果和失败提示已原样搬迁到 `useChatMessageTranslation`，保持现有 API 地址、Key、模型和消息作用域行为。新增翻译 Hook 契约测试。最新门禁：`npm test` 423/423、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppChat：聊天背景草稿图片选择、压缩和草稿状态写入已搬迁到 `useChatBackgroundDraftUpload`，保持原有 `1000×1000`、`0.7` 压缩参数和失败处理。新增背景草稿上传 Hook 契约测试。最新门禁：`npm test` 424/424、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppChat：设置保存、关系会话更新、主动线下偏好写入和设置项自动翻译已原样搬迁到 `useChatSaveSettings`，保持原有自定义 API、Key、关系作用域、弹窗关闭和保存失败处理；新增设置保存 Hook 契约测试并迁移主动线下偏好静态断言。最新门禁：`npm test` 425/425、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppChat：记忆提炼动作已原样搬迁到 `useChatMemoryExtraction`，保留关系作用域、Truth claims 先写入、会话摘要、兼容 Memory 合并、API 失败返回值和压缩状态清理；新增 Hook 契约测试并迁移 Truth Layer 静态断言。最新门禁：`npm test` 426/426、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 AppChat：聊天图标草稿更新动作已搬迁到 `useChatDraftChatIcon`，保持 URL trim、空值删除和原有草稿状态写入行为。新增 Hook 契约测试。最新门禁：`npm test` 427/427、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮补齐阶段九的 API 调用量治理：新增 90 天有界的 `apiUsageMetrics`，只记录聊天、翻译、记忆提取和人设总结的请求次数、成功/失败及输入输出字符量，不保存 API Key 或请求正文；统一 API 包装器负责记录，存储诊断卡展示汇总。新增指标回归测试。最新门禁：`npm test` 428/428、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮补齐 Scheduler 注册缺口：`AppForum` 现在接入 `useForumActivityEngine`，论坛体故事推进新增 `useForumStoryScheduler` 并注册 `forum-story-progression` 任务；两者均暂停于隐藏/离线状态并携带受限恢复描述。新增运行时接入契约测试。同时新增 `.github/workflows/quality.yml`，在 push、PR 和手动触发时执行可重复安装与完整 `npm run check`。最新门禁：`npm test` 430/430、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 `AppOffline`：离开前自动同步、线上交接、预约完成状态更新和故事持久化已原样搬迁到 `useOfflineStoryExitFinalization`，退出/回线上流程继续复用同一最终化边界；迁移了相关自动归档、线上召回和预约入口静态契约。最新门禁：`npm test` 431/431、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 `AppForum`：论坛体故事手动推进动作已搬迁到 `useForumStoryUpdateAction`，保留点赞后结局判定、故事更新后的评论生成、提示语和错误/进行中状态。新增动作 Hook 契约测试。最新门禁：`npm test` 432/432、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 `AppChat`：回复重生成的完整提示词组装、关系/Truth/线下交接上下文、错误处理和消息发送已机械等价搬迁到 `useChatRegenerationAction`；send 与 regeneration 的静态提示词、序列化、跨日历史和线下交接契约已迁移到页面+Hook 联合校验。最新门禁：`npm test` 433/433、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 `AppForum`：论坛体故事读者评论提交、评论事件记录、分享、故事/评论删除和翻译提示动作已搬迁到 `useForumStoryReaderActions`，保留故事作用域、确认框、提示、后台评论生成与刷新顺序。新增动作 Hook 契约测试。最新门禁：`npm test` 434/434、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 `AppSettings`：全局字体文件导入、字体 URL 校验、字体数据库回滚/清理和恢复默认动作已搬迁到 `useSettingsGlobalFontActions`，保持字体格式限制、25MB 限制、保存失败回滚与对象 URL 释放。新增动作 Hook 契约测试。最新门禁：`npm test` 435/435、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 `AppForum`：论坛 NPC 角色卡的保存、编辑、选择、JSON 导入/导出和身份作用域处理已搬迁到 `useForumCommunityNpcActions`，保留字段截断、无效卡拒绝、导出对象 URL 释放和原有提示。新增动作 Hook 契约测试。最新门禁：`npm test` 436/436、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮补强阶段九持续治理：质量工作流新增每日定时触发，持续执行可重复安装、迁移/备份回归、调度长时间 soak、构建、smoke 与生产依赖审计；新增 cron 配置契约测试。最新门禁：`npm test` 436/436、lint、release、smoke、security 全部通过，构建门禁此前已通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮补齐浏览器端错误监控：新增 `runtimeErrorMetrics` 与 `useRuntimeErrorMonitoring`，应用根监听 `error`/`unhandledrejection` 并在 30 天、40 类桶上限内记录来源、错误类型、次数和时间；不保存错误消息、堆栈、请求正文或凭据。存储诊断卡展示近 30 天汇总，新增指标与监听器清理契约测试。最新门禁：`npm test` 438/438、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮补充普通聊天性能验收：新增 1,000 与 5,000 条聊天记录窗口测试，确认 `MessageList` 仅挂载最近 120 条、保留绝对索引和完整消息数据源；线下故事 10,000 条窗口测试继续保留。最新门禁：`npm test` 439/439、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮完成一次本地生产构建浏览器验收：通过 `npm start` 加载生产构建，实际打开设置/系统备份/存储诊断页面，确认应用版本、schema、备份版本、健康扫描、API 调用统计和运行时错误统计均可显示；生产页面加载成功，未产生新的浏览器错误日志。该结果仅代表本机生产构建验收，不代表 Android/iOS 或 staging 验收。
+
+本轮继续拆分 `AppForum`：论坛资料保存、头像类型校验/压缩、图片资源写入和身份作用域处理已搬迁到 `useForumProfileActions`，保持字段截断、资源 ID、错误提示和原有保存边界。新增动作 Hook 契约测试。最新门禁：`npm test` 440/440、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮继续拆分 `AppChat`：语音消息格式归一化、通话字幕隔离、通话 TTS 排队入口、单聊作用域校验和群聊会话标记已搬迁到 `chatMessageDelivery` 服务；保留通话语音完成后再推进下一条的 Promise 语义，不改变 API 地址、Key 或备份行为。新增投递服务契约测试，并迁移 TTS 静态契约到新边界。最新门禁：`npm test` 441/441、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮完成 CSP 强制执行：首屏主题初始化从 `index.html` 内联脚本搬迁到同源 `public/firstPaintTheme.js`，静态入口、Express、Cloudflare Worker API 与静态资源响应统一发送 `Content-Security-Policy`；保留 `connect-src 'self' https:` 以不改变用户自定义 API 地址支持。新增强制 CSP、首屏脚本和 Worker 静态响应契约测试。最新门禁：`npm test` 441/441、lint、build、release、smoke、security 全部通过；安全审计为 0 vulnerabilities。
+
+本轮继续增强 Scheduler 多标签运行边界：运行中的任务按租约周期续期，续期失败进入可恢复失败态；同源标签通过 advisory `BroadcastChannel` 快速广播租约取得/释放，localStorage 仍作为最终仲裁边界，不宣称替代真实多标签验收或跨部署 Durable Objects。新增续期与协议契约测试。最新门禁：`npm test` 442/442、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮补充 staging readiness 工作流：仅允许手动触发，使用 GitHub `staging` environment，执行 `npm ci` 与完整 `npm run check`，并保留 14 天的 release manifest、静态入口和服务端制品证据；工作流不自动部署，因此不把仓库门禁冒充真实 staging 发布。新增工作流契约测试。最新门禁：`npm test` 447/447、lint、build、release、smoke、security 全部通过。
+
+本轮继续拆分 `AppChat`：通话 TTS 播放队列、移动端音频解锁、对象 URL 回收、取消代际、字幕同步和串行等待已搬迁到 `useChatCallSpeechPlayback`；页面仅组合控制状态和生命周期动作，保留通话完成后再推进下一条的 Promise 语义。新增 Hook 契约测试并迁移 TTS 播放静态契约。最新门禁：`npm test` 445/445、lint、build、release、smoke、security 全部通过；构建仍仅有 AppChat/vendor-docx 大 chunk 警告。
+
+本轮清理 `AppChat` 中已由 `MomentsApp` 接管、且永远不会执行的旧朋友圈渲染分支，删除约 360 行死代码，不改变当前朋友圈入口或事件处理路径；组件源码从 9,682 行降至 9,321 行。最新门禁：`npm test` 445/445、lint、build、release、smoke、security 全部通过。
+
+本轮继续清理 `AppChat` 中已被统一 `getWorldBookLocationReferences` 替代的旧位置提取算法块注释，删除约 89 行不可执行遗留代码；位置候选仍由领域服务统一生成，现有世界书位置契约测试继续覆盖过滤、去重和数量上限。组件源码进一步降至 9,232 行。
+
+本轮将 `AppSettings` 的身份作用域设置保存逻辑抽为 `useSettingsScopedSave`，保留活动身份回退、资料字段同步和统一保存入口；新增 Hook 契约测试。最新门禁：`npm test` 445/445、lint、build、release、smoke、security 全部通过；构建仍仅提示 AppChat/vendor-docx 大 chunk。
+
+本轮继续拆分 `AppChat` 群聊生成：将消息去重、时间排序、上下文窗口截取、成员显示名格式化和世界书扫描文本构建迁移到 `buildGroupChatHistoryContext`，保留自定义历史与当前用户消息的扫描语义；新增群聊服务契约覆盖。最新门禁：`npm test` 445/445、lint、build、release、smoke、security 全部通过。
+
+本轮进一步将群聊成员级世界书、私有记忆、`at_depth` 注入和公开成员定义组装迁移到 `buildGroupMemberPromptContexts`；继续保持群级与成员级注入合并规则，以及私有上下文只进入对应成员请求的边界。最新门禁：`npm test` 445/445、lint、build、release、smoke、security 全部通过；构建仍仅提示 AppChat/vendor-docx 大 chunk。
+
+本轮再将群聊路由成员选择、成员逐个生成、同轮公开历史追加和中止传播迁移到 `generateIsolatedGroupChatReplies`；页面继续负责打字动画、延迟消息投递和群聊记忆持久化。更新群聊提示静态契约以验证服务边界。组件源码进一步降至 9,130 行；最新门禁：`npm test` 445/445、lint、build、release、smoke、security 全部通过。
+
+本轮将群聊回复的 500ms 缓冲、1500ms 打字模拟、成员间 400ms 间隔、取消清理和完成回调迁移到 `scheduleGroupReplyDelivery`，页面仅提供状态、发送和记忆保存回调；新增顺序投递与时间契约测试。组件源码进一步降至 9,075 行；最新门禁：`npm test` 445/445、lint、build、release、smoke、security 全部通过。
+
+本轮将 `AppSettings` 聊天功能图标的 trim、空值删除和即时持久化动作抽为 `useSettingsChatIconActions`，页面保留字段渲染；新增 Hook 契约测试。`AppSettings.tsx` 降至 2,987 行。最新门禁：`npm test` 447/447、lint、build、release、smoke、security 全部通过。
+
+本轮将全局聊天 CSS 模板复制的剪贴板 API、textarea 回退、复制状态反馈和失败提示抽为 `useSettingsCssTemplateCopy`；新增 Hook 契约测试。`AppSettings.tsx` 降至 2,974 行。最新门禁：`npm test` 447/447、lint、build、release、smoke、security 全部通过。
+
+本轮将设置页预览气泡的颜色、圆角、边框和液态玻璃样式计算抽为纯函数 `getSettingsPreviewBubbleStyle`，新增普通边框与液态玻璃契约测试；`AppSettings.tsx` 降至 2,966 行。最新门禁：`npm test` 448/448、lint、build、release、smoke、security 全部通过。
+
+本轮继续收紧组件边界：将系统备份数据清洗逻辑迁移到 `src/features/settings/systemBackupSanitizer.ts`，将主动联系时间窗计算迁移到 `src/features/chat/services/proactiveScheduleService.ts`，并将首次开场白 effect 迁移到 `useChatGreeting`；新增备份隐私、主动联系日间/跨夜和开场白清理边界测试。`AppSettings.tsx` 降至 2,825 行，`AppChat.tsx` 降至 9,007 行。最新统一门禁：`npm run check` 全部通过，`npm test` 450/450。
+
+本轮补齐普通聊天 10,000 条消息窗口验收；`MessageList` 在 1,000、5,000 和 10,000 条消息场景均只挂载 120 条可见窗口，同时保留完整数据源与末尾定位。新增场景契约后，lint 与窗口测试通过。
+
+已在当前工作区实现并通过本地验证：统一存储边界契约、存储诊断与用户确认清理、备份恢复回滚错误、备份只读检查与原始文件导出、迁移前备份下载确认、消息窗口查询、固定迁移数据集（3 身份、直聊/群聊、1000 条消息、媒体引用、重复/悬空引用和损坏备份）、调度元数据快照与隐藏/离线暂停、`pagehide/pageshow` 生命周期恢复、调度原因/任务类型/冷却/拒绝状态记录、任务类型注册表和 React hook 自动注册/恢复、逻辑时钟防回拨、租约写后确认与续期、advisory BroadcastChannel 标签协调、受限非敏感恢复描述、论坛活动统一调度、论坛体故事推进调度、跨标签短租约、可恢复任务状态筛选、刷新恢复与取消不复活测试、聊天预约 Hook、聊天已发起/未读状态 Hook、通话计时/超时/滚动 Hook、通话 TTS 播放 Hook、支付/红包状态 Hook、聊天个人资料与 Me 页状态 Hook、聊天贴纸选择器状态 Hook、聊天导航/朋友圈筛选状态 Hook、聊天设置面板状态 Hook、群聊历史上下文服务、群聊成员提示上下文服务、群聊路由与成员生成服务、群聊回复投递服务、统一安全优先 ID 生成、发布版本清单与回滚不变量检查、存储健康/迁移 Hook、API 调用量与字符量统计、浏览器运行时错误类型监控、普通聊天 1,000/5,000/10,000 条消息窗口验收、线下工作区导航组件拆分、线下剧本设置 hook 拆分、线下故事创建/编辑表单 Hook、AppOffline 阅读偏好与瞬时控制 Hook、AppOffline 故事编辑器运行时状态 Hook、AppOffline Toast 生命周期 Hook、`useOfflineWorkspaceScope` 关系/故事恢复 Hook、AppChat 群聊创建与待欢迎消息 Hook、AppSettings PWA 安装/独立运行 Hook、AppSettings API/图片预设状态 Hook、AppSettings 外观草稿状态 Hook、AppSettings 语音配置状态 Hook、AppSettings 导航状态 Hook、AppSettings 身份资料草稿 Hook、AppSettings 样式/字体草稿状态 Hook、AppSettings 瞬时测试/预设 UI 状态 Hook、AppOffline 消息编辑状态 Hook、AppSettings 聊天图标状态 Hook、AppSettings 备份 UI 状态 Hook、AppChat 消息交互 UI 状态 Hook、AppChat 朋友圈交互与持久化状态 Hook、AppChat 语音播放/转写标记状态 Hook、AppChat 通话 TTS 播放 Hook、AppChat 旧朋友圈死代码清理、AppSettings 身份作用域保存 Hook、AppSettings 聊天图标动作 Hook、AppSettings CSS 模板复制 Hook、AppSettings 预览样式纯函数、Service Worker 指纹缓存、服务端健康探针/请求关联、系统备份面板与心声 Hook/弹窗接入、离线退出最终化 Hook、论坛故事读者动作 Hook、全局字体动作 Hook、论坛 NPC 动作 Hook、论坛资料动作 Hook、AppChat 消息投递服务、staging readiness 门禁、CI 每日定时质量门禁。另补充了安全治理契约：API Key 不进入日志/聚合指标，备份导入路径不执行字符串代码，恶意 JSON 不得污染 `Object.prototype`，未知本地键在恢复前被过滤；实际 API 地址支持范围和备份 API Key 行为均未改变。`npm run lint`、`npm test`（461/461）、`npm run build`、`npm run release:check`、`npm run smoke:check` 和 `npm run security:check` 均通过；生产依赖 high/critical 审计为 0 vulnerabilities。构建仍提示 AppChat/vendor-docx 等大 chunk，这是性能警告，不是失败。发布构建现在额外生成 `dist/release-manifest.json`，记录应用版本、备份版本、SW 缓存、提交标识和回滚不变量。跨标签租约仍是 localStorage 的 best-effort 协调，完整真实多标签/刷新/关闭页面验收仍待进行。
+
+以下仍不能视为完成：真实设备迁移验收、弱网/长时间运行矩阵、staging/灰度发布、跨部署 durable scheduler 和真实多标签/刷新/关闭页面验收、大型页面的进一步拆分余项、更广泛安全审计，以及用户明确暂缓的 API 安全策略和备份 API Key 行为。仓库内已补齐强制 CSP、生产依赖审计、受限恢复描述、逻辑时钟防回拨和 best-effort 租约确认。
+
+最新增量已将备份清洗、主动联系时间窗、开场白副作用、Token 估算、主动消息 catch-up/冷却/随机触发策略、自定义 CSS DOM 注入、CSS 模板复制、通话字幕消息创建、图片生成结果交付/关系切换清理、朋友圈照片分析、通话结束记录/拒绝策略、直聊历史上下文构造、自动语音气泡资格适配、群聊上下文/多成员生成编排、朋友圈关系认知上下文构造、线下 handoff 时间线构造、朋友圈自动动态生成编排、自动评论生成编排、自动回复生成编排、图片生成身份/关系上下文解析以及直聊逐气泡投递/通话语音同步/取消保护移出页面组件；又将设置页气泡预览背景色/透明度计算迁移到 `settingsPreviewStyle.ts`、存储孤儿资源/迁移副本的确认与清理迁移到 `useStorageCleanupActions.ts`、离线故事首次 Act 自动启动迁移到 `useOfflineStoryAutoStart.ts`、线下故事记忆修复判定迁移到 `offlineStoryMemoryRepairPolicy.ts`、错过的线下回线上 handoff 恢复迁移到 `offlineHandoffRecoveryService.ts`；当前以最新记录为准：`AppChat.tsx` 8,440 行、`AppSettings.tsx` 2,788 行、`AppOffline.tsx` 1,338 行，`npm run check`（含 468/468 测试）通过。大型页面仍有进一步拆分余项，但已不再包含本轮已迁出的二十六个边界。
+
+本轮新增 `docs/LONG_TERM_OPTIMIZATION_ACCEPTANCE.md`，按长期计划九阶段逐项记录仓库内完成证据、外部验收缺口和明确暂缓的 API/备份行为，避免将本地门禁误表述为真实设备或 staging 验收。
 
 ## 3. 目录职责
 

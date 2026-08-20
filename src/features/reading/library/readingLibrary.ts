@@ -1,4 +1,5 @@
 import { readingAssetDb } from "../../../core/storage/readingAssetDb";
+import { createId } from "../../../core/id/createId";
 import { loadReadingStore, saveReadingStore } from "../../../core/storage/repositories/readingRepository";
 import type { StorageResult, StorageWriteResult } from "../../../core/storage/storageTypes";
 import type {
@@ -36,7 +37,7 @@ const defaultDependencies: ReadingLibraryDependencies = {
   saveStore: saveReadingStore,
   assetStore: readingAssetDb,
   now: () => Date.now(),
-  createId: (prefix) => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`,
+  createId,
 };
 
 function requireStore(dependencies: ReadingLibraryDependencies): ReadingStore {

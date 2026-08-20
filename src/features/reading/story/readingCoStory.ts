@@ -4,9 +4,10 @@ import type { ReadingStoryGenerationPreferences, ReadingStoryLength } from "../.
 import { evaluateReadingStoryAiAction, ReadingCoStoryPolicyError } from "./readingCoStoryPolicy";
 import { DEFAULT_READING_STORY_GENERATION_PREFERENCES, normalizeReadingStoryGenerationPreferences } from "../../../domain/reading/storyGenerationPreferences";
 import { ensureDistinctReadingStoryChoices } from "./readingStoryChoices";
+import { createId as createApplicationId } from "../../../core/id/createId";
 
 const targetChapters: Record<ReadingStoryLength, number> = { short: 3, medium: 8, long: 20 };
-const createId = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const createId = (prefix: string): string => createApplicationId(prefix);
 const text = (value: string, max: number): string => value.trim().slice(0, max);
 const sameScope = (left: ReadingCoStoryScope, right: ReadingCoStoryScope): boolean => left.userIdentityId === right.userIdentityId && left.coStoryId === right.coStoryId && left.relationId === right.relationId && left.characterId === right.characterId;
 

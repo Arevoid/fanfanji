@@ -9,12 +9,13 @@ assert.deepEqual(createProactiveOfflinePreferencePatch(false), { enableProactive
 assert.deepEqual(createProactiveOfflinePreferencePatch(true), { enableProactiveOffline: true });
 
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const saveSettingsHookSource = readFileSync(new URL("../src/features/chat/hooks/useChatSaveSettings.ts", import.meta.url), "utf8");
 const offlineSettingIndex = chatSource.indexOf("主动发起线下");
 const proactiveChatIndex = chatSource.indexOf("主动联络", offlineSettingIndex);
 assert.ok(offlineSettingIndex >= 0, "chat settings expose the proactive offline toggle");
 assert.ok(proactiveChatIndex > offlineSettingIndex, "the proactive offline toggle is shown above proactive contact");
 assert.match(chatSource, /!activeCharacter\.isGroupChat && activeRelationship/);
-assert.match(chatSource, /createProactiveOfflinePreferencePatch\(draftEnableProactiveOffline\)/);
+assert.match(saveSettingsHookSource, /createProactiveOfflinePreferencePatch\(draftEnableProactiveOffline\)/);
 
 const draftSource = readFileSync(new URL("../src/features/chat/hooks/useChatSettingsDraft.ts", import.meta.url), "utf8");
 assert.match(draftSource, /loadCharacterDraft = \(character: Character, relationship\?: CharacterRelationship\)/);

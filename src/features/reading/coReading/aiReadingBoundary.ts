@@ -2,8 +2,9 @@ import { loadReadingStore } from "../../../core/storage/repositories/readingRepo
 import { getAiReadingState, getReadingRoom, saveAiReadingState } from "../../../core/storage/repositories/readingCoReadingRepository";
 import type { AiReadingPace, AiReadingSpoilerDisclosure, AutonomousCommentFrequency, SpoilerPolicy, AiReadingState } from "../../../domain/reading/coReadingTypes";
 import type { ParagraphAnchor, ReadingRoomScope } from "../../../domain/reading/types";
+import { createId as createApplicationId } from "../../../core/id/createId";
 
-const createId = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const createId = (prefix: string): string => createApplicationId(prefix);
 
 export class AiReadingBoundaryError extends Error {
   constructor(message: string, public readonly code: "missing-room" | "missing-anchor" | "invalid-scope" | "storage" = "storage") {

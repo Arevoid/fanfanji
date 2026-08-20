@@ -14,8 +14,9 @@ import {
   type ReadingRoom,
 } from "../../../domain/reading/coReadingTypes";
 import type { ReadingBook, ReadingRoomScope } from "../../../domain/reading/types";
+import { createId as createApplicationId } from "../../../core/id/createId";
 
-const id = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const id = (prefix: string): string => createApplicationId(prefix);
 
 export class ReadingCoReadingError extends Error {
   constructor(message: string, public readonly code: "missing-book" | "invalid-relationship" | "duplicate" | "storage" = "storage") {

@@ -1,7 +1,7 @@
 import type { Message } from "../../types";
 
 export const MESSAGE_ENTRY_DB_NAME = "FanfanjiMessageEntryDB";
-export const MESSAGE_ENTRY_DB_VERSION = 1;
+export const MESSAGE_ENTRY_DB_VERSION = 2;
 export const MESSAGE_ENTRY_STORE_NAME = "messages";
 
 interface MessageEntryRecord {
@@ -12,6 +12,14 @@ interface MessageEntryRecord {
   conversationId?: string;
   timestamp: number;
   message: Message;
+}
+
+export interface MessageEntryQuery {
+  characterId?: string;
+  relationId?: string;
+  conversationId?: string;
+  offset?: number;
+  limit: number;
 }
 
 const clone = <T>(value: T): T => typeof structuredClone === "function"
@@ -46,14 +54,18 @@ class MessageEntryDB {
     if (typeof indexedDB === "undefined") throw new Error("IndexedDB is unavailable");
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(MESSAGE_ENTRY_DB_NAME, MESSAGE_ENTRY_DB_VERSION);
-      request.onupgradeneeded = () => {
+      request.onupgradeneeded = (event) => {
         const database = request.result;
-        if (database.objectStoreNames.contains(MESSAGE_ENTRY_STORE_NAME)) return;
-        const store = database.createObjectStore(MESSAGE_ENTRY_STORE_NAME, { keyPath: "recordId" });
-        store.createIndex("byCharacterId", "characterId", { unique: false });
-        store.createIndex("byRelationId", "relationId", { unique: false });
-        store.createIndex("byConversationId", "conversationId", { unique: false });
-        store.createIndex("byTimestamp", "timestamp", { unique: false });
+        const oldVersion = (event as IDBVersionChangeEvent).oldVersion;
+        const store = database.objectStoreNames.contains(MESSAGE_ENTRY_STORE_NAME)
+          ? request.transaction?.objectStore(MESSAGE_ENTRY_STORE_NAME)
+          : database.createObjectStore(MESSAGE_ENTRY_STORE_NAME, { keyPath: "recordId" });
+        if (!store) return;
+        if (!store.indexNames.contains("byCharacterId")) store.createIndex("byCharacterId", "characterId", { unique: false });
+        if (!store.indexNames.contains("byRelationId")) store.createIndex("byRelationId", "relationId", { unique: false });
+        if (!store.indexNames.contains("byConversationId")) store.createIndex("byConversationId", "conversationId", { unique: false });
+        if (!store.indexNames.contains("byTimestamp")) store.createIndex("byTimestamp", "timestamp", { unique: false });
+        if (oldVersion < 2 && !store.indexNames.contains("byPosition")) store.createIndex("byPosition", "position", { unique: false });
       };
       request.onsuccess = () => {
         this.db = request.result;
@@ -83,6 +95,37 @@ class MessageEntryDB {
     });
     this.persistedEntries = entries.map((entry) => clone(entry));
     return fromEntries(entries);
+  }
+
+  async loadWindow(query: MessageEntryQuery): Promise<Message[]> {
+    const limit = Math.max(0, Math.floor(query.limit));
+    const offset = Math.max(0, Math.floor(query.offset || 0));
+    if (!limit) return [];
+    const database = await this.init();
+    return new Promise<Message[]>((resolve, reject) => {
+      const request = database.transaction(MESSAGE_ENTRY_STORE_NAME, "readonly")
+        .objectStore(MESSAGE_ENTRY_STORE_NAME).index("byPosition").openCursor();
+      const result: MessageEntryRecord[] = [];
+      let skipped = 0;
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(fromEntries(result));
+          return;
+        }
+        const entry = cursor.value as MessageEntryRecord;
+        const matches = (!query.characterId || entry.characterId === query.characterId)
+          && (!query.relationId || entry.relationId === query.relationId)
+          && (!query.conversationId || entry.conversationId === query.conversationId);
+        if (matches) {
+          if (skipped < offset) skipped += 1;
+          else if (result.length < limit) result.push(clone(entry));
+        }
+        if (result.length >= limit) resolve(fromEntries(result));
+        else cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
   }
 
   async replaceAll(messages: readonly Message[]): Promise<void> {

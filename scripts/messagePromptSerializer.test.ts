@@ -80,8 +80,11 @@ assert.match(transcript, /转账消息/);
 assert.doesNotMatch(transcript, /VERY_SECRET|STICKER_SECRET|data:image|blob:/);
 
 const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
-assert.equal((appChat.match(/serializeMessageToPromptTurns\(m,/g) || []).length, 2, "send and regeneration history must use the same serializer");
-assert.equal((appChat.match(/mode: "current"/g) || []).length >= 2, true, "send and regeneration current messages must be serialized");
+const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
+const historySource = readFileSync(new URL("../src/features/chat/services/directChatHistoryContext.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${appChat}\n${regenerationSource}\n${historySource}`;
+assert.equal((chatRuntimeSource.match(/serializeMessageToPromptTurns\((?:m|message),/g) || []).length, 3, "send, regeneration, and extracted history must use the same serializer");
+assert.equal((chatRuntimeSource.match(/mode: "current"/g) || []).length >= 2, true, "send and regeneration current messages must be serialized");
 assert.doesNotMatch(appChat, /let promptMessage = userMsg \? userMsg\.content/);
 
 for (const relativePath of [

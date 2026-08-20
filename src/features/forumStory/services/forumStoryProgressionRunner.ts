@@ -9,6 +9,7 @@ import {
   executeForumStoryProgression,
   type ForumStoryProgressionAction,
 } from "./forumStoryProgressionExecutor";
+import { createId as createApplicationId } from "../../../core/id/createId";
 import {
   ForumStoryCommentService,
   type ForumStoryCommentAiCall,
@@ -65,12 +66,7 @@ export type ForumStoryProgressionRunnerResult =
 const errorMessage = (error: unknown): string =>
   (error instanceof Error ? error.message : "ForumStory progression execution failed").slice(0, 1000);
 
-const makeExecutionLogId = (storyId: string, startedAt: number): string => {
-  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${startedAt}-${Math.random().toString(36).slice(2)}`;
-  return `${storyId}:execution:${suffix}`;
-};
+const makeExecutionLogId = (storyId: string, _startedAt: number): string => `${storyId}:execution:${createApplicationId("run")}`;
 
 const safeTimestamp = (candidate: number | undefined): number =>
   candidate !== undefined && Number.isFinite(candidate) ? candidate : Date.now();

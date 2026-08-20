@@ -20,8 +20,9 @@ import type {
 } from "../../../domain/reading/storyTypes";
 import { DEFAULT_READING_STORY_GENERATION_PREFERENCES, normalizeReadingStoryGenerationPreferences } from "../../../domain/reading/storyGenerationPreferences";
 import { ensureDistinctReadingStoryChoices } from "./readingStoryChoices";
+import { createId as createApplicationId } from "../../../core/id/createId";
 
-const createId = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const createId = (prefix: string): string => createApplicationId(prefix);
 const targetChapters: Record<ReadingStoryLength, number> = { short: 3, medium: 8, long: 20 };
 const text = (value: string, max: number): string => value.trim().slice(0, max);
 const sameScope = (left: ReadingStoryScope, right: ReadingStoryScope): boolean =>

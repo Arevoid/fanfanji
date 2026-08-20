@@ -5,7 +5,8 @@ import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldB
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
 import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
 import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
-import { writeJson } from "../core/storage/storageAdapter";
+import { readString, writeJson } from "../core/storage/storageAdapter";
+import { createId } from "../core/id/createId";
 import { getWorldBookCharacterIds, isWorldBookEntryForCharacter, isWorldBookEntryGlobal } from "../domain/worldbook/worldBookVisibility";
 
 export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBookEntry | null => {
@@ -76,7 +77,7 @@ export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBo
   }
 
   return {
-    id: "wb-import-" + Date.now() + "-" + Math.floor(Math.random() * 100000),
+      id: createId("wb-import"),
     title,
     category: "常规",
     content,
@@ -150,7 +151,7 @@ export default function AppWorldBook({
   const [selectedBinding, setSelectedBinding] = useState<string | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>(() => {
     try {
-      const stored = localStorage.getItem("worldbook_collapsed_categories");
+      const stored = readString("worldbook_collapsed_categories").value;
       return stored ? JSON.parse(stored) : {};
     } catch {
       return {};

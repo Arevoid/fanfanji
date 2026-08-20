@@ -15,8 +15,9 @@ assert.equal(shouldAttemptAutomaticForumActivity({ activityTasks: daily, ownerId
 assert.equal(shouldAttemptAutomaticForumActivity({ activityTasks: [makeTask(1, now)], ownerIdentityId: "identity-b", now }), true, "identity budgets are isolated");
 
 const hook = readFileSync(new URL("../src/features/forum/hooks/useForumActivityEngine.ts", import.meta.url), "utf8");
-assert.match(hook, /visibilityState/);
-assert.match(hook, /clearTimeout/);
+assert.match(hook, /useBackgroundScheduler/);
+assert.match(hook, /pauseWhenHidden: true/);
+assert.match(hook, /taskType: "forum-activity"/);
 assert.match(hook, /ownerIdentityId/);
 const runtime = readFileSync(new URL("../src/features/forum/services/forumActivityRuntime.ts", import.meta.url), "utf8");
 assert.match(runtime, /forceForumThreadActivity/);

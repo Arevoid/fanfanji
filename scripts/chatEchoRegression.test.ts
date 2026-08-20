@@ -6,9 +6,11 @@ import { formatCurrentVoiceMessagePrompt, formatVoiceMessageHistory } from "../s
 import { CURRENT_SCENE_CONTINUITY_PROMPT } from "../src/features/chat/prompts/directChatTurnPrompt";
 
 const chatSource = fs.readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const regenerationSource = fs.readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${chatSource}\n${regenerationSource}`;
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /\[CURRENT-SCENE CONTINUITY\]/);
-assert.equal((chatSource.match(/assembledInstructions\.push\(CURRENT_SCENE_CONTINUITY_PROMPT\)/g) || []).length, 2);
-assert.doesNotMatch(chatSource, /sceneAnchorTranscript|Recent scene facts:/);
+assert.equal((chatRuntimeSource.match(/assembledInstructions\.push\(CURRENT_SCENE_CONTINUITY_PROMPT\)/g) || []).length, 2);
+assert.doesNotMatch(chatRuntimeSource, /sceneAnchorTranscript|Recent scene facts:/);
 
 assert.equal(isLowInformationUserEcho("老公我错了嘛", "我错了"), true);
 assert.equal(isLowInformationUserEcho("啊？", "啊"), true);

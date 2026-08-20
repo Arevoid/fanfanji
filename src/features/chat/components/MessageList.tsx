@@ -18,6 +18,8 @@ interface MessageListProps {
   style: CSSProperties;
   renderMessage: (message: Message, index: number) => ReactNode;
   children: ReactNode;
+  header?: ReactNode;
+  contentClassName?: string;
   renderWindowSize?: number;
 }
 
@@ -41,6 +43,8 @@ export function MessageList({
   style,
   renderMessage,
   children,
+  header,
+  contentClassName,
   renderWindowSize,
 }: MessageListProps) {
   const windowSize = normalizeWindowSize(renderWindowSize);
@@ -109,15 +113,18 @@ export function MessageList({
 
   return (
     <div ref={scrollRef} className={className} style={style} onScroll={handleScroll}>
-      {renderedMessages.map((message, index) => (
-        <MessageItem
-          key={message.id}
-          message={message}
-          index={effectiveWindowStart + index}
-          render={renderMessage}
-        />
-      ))}
-      {children}
+      <div className={contentClassName}>
+        {header}
+        {renderedMessages.map((message, index) => (
+          <MessageItem
+            key={message.id}
+            message={message}
+            index={effectiveWindowStart + index}
+            render={renderMessage}
+          />
+        ))}
+        {children}
+      </div>
     </div>
   );
 }

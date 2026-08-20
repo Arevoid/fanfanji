@@ -50,6 +50,11 @@ export function useProactiveCallScheduler({
     enabled: Boolean(character && relationship && voiceCallScope && !character.isGroupChat && character.enableProactiveCall),
     intervalMs: 60 * 1000,
     initialDelayMs: 60 * 1000,
+    taskType: "proactive-voice-call",
+    reason: "scheduled-proactive-call-check",
+    recoveryPayload: voiceCallScope ? { relationId: voiceCallScope.relationId, scope: "direct-relation" } : undefined,
     run,
+    pauseWhenHidden: true,
+    pauseWhenOffline: true,
   });
 }

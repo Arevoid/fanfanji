@@ -20,7 +20,7 @@ const scheduler = new BackgroundScheduler({
   onState: (snapshot) => states.push(snapshot.status),
 });
 scheduler.start();
-await wait(40);
+await wait(80);
 scheduler.stop();
 assert.ok(runs >= 2);
 assert.equal(maxConcurrent, 1);

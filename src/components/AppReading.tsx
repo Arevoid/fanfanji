@@ -29,6 +29,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { createId } from "../core/id/createId";
 import { initializeReadingStore, loadReadingStore, saveReadingStore } from "../core/storage/repositories/readingRepository";
 import { readingAssetDb } from "../core/storage/readingAssetDb";
 import type {
@@ -604,8 +605,7 @@ export default function AppReading({
   const createStoryFromSetup = (draft: ReadingStorySetupDraft) => {
     if (!storySetupBook) return;
     const book = storySetupBook;
-    const makeId = (prefix: string) =>
-      `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+    const makeId = (prefix: string) => createId(prefix);
     const identityDescription = describeReadingStoryIdentity(draft.user);
     const preparedBible = getReadingBookBible({
       userIdentityId,
@@ -728,8 +728,7 @@ export default function AppReading({
       (item) => item.relationship.id === draft.relationId,
     );
     if (!friendOption) return;
-    const makeId = (prefix: string) =>
-      `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+    const makeId = (prefix: string) => createId(prefix);
     try {
       await initializeReadingCoStoryStore();
       const userName = settings?.name?.trim() || "我";

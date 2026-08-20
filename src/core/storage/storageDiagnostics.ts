@@ -6,6 +6,9 @@ import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./c
 import { messageEntryDb } from "./messageEntryDb";
 import { offlineStoryDb } from "./offlineStoryDb";
 import { readingAssetDb } from "./readingAssetDb";
+import { imageAssetDb } from "../../utils/imageAssetDb";
+import { stickerDb } from "../../utils/stickerDb";
+import { CURRENT_STORAGE_SCHEMA_VERSION, STORAGE_MIGRATION_SCRIPT_VERSION } from "./storageVersion";
 
 export interface LocalStorageUsageEntry {
   key: string;
@@ -19,10 +22,110 @@ export interface StorageDiagnostics {
   quota?: number;
   persisted?: boolean;
   dataSchemaVersion?: string | null;
+  currentSchemaVersion: number;
+  migrationScriptVersion: string;
   migrationState?: StorageMigrationState | null;
   migrationLock?: StorageMigrationLock | null;
   pressure: "normal" | "warning" | "critical" | "unknown";
   health: StorageHealthReport;
+}
+
+export interface StorageDiagnosticReport {
+  format: "fanfanji-storage-diagnostic";
+  version: 1;
+  capturedAt: number;
+  appVersion: string;
+  backupVersion: number;
+  diagnostics: StorageDiagnostics;
+}
+
+export interface OrphanedResourceCleanupEntry {
+  database: string;
+  store: string;
+  removed: number;
+  failed: number;
+}
+
+interface ReferencedAssetScan {
+  ids: Set<string>;
+  complete: boolean;
+}
+
+/**
+ * Creates a portable diagnostic report. It intentionally contains only
+ * metadata, sizes, statuses and finding summaries; it never includes storage
+ * values, message bodies, API keys or backup payloads.
+ */
+export function buildStorageDiagnosticReport(
+  diagnostics: StorageDiagnostics,
+  appVersion: string,
+  backupVersion: number,
+  capturedAt = Date.now(),
+): StorageDiagnosticReport {
+  return {
+    format: "fanfanji-storage-diagnostic",
+    version: 1,
+    capturedAt,
+    appVersion,
+    backupVersion,
+    diagnostics: {
+      ...diagnostics,
+      localStorageEntries: diagnostics.localStorageEntries.map(({ key, bytes }) => ({ key, bytes })),
+      health: {
+        ...diagnostics.health,
+        findings: diagnostics.health.findings.map(({ key, kind, count, detail }) => ({ key, kind, count, detail })),
+      },
+    },
+  };
+}
+
+/**
+ * Removes only resources that the current metadata scan proves are orphaned.
+ * This function is never called automatically; the settings UI requires an
+ * explicit user confirmation before invoking it.
+ */
+export async function cleanupOrphanedStorageResources(): Promise<OrphanedResourceCleanupEntry[]> {
+  if (typeof window === "undefined") return [];
+  const storage = window.localStorage;
+  const existingNames = await getExistingDatabaseNames();
+  const result: OrphanedResourceCleanupEntry[] = [];
+  if (existingNames.has("FanfanImageAssets")) {
+    const storedIds = new Set(await readStoreKeys("FanfanImageAssets", "images"));
+    const referencedScan = await collectReferencedAssetIds(storage);
+    if (!referencedScan.complete) {
+      throw new Error("无法完整读取图片引用，已停止清理以保护现有资源。");
+    }
+    const referencedIds = referencedScan.ids;
+    let removed = 0;
+    let failed = 0;
+    for (const id of storedIds) {
+      if (referencedIds.has(id)) continue;
+      try {
+        await imageAssetDb.deleteImage(id);
+        removed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    result.push({ database: "FanfanImageAssets", store: "images", removed, failed });
+  }
+  if (existingNames.has("StickerAppDB")) {
+    const storedIds = new Set(await readStoreKeys("StickerAppDB", "stickerImages"));
+    const referencedIds = await readStickerGroupReferences("StickerAppDB");
+    let removed = 0;
+    let failed = 0;
+    for (const id of storedIds) {
+      if (referencedIds.has(id)) continue;
+      try {
+        await stickerDb.deleteStickerImage(id);
+        removed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    result.push({ database: "StickerAppDB", store: "stickerImages", removed, failed });
+  }
+  return result;
 }
 
 export interface IndexedDbHealthEntry {
@@ -123,8 +226,9 @@ function inspectStorageHealth(storage: Storage): StorageHealthReport {
   return { checkedCollections, findings, indexedDb: [], resources: [] };
 }
 
-function collectReferencedAssetIds(storage: Storage): Set<string> {
+async function collectReferencedAssetIds(storage: Storage): Promise<ReferencedAssetScan> {
   const referenced = new Set<string>();
+  let complete = true;
   const fieldsByKey: Array<[string, string]> = [
     [storageKeys.characters, "imageReferenceAssetId"],
     [storageKeys.messages, "imageAssetId"],
@@ -143,10 +247,31 @@ function collectReferencedAssetIds(storage: Storage): Set<string> {
         if (typeof value === "string" && value.length > 0) referenced.add(value);
       });
     } catch {
-      // The collection-level scan reports invalid JSON separately.
+      // An incomplete reference scan must never authorize destructive cleanup.
+      complete = false;
     }
   }
-  return referenced;
+  if (isMessageEntryStoreEnabled() && typeof indexedDB !== "undefined") {
+    try {
+      const messages = await messageEntryDb.loadAll();
+      messages.forEach((message) => {
+        if (message.imageAssetId) referenced.add(message.imageAssetId);
+      });
+    } catch {
+      complete = false;
+    }
+  }
+  if (isOfflineStoryEntryStoreEnabled() && typeof indexedDB !== "undefined") {
+    try {
+      const stories = await offlineStoryDb.loadAll();
+      stories.forEach((story) => story.messages.forEach((message) => {
+        if (message.imageAssetId) referenced.add(message.imageAssetId);
+      }));
+    } catch {
+      complete = false;
+    }
+  }
+  return { ids: referenced, complete };
 }
 
 function getExistingDatabaseNames(): Promise<Set<string>> {
@@ -224,14 +349,18 @@ async function inspectIndexedDbResources(storage: Storage, existingNames: Set<st
   const resources: IndexedDbResourceHealthEntry[] = [];
   if (existingNames.has("FanfanImageAssets")) {
     const storedIds = new Set(await readStoreKeys("FanfanImageAssets", "images"));
-    const referencedIds = collectReferencedAssetIds(storage);
+    const referencedScan = await collectReferencedAssetIds(storage);
+    const referencedIds = referencedScan.ids;
     resources.push({
       database: "FanfanImageAssets",
       store: "images",
       stored: storedIds.size,
-      referenced: referencedIds.size,
-      orphaned: [...storedIds].filter((id) => !referencedIds.has(id)).length,
-      missing: [...referencedIds].filter((id) => !storedIds.has(id)).length,
+      referenced: referencedScan.complete ? referencedIds.size : 0,
+      // If any source could not be read, report an indeterminate result as
+      // zero actionable findings. The cleanup action separately refuses to
+      // run until the scan is complete.
+      orphaned: referencedScan.complete ? [...storedIds].filter((id) => !referencedIds.has(id)).length : 0,
+      missing: referencedScan.complete ? [...referencedIds].filter((id) => !storedIds.has(id)).length : 0,
     });
   }
   if (existingNames.has("StickerAppDB")) {
@@ -353,6 +482,8 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
     dataSchemaVersion: dataSchemaVersion.valid ? dataSchemaVersion.value : null,
     migrationState: loadStorageMigrationState(),
     migrationLock: loadStorageMigrationLock(),
+    currentSchemaVersion: CURRENT_STORAGE_SCHEMA_VERSION,
+    migrationScriptVersion: STORAGE_MIGRATION_SCRIPT_VERSION,
     health,
     pressure: ratio === undefined ? "unknown" : ratio >= 0.95 ? "critical" : ratio >= 0.8 ? "warning" : "normal",
   };

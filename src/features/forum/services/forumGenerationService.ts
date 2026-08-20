@@ -11,6 +11,7 @@ import type {
   UserSettings,
   WorldBookEntry,
 } from "../../../types";
+import { createId as createApplicationId } from "../../../core/id/createId";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { isWorldBookEntryVisible } from "../../../domain/worldbook/worldBookVisibility";
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
@@ -116,12 +117,7 @@ type ForumReplyAuthor =
 
 const defaultAiCall: ForumAiCall = (params) => apiChat({ ...params, ...PromptComposer.compose({ scenario: "forum-thread", message: params.message, history: [], systemInstruction: params.systemInstruction }) });
 
-const id = (prefix: string): string => {
-  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `${prefix}-${suffix}`;
-};
+const id = (prefix: string): string => createApplicationId(prefix);
 
 const trimContext = (value: string, max = 1800): string =>
   value.trim().slice(0, max);

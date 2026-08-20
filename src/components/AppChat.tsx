@@ -2,35 +2,44 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../utils/apiHelper";
-import { readJson, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
+import { readJson, readString, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
+import { createId } from "../core/id/createId";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
 import type { Appointment, AppointmentMode } from "../domain/schedule/scheduleTypes";
 import { getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
-import { isAppointmentReadyForOfflineEntry, startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
+import { startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
-import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDistribution";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
+import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatReplyPipeline";
+import { scheduleGroupReplyDelivery } from "../features/chat/services/groupReplyDelivery";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
-import { createProactiveCallRejectionPatch, isEmotionallyChargedCallContext, resolveOutgoingCallResolution } from "../features/chat/services/proactiveVoiceCallPolicy";
+import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
+import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
+import { completeVoiceCall } from "../features/chat/services/voiceCallCompletion";
+import { buildDirectChatHistoryContext } from "../features/chat/services/directChatHistoryContext";
 import { useProactiveCallScheduler } from "../features/chat/hooks/useProactiveCallScheduler";
+import { useChatPaymentState } from "../features/chat/hooks/useChatPaymentState";
+import { useChatProfileState } from "../features/chat/hooks/useChatProfileState";
+import { useChatGroupState } from "../features/chat/hooks/useChatGroupState";
 import type { VoiceCallStatus } from "../features/chat/services/messageTypes";
-import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
-import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
+import { shouldConvertBubbleToVoice } from "../features/chat/services/voiceBubbleEligibility";
+import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { isWorldBookEntryForAnyCharacter } from "../domain/worldbook/worldBookVisibility";
 import { aiAnalyzeRemoteSticker, aiAnalyzeSticker, loadStickerImageBlob, stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
-import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectInterveningOfflineHandoff, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
+import { hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { buildCharacterBehaviorPrompt } from "../domain/prompt/characterBehaviorProfile";
@@ -43,13 +52,12 @@ import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
 import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../domain/offlineStory/offlineHandoffContext";
 import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
-import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage, buildProactiveChatSystemInstruction, finalizeCharacterChatSystemInstruction } from "../features/chat/prompts/chatPromptBuilders";
+import { buildProactiveChatSystemInstruction, finalizeCharacterChatSystemInstruction } from "../features/chat/prompts/chatPromptBuilders";
 import { buildProactiveOfflineInvitationPrompt } from "../features/chat/prompts/proactiveOfflineInvitationPrompt";
 import { buildProactiveOfflineResponsePrompt } from "../features/chat/prompts/proactiveOfflineResponsePrompt";
 import { parseProactiveOfflineInvitationDirective } from "../features/chat/services/proactiveOfflineInvitationProtocol";
 import { applyProactiveOfflineResponse, parseProactiveOfflineResponseDirective } from "../features/chat/services/proactiveOfflineResponseProtocol";
 import { deriveProactiveOfflineContextEvidence, deriveProactiveOfflinePresenceEvidence } from "../features/chat/services/proactiveOfflineContext";
-import { buildGroupMemberPrivateContext, buildIsolatedGroupMemberDefinitions } from "../features/chat/prompts/groupMemberPrivateContext";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
@@ -65,17 +73,49 @@ import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
-import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords, type InnerVoiceScope } from "../core/storage/repositories/innerVoiceRepository";
-import { generateInnerVoice } from "../features/chat/services/innerVoiceService";
-import { generateCharacterImage } from "../features/chat/services/characterImageService";
+import { loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords } from "../core/storage/repositories/innerVoiceRepository";
+import { generateCharacterImageForDelivery } from "../features/chat/services/characterImageDeliveryService";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { resolveChatRoutine, resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
-import { getChatTypingScopeKey, getVisibleChatTyping, setChatScopeCharacterOverride, setChatScopeTyping, type ChatTypingScopeState } from "../features/chat/services/chatTypingScope";
-import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
+import { createChatSideEffectController, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
 import { useChatAttachmentState } from "../features/chat/hooks/useChatAttachmentState";
+import { useInnerVoice } from "../features/chat/hooks/useInnerVoice";
+import { useChatAppointment } from "../features/chat/hooks/useChatAppointment";
+import { useChatStickerState } from "../features/chat/hooks/useChatStickerState";
+import { useChatNavigationState } from "../features/chat/hooks/useChatNavigationState";
+import { useChatSettingsPanelState } from "../features/chat/hooks/useChatSettingsPanelState";
+import { useChatMessageInteractionState } from "../features/chat/hooks/useChatMessageInteractionState";
+import { useChatMomentsInteractionState } from "../features/chat/hooks/useChatMomentsInteractionState";
+import { useChatVoiceMessageState } from "../features/chat/hooks/useChatVoiceMessageState";
+import { useChatTtsPlaybackState } from "../features/chat/hooks/useChatTtsPlaybackState";
+import { useChatCallSpeechPlayback } from "../features/chat/hooks/useChatCallSpeechPlayback";
+import { useChatTypingState } from "../features/chat/hooks/useChatTypingState";
+import { useChatTransientUiState } from "../features/chat/hooks/useChatTransientUiState";
+import { useChatOperationState } from "../features/chat/hooks/useChatOperationState";
+import { getChatTypingScopeKey } from "../features/chat/services/chatTypingScope";
+import { useChatReadState } from "../features/chat/hooks/useChatReadState";
+import { useChatMessageProjection } from "../features/chat/hooks/useChatMessageProjection";
+import { useChatMessageCleanupActions } from "../features/chat/hooks/useChatMessageCleanupActions";
+import { useChatRelationshipCleanupActions } from "../features/chat/hooks/useChatRelationshipCleanupActions";
+import { useChatDeleteFriendAction } from "../features/chat/hooks/useChatDeleteFriendAction";
+import { useChatMomentActions } from "../features/chat/hooks/useChatMomentActions";
+import { useChatGroupMemberActions } from "../features/chat/hooks/useChatGroupMemberActions";
+import { useChatStartOfflineFromMessage } from "../features/chat/hooks/useChatStartOfflineFromMessage";
+import { useChatMessageTranslation } from "../features/chat/hooks/useChatMessageTranslation";
+import { useChatBackgroundDraftUpload } from "../features/chat/hooks/useChatBackgroundDraftUpload";
+import { useChatSaveSettings } from "../features/chat/hooks/useChatSaveSettings";
+import { scheduleNextProactiveMessage } from "../features/chat/services/proactiveScheduleService";
+import { useChatGreeting } from "../features/chat/hooks/useChatGreeting";
+import { estimateChatTokens } from "../features/chat/services/chatTokenEstimate";
+import { recoverPendingOfflineHandoff } from "../features/chat/services/offlineHandoffRecoveryService";
+import { runBackgroundProactivePass, runProactiveCatchupPass } from "../features/chat/services/proactiveChatPassService";
+import { useChatMemoryExtraction } from "../features/chat/hooks/useChatMemoryExtraction";
+import { useChatDraftChatIcon } from "../features/chat/hooks/useChatDraftChatIcon";
+import { useChatRegenerationAction } from "../features/chat/hooks/useChatRegenerationAction";
+import { useVoiceCallTimers } from "../features/chat/hooks/useVoiceCallTimers";
 import { resolveActiveChatStylePreset } from "../features/chat/styles/chatStylePreset";
 import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
 import { COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE } from "../features/chat/styles/chatThemeTemplate";
@@ -83,7 +123,7 @@ import { ChatSettingsSwitch as SettingsSwitch } from "../features/chat/component
 import { ChatAvatar as RenderAvatar } from "../features/chat/components/ChatAvatar";
 import { StoredChatImage } from "../features/chat/components/StoredChatImage";
 import { createChatRuntimeContext, type ChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
-import { attachDirectScope, isMessageInDirectScope, resolveDirectInteractionScope, toDirectChatRuntimeContext, type MessageMutationScope } from "../features/chat/context/directInteractionScope";
+import { isMessageInDirectScope, resolveDirectInteractionScope, toDirectChatRuntimeContext, type MessageMutationScope } from "../features/chat/context/directInteractionScope";
 import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
 import { removeCharacterTruthForRelations } from "../features/characterKnowledge/services/characterTruthCleanupService";
 import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
@@ -102,7 +142,7 @@ import { createProactiveTopicRecord } from "../domain/characterLife/proactive/pr
 import { appendMomentTopicRecord, loadMomentTopicRecords } from "../core/storage/repositories/momentTopicRepository";
 import { appendProactiveTopicRecord, loadProactiveTopicRecords, removeProactiveTopicsForRelations } from "../core/storage/repositories/proactiveTopicRepository";
 import { imageAssetDb } from "../utils/imageAssetDb";
-import { loadImageGenerationRecords, removeImageGenerationRecordByMessage, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
+import { loadImageGenerationRecords, removeImageGenerationRecordsByRelation, saveImageGenerationRecords } from "../core/storage/repositories/imageGenerationRepository";
 import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "../core/storage/repositories/forumRepository";
 import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from "../domain/forum/forumShare";
 import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
@@ -114,6 +154,7 @@ import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
 import { ForumShareCard } from "../features/forum/components/ForumShareCard";
 import { ChatTopBar } from "../features/chat/components/ChatTopBar";
+import { InnerVoiceModal } from "../features/chat/components/InnerVoiceModal";
 import { ContactList } from "../features/chat/components/ContactList";
 import { ConversationList } from "../features/chat/components/ConversationList";
 import { MessageList } from "../features/chat/components/MessageList";
@@ -133,9 +174,21 @@ import { MomentsApp } from "../features/moments/MomentsApp";
 import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
-import { buildMomentCognitiveContext } from "../features/moments/services/momentCognitiveContext";
+import { buildRelationMomentContext, formatMomentSourceText } from "../features/moments/services/momentRelationContext";
+import { generateCharacterMomentPipeline } from "../features/moments/services/characterMomentGenerationPipeline";
+import { generateAutomaticMomentComment } from "../features/moments/services/automaticMomentCommentPipeline";
+import { generateAutomaticMomentReply } from "../features/moments/services/automaticMomentReplyPipeline";
+import { analyzeMomentPhoto } from "../features/moments/services/momentPhotoAnalysisService";
+import { deliverDirectReplyCandidates } from "../features/chat/services/directReplyDeliveryService";
 import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
-import { prioritizeUserChatCss, scopeUserChatCss } from "../features/chat/styles/chatCssScope";
+import { useChatCustomCss } from "../features/chat/hooks/useChatCustomCss";
+import { useChatCssTemplateCopy } from "../features/chat/hooks/useChatCssTemplateCopy";
+import {
+  buildOfflineTimelineHandoff as buildOfflineTimelineHandoffPrompt,
+  buildPendingOfflineTimelineHandoff as buildPendingOfflineTimelineHandoffPrompt,
+  getInterveningOfflineHandoff as getInterveningOfflineHandoffFromContext,
+  getOfflineTimelineStoriesBetween as getOfflineTimelineStoriesBetweenFromContext,
+} from "../features/chat/services/offlineHandoffPromptContext";
 import {
   LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
   LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
@@ -192,8 +245,6 @@ import {
   Square
 } from "lucide-react";
 
-import { getSpeechForText } from "../utils/minimaxTts";
-import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, resolveTtsCharacter, shouldQueueCallSpeech } from "../features/voice/ttsConfig";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -270,7 +321,7 @@ interface AppChatProps {
 const PRESEED_MOMENTS: Moment[] = [];
 
 const isOfflineStoryActiveFor = (relationId: string) =>
-  localStorage.getItem(getOfflineModeStorageKey(relationId)) === "true";
+  readString(getOfflineModeStorageKey(relationId)).value === "true";
 
 export default function AppChat({
   characters,
@@ -318,464 +369,39 @@ export default function AppChat({
   onDiaryShareHandled,
   onOpenForumShare,
 }: AppChatProps) {
-  const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "moments" | "me">("chats");
+  const {
+    activeTab,
+    setActiveTab,
+    momentsFilterCharId,
+    setMomentsFilterCharId,
+    singleCharacterMomentsId,
+    setSingleCharacterMomentsId,
+    isShowingAddFriendDialog,
+    setIsShowingAddFriendDialog,
+  } = useChatNavigationState();
   const diaryShareReplyInFlightRef = useRef<Set<string>>(new Set());
 
   // MiniMax Real-time TTS Playback States
-  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
-  const [audioLoadingMessageId, setAudioLoadingMessageId] = useState<string | null>(null);
-  const [activeTtsAudio, setActiveTtsAudio] = useState<HTMLAudioElement | null>(null);
-  const callSpeechQueueRef = useRef<Array<{ message: Message; resolve: () => void; generation: number; revealSubtitle: () => void }>>([]);
-  const isCallSpeechPlayingRef = useRef(false);
-  const activeCallSpeechResolveRef = useRef<(() => void) | null>(null);
-  const callTtsAudioRef = useRef<HTMLAudioElement | null>(null);
-  const callTtsObjectUrlRef = useRef<string | null>(null);
-  const callSpeechGenerationRef = useRef(0);
+  const {
+    playingMessageId,
+    setPlayingMessageId,
+    audioLoadingMessageId,
+    setAudioLoadingMessageId,
+    activeTtsAudio,
+    setActiveTtsAudio,
+  } = useChatTtsPlaybackState();
+  const {
+    stickerGroups,
+    setStickerGroups,
+    stickerSemanticAnalysisInFlightRef,
+    triggerCreateStickerGroupRef,
+    activeStickerGroupIndex,
+    setActiveStickerGroupIndex,
+    showStickerSelector,
+    setShowStickerSelector,
+  } = useChatStickerState();
 
-  // Mobile browsers only allow later asynchronous call audio when an element
-  // has first been played from the user's call/accept gesture. Reuse that same
-  // element for every synthesized reply in the call.
-  const unlockCallTtsPlayback = () => {
-    if (typeof Audio === "undefined") return;
-    const silentWav = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAACAgICA";
-    const audio = callTtsAudioRef.current || new Audio();
-    callTtsAudioRef.current = audio;
-    audio.onended = null;
-    audio.onerror = null;
-    audio.src = silentWav;
-    audio.preload = "auto";
-    void audio.play().then(() => {
-      audio.pause();
-      audio.currentTime = 0;
-    }).catch((error) => {
-      console.warn("Call audio unlock failed:", error);
-    });
-  };
-
-  const resetCallTtsPlayback = () => {
-    const audio = callTtsAudioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.onended = null;
-      audio.onerror = null;
-      audio.removeAttribute("src");
-      audio.load();
-    }
-    if (callTtsObjectUrlRef.current) {
-      URL.revokeObjectURL(callTtsObjectUrlRef.current);
-      callTtsObjectUrlRef.current = null;
-    }
-    callTtsAudioRef.current = null;
-    setActiveTtsAudio(null);
-  };
-
-  // Serial Playback Queue Manager
-  const playNextMessageInQueue = (currentId: string) => {
-    // Cancel consecutive/chained auto-playback completely
-    setPlayingMessageId(null);
-    setActiveTtsAudio(null);
-  };
-
-  // TTS Trigger Speech Function
-  const triggerMessageSpeech = async (
-    msg: Message,
-    isQueuedCallSpeech = false,
-    callSpeechGeneration = callSpeechGenerationRef.current,
-    revealCallSubtitle?: () => void,
-  ) => {
-    let objectUrl: string | null = null;
-    let callSubtitleRevealed = false;
-    const revealCallSubtitleOnce = () => {
-      if (!isQueuedCallSpeech || callSubtitleRevealed) return;
-      callSubtitleRevealed = true;
-      revealCallSubtitle?.();
-    };
-    const isCancelledCallSpeech = () => isQueuedCallSpeech && callSpeechGeneration !== callSpeechGenerationRef.current;
-    const releaseObjectUrl = () => {
-      if (!objectUrl) return;
-      URL.revokeObjectURL(objectUrl);
-      if (callTtsObjectUrlRef.current === objectUrl) callTtsObjectUrlRef.current = null;
-      objectUrl = null;
-    };
-    let queuedCallSpeechFinished = false;
-    const finishQueuedCallSpeechOnce = () => {
-      if (!isQueuedCallSpeech || queuedCallSpeechFinished) return;
-      queuedCallSpeechFinished = true;
-      finishQueuedCallSpeech();
-    };
-
-    // Guard: Prevent non-voice messages from being synthesized/played in standard chat layout
-    const isVoice = Boolean(msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage));
-    if (!canPlayTtsMessage({ isOfflineModeActive, isVoiceMessage: isVoice, isQueuedCallSpeech })) {
-      console.warn("Speech synthesis blocked: Message is not a voice message in chat layout");
-      revealCallSubtitleOnce();
-      return;
-    }
-
-    if (msg.sender === "character" && !settings.enableMiniMaxTts) {
-      console.info("Speech synthesis skipped: global TTS switch is off");
-      revealCallSubtitleOnce();
-      finishQueuedCallSpeechOnce();
-      return;
-    }
-
-    if (playingMessageId === msg.id) {
-      if (activeTtsAudio) {
-        try {
-          activeTtsAudio.pause();
-        } catch (e) {
-          console.error(e);
-        }
-      }
-      if (voiceTimer) {
-        clearInterval(voiceTimer);
-        setVoiceTimer(null);
-      }
-      setPlayingMessageId(null);
-      return;
-    }
-
-    if (activeTtsAudio && !isQueuedCallSpeech) {
-      try {
-        activeTtsAudio.pause();
-      } catch (e) {
-        console.error(e);
-      }
-      setActiveTtsAudio(null);
-    }
-    if (voiceTimer && !isQueuedCallSpeech) {
-      clearInterval(voiceTimer);
-      setVoiceTimer(null);
-    }
-
-    // "我" (user) 发送的语音不需要语音合成 (no TTS/MiniMax API calls for user voice messages)
-    if (msg.sender === "user" && msg.content && msg.content.startsWith("[语音]|")) {
-      setPlayingMessageId(msg.id);
-      setAudioLoadingMessageId(null);
-      
-      const parts = msg.content.split("|");
-      const duration = parseInt(parts[1] || "3", 10);
-      let countdown = duration;
-      
-      const interval = setInterval(() => {
-        countdown -= 1;
-        if (countdown <= 0) {
-          setPlayingMessageId(null);
-          clearInterval(interval);
-          setVoiceTimer(null);
-        }
-      }, 1000);
-      
-      setVoiceTimer(interval);
-      return;
-    }
-
-    setPlayingMessageId(msg.id);
-    setAudioLoadingMessageId(msg.id);
-    let ttsProviderName = "MiniMax";
-
-    try {
-      const userSettings = settings;
-      ttsProviderName = getTtsProvider(userSettings) === "mossland" ? "Mossland" : "MiniMax";
-
-      const msgChar = resolveTtsCharacter(characters, msg.characterId, msg.senderId);
-      const ttsOptions = buildCharacterTtsOptions(userSettings, msgChar);
-
-      let cleanText = msg.content;
-      if (cleanText.startsWith("[语音]|")) {
-        const parts = cleanText.split("|");
-        cleanText = parts.slice(2).join("|") || "";
-      }
-      cleanText = cleanText
-        .replace(/\([^\)]*\)/g, "")
-        .replace(/（[^）]*）/g, "")
-        .trim();
-
-      if (!cleanText) {
-        revealCallSubtitleOnce();
-        setPlayingMessageId(null);
-        setAudioLoadingMessageId(null);
-        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
-        else playNextMessageInQueue(msg.id);
-        return;
-      }
-
-      const blob = await getSpeechForText(cleanText, ttsOptions);
-      if (isCancelledCallSpeech()) return;
-      objectUrl = URL.createObjectURL(blob);
-      if (isQueuedCallSpeech) callTtsObjectUrlRef.current = objectUrl;
-      const audio = isQueuedCallSpeech
-        ? (callTtsAudioRef.current || new Audio())
-        : new Audio();
-      if (isQueuedCallSpeech) callTtsAudioRef.current = audio;
-      audio.onended = null;
-      audio.onerror = null;
-      audio.src = objectUrl;
-      audio.preload = "auto";
-      
-      setActiveTtsAudio(audio);
-      setAudioLoadingMessageId(null);
-
-      audio.onended = () => {
-        releaseObjectUrl();
-        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
-        else playNextMessageInQueue(msg.id);
-      };
-
-      audio.onerror = (e) => {
-        console.warn("Audio playback error:", e);
-        releaseObjectUrl();
-        setPlayingMessageId(null);
-        setAudioLoadingMessageId(null);
-        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
-      };
-
-      const playback = audio.play();
-      // Reveal the subtitle in the same event turn that starts audio playback,
-      // instead of exposing the text during the preceding network synthesis.
-      revealCallSubtitleOnce();
-      await playback;
-    } catch (err: any) {
-      console.warn("TTS generation failed:", err);
-      releaseObjectUrl();
-      if (isCancelledCallSpeech()) return;
-      revealCallSubtitleOnce();
-      setPlayingMessageId(null);
-      setAudioLoadingMessageId(null);
-      if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
-      const detail = err instanceof Error ? err.message.replace(/\s+/g, " ").trim().slice(0, 120) : "";
-      showToast(detail || `语音合成失败，请确认 ${ttsProviderName} 设置正确！`);
-    }
-  };
-
-  const playNextQueuedCallSpeech = () => {
-    if (isCallSpeechPlayingRef.current) return;
-    const nextJob = callSpeechQueueRef.current.shift();
-    if (!nextJob) return;
-    isCallSpeechPlayingRef.current = true;
-    activeCallSpeechResolveRef.current = nextJob.resolve;
-    triggerMessageSpeech(nextJob.message, true, nextJob.generation, nextJob.revealSubtitle);
-  };
-
-  const finishQueuedCallSpeech = () => {
-    const resolve = activeCallSpeechResolveRef.current;
-    activeCallSpeechResolveRef.current = null;
-    isCallSpeechPlayingRef.current = false;
-    setPlayingMessageId(null);
-    setActiveTtsAudio(null);
-    resolve?.();
-    window.setTimeout(playNextQueuedCallSpeech, 0);
-  };
-
-  const enqueueCallSpeech = (msg: Message, revealSubtitle: () => void): Promise<void> => new Promise((resolve) => {
-    callSpeechQueueRef.current.push({ message: msg, resolve, generation: callSpeechGenerationRef.current, revealSubtitle });
-    playNextQueuedCallSpeech();
-  });
-
-  const clearCallSpeechQueue = () => {
-    callSpeechGenerationRef.current += 1;
-    activeCallSpeechResolveRef.current?.();
-    activeCallSpeechResolveRef.current = null;
-    callSpeechQueueRef.current.splice(0).forEach((job) => job.resolve());
-    isCallSpeechPlayingRef.current = false;
-  };
-
-  // Visibility and Cleanup Effects
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        if (activeTtsAudio) {
-          try {
-            activeTtsAudio.pause();
-          } catch (e) {
-            console.error(e);
-          }
-        }
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      if (activeTtsAudio) {
-        try {
-          activeTtsAudio.pause();
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    };
-  }, [activeTtsAudio]);
-
-  // Intercepting Wrapper for onSendMessage
-  const onSendMessage = (msg: Message) => {
-    let content = msg.content || "";
-    // Normalize [语音: "text" (X秒)] or [语音: text] to standard [语音]|secs|text
-    if (content.startsWith("[语音") && !content.startsWith("[语音]|")) {
-      let text = "";
-      let secs = 5;
-      
-      const match1 = content.match(/^\[语音:\s*"([^"]+)"\s*\((\d+)(?:秒|s)\)\]/i);
-      const match2 = content.match(/^\[语音:\s*(.+?)\s*\((\d+)(?:秒|s)\)\]/i);
-      const match3 = content.match(/^\[语音:\s*(\d+)(?:秒|s)\]/i);
-      const match4 = content.match(/^\[语音:\s*"([^"]+)"\]/i) || content.match(/^\[语音:\s*(.+?)\]/i);
-
-      if (match1) {
-        text = match1[1];
-        secs = parseInt(match1[2], 10) || 5;
-      } else if (match2) {
-        text = match2[1];
-        secs = parseInt(match2[2], 10) || 5;
-      } else if (match3) {
-        text = "";
-        secs = parseInt(match3[1], 10) || 5;
-      } else if (match4) {
-        text = match4[1];
-        secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
-      } else {
-        const clean = content.replace(/^\[语音\]\s*/, "").replace(/^\[语音:\s*/, "").replace(/\]$/, "").trim();
-        text = clean;
-        secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
-      }
-      msg.content = `[语音]|${secs}|${text}`;
-    }
-
-    const isCallActive = activeAttachModal === "calling" && callingStatus === "connected";
-    // A real voice call only carries spoken content. Drop sticker/image payloads
-    // instead of showing or reading their markup as call subtitles.
-    if (
-      isCallActive &&
-      msg.sender === "character" &&
-      (/^\[(?:表情|贴图|图片)\]/.test(msg.content || "") || msg.content?.startsWith("data:image/"))
-    ) {
-      return;
-    }
-
-    // Call subtitles are private to the call screen. They are only persisted inside
-    // the call record after hang-up, never mixed into the normal online timeline.
-    if (isCallActive) {
-      const subtitleContent = getCallTranscriptText(msg.content || "");
-      let subtitleCommitted = false;
-      const commitSubtitleOnce = () => {
-        if (subtitleCommitted) return;
-        subtitleCommitted = true;
-        setCallTranscript((prev) => [...prev, {
-          id: msg.id,
-          sender: msg.sender,
-          content: subtitleContent,
-          timestamp: msg.timestamp,
-        }]);
-      };
-
-      if (settings.enableMiniMaxTts && shouldQueueCallSpeech(msg.sender, subtitleContent)) {
-        // TTS remains automatic during calls, but the call UI and saved transcript
-        // always contain plain subtitles rather than voice-message markup. Reveal
-        // each character subtitle only when its audio begins playback.
-        return enqueueCallSpeech({ ...msg, content: subtitleContent }, commitSubtitleOnce);
-      }
-      commitSubtitleOnce();
-      return;
-    }
-
-    if (!activeCharacter?.isGroupChat) {
-      if (!activeDirectScope) {
-        console.warn("Direct message write blocked: no verified relationship scope.", msg.id);
-        return;
-      }
-      const scopedMessage = attachDirectScope(msg, activeDirectScope);
-      if (!scopedMessage) {
-        console.warn("Direct message write blocked: message scope conflicts with the active relationship.", msg.id);
-        return;
-      }
-      onSendMessageRaw(scopedMessage);
-    } else {
-      const { relationId: _relationId, ...groupMessage } = msg;
-      onSendMessageRaw({
-        ...groupMessage,
-        conversationId: `group:${activeCharacter.id}`,
-      });
-    }
-
-    // Normal chat remains manual-play only.
-  };
-
-  // Sticker groups state
-  const [stickerGroups, setStickerGroups] = useState<StickerGroup[]>([]);
-  const stickerSemanticAnalysisInFlightRef = useRef(new Set<string>());
-  const triggerCreateStickerGroupRef = useRef<(() => void) | null>(null);
-  const [activeStickerGroupIndex, setActiveStickerGroupIndex] = useState<number>(0);
-  const [showStickerSelector, setShowStickerSelector] = useState<boolean>(false);
-
-  // Load sticker groups on mount
-  useEffect(() => {
-    const loadStickers = async () => {
-      try {
-        const groups = await stickerDb.getGroups();
-        if (groups.length === 0) {
-          const defaultGroup: StickerGroup = {
-            id: "default-sticker-group",
-            name: "默认分组",
-            stickers: [],
-          };
-          await stickerDb.saveGroup(defaultGroup);
-          setStickerGroups([defaultGroup]);
-        } else {
-          setStickerGroups(groups);
-        }
-      } catch (err) {
-        console.error("Failed to load sticker groups:", err);
-      }
-    };
-    loadStickers();
-  }, []);
-
-  // Initiated chats state to satisfy: unless user initiates chat or proactive message received, don't show thread
-  const [initiatedChatIds, setInitiatedChatIds] = useState<string[]>(() =>
-    readArray<string>("phone_initiated_chat_ids", []).value);
-
-  useEffect(() => {
-    try {
-      writeJson("phone_initiated_chat_ids", initiatedChatIds);
-    } catch (e) {
-      console.error(e);
-    }
-  }, [initiatedChatIds]);
-
-  // Keep track of initiated chats when a chat is opened
-  useEffect(() => {
-    const chatKey = activeChatRelationId || activeChatCharId;
-    if (chatKey && !initiatedChatIds.includes(chatKey)) {
-      setInitiatedChatIds((prev) => markChatInitiated(prev, chatKey));
-    }
-  }, [activeChatCharId, activeChatRelationId, initiatedChatIds]);
-
-  // Unread messages tracking
-  const [lastReadTimestamps, setLastReadTimestamps] = useState<Record<string, number>>(() =>
-    readJson<Record<string, number>>("phone_last_read_timestamps", {}).value);
-
-  useEffect(() => {
-    try {
-      writeJson("phone_last_read_timestamps", lastReadTimestamps);
-    } catch (e) {
-      console.error(e);
-    }
-  }, [lastReadTimestamps]);
-
-  useEffect(() => {
-    const chatKey = activeChatRelationId || activeChatCharId;
-    if (chatKey) {
-      setLastReadTimestamps((prev) => markChatRead(prev, chatKey, Date.now()));
-    }
-  }, [activeChatCharId, activeChatRelationId, messages.length]);
-
-  const getUnreadCount = (chatKey: string) => {
-    if (activeChatRelationId === chatKey || (!activeChatRelationId && activeChatCharId === chatKey)) return 0;
-    const lastRead = lastReadTimestamps[chatKey] || 0;
-    const charMsgs = messages.filter(
-      (m) => (m.relationId === chatKey || (!m.relationId && m.characterId === chatKey)) && m.sender === "character" && !m.isOffline && m.timestamp > lastRead
-    );
-    return charMsgs.length;
-  };
+  const { initiatedChatIds, setInitiatedChatIds, lastReadTimestamps, setLastReadTimestamps, getUnreadCount } = useChatReadState({ activeChatCharId, activeChatRelationId, messages });
 
   const startChatWith = (relationId: string) => {
     const relation = relationships.find((item) => item.id === relationId);
@@ -807,63 +433,28 @@ export default function AppChat({
   // Navigation State
   const activeRelationship = activeChatRelationId ? relationships.find((relation) => relation.id === activeChatRelationId) : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
-  const [appointmentClock, setAppointmentClock] = useState(Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setAppointmentClock(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  const readyOfflineAppointment = activeRelationship
-    ? appointments.find((appointment) => appointment.relationId === activeRelationship.id
-      && appointment.characterId === activeRelationship.characterId
-      && appointment.userIdentityId === activeRelationship.userIdentityId
-      && isAppointmentReadyForOfflineEntry(appointment, appointmentClock))
-    : undefined;
+  const readyOfflineAppointment = useChatAppointment({ activeRelationship, appointments });
   const characterCustomChatCss = activeCharacter?.customChatCSS || activeCharacter?.customCss || "";
-  // bubbleCss is the legacy preset field. Keep it as a scoped compatibility
-  // source so existing user presets still work without leaking styles outside
-  // the chat screen.
-  const userCustomChatCss = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss]
-    .filter((css): css is string => Boolean(css && css.trim()))
-    .join("\n");
-  const hasUserCustomChatCss = userCustomChatCss.trim().length > 0;
-  const scopedUserCustomChatCss = hasUserCustomChatCss
-    ? prioritizeUserChatCss(scopeUserChatCss(userCustomChatCss))
-    : "";
-
-  // Keep the user stylesheet in the document cascade after the app's global
-  // styles as well as inside the chat subtree.  The head copy is deliberately
-  // scoped by scopeUserChatCss, so it cannot affect other applications.
-  useEffect(() => {
-    const styleId = "app-chat-user-custom-css";
-    const existing = document.getElementById(styleId);
-    if (!hasUserCustomChatCss) {
-      existing?.remove();
-      return;
-    }
-    const style = existing instanceof HTMLStyleElement
-      ? existing
-      : Object.assign(document.createElement("style"), { id: styleId });
-    style.setAttribute("data-user-chat-css", "true");
-    style.textContent = scopedUserCustomChatCss;
-    if (!existing) document.head.appendChild(style);
-    return () => {
-      if (style.textContent === scopedUserCustomChatCss) style.remove();
-    };
-  }, [hasUserCustomChatCss, scopedUserCustomChatCss]);
+  // bubbleCss remains a scoped legacy compatibility source.
+  const userCustomChatCssSources = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss];
+  const hasUserCustomChatCss = userCustomChatCssSources.some((css) => Boolean(css && css.trim()));
+  useChatCustomCss(userCustomChatCssSources);
 
   // Long-lived callbacks can outlive the render in which they were created.
   // Keep the latest character/settings available at the actual send boundary.
   const latestActiveCharacterRef = useRef<Character | undefined>(activeCharacter);
   const latestActiveRelationshipRef = useRef<CharacterRelationship | undefined>(activeRelationship);
   const latestMemoriesRef = useRef<MemoryItem[]>(memories || []);
-  const pendingGroupWelcomeIdRef = useRef<string | null>(null);
   const consumedGroupWelcomeIdsRef = useRef(new Set<string>());
   latestActiveCharacterRef.current = activeCharacter;
   latestActiveRelationshipRef.current = activeRelationship;
   latestMemoriesRef.current = memories || [];
-  const currentChatMessages = messages.filter((m) => !m.isOffline && (activeRelationship
-    ? m.relationId === activeRelationship.id
-    : m.characterId === activeChatCharId && activeCharacter?.isGroupChat));
+  const { currentChatMessages, visibleChatMessages } = useChatMessageProjection({
+    messages,
+    activeChatCharId,
+    activeRelationship,
+    activeCharacter,
+  });
   const activeIdentityId = settings.activeIdentityId || "identity-1";
   const activeDirectScope = resolveDirectInteractionScope({
     characterId: activeCharacter?.id,
@@ -902,46 +493,20 @@ export default function AppChat({
     share.ownerIdentityId === activeIdentityId);
   const diarySharesForCurrentIdentity = loadDiaryShares().value.filter((share) =>
     share.ownerIdentityId === activeIdentityId);
-  // Old records may contain model-facing scheduling metadata. Never render it
-  // as a chat bubble, but retain the underlying history record untouched.
-  const visibleChatMessages = currentChatMessages
-    .map((message) => ({ ...message, content: stripInternalDeliveryMarkers(message.content) }))
-    .filter((message) => Boolean(message.content.trim()));
-  const getPendingOfflineHandoff = (): OfflineStory | undefined => {
-    const pending = selectPendingOfflineHandoffStory({
-      stories: offlineStories,
-      relationId: activeCharacter?.isGroupChat ? undefined : activeRelationship?.id,
-      groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
-      characterId: activeCharacter?.isGroupChat ? activeCharacter.id : activeRelationship?.characterId,
-      conversationId: activeCharacter?.isGroupChat ? `group:${activeCharacter.id}` : activeRelationship?.conversationId,
-    });
-    if (pending) return pending;
-
-    // Upgrade stories completed shortly before this bridge schema existed (or
-    // before their parent state update reached AppChat). This also repairs up
-    // to three already-generated online replies after a missed first handoff.
-    const now = Date.now();
-    const recentUntrackedStory = [...offlineStories]
-      .filter((story) => !story.onlineHandoff && story.mode === "continue" && Boolean(story.archivedAt))
-      .filter((story) => activeCharacter?.isGroupChat
-        ? story.relationId === undefined && story.characterId === activeCharacter.id && story.conversationId === `group:${activeCharacter.id}`
-        : story.relationId === activeRelationship?.id && story.characterId === activeRelationship?.characterId)
-      .filter((story) => activeCharacter?.isGroupChat
-        ? true
-        : !activeRelationship?.conversationId || !story.conversationId || story.conversationId === activeRelationship.conversationId)
-      .filter((story) => now - (story.archivedAt || 0) >= 0 && now - (story.archivedAt || 0) <= 2 * 60 * 60 * 1000)
-      .filter((story) => currentChatMessages.filter((message) => message.sender === "character" && message.timestamp > (story.archivedAt || 0)).length <= 3)
-      .sort((left, right) => (right.archivedAt || 0) - (left.archivedAt || 0))[0];
-    if (!recentUntrackedStory) return undefined;
-    const upgraded = createPendingOfflineHandoff({
-      story: recentUntrackedStory,
-      sourceMessages: getOfflineHandoffSourceMessagesForReturn(recentUntrackedStory),
-      now: recentUntrackedStory.archivedAt,
-    });
-    if (!upgraded.onlineHandoff) return undefined;
-    onSaveOfflineStory(upgraded);
-    return upgraded;
-  };
+  // Old records may contain model-facing scheduling metadata. The projection
+  // hook removes it only from the rendered timeline, retaining source history.
+  const getPendingOfflineHandoff = (): OfflineStory | undefined => recoverPendingOfflineHandoff({
+    stories: offlineStories,
+    currentChatMessages,
+    scope: {
+      isGroup: Boolean(activeCharacter?.isGroupChat),
+      characterId: activeCharacter?.id,
+      relationId: activeRelationship?.id,
+      relationCharacterId: activeRelationship?.characterId,
+      conversationId: activeRelationship?.conversationId,
+    },
+    onSaveOfflineStory,
+  });
   const recordPendingOfflineHandoffDelivery = (story?: OfflineStory) => {
     if (!story || story.onlineHandoff?.status !== "pending") return;
     const durableSummaryReady = hasOfflineStorySummary(story, memories || []);
@@ -952,68 +517,43 @@ export default function AppChat({
     currentOnlineAt?: number,
     summaryMemory?: MemoryItem,
   ): string => {
-    const offlineStartedAt = story.onlineHandoff?.startedAt ?? story.createdAt;
-    const previousOnlineAt = [...currentChatMessages]
-      .filter((message) => message.timestamp < offlineStartedAt)
-      .sort((left, right) => right.timestamp - left.timestamp)[0]?.timestamp;
-    return buildPendingOfflineHandoffPromptBlock({
+    return buildPendingOfflineTimelineHandoffPrompt({
       story,
       characterName: activeCharacter?.remark || activeCharacter?.name || "当前角色",
       userName: settings.name || "用户",
-      previousOnlineAt,
+      currentChatMessages,
       currentOnlineAt,
       summaryMemory,
     });
   };
   const buildOfflineTimelineHandoff = (memory: MemoryItem, currentOnlineAt?: number): string => {
-    const story = [...offlineStories]
-      .filter((candidate) => candidate.relationId === activeRelationship?.id)
-      .filter((candidate) => isOfflineStoryHandoffMemory(memory, candidate))
-      .sort((left, right) => (right.archivedAt ?? right.updatedAt) - (left.archivedAt ?? left.updatedAt))[0];
-    const offlineSourceMessages = story
-      ? getOfflineMemorySourceMessages(story, { includeSynced: true })
-      : [];
-    const offlineStartedAt = offlineSourceMessages[0]?.timestamp ?? story?.createdAt ?? memory.timestamp;
-    const previousOnlineAt = [...currentChatMessages]
-      .filter((message) => message.timestamp < offlineStartedAt)
-      .sort((left, right) => right.timestamp - left.timestamp)[0]?.timestamp;
-    return buildOfflineHandoffTimelinePromptBlock({
+    return buildOfflineTimelineHandoffPrompt({
       memory,
-      story,
-      previousOnlineAt,
+      offlineStories,
+      relationId: activeRelationship?.id,
+      currentChatMessages,
       currentOnlineAt,
     });
   };
   const getInterveningOfflineHandoff = (currentOnlineAt?: number) => {
-    if (!currentOnlineAt || (!activeRelationship?.id && !activeCharacter?.isGroupChat)) return undefined;
-    const currentDate = new Date(currentOnlineAt);
-    const currentDayStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
-    const previousOnlineAt = [...currentChatMessages]
-      .filter((message) => message.timestamp < currentDayStart)
-      .sort((left, right) => right.timestamp - left.timestamp)[0]?.timestamp ?? 0;
-    return selectInterveningOfflineHandoff({
-      stories: offlineStories,
-      memories: memories || [],
+    return getInterveningOfflineHandoffFromContext({
+      currentOnlineAt,
       relationId: activeCharacter?.isGroupChat ? undefined : activeRelationship?.id,
       groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
-      after: previousOnlineAt,
-      before: currentOnlineAt,
+      currentChatMessages,
+      offlineStories,
+      memories: memories || [],
     });
   };
   const getOfflineTimelineStoriesBetween = (previousAt: number | undefined, currentAt: number): OfflineStory[] => {
-    if (!previousAt || !activeRelationship?.id || activeCharacter?.isGroupChat) return [];
-    return offlineStories
-      .filter((story) => story.relationId === activeRelationship.id)
-      .filter((story) => hasOfflineStorySummary(story, memories || []))
-      .filter((story) => {
-        const occurredAt = story.onlineHandoff?.endedAt ?? story.archivedAt ?? story.lastMemorySyncAt ?? story.updatedAt;
-        return occurredAt > previousAt && occurredAt <= currentAt;
-      })
-      .sort((left, right) => {
-        const leftAt = left.onlineHandoff?.endedAt ?? left.archivedAt ?? left.lastMemorySyncAt ?? left.updatedAt;
-        const rightAt = right.onlineHandoff?.endedAt ?? right.archivedAt ?? right.lastMemorySyncAt ?? right.updatedAt;
-        return leftAt - rightAt;
-      });
+    return getOfflineTimelineStoriesBetweenFromContext({
+      previousAt,
+      currentAt,
+      relationId: activeRelationship?.id,
+      isGroup: Boolean(activeCharacter?.isGroupChat),
+      offlineStories,
+      memories: memories || [],
+    });
   };
   const activeStylePreset = resolveActiveChatStylePreset(
     activeCharacter?.chatStylePreset,
@@ -1033,142 +573,14 @@ export default function AppChat({
   const belongsToActiveIdentity = (ownerIdentityId?: string) =>
     (ownerIdentityId || "identity-1") === activeIdentityId;
 
-  const [momentsFilterCharId, setMomentsFilterCharId] = useState<string | null>(null);
-  const [isShowingCardModal, setIsShowingCardModal] = useState(false);
-  const [advancedSettingsSection, setAdvancedSettingsSection] = useState<"memory" | "voiceImage" | "appearance" | null>(null);
-  const isShowingAdvancedSettings = advancedSettingsSection !== null;
-  const advancedSettingsTitle = advancedSettingsSection === "memory"
-    ? "记忆设置"
-    : advancedSettingsSection === "voiceImage"
-      ? "语音图片"
-      : advancedSettingsSection === "appearance"
-        ? "美化样式"
-        : "设置";
-  const [singleCharacterMomentsId, setSingleCharacterMomentsId] = useState<string | null>(null);
-  const [isShowingAddFriendDialog, setIsShowingAddFriendDialog] = useState(false);
-  const [innerVoiceRecord, setInnerVoiceRecord] = useState<InnerVoiceRecord | null>(null);
-  const [innerVoiceCharacter, setInnerVoiceCharacter] = useState<Character | null>(null);
-  const [innerVoiceMode, setInnerVoiceMode] = useState<"current" | "history">("current");
-  const [innerVoiceLoading, setInnerVoiceLoading] = useState(false);
-  const [innerVoiceError, setInnerVoiceError] = useState<string | null>(null);
-  const [innerVoiceHistory, setInnerVoiceHistory] = useState<InnerVoiceRecord[]>([]);
-  const innerVoiceRequestsRef = useRef(new Set<string>());
-
-  const closeInnerVoice = () => {
-    setInnerVoiceRecord(null);
-    setInnerVoiceCharacter(null);
-    setInnerVoiceMode("current");
-    setInnerVoiceError(null);
-  };
-
-  const getInnerVoiceEmotion = (record: InnerVoiceRecord) =>
-    record.emotionalState?.trim() || `当前情绪：${record.state || "难以言说的心绪"}`;
-
-  const openInnerVoice = async (targetCharacterId: string, triggerMessage: Message) => {
-    const canonicalCharacterId = resolveCanonicalCharacterId(targetCharacterId, characters);
-    const character = characters.find((item) => item.id === canonicalCharacterId);
-    if (!character) return;
-
-    const relationId = activeRelationship?.id;
-    const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
-    const conversationId = relationId
-      ? activeRelationship!.conversationId
-      : triggerMessage.conversationId || groupId;
-    if (!conversationId || (!relationId && !groupId)) return;
-    const scope: InnerVoiceScope = relationId
-      ? { kind: "direct", relationId, messageId: triggerMessage.id }
-      : { kind: "group", groupId: groupId!, conversationId, characterId: canonicalCharacterId, messageId: triggerMessage.id };
-    const listHistory = (records: readonly InnerVoiceRecord[]) => relationId
-      ? listInnerVoicesByRelation(records, relationId)
-      : listInnerVoicesByGroup(records, groupId!, conversationId, canonicalCharacterId);
-
-    setInnerVoiceCharacter(character);
-    setInnerVoiceMode("current");
-    setInnerVoiceError(null);
-    const stored = loadInnerVoiceRecords([]).value;
-    const existing = findInnerVoiceByMessage(stored, scope);
-    setInnerVoiceHistory(listHistory(stored));
-    if (existing) {
-      setInnerVoiceRecord(existing);
-      setInnerVoiceLoading(false);
-      return;
-    }
-
-    setInnerVoiceRecord(null);
-    const requestKey = relationId ? `direct:${relationId}:${triggerMessage.id}` : `group:${groupId}:${canonicalCharacterId}:${triggerMessage.id}`;
-    if (innerVoiceRequestsRef.current.has(requestKey)) return;
-    innerVoiceRequestsRef.current.add(requestKey);
-    setInnerVoiceLoading(true);
-    try {
-      const recentMessages = messages.filter((message) => activeRelationship
-        ? message.relationId === activeRelationship.id
-        : message.characterId === groupId && activeCharacter?.isGroupChat,
-      );
-      const interveningOfflineHandoff = relationId || activeCharacter?.isGroupChat ? getInterveningOfflineHandoff(triggerMessage.timestamp) : undefined;
-      const latestOfflineMemory = interveningOfflineHandoff?.memory || (relationId
-        ? selectFreshOfflineHandoffMemory({
-          memories: memories || [],
-          relationId,
-          queryText: triggerMessage.content,
-        })
-        : undefined);
-      const pendingOfflineStory = relationId || activeCharacter?.isGroupChat ? getPendingOfflineHandoff() : undefined;
-      const offlineContinuityContext = pendingOfflineStory
-        ? buildPendingOfflineTimelineHandoff(
-          pendingOfflineStory,
-          triggerMessage.timestamp,
-          latestOfflineMemory && isOfflineStoryHandoffMemory(latestOfflineMemory, pendingOfflineStory)
-            ? latestOfflineMemory
-            : undefined,
-        )
-        : latestOfflineMemory
-          ? buildOfflineTimelineHandoff(latestOfflineMemory, triggerMessage.timestamp)
-          : undefined;
-      const generated = await generateInnerVoice({
-        character,
-        relationship: activeRelationship,
-        triggerMessage,
-        recentMessages,
-        conversationId,
-        relationId,
-        groupId,
-        settings,
-        offlineContinuityContext,
-        worldBookEntries,
-      });
-      if (!generated) {
-        setInnerVoiceError("心声生成结果无效，请稍后重试。");
-        return;
-      }
-      if (character.enableAutoTranslate) {
-        try {
-          const translated = await apiTranslate({
-            text: generated.content,
-            apiKey: settings.apiKey || "",
-            model: settings.selectedModel,
-            apiEndpoint: settings.apiEndpoint,
-          });
-          if (translated.text && translated.text !== generated.content) generated.translation = translated.text;
-        } catch (error) {
-          console.warn("Inner voice translation failed:", error);
-        }
-      }
-      // Re-read before saving so the character/message pair remains unique across repeated taps.
-      const latest = loadInnerVoiceRecords([]).value;
-      const cached = findInnerVoiceByMessage(latest, scope);
-      const record = cached || generated;
-      if (!cached) saveInnerVoiceRecords([...latest, record]);
-      setInnerVoiceRecord(record);
-      setInnerVoiceHistory(listHistory(cached ? latest : [...latest, record]));
-    } catch (error) {
-      console.error("Inner voice generation failed:", error);
-      setInnerVoiceError("暂时无法生成心声，不影响正常聊天。");
-    } finally {
-      innerVoiceRequestsRef.current.delete(requestKey);
-      setInnerVoiceLoading(false);
-    }
-  };
-
+  const {
+    isShowingCardModal,
+    setIsShowingCardModal,
+    advancedSettingsSection,
+    setAdvancedSettingsSection,
+    isShowingAdvancedSettings,
+    advancedSettingsTitle,
+  } = useChatSettingsPanelState();
   const availableCharacterIds = getAvailableCanonicalCharacterIds(characters);
   const activeRelationships = relationships.filter((relation) =>
     relation.userIdentityId === activeIdentityId
@@ -1187,114 +599,6 @@ export default function AppChat({
     const character = characters.find((item) => item.id === resolveCanonicalCharacterId(relation.characterId, characters))!;
     return { id: relation.id, character, subtitle: settings.identities?.find((identity) => identity.id === relation.userIdentityId)?.name };
   }).filter((item) => Boolean(item.character));
-
-  const handleDeleteFriend = () => {
-    if (!activeCharacter || activeCharacter.isGroupChat) return;
-
-    const friendName = activeCharacter.remark || activeCharacter.name;
-    if (!window.confirm(`确定删除好友“${friendName}”吗？与该好友的聊天、朋友圈、记忆和线下剧本将一并删除，且无法恢复。`)) {
-      return;
-    }
-
-    // Recovery path: a previously merged/deleted relationship can leave an
-    // open direct-chat entry with only its relation ID in navigation state.
-    // It must still be removable without deleting the canonical Character.
-    const currentIdentityRelation = relationForCharacter(activeCharacter.id);
-    const relationToDelete = activeRelationship?.userIdentityId === activeIdentityId
-      ? activeRelationship
-      : currentIdentityRelation;
-    const orphanRelationId = !relationToDelete && !activeRelationship && activeChatRelationId ? activeChatRelationId : undefined;
-    if (!relationToDelete && !orphanRelationId) {
-      showToast("找不到当前身份的好友关系，无法执行安全清理。");
-      return;
-    }
-    const friendId = activeCharacter.id;
-    const relationId = relationToDelete?.id || orphanRelationId!;
-    // A contact deletion removes only this identity's direct relationship. The
-    // canonical Character and sibling relationships must remain untouched.
-    clearMessagesAndLinkedArtifacts(friendId, relationId);
-    removeCharacterLifeEventsForRelations([relationId]);
-    removeCharacterTruthForRelations([relationId]);
-    removeProactiveTopicsForRelations([relationId]);
-    onDeleteMomentsByRelation?.(relationId);
-    onSaveRelationships(relationships.filter((relation) => relation.id !== relationId));
-    const innerVoices = loadInnerVoiceRecords([]).value;
-    const remainingInnerVoices = removeInnerVoicesByRelation(innerVoices, relationId);
-    if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
-    const imageRecords = loadImageGenerationRecords([]).value;
-    const removedImageRecords = imageRecords.filter((record) => record.relationId === relationId);
-    if (removedImageRecords.length) {
-      saveImageGenerationRecords(removeImageGenerationRecordsByRelation(imageRecords, relationId));
-      removedImageRecords.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete relation image asset:", error)));
-    }
-    onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
-    const diaryCleanup = cleanupDiaryForRelations({
-      relationIds: [relationId],
-      entries: loadDiaryEntries().value,
-      shares: loadDiaryShares().value,
-      tasks: loadDiaryGenerationTasks().value,
-      translations: loadDiaryTranslations().value,
-    });
-    saveDiaryEntries(diaryCleanup.entries);
-    saveDiaryShares(diaryCleanup.shares);
-    saveDiaryGenerationTasks(diaryCleanup.tasks);
-    saveDiaryTranslations(diaryCleanup.translations);
-    setRedPacketStatuses((previous) => {
-      const next = removePaymentStatusesByRelation(previous, relationId);
-      writeJson(RED_PACKET_STATUSES_KEY, next);
-      return next;
-    });
-    onDeleteRelationshipMusic?.(relationId);
-    const forumShares = loadForumShares().value;
-    const remainingForumShares = removeForumSharesByRelation(forumShares, relationId);
-    const forumThreads = loadForumThreads().value;
-    const forumReplies = loadForumReplies().value;
-    const forumMutation: { shares?: typeof forumShares; threads?: typeof forumThreads; replies?: typeof forumReplies; generationTasks?: ReturnType<typeof loadForumGenerationTasks>["value"]; actorStates?: ReturnType<typeof loadForumActorStates>["value"]; activityTasks?: ReturnType<typeof loadForumActivityTasks>["value"] } = {};
-    if (remainingForumShares.length !== forumShares.length) forumMutation.shares = remainingForumShares;
-    const unlinkedForumThreads = unlinkForumPrivateAuthorByRelation(forumThreads, relationId);
-    if (unlinkedForumThreads.some((thread, index) => thread !== forumThreads[index])) {
-      forumMutation.threads = unlinkedForumThreads;
-    }
-    const unlinkedForumReplies = forumReplies.map((reply) =>
-      reply.privateActor?.kind === "relationship" && reply.privateActor.relationId === relationId
-        ? (() => { const { privateActor: _privateActor, ...publicReply } = reply; return publicReply; })()
-        : reply);
-    if (unlinkedForumReplies.some((reply, index) => reply !== forumReplies[index])) forumMutation.replies = unlinkedForumReplies;
-    forumMutation.generationTasks = removeForumGenerationTasksByRelation(
-      loadForumGenerationTasks().value,
-      relationId,
-    );
-    forumMutation.actorStates = loadForumActorStates().value.filter((state) =>
-      state.actor.kind !== "relationship" || state.actor.relationId !== relationId);
-    forumMutation.activityTasks = loadForumActivityTasks().value.map((task) => ({
-      ...task,
-      pendingEvents: task.pendingEvents.filter((event) =>
-        event.privateActor?.kind !== "relationship" || event.privateActor.relationId !== relationId),
-    }));
-    commitForumMutation(forumMutation);
-    offlineStories
-      .filter((story) => story.relationId === relationId)
-      .forEach((story) => onDeleteOfflineStory?.(story.id));
-    characters
-      .filter((character) => character.isGroupChat && belongsToActiveIdentity(character.ownerIdentityId) && character.memberIds?.includes(friendId))
-      .forEach((group) => onSaveCharacter({
-        ...group,
-        memberIds: group.memberIds?.filter((memberId) => memberId !== friendId),
-      }));
-
-    removeStoredValue(getOfflineModeStorageKey(relationId));
-    removeStoredValue(getOfflineStoryStorageKey(relationId));
-    proactiveMessageInFlightRef.current.delete(relationId);
-    setInitiatedChatIds((previous) => previous.filter((id) => id !== relationId));
-    setLastReadTimestamps((previous) => {
-      const next = { ...previous };
-      delete next[relationId];
-      return next;
-    });
-    setIsShowingCardModal(false);
-    setActiveChatCharId(null);
-    setActiveChatRelationId(null);
-  };
 
   // Never leave an old identity's direct or group thread open after switching
   // profiles. Otherwise the next profile can temporarily render and act on
@@ -1343,312 +647,74 @@ export default function AppChat({
   const getDynamicLocations = () => {
     if (!activeCharacter) return [];
     return getWorldBookLocationReferences(getLatestWorldBookEntries(worldBookEntries), activeCharacter.id);
-    /* Legacy broad extraction retained below only as an inactive reference while
-       location references use the conservative domain helper above.
-    
-    const latestWorldBookEntries = getLatestWorldBookEntries(worldBookEntries);
-
-    const locations: string[] = [];
-    
-    // 1. Filter entries related to the current character
-    const charEntries = latestWorldBookEntries.filter(
-      (entry) => entry.characterId === activeCharacter.id
-    );
-    
-    charEntries.forEach((entry) => {
-      // Check if entry category is location-related, or title is a place
-      const isLocCategory = ["地点", "地名", "地址", "位置", "场景", "场景设定", "场景信息", "空间"].includes(entry.category || "");
-      const isLocTitle = /地点|地址|地名|位置|场所|场景|住所|公寓|工作室|办公室|大厅|飞船|星空|学校|家/i.test(entry.title || "");
-      
-      // If it's a location entry, the title itself is a perfect place name
-      if (isLocCategory || isLocTitle) {
-        if (entry.title && !locations.includes(entry.title)) {
-          locations.push(entry.title);
-        }
-      }
-      
-      // Parse content for explicit address indicators: e.g. "地址：xxx", "位置：xxx", "地点：xxx"
-      if (entry.content) {
-        const lines = entry.content.split(/\r?\n/);
-        lines.forEach((line) => {
-          const match = line.match(/(?:地址|位置|地点|地名)[:：]\s*(.+)/);
-          if (match && match[1]) {
-            const val = match[1].trim();
-            if (val && !locations.includes(val) && val.length < 50) {
-              locations.push(val);
-            }
-          }
-        });
-      }
-    });
-    
-    // 2. Also check global entries if specific character entries are empty or to enrich the list
-    const globalEntries = latestWorldBookEntries.filter(
-      (entry) => entry.characterId === "global"
-    );
-    globalEntries.forEach((entry) => {
-      const isLocCategory = ["地点", "地名", "地址", "位置", "场景", "场景设定"].includes(entry.category || "");
-      if (isLocCategory) {
-        if (entry.title && !locations.includes(entry.title)) {
-          locations.push(entry.title);
-        }
-      }
-      
-      if (entry.content) {
-        const lines = entry.content.split(/\r?\n/);
-        lines.forEach((line) => {
-          const match = line.match(/(?:地址|位置|地点|地名)[:：]\s*(.+)/);
-          if (match && match[1]) {
-            const val = match[1].trim();
-            if (val && !locations.includes(val) && val.length < 50) {
-              locations.push(val);
-            }
-          }
-        });
-      }
-    });
-
-    // 3. Fallback to default locations if no locations extracted from World Book entries
-    if (locations.length === 0) {
-      if (activeCharacter.name.includes("陆沉砚")) {
-        return [
-          "陆沉砚的设计工作室「静空间」",
-          "工作室一楼手绘写生区",
-          "常德路12号人文概念展厅",
-          "静溢半山私享住宅项目现场",
-          "老街梧桐树下的街角咖啡馆",
-          "落日湖畔的深夜写生露台"
-        ];
-      }
-      return [
-        "废墟图书馆总理大堂",
-        "塞伯坦星巡航飞船第一总署",
-        "星空银河系瞭望第十二哨站",
-        "温馨小屋一楼客厅沙发",
-        "繁华商业街中央喷泉广场",
-        "静谧森林樱花树下"
-      ];
-    }
-    
-    return locations;
-    */
   };
 
-  // User profile edit states
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [meActiveSubView, setMeActiveSubView] = useState<"none" | "identities" | "wallet" | "stickers" | "favorites">("none");
+  const {
+    isEditingProfile, setIsEditingProfile,
+    meActiveSubView, setMeActiveSubView,
+    showTopUpModal, setShowTopUpModal,
+    topUpAmount, setTopUpAmount,
+    editMyName, setEditMyName,
+    editMySignature, setEditMySignature,
+    editMyBio, setEditMyBio,
+    editMyAvatar, setEditMyAvatar,
+    editGlobalChatStylePreset, setEditGlobalChatStylePreset,
+  } = useChatProfileState(settings);
   const mainTabsViewportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (activeTab === "me") mainTabsViewportRef.current?.scrollTo({ top: 0 });
   }, [activeTab, meActiveSubView]);
-  const [showTopUpModal, setShowTopUpModal] = useState(false);
-  const [topUpAmount, setTopUpAmount] = useState("");
-  const [walletBalances, setWalletBalances] = useState<IdentityWalletBalances>(() =>
-    loadIdentityWalletBalances(localStorage.getItem(IDENTITY_WALLET_BALANCES_KEY), localStorage.getItem("wechat_wallet_balance")));
-  const walletBalance = walletBalances[activeIdentityId] || 0;
-  const setWalletBalance = (update: number | ((previous: number) => number)) => {
-    setWalletBalances((previous) => {
-      const current = previous[activeIdentityId] || 0;
-      const nextValue = typeof update === "function" ? update(current) : update;
-      const next = { ...previous, [activeIdentityId]: nextValue };
-      writeJson(IDENTITY_WALLET_BALANCES_KEY, next);
-      return next;
-    });
-  };
-
-  const [editMyName, setEditMyName] = useState(settings.name);
-  const [editMySignature, setEditMySignature] = useState(settings.signature);
-  const [editMyBio, setEditMyBio] = useState(settings.bio);
-  const [editMyAvatar, setEditMyAvatar] = useState(settings.avatar);
-  const [editGlobalChatStylePreset, setEditGlobalChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
-
-  // Sync edits when isEditingProfile toggled
-  useEffect(() => {
-    if (isEditingProfile) {
-      setEditMyName(settings.name);
-      setEditMySignature(settings.signature);
-      setEditMyBio(settings.bio);
-      setEditMyAvatar(settings.avatar);
-      setEditGlobalChatStylePreset(settings.globalChatStylePreset || "default");
-    }
-  }, [isEditingProfile, settings]);
-
   // Inputs
   // Reply requests can finish after the user has opened another conversation.
   // Keep their typing state attached to the captured conversation instead of
   // relabelling a global boolean with whichever contact is currently visible.
   const activeTypingScopeKey = getChatTypingScopeKey(activeRuntimeContext);
-  const [typingByScope, setTypingByScope] = useState<ChatTypingScopeState<Character>>({});
-  const setIsTyping = (isTyping: boolean) => {
-    const capturedScopeKey = activeTypingScopeKey;
-    setTypingByScope((previous) => setChatScopeTyping(previous, capturedScopeKey, isTyping));
-  };
-  const setTypingCharacterOverride = (character: Character | null) => {
-    const capturedScopeKey = activeTypingScopeKey;
-    setTypingByScope((previous) => setChatScopeCharacterOverride(previous, capturedScopeKey, character));
-  };
-  const visibleTypingState = getVisibleChatTyping<Character>(typingByScope, activeTypingScopeKey);
-  const isTyping = Boolean(visibleTypingState);
-  const typingCharacterOverride = visibleTypingState?.characterOverride || null;
-  const [manualLocationText, setManualLocationText] = useState("");
-  const [, setEmptyGreetingCheckedCharIds] = useState<string[]>([]);
-  const [sentGreetings, setSentGreetings] = useState<string[]>([]);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const { setIsTyping, setTypingCharacterOverride, isTyping, typingCharacterOverride } = useChatTypingState(activeTypingScopeKey);
+
+  const innerVoiceController = useInnerVoice({
+    characters,
+    activeCharacter,
+    activeRelationship,
+    messages,
+    memories: memories || [],
+    settings,
+    worldBookEntries,
+    getOfflineContinuityContext: (triggerMessage) => {
+      const relationId = activeRelationship?.id;
+      const interveningOfflineHandoff = relationId || activeCharacter?.isGroupChat
+        ? getInterveningOfflineHandoff(triggerMessage.timestamp)
+        : undefined;
+      const latestOfflineMemory = interveningOfflineHandoff?.memory || (relationId
+        ? selectFreshOfflineHandoffMemory({ memories: memories || [], relationId, queryText: triggerMessage.content })
+        : undefined);
+      const pendingOfflineStory = relationId || activeCharacter?.isGroupChat ? getPendingOfflineHandoff() : undefined;
+      return pendingOfflineStory
+        ? buildPendingOfflineTimelineHandoff(
+          pendingOfflineStory,
+          triggerMessage.timestamp,
+          latestOfflineMemory && isOfflineStoryHandoffMemory(latestOfflineMemory, pendingOfflineStory) ? latestOfflineMemory : undefined,
+        )
+        : latestOfflineMemory ? buildOfflineTimelineHandoff(latestOfflineMemory, triggerMessage.timestamp) : undefined;
+    },
+  });
+  const openInnerVoice = innerVoiceController.open;
+  const {
+    manualLocationText,
+    setManualLocationText,
+    setEmptyGreetingCheckedCharIds,
+    sentGreetings,
+    setSentGreetings,
+    toastMessage,
+    setToastMessage,
+    memoNotes,
+    setMemoNotes,
+  } = useChatTransientUiState();
   
   // Offline Mode States (Inline Offline mode inside chat is disabled, transitioned to AppOffline)
   const isOfflineModeActive = false;
   const isInputNarration = false;
   const activeOfflineStoryId = null;
-  const handleStartOfflineFromMsg = async (
-    msg: Message,
-    appointment?: Appointment,
-    handoffMessages?: readonly Message[],
-  ) => {
-    if (!activeChatCharId || !activeCharacter) return;
-    if (appointment && (!activeRelationship
-      || appointment.relationId !== activeRelationship.id
-      || appointment.characterId !== activeRelationship.characterId
-      || appointment.userIdentityId !== activeRelationship.userIdentityId)) {
-      showToast("这条线下约定不属于当前聊天关系");
-      return;
-    }
-    if (appointment) {
-      const inProgressAppointment = startAppointmentOfflineSession(appointment, Date.now());
-      if (!inProgressAppointment || !onSaveAppointment?.(inProgressAppointment)) {
-        showToast("线下约定暂时无法开始，请稍后重试");
-        return;
-      }
-      const existingStory = offlineStories.find((story) => story.sourceAppointmentId === appointment.id
-        && story.relationId === appointment.relationId);
-      if (existingStory && activeRelationship) {
-        writeString(getOfflineModeStorageKey(activeRelationship.id), "true");
-        writeString(getOfflineStoryStorageKey(activeRelationship.id), existingStory.id);
-        onOpenOfflineStory?.(existingStory.id);
-        onNavigateToApp?.("offline");
-        return;
-      }
-    }
-    
-    const charName = activeCharacter.remark || activeCharacter.name;
-    const offlineParticipantIds = activeCharacter.isGroupChat
-      ? (activeCharacter.memberIds || [])
-      : [activeChatCharId];
-    const offlineParticipantSet = new Set(offlineParticipantIds);
-    // The direct menu action used to import only the clicked message. Snapshot
-    // a durable relation window so the offline scene has a real handoff.
-    const handoffSourceMessages = (handoffMessages ? [...handoffMessages] : messages)
-      .filter((item) => !item.isOffline && (activeRelationship
-        ? item.relationId === activeRelationship.id
-        : item.characterId === activeChatCharId && activeCharacter?.isGroupChat));
-    // A handoff is a durable continuity boundary, not the normal short-term
-    // chat context. Keep a generous raw snapshot (facts are extracted from the
-    // complete relation history below) so a 50-message conversation does not
-    // silently lose its earlier commitments.
-    const recentOnlineMessages = handoffSourceMessages.slice(-OFFLINE_HANDOFF_MESSAGE_LIMIT);
-    const sourceMessages = recentOnlineMessages.length > 0 ? recentOnlineMessages : [msg];
-    const handoffFacts = buildOfflineHandoffFacts(
-      handoffSourceMessages.length > 0 ? handoffSourceMessages : [msg],
-    );
-    const snapshotTimestamp = Date.now();
-    const importedMessages = sourceMessages.map((item, index) => ({
-      ...item,
-      id: `offline-import-${snapshotTimestamp}-${index}-${item.id}`,
-      isOffline: true,
-      isImportedContext: true,
-    }));
-    const memberMemories = activeCharacter.isGroupChat
-      ? buildOfflineMemberKnowledgeSnapshots({
-          memberIds: offlineParticipantIds,
-          characters,
-          relationships,
-          activeIdentityId,
-          memories,
-          claims: loadKnowledgeClaims().value,
-        })
-      : undefined;
-    const importedContext: OfflineStory["importedContext"] = {
-      messages: importedMessages,
-      memories: activeRelationship
-        ? memories.filter((memory) => memory.relationId === activeRelationship.id).map((memory) => memory.content)
-        : [],
-      ...(handoffFacts.length > 0 ? { handoffFacts } : {}),
-      ...(memberMemories ? { memberMemories } : {}),
-      worldBook: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set([activeChatCharId, ...offlineParticipantSet])))
-        .map((entry) => `${entry.title}: ${entry.content}`),
-      importedAt: snapshotTimestamp,
-    };
-
-    const newStory: OfflineStory = {
-      id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      characterId: activeChatCharId,
-      relationId: activeRelationship?.id,
-      conversationId: activeCharacter.isGroupChat
-        ? `group:${activeCharacter.id}`
-        : activeRelationship?.conversationId,
-      // A group is only a container; the actual offline actors are its members.
-      characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
-      ...(activeCharacter.isGroupChat ? {
-        participantSnapshots: offlineParticipantIds
-          .map((participantId) => characters.find((character) => character.id === participantId))
-          .filter((character): character is Character => Boolean(character))
-          .map((character) => ({
-            id: character.id,
-            name: character.remark || character.name,
-            avatar: character.avatar,
-          })),
-      } : {}),
-      title: appointment
-        ? `${getCurrentAppointmentProposal(appointment)?.activity || appointment.title} - ${new Date().toLocaleDateString()}`
-        : `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      mode: "continue",
-      worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set([activeChatCharId, ...offlineParticipantSet]))),
-      knowledgeSnapshot: activeRelationship ? Array.from(new Set([
-        ...loadKnowledgeClaims().value
-          .filter((claim) => claim.relationId === activeRelationship.id
-            && claim.characterId === activeRelationship.characterId
-            && claim.userIdentityId === activeRelationship.userIdentityId
-            && claim.status === "active"
-            && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
-          .map((claim) => claim.statement),
-        ...memories
-          .filter((memory) => memory.relationId === activeRelationship.id && memory.isManual === true)
-          .map((memory) => memory.content),
-      ])) : [],
-      sourceChatId: activeChatCharId,
-      sourceChatMsgCount: importedMessages.length,
-      ...(appointment ? { sourceAppointmentId: appointment.id, autoStartFirstAct: true } : {}),
-      importedContext,
-      enableTimeAwareness: Boolean(activeCharacter.enableTimeAwareness),
-      // Imported online chat is context only; the offline page starts with new story content.
-      messages: []
-    };
-    
-    if (onSaveOfflineStory) {
-      const saveResult = onSaveOfflineStory(newStory);
-      const saved = saveResult instanceof Promise ? await saveResult : saveResult !== false;
-      if (!saved) {
-        showToast("线下故事保存失败，请稍后重试");
-        return;
-      }
-    }
-    
-    if (activeRelationship) {
-      writeString(getOfflineModeStorageKey(activeRelationship.id), "true");
-      writeString(getOfflineStoryStorageKey(activeRelationship.id), newStory.id);
-    }
-    
-    showToast("已无痛切换到线下故事模式");
-
-    if (onNavigateToApp) {
-      onOpenOfflineStory?.(newStory.id);
-      onNavigateToApp("offline");
-    }
-  };
 
   /**
    * Start a relation-scoped offline story only after the online transcript
@@ -1689,58 +755,50 @@ export default function AppChat({
     window.setTimeout(() => offlineAutoStartInFlightRef.current.delete(input.relationship.id), 0);
   };
 
-  const handleTranslateMessage = (msg: Message) => {
-    if (!onUpdateMessage) return;
-    
-    showToast("正在翻译中...");
-    
-    apiTranslate({
-      text: msg.content,
-      apiKey: settings.apiKey || "",
-      model: settings.selectedModel,
-      apiEndpoint: settings.apiEndpoint
-    })
-    .then(res => {
-      if (res && res.text) {
-        onUpdateMessage(msg.id, { translation: res.text }, msg);
-        showToast("翻译完成");
-      } else {
-        showToast("翻译无结果");
-      }
-    })
-    .catch(err => {
-      console.error("Translate message failed:", err);
-      showToast(err instanceof Error ? err.message : "翻译失败，请检查 API 配置");
-    });
-  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 1500);
   };
 
-  const copyCssExampleTemplate = async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        document.execCommand("copy");
-        textarea.remove();
-      }
-      setCssTemplateCopied(true);
-      showToast("CSS 模板已复制，可直接粘贴编辑");
-      window.setTimeout(() => setCssTemplateCopied(false), 1500);
-    } catch {
-      showToast("复制失败，请手动选择占位符内容");
-    }
-  };
+  const { handleTranslateMessage } = useChatMessageTranslation({ settings, onUpdateMessage, showToast });
+
+  const { handleStartOfflineFromMsg } = useChatStartOfflineFromMessage({
+    activeChatCharId,
+    activeCharacter,
+    activeRelationship,
+    messages,
+    offlineStories,
+    characters,
+    relationships,
+    activeIdentityId,
+    memories,
+    worldBookEntries: worldBookEntries || [],
+    onSaveAppointment,
+    onSaveOfflineStory,
+    onOpenOfflineStory,
+    onNavigateToApp,
+    showToast,
+  });
+
+  const {
+    walletBalances,
+    walletBalance,
+    setWalletBalance,
+    redPacketStatuses,
+    setRedPacketStatuses,
+    updateRedPacketStatus,
+    getRedPacketActualStatus,
+  } = useChatPaymentState({
+    activeIdentityId,
+    activeRelationships,
+    characters,
+    messages,
+    belongsToActiveIdentity,
+    showToast,
+  });
+
+  const { cssTemplateCopied, copyCssExampleTemplate } = useChatCssTemplateCopy({ showToast });
 
   const {
     momentInputText, setMomentInputText, momentAttachedImage, setMomentAttachedImage,
@@ -1749,21 +807,24 @@ export default function AppChat({
     inlineCommentsTexts, setInlineCommentsTexts, showCommentInputMap, setShowCommentInputMap,
     replyingToCommentMap, setReplyingToCommentMap,
   } = useMomentComposerState();
-  const [lastViewedMomentsTime, setLastViewedMomentsTime] = useState<number>(() => {
-    return Number(localStorage.getItem("phone_last_viewed_moments_time") || "0");
-  });
+  const {
+    lastViewedMomentsTime, momentContextMenu, setMomentContextMenu, commentDeleteTarget, setCommentDeleteTarget,
+    commentContextMenu, setCommentContextMenu, momentTranslations, setMomentTranslations,
+    commentTranslations, setCommentTranslations, momentFavorites, setMomentFavorites, favedTab, setFavedTab,
+  } = useChatMomentsInteractionState(activeTab, moments);
 
-  // Group Chat States
-  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
-  const [groupNameInput, setGroupNameInput] = useState("");
-  const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([]);
-  const [pendingGroupWelcome, setPendingGroupWelcome] = useState<{ groupId: string; narration: Message } | null>(null);
-
+  const {
+    showCreateGroupModal, setShowCreateGroupModal,
+    groupNameInput, setGroupNameInput,
+    selectedGroupMemberIds, setSelectedGroupMemberIds,
+    pendingGroupWelcome, setPendingGroupWelcome,
+    pendingGroupWelcomeIdRef,
+  } = useChatGroupState();
   const {
     draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
     isDeleteMemberMode, setIsDeleteMemberMode, showAddMemberModal, setShowAddMemberModal,
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
-    draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss, cssTemplateCopied, setCssTemplateCopied,
+    draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
     draftEnableProactiveCall, setDraftEnableProactiveCall,
@@ -1780,6 +841,7 @@ export default function AppChat({
     draftImageReferenceAssetId, setDraftImageReferenceAssetId, draftImageReferenceMimeType, setDraftImageReferenceMimeType,
     loadCharacterDraft,
   } = useChatSettingsDraft();
+  const { handleDraftChatBgUpload } = useChatBackgroundDraftUpload({ setDraftChatBg });
   const {
     showImageGenerator, setShowImageGenerator, imageRequestText, setImageRequestText,
     isGeneratingImage, setIsGeneratingImage, imageGenerationError, setImageGenerationError,
@@ -1792,124 +854,56 @@ export default function AppChat({
     openRedPacketDetail, setOpenRedPacketDetail, isOpeningRedPacket, setIsOpeningRedPacket,
     setOpenTransferDetail, setShowTransferDetailModal, setOpenVoiceId, voiceTimer, setVoiceTimer,
   } = useChatAttachmentState();
-  const [isManualArchiving, setIsManualArchiving] = useState<boolean>(false);
+  const {
+    triggerMessageSpeech,
+    unlockCallTtsPlayback,
+    resetCallTtsPlayback,
+    enqueueCallSpeech,
+    clearCallSpeechQueue,
+    callSpeechGenerationRef,
+  } = useChatCallSpeechPlayback({
+    settings,
+    characters,
+    isOfflineModeActive,
+    playingMessageId,
+    setPlayingMessageId,
+    setAudioLoadingMessageId,
+    activeTtsAudio,
+    setActiveTtsAudio,
+    voiceTimer,
+    setVoiceTimer,
+    showToast,
+  });
+  const onSendMessage = createChatMessageDeliveryHandler({
+    settings,
+    activeCharacter,
+    activeDirectScope,
+    activeAttachModal,
+    callingStatus,
+    onSendMessageRaw,
+    setCallTranscript,
+    enqueueCallSpeech,
+  });
+  const { handleRemoveGroupMember, handleAddGroupMembers } = useChatGroupMemberActions({
+    activeCharacter,
+    characters,
+    onSaveCharacter,
+    onSendMessage,
+    setShowAddMemberModal,
+  });
+  const { isManualArchiving, setIsManualArchiving, isCompressingMemory, setIsCompressingMemory } = useChatOperationState();
 
-  const estimatedTokens = React.useMemo(() => {
-    if (!activeCharacter) return { total: 0, context: 0, retrieval: 0, persona: 0 };
-    // 1. System instructions & prompt rules
-    const sysInstructionsLength = 1200;
-    
-    // 2. Persona definition
-    const personaLength = (activeCharacter.name || "").length + 
-                          (activeCharacter.backstory || "").length + 
-                          (activeCharacter.personality || "").length +
-                          (activeRelationship?.compressedMemory || "").length;
-    
-    // 3. Short term context (using current settings draft state for real-time update!)
-    const slicedMsgsForPreview = currentChatMessages.slice(-draftContextMemoryLimit);
-    const historyTextLength = slicedMsgsForPreview.reduce((sum, m) => sum + m.content.length, 0);
-    
-    // 4. Memory Vault items
-    const activeMemories = (memories || []).filter((memory) => activeRelationship
-      ? memory.relationId === activeRelationship.id
-      : memory.characterId === activeCharacter.id && activeCharacter.isGroupChat);
-    const topK = recallSettings?.recallCount || 5;
-    const memoryCount = Math.min(topK, activeMemories.length);
-    const memoryLength = activeMemories.slice(0, memoryCount).reduce((sum, m) => sum + m.content.length, 0);
-    
-    // Total character length
-    const totalChars = sysInstructionsLength + personaLength + historyTextLength + memoryLength;
-    
-    // Convert to estimate
-    const rawText = (activeCharacter.backstory || "") + (activeCharacter.personality || "");
-    const chineseCharsCount = rawText.match(/[\u4e00-\u9fa5]/g)?.length || 0;
-    const remainingCount = totalChars - chineseCharsCount;
-    const tokenEstimate = Math.round(chineseCharsCount * 1.6 + remainingCount * 0.5);
-    
-    return {
-      total: Math.max(250, tokenEstimate),
-      context: Math.round(historyTextLength * 1.6),
-      retrieval: Math.round(memoryLength * 1.6),
-      persona: Math.round(personaLength * 1.6)
-    };
-  }, [draftContextMemoryLimit, activeCharacter, currentChatMessages, memories, recallSettings]);
-  const [redPacketStatuses, setRedPacketStatuses] = useState<RedPacketStatusMap>((() => {
-    try {
-      const stored = localStorage.getItem(RED_PACKET_STATUSES_KEY);
-      return stored ? JSON.parse(stored) : {};
-    } catch {
-      return {};
-    }
-  })());
-
-  const updateRedPacketStatus = (message: Message, status: RedPacketStatus) => {
-    setRedPacketStatuses(prev => {
-      const next = writeRedPacketStatus(prev, message, status);
-      writeJson(RED_PACKET_STATUSES_KEY, next);
-      return next;
-    });
-  };
-
-  const getRedPacketActualStatus = (message: Message) => {
-    const savedStatus = readRedPacketStatus(redPacketStatuses, message, activeIdentityId === "identity-1");
-    if (savedStatus === "claimed" || savedStatus === "refunded") {
-      return savedStatus;
-    }
-    // Check if 24 hours (86400000 ms) have passed since timestamp
-    const hours24 = 24 * 3600 * 1000;
-    if (Date.now() - message.timestamp > hours24) {
-      return "expired";
-    }
-    return savedStatus || "unclaimed";
-  };
-
-  // Dynamically auto-expire and refund user-sent red packets if they are expired and unclaimed
-  useEffect(() => {
-    let changed = false;
-    const updatedStatuses = { ...redPacketStatuses };
-    let refundAmountTotal = 0;
-
-    const activeRelationIds = new Set(activeRelationships.map((relationship) => relationship.id));
-    messages.filter((message) => message.relationId
-      ? activeRelationIds.has(message.relationId)
-      : Boolean(characters.find((character) => character.id === message.characterId && character.isGroupChat && belongsToActiveIdentity(character.ownerIdentityId))))
-      .forEach((msg) => {
-      if (isRedPacketMarkup(msg.content)) {
-        const currentStatus = readRedPacketStatus(redPacketStatuses, msg, activeIdentityId === "identity-1") || "unclaimed";
-        const isExpired = Date.now() - msg.timestamp > 24 * 3600 * 1000;
-        
-        if (isExpired && currentStatus === "unclaimed") {
-          updatedStatuses[getPaymentStatusKey(msg)] = "expired";
-          changed = true;
-
-          // If the user sent it, refund the money to user's wallet
-          if (msg.sender === "user") {
-            const [_, amountStr] = normalizePaymentMarkup(msg.content).split("|");
-            const amt = parseFloat(amountStr || "0");
-            if (!isNaN(amt) && amt > 0) {
-              refundAmountTotal += amt;
-              updatedStatuses[getPaymentStatusKey(msg)] = "refunded";
-            }
-          }
-        }
-      }
-    });
-
-    if (changed) {
-      setRedPacketStatuses(updatedStatuses);
-      writeJson(RED_PACKET_STATUSES_KEY, updatedStatuses);
-      if (refundAmountTotal > 0) {
-        setWalletBalance(prev => {
-          const next = prev + refundAmountTotal;
-          return next;
-        });
-        showToast(`检测到有红包逾期未领，已自动退回 ¥${refundAmountTotal.toFixed(2)} 至您的零钱！🧧`);
-      }
-    }
-  }, [messages, redPacketStatuses]);
-
+  const estimatedTokens = React.useMemo(() => estimateChatTokens({
+    character: activeCharacter,
+    relationshipCompressedMemory: activeRelationship?.compressedMemory,
+    messages: currentChatMessages,
+    contextLimit: draftContextMemoryLimit,
+    memories: memories || [],
+    relationId: activeRelationship?.id,
+    isGroupChat: activeCharacter?.isGroupChat,
+    recallCount: recallSettings?.recallCount,
+  }), [draftContextMemoryLimit, activeCharacter, activeRelationship?.compressedMemory, activeRelationship?.id, currentChatMessages, memories, recallSettings?.recallCount]);
   // Memory Compression and Proactive Chat states
-  const [isCompressingMemory, setIsCompressingMemory] = useState(false);
   const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
   // Stop background generation after an authentication failure so a missing
   // or invalid provider key cannot create a repeated request/logging loop.
@@ -1921,18 +915,34 @@ export default function AppChat({
   useEffect(() => {
     backgroundGenerationBlockedRef.current = false;
   }, [settings.apiKey, settings.apiEndpoint, settings.selectedModel]);
-  const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
-  const [showDisbandGroupModal, setShowDisbandGroupModal] = useState(false);
-  const [, setEditingMemoryText] = useState("");
-
+  const {
+    showClearHistoryModal, setShowClearHistoryModal, showDisbandGroupModal, setShowDisbandGroupModal,
+    activeMenuMsg, setActiveMenuMsg, menuPosition, setMenuPosition, isMultiSelectDeleteMode, setIsMultiSelectDeleteMode,
+    selectedMessageIds, setSelectedMessageIds, selectedFileNote, setSelectedFileNote,
+    showOocCommentModal, setShowOocCommentModal, oocCommentText, setOocCommentText,
+  } = useChatMessageInteractionState();
+  const {
+    deleteMessageAndLinkedImage,
+    startMultiSelectDelete,
+    toggleMultiSelectedMessage,
+    exitMultiSelectDelete,
+    deleteSelectedMessages,
+    clearMessagesAndLinkedArtifacts,
+  } = useChatMessageCleanupActions({
+    messages,
+    currentChatMessages,
+    activeDirectScope,
+    onDeleteMessage,
+    onClearMessages,
+    setRedPacketStatuses,
+    setActiveMenuMsg,
+    setIsMultiSelectDeleteMode,
+    setSelectedMessageIds,
+    selectedMessageIds,
+    showToast,
+  });
   // New features: Notes attachment, Quoting, Bubble Menu, Note Reader, OOC Annotation
-  const [memoNotes, setMemoNotes] = useState<any[]>([]);
-  const [activeMenuMsg, setActiveMenuMsg] = useState<Message | null>(null);
-  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [isMultiSelectDeleteMode, setIsMultiSelectDeleteMode] = useState(false);
-  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
-  const [voicePlayed, setVoicePlayed] = useState<Record<string, boolean>>({});
-  const [voiceTranscribed, setVoiceTranscribed] = useState<Record<string, boolean>>({});
+  const { voicePlayed, setVoicePlayed, voiceTranscribed, setVoiceTranscribed } = useChatVoiceMessageState();
 
   useEffect(() => {
     activeTtsAudio?.pause();
@@ -1955,68 +965,10 @@ export default function AppChat({
     setSelectedMessageIds(new Set());
   }, [activeIdentityId, activeChatRelationId, activeChatCharId]);
 
-  const [selectedFileNote, setSelectedFileNote] = useState<{ title: string; content: string } | null>(null);
-  const [showOocCommentModal, setShowOocCommentModal] = useState<Message | null>(null);
-  const [oocCommentText, setOocCommentText] = useState("");
-
-  // Moments long-press popup menu and state
-  const [momentContextMenu, setMomentContextMenu] = useState<{
-    momentId: string;
-    text: string;
-    x: number;
-    y: number;
-    authorName: string;
-    authorAvatar: string;
-    isOwn: boolean;
-    timestamp: number;
-  } | null>(null);
-  const [commentDeleteTarget, setCommentDeleteTarget] = useState<{ momentId: string; commentId: string } | null>(null);
-  const [commentContextMenu, setCommentContextMenu] = useState<{
-    momentId: string;
-    commentId: string;
-    text: string;
-    x: number;
-    y: number;
-  } | null>(null);
+  // Moments long-press popup refs remain local because handlers own their gesture lifecycle.
   const commentLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commentLongPressOriginRef = useRef<{ x: number; y: number } | null>(null);
   const suppressCommentClickRef = useRef(false);
-
-  const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() =>
-    readJson<Record<string, string>>("phone_moment_translations", {}).value);
-  const [commentTranslations, setCommentTranslations] = useState<Record<string, string>>(() =>
-    readJson<Record<string, string>>("phone_moment_comment_translations", {}).value);
-
-  const [momentFavorites, setMomentFavorites] = useState<{
-    id: string;
-    momentId: string;
-    authorName: string;
-    authorAvatar: string;
-    content: string;
-    timestamp: number;
-  }[]>(() => readArray<{
-    id: string;
-    momentId: string;
-    authorName: string;
-    authorAvatar: string;
-    content: string;
-    timestamp: number;
-  }>("phone_moment_favorites", []).value);
-
-  const [favedTab, setFavedTab] = useState<"chats" | "moments">("chats");
-
-  // Sync favorites & translations to localStorage when updated
-  useEffect(() => {
-    writeJson("phone_moment_translations", momentTranslations);
-  }, [momentTranslations]);
-
-  useEffect(() => {
-    writeJson("phone_moment_comment_translations", commentTranslations);
-  }, [commentTranslations]);
-
-  useEffect(() => {
-    writeJson("phone_moment_favorites", momentFavorites);
-  }, [momentFavorites]);
 
   useEffect(() => {
     if (activeAttachModal === "file") {
@@ -2029,22 +981,6 @@ export default function AppChat({
     setShowAttachPanel(false);
   }, [activeChatCharId]);
 
-  // Sync last viewed moments time when entering moments tab or when new comments arrive while viewing moments
-  useEffect(() => {
-    if (activeTab === "moments") {
-      const now = Date.now();
-      setLastViewedMomentsTime(now);
-      writeString("phone_last_viewed_moments_time", now.toString());
-    }
-  }, [activeTab, moments]);
-
-  // Sync editing memory text
-  useEffect(() => {
-    if (activeCharacter) {
-      setEditingMemoryText(activeRelationship?.compressedMemory || "");
-    }
-  }, [activeCharacter, activeRelationship, isShowingCardModal]);
-
   // Relationship activity is persisted by the message boundary; never write it
   // back to the canonical character for a direct chat.
   useEffect(() => {
@@ -2053,178 +989,23 @@ export default function AppChat({
     onSaveRelationships(touchRelationshipSession(relationships, activeRelationship.id, timestamp));
   }, [activeChatRelationId]);
 
-  // Send character's custom opening speech / greeting if there are no messages in the chat history
-  useEffect(() => {
-    if (!activeChatCharId || !activeCharacter || (!activeCharacter.isGroupChat && !activeRelationship)) return;
-    const chatKey = activeRelationship?.id || activeChatCharId;
-    if (isOfflineStoryActiveFor(chatKey)) return;
-    
-    const currentChatMessages = messages.filter((message) => !message.isOffline && (activeCharacter.isGroupChat ? message.characterId === activeChatCharId : message.relationId === activeRelationship?.id));
-    if (currentChatMessages.length > 0) return;
-
-    if (activeCharacter.greeting && activeCharacter.greeting.trim()) {
-      if (sentGreetings.includes(chatKey)) return;
-      
-      setSentGreetings(prev => [...prev, chatKey]);
-      
-      // Simulate realistic typing for the greeting message
-      setIsTyping(true);
-      const timer = setTimeout(() => {
-        const charMsg: Message = {
-          id: `msg-greeting-${Date.now()}`,
-          characterId: activeChatCharId,
-          relationId: activeRelationship?.id,
-          conversationId: activeRelationship?.conversationId,
-          sender: "character",
-          content: activeCharacter.greeting!.trim(),
-          timestamp: Date.now(),
-        };
-        onSendMessage(charMsg);
-        setIsTyping(false);
-      }, 1500);
-
-      return () => {
-        clearTimeout(timer);
-        setIsTyping(false);
-      };
-    } else {
-      // No custom greeting set. According to user instruction:
-      // 如果没有开场白，则不主动发第一条信息，也不显示正在输入中。
-    }
-  }, [activeChatCharId, activeRelationship, activeCharacter, messages, onSendMessage, sentGreetings]);
+  useChatGreeting({
+    activeChatCharId,
+    activeCharacter,
+    activeRelationship,
+    messages,
+    sentGreetings,
+    isOfflineStoryActiveFor,
+    onSendMessage,
+    setSentGreetings,
+    setIsTyping,
+  });
 
   const updateRelationshipSession = (relationId: string, patch: Partial<CharacterRelationship>) => {
     onSaveRelationships(relationships.map((relation) => relation.id === relationId
       ? { ...relation, ...patch, updatedAt: Date.now() }
       : relation));
   };
-
-  // Proactive contact catch-up on load (supports background clear / offline delivery).
-  // Keep this in the same scheduler boundary as the recurring pass so a tab
-  // cannot accidentally create a second independent timer during re-renders.
-  const runProactiveCatchupPass = async () => {
-    activeRelationships.forEach((relation) => {
-      const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters));
-      if (!friend || friend.isGroupChat) return;
-      if (!friend.enableProactiveChat) return;
-      if (isOfflineStoryActiveFor(relation.id)) return;
-
-      // Only execute catch-up once per relationship per app session to avoid duplicates.
-      if (processedCatchupsRef.current[relation.id]) return;
-      processedCatchupsRef.current[relation.id] = true;
-
-      const sched = relation.scheduledProactiveTime;
-      const now = Date.now();
-
-      if (!sched) {
-        updateRelationshipSession(relation.id, { scheduledProactiveTime: scheduleNextProactiveMessage(friend) });
-      } else if (sched < now) {
-        const nextTime = scheduleNextProactiveMessage(friend);
-        updateRelationshipSession(relation.id, { scheduledProactiveTime: nextTime, lastActiveTime: now });
-
-        // Trigger the missed proactive message, backdated to the scheduled timestamp
-        const missedTimeStr = new Date(sched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const catchupPrompt = `This is a catchup/missed message that was scheduled to be sent to the user at exactly ${missedTimeStr} today while they were offline/away. You are proactively initiating contact to check in on them, share something interesting about your day/life, or show your warmth. Keep it perfectly natural, spontaneous, and matching your character profile.`;
-        
-        triggerProactiveFor(relation.id, catchupPrompt, sched);
-      }
-    });
-  };
-
-  // Background proactive check (every minute). The scheduler owns the timer
-  // and prevents overlapping passes; the trigger policy below is unchanged.
-  const runBackgroundProactivePass = async () => {
-      const now = new Date();
-      const hh = now.getHours().toString().padStart(2, "0");
-      const mm = now.getMinutes().toString().padStart(2, "0");
-      const currentHM = `${hh}:${mm}`;
-
-      activeRelationships.forEach((relation) => {
-        const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters));
-        if (!friend || friend.isGroupChat) return;
-        if (!friend.enableProactiveChat) return;
-        if (isOfflineStoryActiveFor(relation.id)) return;
-
-        // 0. Guaranteed scheduled proactive contact check
-        if (relation.scheduledProactiveTime && Date.now() >= relation.scheduledProactiveTime) {
-          const nextTime = scheduleNextProactiveMessage(friend);
-          updateRelationshipSession(relation.id, { scheduledProactiveTime: nextTime, lastActiveTime: Date.now() });
-          triggerProactiveFor(relation.id);
-          return; // Skip other checks
-        }
-
-        // 1. Check for agreed scheduled contact time FIRST
-        const charMsgs = messagesRef.current.filter((message) => message.relationId === relation.id);
-        const schedule = getScheduledContactTime(charMsgs, settings.name);
-
-        if (schedule) {
-          const lastMsg = charMsgs[charMsgs.length - 1];
-          const isSilent = lastMsg ? (Date.now() - lastMsg.timestamp >= 2 * 60 * 1000) : true; // 2 minutes of silence limit so we don't interrupt active conversations
-
-          // If the scheduled time has arrived AND no messages have been sent after the scheduled time, AND the user/character has been quiet for 2 minutes
-          if (Date.now() >= schedule.triggerTime && (!lastMsg || lastMsg.timestamp < schedule.triggerTime) && isSilent) {
-            const nextTime = scheduleNextProactiveMessage(friend);
-            updateRelationshipSession(relation.id, { scheduledProactiveTime: nextTime, lastActiveTime: Date.now() });
-
-            const customTaskText = `You and the user previously agreed that you would contact or chat with them after a certain amount of time (which has now passed). You are proactively initiating contact exactly as promised/agreed. Please follow up on what they went to do (e.g., if they went to eat lunch, ask how the food was or what they ate, or follow up on whatever other topic you were discussing), show concern, or start a fresh, warm conversation as promised, keeping it spontaneous, natural, and perfectly matching your character profile.`;
-
-            triggerProactiveFor(relation.id, customTaskText);
-            return; // Skip standard random proactive check for this friend
-          }
-        }
-
-        // 2. Standard random proactive check
-        const startTime = friend.proactiveStartTime || "09:00";
-        const endTime = friend.proactiveEndTime || "22:00";
-
-        // Helper to check if current time is within range
-        let isWithinRange = false;
-        if (startTime === endTime) {
-          isWithinRange = true; // e.g., 00:00-00:00 covers all day
-        } else if (startTime < endTime) {
-          isWithinRange = currentHM >= startTime && currentHM <= endTime;
-        } else {
-          isWithinRange = currentHM >= startTime || currentHM <= endTime; // overnight e.g. 22:00 to 06:00
-        }
-
-        if (!isWithinRange) return;
-
-        const lastActive = relation.lastActiveTime || (Date.now() - 4 * 60 * 60 * 1000);
-        const cooldownMs = 2 * 60 * 60 * 1000; // 2 hours minimum cooldown since last conversation
-        
-        // Random probability: 0.5% chance per minute (approx once every 3.3 hours on average)
-        const isRandomTrigger = Math.random() < 0.005;
-
-        if (Date.now() - lastActive >= cooldownMs && isRandomTrigger) {
-          // Reset timer/lastActiveTime first to avoid flooding
-          const nextTime = scheduleNextProactiveMessage(friend);
-          updateRelationshipSession(relation.id, { scheduledProactiveTime: nextTime, lastActiveTime: Date.now() });
-          triggerProactiveFor(relation.id);
-        }
-      });
-
-      // Run character moments check
-      await checkAndTriggerCharacterMoments();
-  };
-
-  useProactiveChatScheduler({
-    enabled: activeRelationships.length > 0,
-    runCatchupPass: runProactiveCatchupPass,
-    runBackgroundPass: runBackgroundProactivePass,
-  });
-
-  // Calling timer
-  useEffect(() => {
-    let timer: any;
-    if (activeAttachModal === "calling" && callingStatus === "connected") {
-      timer = setInterval(() => {
-        setCallingDuration((prev) => prev + 1);
-      }, 1000);
-    } else {
-      setCallingDuration(0);
-    }
-    return () => clearInterval(timer);
-  }, [activeAttachModal, callingStatus]);
 
   // Calls are direct-relationship sessions. Never let a session started by a
   // previous identity remain open after the active relationship changes.
@@ -2240,13 +1021,6 @@ export default function AppChat({
     setActiveAttachModal(null);
     setVoiceCallRelationId(null);
   }, [activeAttachModal, activeTtsAudio, activeVoiceCallScope?.relationId, voiceCallRelationId]);
-
-  useEffect(() => {
-    if (activeAttachModal !== "calling" || callingStatus !== "connected") return;
-    requestAnimationFrame(() => {
-      callTranscriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    });
-  }, [callTranscript.length, activeAttachModal, callingStatus]);
 
   const beginVoiceCall = (incoming: boolean) => {
     if (!activeCharacter || activeCharacter.isGroupChat || !activeVoiceCallScope) return;
@@ -2272,43 +1046,25 @@ export default function AppChat({
       setVoiceCallRelationId(null);
       return;
     }
-    const meaningfulTranscript = callTranscript.filter((item) => getCallTranscriptText(item.content || "").trim());
-    const status: VoiceCallStatus = requestedStatus === "completed" && meaningfulTranscript.length === 0
-      ? "cancelled"
-      : requestedStatus;
-    const mins = Math.floor(callingDuration / 60).toString().padStart(2, "0");
-    const secs = (callingDuration % 60).toString().padStart(2, "0");
-    const callRecord = createVoiceCallRecordMessage({
+    const completion = completeVoiceCall({
+      requestedStatus,
+      transcript: callTranscript,
+      durationSeconds: callingDuration,
       id: `call-record-${Date.now()}`,
       characterId: activeChatCharId,
       scope: activeVoiceCallScope,
       sender: isIncomingCall ? "character" : "user",
-      content: createCallRecordMarkup({
-        callType: "语音通话",
-        status,
-        direction: isIncomingCall ? "incoming" : "outgoing",
-        duration: `${mins}:${secs}`,
-        transcript: meaningfulTranscript,
-      }),
       timestamp: Date.now(),
+      incoming: isIncomingCall,
+      userEndedCall: options.userEndedCall,
+      recentMessages: messagesRef.current,
     });
-    onSendMessageRaw(callRecord);
-    if (status === "completed" && activeDirectScope) {
-      const claim = createDeterministicArtifactClaim({ message: callRecord, scope: activeDirectScope });
+    onSendMessageRaw(completion.callRecord);
+    if (completion.status === "completed" && activeDirectScope) {
+      const claim = createDeterministicArtifactClaim({ message: completion.callRecord, scope: activeDirectScope });
       if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture voice-call knowledge claim.");
     }
-    if (isIncomingCall && (status !== "completed" || options.userEndedCall)) {
-      const recentContext = messagesRef.current
-        .filter((message) => message.relationId === activeVoiceCallScope.relationId && !message.isOffline)
-        .slice(-12)
-        .map((message) => message.content)
-        .concat(callTranscript.map((item) => getCallTranscriptText(item.content || "")))
-        .join("\n");
-      updateRelationshipSession(
-        activeVoiceCallScope.relationId,
-        createProactiveCallRejectionPatch(Date.now(), isEmotionallyChargedCallContext(recentContext)),
-      );
-    }
+    if (completion.rejectionPatch) updateRelationshipSession(activeVoiceCallScope.relationId, completion.rejectionPatch);
     clearCallSpeechQueue();
     if (activeTtsAudio) activeTtsAudio.pause();
     resetCallTtsPlayback();
@@ -2320,41 +1076,33 @@ export default function AppChat({
 
   const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled", { userEndedCall: true });
 
-  // Resolve an outgoing invitation instead of making every character answer automatically.
-  useEffect(() => {
-    if (activeAttachModal !== "calling" || callingStatus !== "ringing" || isIncomingCall) return;
-    const timer = window.setTimeout(() => {
-      const resolution = resolveOutgoingCallResolution(Math.random());
-      if (resolution === "connected") {
-        setCallingStatus("connected");
-        setCallStartTime(Date.now());
-      } else {
-        finishVoiceCall(resolution);
-      }
-    }, 3500);
-    return () => window.clearTimeout(timer);
-  }, [activeAttachModal, callingStatus, isIncomingCall, voiceCallRelationId]);
-
-  // An unanswered incoming call must end as a visible cancelled record.
-  useEffect(() => {
-    if (activeAttachModal !== "calling" || callingStatus !== "ringing" || !isIncomingCall) return;
-    const timer = window.setTimeout(() => finishVoiceCall("cancelled"), 30 * 1000);
-    return () => window.clearTimeout(timer);
-  }, [activeAttachModal, callingStatus, isIncomingCall, voiceCallRelationId]);
+  useVoiceCallTimers({
+    activeAttachModal,
+    callingStatus,
+    isIncomingCall,
+    voiceCallRelationId,
+    transcriptLength: callTranscript.length,
+    callTranscriptEndRef,
+    onDurationTick: () => setCallingDuration((previous) => previous + 1),
+    onResetDuration: () => setCallingDuration(0),
+    onOutgoingConnected: () => {
+      setCallingStatus("connected");
+      setCallStartTime(Date.now());
+    },
+    onOutgoingFinished: (status) => finishVoiceCall(status),
+    onIncomingTimeout: () => finishVoiceCall("cancelled"),
+  });
 
   const sendVoiceCallMessage = () => {
-    const text = callingInputText.trim();
-    if (!activeChatCharId || !text || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) return;
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
+    const userMsg = createVoiceCallUserMessage({
+      text: callingInputText,
       characterId: activeChatCharId,
-      relationId: activeVoiceCallScope.relationId,
-      conversationId: activeVoiceCallScope.conversationId,
-      sender: "user",
-      content: text,
+      sessionRelationId: voiceCallRelationId,
+      scope: activeVoiceCallScope,
+      id: Date.now().toString(),
       timestamp: Date.now(),
-    };
+    });
+    if (!userMsg) return;
     onSendMessage(userMsg);
     generateResponseForUserMessage(userMsg);
     setCallingInputText("");
@@ -2367,7 +1115,6 @@ export default function AppChat({
     let repliesScheduled = false;
 
     try {
-      // Find all characters in this group chat
       const groupMembers = (activeCharacter.memberIds || []).map(id => characters.find(c => c.id === id)).filter(Boolean) as Character[];
       if (groupMembers.length === 0) {
         setIsTyping(false);
@@ -2377,181 +1124,36 @@ export default function AppChat({
       // Initialize the typing avatar override with the first group member to avoid displaying the group's own avatar
       setTypingCharacterOverride(groupMembers[0]);
 
-      // Collect chat messages in this group
-      const sourceMsgs = customHistoryOverride || (userMsg ? [...currentChatMessages, userMsg] : [...currentChatMessages]);
-      const uniqueMsgsMap = new Map<string, Message>();
-      sourceMsgs.forEach(m => {
-        if (m) uniqueMsgsMap.set(m.id, m);
-      });
-      const finalMsgs = Array.from(uniqueMsgsMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-
-      // Short-term real-time context limit: contextMemoryLimit (range 10~50, default 20), capped globally at 50
-      const limit = Math.min(50, activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20);
-      const slicedMsgs = finalMsgs.slice(-limit);
-
-      // Create a readable history for the AI, showing the user's name or character names as senders
-      const historyText = slicedMsgs.map((m) => {
-        const senderChar = m.sender === "character" ? groupMembers.find(c => c.id === m.senderId) : undefined;
-        const senderName = m.sender === "user"
-          ? settings.name
-          : senderChar ? (senderChar.remark || senderChar.name) : (m.senderId || "成员");
-        const content = serializeMessageContentForPrompt(m, {
-          mode: "history",
-          userName: settings.name,
-          characterName: senderName,
-        });
-        if (m.sender === "user") {
-          return `${settings.name} (机主): ${content}`;
-        } else {
-          return `${senderName}: ${content}`;
-        }
-      }).join("\n");
-
-      // Scan context for World Book triggers in group chat
-      const scanContextParts = [
-        userMsg ? serializeMessageContentForPrompt(userMsg, { mode: "history", userName: settings.name }) : "",
-        ...slicedMsgs.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name }))
-      ];
-      const scanText = scanContextParts.filter(Boolean).join("\n");
-
-      // Query group-level worldbook entries
-      const groupWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText, {
-        scenario: "group",
-        characterId: activeChatCharId || undefined,
-      });
-      const groupAtDepthInjections = new Map(groupWbBlocks.at_depth.map((entry) => [entry.sourceId, entry]));
-      const memberAtDepthInjections = new Map<string, typeof groupWbBlocks.at_depth>();
-      const includedWorldBookEntryIds = new Set(groupWbBlocks.allTriggered.map((entry) => entry.id));
-      let groupWbText = groupWbBlocks.formattedAll ? `\n\n【微信群组整体背景设定 / 共同世界书规则】：\n${groupWbBlocks.formattedAll}\n` : "";
-      if (resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness) {
-        groupWbText += `\n【当前现实时间】\n${formatLocalTimeContext()}\n`;
-      }
-      groupWbText += `\n${formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id, groupMemberIds: groupMembers.map((member) => member.id) })}\n`;
-
-      // Relation-private data is selected independently for each member and is
-      // never promoted into the group-wide context.
       const groupKnowledgeClaims = loadKnowledgeClaims().value;
       const groupConversationSummaries = loadConversationSummaries().value;
       const groupBehaviorCorrections = loadBehaviorCorrections().value;
-
-      const privateContextByMemberId = new Map<string, string>();
-      // Public definitions are safe for the speaker router. Relation-private
-      // blocks are retained separately and enter only that member's request.
-      const publicMemberDefinitions = groupMembers.map((member, idx) => {
-        const memberWbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], member.id, scanText, {
-          scenario: "group",
-          characterId: member.id,
-        });
-        memberWbBlocks.at_depth.forEach((entry) => groupAtDepthInjections.set(entry.sourceId, entry));
-        memberAtDepthInjections.set(member.id, memberWbBlocks.at_depth);
-        const memberOnlyWorldBook = memberWbBlocks.allTriggered
-          .filter((entry) => entry.position !== "at_depth" && !includedWorldBookEntryIds.has(entry.id));
-        memberOnlyWorldBook.forEach((entry) => includedWorldBookEntryIds.add(entry.id));
-        const privateContext = buildGroupMemberPrivateContext({
-          member,
-          characters,
-          relationships,
-          activeIdentityId,
-          memories: memories || [],
-          claims: groupKnowledgeClaims,
-          summaries: groupConversationSummaries,
-          corrections: groupBehaviorCorrections,
-          queryText: scanText,
-          limit: recallSettings?.recallCount || 5,
-        });
-        if (privateContext) privateContextByMemberId.set(member.id, privateContext);
-        const memberWbText = memberOnlyWorldBook.length
-          ? `\n- 该角色专属世界书背景/日程/时间线设定:\n${memberOnlyWorldBook.map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")}`
-          : "";
-        return `[群聊成员 ${idx + 1}: ${member.name}]
-- 角色人设/性格: ${member.personality}
-- 背景设定: ${member.backstory}
-- 与机主(${settings.name})的关系: 根据人设及世界观设定
-${memberWbText}`;
-      });
-      const publicMembersDefText = publicMemberDefinitions.join("\n\n");
-
-      // The first request is a public router only. Its generated text is never
-      // displayed; only the selected, verified member identities are used.
-      const routerSystemInstruction = buildGroupChatSystemInstruction({ userName: settings.name, userBio: settings.bio, groupName: activeCharacter.name, worldContext: groupWbText, memberDefinitions: publicMembersDefText });
-      const promptMessage = buildGroupChatTaskMessage(historyText, Boolean(userMsg));
-      const routerResult = await generateGroupChatTurn({
-        prompt: {
-          scenario: "group-chat",
-          message: `${promptMessage}\n\n【本轮仅选择发言人】不要撰写正式回复。请选择本轮最自然会发言的 0—3 位成员，每位只输出占位内容“SELECT”，格式仍为 [SENDER_NAME: 角色原名]。`,
-          history: [],
-          systemInstruction: routerSystemInstruction,
-          historyInjections: [...groupAtDepthInjections.values()],
-        },
+      const groupPipeline = await runGroupChatReplyPipeline({
+        activeCharacter,
+        characters,
+        relationships,
+        activeIdentityId,
+        memories: memories || [],
+        claims: groupKnowledgeClaims,
+        summaries: groupConversationSummaries,
+        corrections: groupBehaviorCorrections,
+        worldBookEntries: worldBookEntries || [],
+        currentMessages: currentChatMessages,
+        userMessage: userMsg,
+        customHistoryOverride,
+        userName: settings.name,
+        userBio: settings.bio,
         settings,
-        members: groupMembers,
-        groupId: activeChatCharId,
+        recallLimit: recallSettings?.recallCount || 5,
+        timeAwarenessEnabled: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness,
         disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
-        createId: (index) => `group-route-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`,
+        generateTurn: generateGroupChatTurn,
+        createRouteId: () => createId("group-route"),
+        createReplyId: () => createId("group-reply"),
         currentTime: () => Date.now(),
         signal,
       });
-      if (signal?.aborted) return;
-      const selectedMembers = Array.from(new Map(routerResult.members.map((member) => [member.id, member])).values()).slice(0, 3);
-      const isolatedMessages: Message[] = [];
-      const isolatedMembers: Character[] = [];
-      let sameTurnPublicHistory = historyText;
-      for (const member of selectedMembers) {
-        if (signal?.aborted) return;
-        const memberPrivateContext = privateContextByMemberId.get(member.id) || "";
-        const publicDefinition = publicMemberDefinitions[groupMembers.findIndex((candidate) => candidate.id === member.id)] || "";
-        const memberDefinitions = buildIsolatedGroupMemberDefinitions({
-          publicDefinition,
-          publicRoster: groupMembers.map((candidate) => candidate.name),
-          privateContext: memberPrivateContext,
-        });
-        const memberLanguageInstruction = formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
-          member,
-          [
-            publicDefinition,
-            ...getVisibleWorldBookEntries(worldBookEntries || [], member.id, {
-              scenario: "group",
-              characterId: member.id,
-            }).map((entry) => `${entry.title}\n${entry.content}`),
-          ],
-        ));
-        const memberSystemInstruction = `${buildGroupChatSystemInstruction({
-          userName: settings.name,
-          userBio: settings.bio,
-          groupName: activeCharacter.name,
-          worldContext: groupWbText,
-          memberDefinitions,
-        })}\n\n---\n\n${memberLanguageInstruction}`;
-        const memberPrompt = `${buildGroupChatTaskMessage(sameTurnPublicHistory, Boolean(userMsg))}\n\n【单成员生成】本次请求只允许 ${member.name} 发言。可以保持沉默；若发言，每一条都必须使用 [SENDER_NAME: ${member.name}]，不得代替其他成员输出。`;
-        const isolatedDepthInjections = new Map(groupWbBlocks.at_depth.map((entry) => [entry.sourceId, entry]));
-        (memberAtDepthInjections.get(member.id) || []).forEach((entry) => isolatedDepthInjections.set(entry.sourceId, entry));
-        const memberResult = await generateGroupChatTurn({
-          prompt: {
-            scenario: "group-chat",
-            message: memberPrompt,
-            history: [],
-            systemInstruction: memberSystemInstruction,
-            historyInjections: [...isolatedDepthInjections.values()],
-          },
-          settings,
-          members: [member],
-          groupId: activeChatCharId,
-          disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
-          createId: (index) => `group-reply-${Date.now()}-${member.id}-${index}-${Math.random().toString(36).slice(2, 7)}`,
-          currentTime: () => Date.now(),
-          signal,
-        });
-        if (signal?.aborted) return;
-        isolatedMessages.push(...memberResult.messages);
-        isolatedMembers.push(...memberResult.members);
-        if (memberResult.messages.length > 0) {
-          sameTurnPublicHistory = [
-            sameTurnPublicHistory,
-            ...memberResult.messages.map((message) => `${member.remark || member.name}: ${serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: member.remark || member.name })}`),
-          ].filter(Boolean).join("\n");
-        }
-      }
-      const groupResult = { messages: isolatedMessages, members: isolatedMembers };
+      const groupResult = groupPipeline.result;
+      if (!groupResult) return;
       const persistPublicGroupTurn = (deliveredReplies: readonly Message[]) => {
         const additions = createGroupTurnMemories({
           group: activeCharacter,
@@ -2577,70 +1179,14 @@ ${memberWbText}`;
 
         if (validReplies.length > 0) {
           repliesScheduled = true;
-          // Immediately set typing indicator override to the first actual speaker
-          setTypingCharacterOverride(validReplies[0].member);
-          setIsTyping(true);
-
-          let currentIdx = 0;
-          
-          const sendNext = () => {
-            if (signal?.aborted) {
-              setIsTyping(false);
-              setTypingCharacterOverride(null);
-              return;
-            }
-            if (currentIdx >= validReplies.length) {
-              setIsTyping(false);
-              setTypingCharacterOverride(null);
-              return;
-            }
-
-            const currentItem = validReplies[currentIdx];
-            
-            // Set active typing character
-            setTypingCharacterOverride(currentItem.member);
-            setIsTyping(true);
-
-            // Simulate typing for 1500ms
-            setTimeout(() => {
-              if (signal?.aborted) {
-                setIsTyping(false);
-                setTypingCharacterOverride(null);
-                return;
-              }
-              currentItem.message.timestamp = Date.now();
-              onSendMessage(currentItem.message);
-
-              currentIdx++;
-              if (currentIdx < validReplies.length) {
-                // Pre-set typing avatar for the next speaker, and take a 400ms pause
-                setTypingCharacterOverride(validReplies[currentIdx].member);
-                setIsTyping(false); 
-                setTimeout(() => {
-                  if (signal?.aborted) {
-                    setIsTyping(false);
-                    setTypingCharacterOverride(null);
-                    return;
-                  }
-                  sendNext();
-                }, 400);
-              } else {
-                setIsTyping(false);
-                setTypingCharacterOverride(null);
-                persistPublicGroupTurn(groupResult.messages);
-              }
-            }, 1500);
-          };
-
-          // Start sequence after brief buffer
-          setTimeout(() => {
-            if (signal?.aborted) {
-              setIsTyping(false);
-              setTypingCharacterOverride(null);
-              return;
-            }
-            sendNext();
-          }, 500);
+          scheduleGroupReplyDelivery({
+            items: validReplies,
+            signal,
+            onTypingMember: setTypingCharacterOverride,
+            onTyping: setIsTyping,
+            onSend: onSendMessage,
+            onComplete: persistPublicGroupTurn,
+          });
         }
       } else {
         persistPublicGroupTurn([]);
@@ -2670,30 +1216,16 @@ ${memberWbText}`;
     void generateResponseForGroupChat(null, [pending.narration]);
   }, [pendingGroupWelcome, activeCharacter?.id, activeCharacter?.isGroupChat, activeChatCharId]);
 
-  const shouldConvertBubbleToVoice = (
-    character: Character,
-    lastUserMsg: Message | null,
-    recentMsgs: Message[],
-    bubbleIndex: number,
-    bubbleText: string,
-    replyContext: ChatRuntimeContext,
-  ): boolean => {
-    if (!settings.enableMiniMaxTts) return false;
-    if (!replyContext.characterId || !replyContext.relationId || !replyContext.conversationId || replyContext.isGroup) return false;
-    return shouldAutomaticallyConvertTextToVoice({
+  const canConvertBubbleToVoice = (character: Character, lastUserMsg: Message | null, recentMsgs: Message[], bubbleIndex: number, bubbleText: string, replyContext: ChatRuntimeContext) =>
+    shouldConvertBubbleToVoice({
+      enabled: settings.enableMiniMaxTts,
       character,
       lastUserMessage: lastUserMsg,
       recentMessages: recentMsgs,
       bubbleIndex,
       bubbleText,
-      scope: {
-        characterId: replyContext.characterId,
-        relationId: replyContext.relationId,
-        conversationId: replyContext.conversationId,
-        userIdentityId: replyContext.userIdentityId,
-      },
+      replyContext,
     });
-  };
 
   const persistProactiveOfflineInvitation = (input: {
     relationship: CharacterRelationship;
@@ -2778,7 +1310,7 @@ ${memberWbText}`;
         const partnerName = capturedCharacter.remark || capturedCharacter.name;
         const claimNotification = capturedRelationship
           ? createCharacterTextMessage({
-              id: `claim-notification-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              id: createId("claim-notification"),
               context: createChatRuntimeContext({ characterId: capturedRelationship.characterId, relationId: capturedRelationship.id, conversationId: capturedRelationship.conversationId || getConversationId(capturedRelationship.id), userIdentityId: capturedRelationship.userIdentityId }),
               content: `${partnerName}已拆开并领受了你的红包`, timestamp: Date.now(), isNarration: true,
             })
@@ -2805,90 +1337,18 @@ ${memberWbText}`;
         ? [...currentChatMessages.slice(-Math.min(20, activeCharacter.contextMemoryLimit ?? 20)), ...callHistoryMessages]
         : [...currentChatMessages];
       const sourceMsgs = customHistoryOverride || (userMsg ? [...baseSourceMsgs, userMsg] : baseSourceMsgs);
-      const uniqueMsgsMap = new Map<string, Message>();
-      sourceMsgs.forEach(m => {
-        if (m) uniqueMsgsMap.set(m.id, m);
-      });
-      const finalMsgs = Array.from(uniqueMsgsMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-
-      // Short-term real-time context limit: contextMemoryLimit (range 10~50, default 20), capped globally at 50
-      const limit = Math.min(50, activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20);
-      
-      // If userMsg is provided and is the last message in finalMsgs, exclude it from history because it will be passed as the separate 'message' parameter.
-      const msgsForHistory = (userMsg && finalMsgs.length > 0 && finalMsgs[finalMsgs.length - 1].id === userMsg.id)
-        ? finalMsgs.slice(0, -1)
-        : finalMsgs;
-      const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
-      // With time awareness enabled, the first message on a new calendar day
-      // starts a fresh live session. Yesterday's tail remains stored, but it is
-      // no longer sent as the topic that the model should answer right now.
-      const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
+      const historyContext = buildDirectChatHistoryContext({
+        messages: sourceMsgs,
+        userMessageId: userMsg?.id,
+        userMessageAt: userMsg?.timestamp,
         enableTimeAwareness: turnSettings.enableTimeAwareness,
-        currentMessageAt: userMsg?.timestamp,
-        latestHistoryMessageAt: latestHistoryMessage?.timestamp,
+        contextLimit: activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20,
+        characterName: activeCharacter.name,
+        userName: settings.name,
       });
-      const requestTime = new Date();
-      const historyPartition = partitionDirectChatHistoryByCurrentDay({
-        messages: msgsForHistory,
-        currentMessageAt: userMsg?.timestamp,
-        enableTimeAwareness: turnSettings.enableTimeAwareness,
-      });
-      const slicedMsgs = historyPartition.liveMessages.slice(-limit);
-      const historicalReferenceLines = historyPartition.historicalMessages.map((message) => {
-        const speaker = message.sender === "user" ? "用户" : activeCharacter.name;
-        const content = serializeMessageContentForPrompt(message, {
-          mode: "history",
-          userName: settings.name,
-          characterName: activeCharacter.name,
-          includeCallTranscript: false,
-        }).replace(/\s+/gu, " ").trim().slice(0, 240);
-        return `- ${new Date(message.timestamp).toLocaleString("zh-CN", { hour12: false })}｜${speaker}：${content}`;
-      });
-      const crossDayHistoricalReference = buildCrossDayHistoricalReferencePrompt(historicalReferenceLines);
-
-      const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
-          userName: settings.name,
-          characterName: activeCharacter.name,
-        }).map((turn) => ({
-          role: turn.role,
-          text: turnSettings.enableTimeAwareness
-            ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
-            : turn.text,
-        })));
-
-      let timeLogString = "";
-      if (turnSettings.enableTimeAwareness) {
-        const timeLogLines: string[] = [];
-        let lastDayStr = "";
-        
-        slicedMsgs.forEach((m) => {
-          const date = new Date(m.timestamp);
-          const y = date.getFullYear();
-          const mo = (date.getMonth() + 1).toString().padStart(2, '0');
-          const d = date.getDate().toString().padStart(2, '0');
-          const dayStr = `${y}-${mo}-${d}`;
-          
-          if (dayStr !== lastDayStr) {
-            const wechatLabel = formatWeChatTimestamp(m.timestamp);
-            timeLogLines.push(`\n=== 居中分割时间标签: 【${wechatLabel}】 ===`);
-            lastDayStr = dayStr;
-          }
-          
-          const fullTimeStr = `${y}-${mo}-${d} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-          const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
-          let contentSnippet = serializeMessageContentForPrompt(m, {
-            mode: "history",
-            userName: settings.name,
-            characterName: activeCharacter.name,
-            includeCallTranscript: false,
-          });
-          if (contentSnippet.length > 80) contentSnippet = contentSnippet.slice(0, 80) + "...";
-          
-          timeLogLines.push(`- ${senderName}: "${contentSnippet}" (发送于: ${fullTimeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`);
-        });
-        
-        timeLogString = timeLogLines.join("\n");
-      }
+      const { finalMessages: finalMsgs, messagesForHistory: msgsForHistory, recentMessages: slicedMsgs, history, crossDayHistoricalReference, timeLogString, isCrossDayNewSession } = historyContext;
+      const historyPartition = { hasCrossDayHistory: historyContext.hasCrossDayHistory };
+      const requestTime = historyContext.requestTime;
 
       // Construct system instructions based on multi-block SillyTavern positioning rules
       let mainPromptText = isOfflineModeActive 
@@ -3255,7 +1715,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           let newMsgs: Message[] = [];
           if (paragraphs.length > 0) {
             newMsgs = paragraphs.map((para, pIdx) => ({
-              id: `offline-reply-${Date.now()}-${pIdx}-${Math.random().toString(36).substr(2, 5)}`,
+              id: createId("offline-reply"),
               characterId: activeChatCharId,
               sender: "character",
               content: para,
@@ -3325,44 +1785,23 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 .filter((message) => message.sender === "character" && message.characterId === activeChatCharId)
                 .map((message) => message.content),
             }),
-            createId: (idx) => `${Date.now()}-online-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+            createId: () => createId("online"),
             currentTime: () => Date.now(),
             transformBubble: (bubbleText, idx) => {
-              const isVoice = activeAttachModal !== "calling" && shouldConvertBubbleToVoice(turnCharacter, userMsg, messages, idx, bubbleText, replyContext);
+              const isVoice = activeAttachModal !== "calling" && canConvertBubbleToVoice(turnCharacter, userMsg, messages, idx, bubbleText, replyContext);
               if (!isVoice) return bubbleText;
               const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
               return `[语音]|${secs}|${bubbleText}`;
             },
           });
-          const createdMessages: Message[] = [];
-          
-          for (let idx = 0; idx < replyCandidates.messages.length; idx++) {
-            if (isCancelledCallTurn() || signal?.aborted) break;
-            const charMsg = replyCandidates.messages[idx];
-            const bubbleText = replyCandidates.bubbleTexts[idx];
-            
-            setIsTyping(true);
-            const chars = bubbleText.length;
-            const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
-            await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
-            if (signal?.aborted) return;
-            if (isCancelledCallTurn() || signal?.aborted) break;
-            
-            charMsg.timestamp = Date.now();
-            const callSpeechCompletion = onSendMessage(charMsg);
-            createdMessages.push(charMsg);
-            setIsTyping(false);
-
-            // In a voice call, keep subtitles and speech in lockstep: show one
-            // bubble, play it completely, then allow the next bubble to appear.
-            if (callSpeechCompletion) await callSpeechCompletion;
-            if (isCancelledCallTurn() || signal?.aborted) break;
-            
-            if (idx < replyCandidates.messages.length - 1) {
-              await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
-              if (signal?.aborted) break;
-            }
-          }
+          const createdMessages = await deliverDirectReplyCandidates({
+            candidates: replyCandidates,
+            signal,
+            shouldCancel: isCancelledCallTurn,
+            onTyping: setIsTyping,
+            onSendMessage,
+          });
+          if (signal?.aborted) return;
 
           if (createdMessages.length > 0) {
             recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
@@ -3629,39 +2068,32 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
    * Normal reply, proactive, memory, Moment and Inner Voice paths never call it. */
   const generateAndSendCharacterImage = async (trigger: "manual" | "explicit-user-text", userText: string): Promise<boolean> => {
     if (!activeCharacter) return false;
-    const target = activeCharacter.isGroupChat
-      ? (() => {
-          const lastSender = [...currentChatMessages].reverse().find((message) => message.sender === "character" && message.senderId);
-          return lastSender?.senderId ? characters.find((character) => character.id === resolveCanonicalCharacterId(lastSender.senderId!, characters)) : undefined;
-        })()
-      : activeCharacter;
-    if (!target) {
-      showToast("群聊图片需要先有一位角色发言，以确定生成图片的角色。");
-      return false;
-    }
-    if (!activeCharacter.isGroupChat && !activeRelationship) return false;
     setIsGeneratingImage(true);
     setImageGenerationError(null);
     const capturedContext = activeRuntimeContext;
     try {
-      const scope = activeCharacter.isGroupChat
-        ? { kind: "group" as const, groupId: activeCharacter.id, conversationId: `group:${activeCharacter.id}` }
-        : { kind: "direct" as const, relationId: activeRelationship!.id, conversationId: activeRelationship!.conversationId || getConversationId(activeRelationship!.id) };
-      const recentMessages = activeCharacter.isGroupChat
-        ? currentChatMessages
-        : currentChatMessages.filter((message) => message.relationId === activeRelationship!.id);
-      const generated = await generateCharacterImage({
-        settings, character: target, relationship: activeCharacter.isGroupChat ? undefined : activeRelationship,
-        recentMessages, scope, trigger, userText, createId: () => `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      const result = await generateCharacterImageForDelivery({
+        activeCharacter,
+        activeRelationship,
+        currentMessages: currentChatMessages,
+        characters,
+        settings,
+        trigger,
+        userText,
+        createId: () => createId("image"),
+        isRuntimeCurrent: () => isCapturedRuntimeCurrent(capturedContext),
       });
-      if (!isCapturedRuntimeCurrent(capturedContext)) {
-        await imageAssetDb.deleteImage(generated.record.imageAssetId).catch(() => undefined);
+      if (result.status === "missing-context") {
+        showToast("群聊图片需要先有一位角色发言，以确定生成图片的角色。");
+        return false;
+      }
+      if (result.status === "stale") {
         showToast("关系已切换，已取消发送刚生成的图片。");
         return false;
       }
-      onSendMessage(generated.message);
+      onSendMessage(result.message);
       const records = loadImageGenerationRecords([]).value;
-      saveImageGenerationRecords([...records, generated.record]);
+      saveImageGenerationRecords([...records, result.record]);
       setShowImageGenerator(false);
       showToast("角色图片已生成并发送。");
       return true;
@@ -3701,436 +2133,69 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     },
   });
 
-  const deleteMessageAndLinkedImage = (messageId: string) => {
-    const targetMessage = currentChatMessages.find((message) => message.id === messageId);
-    if (!targetMessage) return;
-    if (activeDirectScope && !isMessageInDirectScope(targetMessage, activeDirectScope)) return;
-    const records = loadImageGenerationRecords([]).value;
-    const removed = records.filter((record) => record.messageId === messageId
-      && record.relationId === targetMessage.relationId
-      && record.conversationId === targetMessage.conversationId);
-    if (removed.length) {
-      saveImageGenerationRecords(removeImageGenerationRecordByMessage(records, messageId, {
-        relationId: targetMessage.relationId,
-        conversationId: targetMessage.conversationId || (activeDirectScope?.conversationId ?? `group:${targetMessage.characterId}`),
-        groupId: targetMessage.relationId ? undefined : targetMessage.characterId,
-      }));
-      removed.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete generated image asset:", error)));
-    }
-    onDeleteMessage?.(messageId, targetMessage);
-  };
+  const { clearFriendScopedMemory } = useChatRelationshipCleanupActions({
+    moments,
+    memories,
+    relationships,
+    offlineStories,
+    clearMessagesAndLinkedArtifacts,
+    onSaveRelationships,
+    onDeleteMomentsByRelation,
+    onSaveMemories,
+    onDeleteRelationshipMusic,
+    onDeleteOfflineStory,
+    onClearMomentState: (relationMomentIds, relationCommentIds) => {
+      setMomentTranslations((previous) => Object.fromEntries(
+        Object.entries(previous).filter(([momentId]) => !relationMomentIds.has(momentId)),
+      ));
+      setMomentFavorites((previous) => previous.filter((favorite) => !relationMomentIds.has(favorite.momentId)));
+      setCommentTranslations((previous) => Object.fromEntries(
+        Object.entries(previous).filter(([key]) => {
+          const separator = key.indexOf(":");
+          const momentId = separator >= 0 ? key.slice(0, separator) : key;
+          return !relationMomentIds.has(momentId) && !relationCommentIds.has(key);
+        }),
+      ));
+    },
+    proactiveMessageInFlightRef,
+    setInitiatedChatIds,
+    setLastReadTimestamps,
+    setRedPacketStatuses,
+  });
 
-  const startMultiSelectDelete = (initialMessageId: string) => {
-    setActiveMenuMsg(null);
-    setSelectedMessageIds(new Set([initialMessageId]));
-    setIsMultiSelectDeleteMode(true);
-  };
-
-  const toggleMultiSelectedMessage = (messageId: string) => {
-    setSelectedMessageIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(messageId)) next.delete(messageId);
-      else next.add(messageId);
-      return next;
-    });
-  };
-
-  const exitMultiSelectDelete = () => {
-    setIsMultiSelectDeleteMode(false);
-    setSelectedMessageIds(new Set());
-  };
-
-  const deleteSelectedMessages = () => {
-    const selectedMessages = currentChatMessages.filter((message) => selectedMessageIds.has(message.id));
-    if (!selectedMessages.length) return;
-    if (!window.confirm(`确定删除选中的 ${selectedMessages.length} 条消息吗？删除后无法恢复。`)) return;
-    selectedMessages.forEach((message) => deleteMessageAndLinkedImage(message.id));
-    exitMultiSelectDelete();
-    showToast(`已删除 ${selectedMessages.length} 条消息`);
-  };
-
-  const clearMessagesAndLinkedArtifacts = (characterId: string, relationId?: string) => {
-    const removedMessages = messages.filter((message) => relationId
-      ? message.relationId === relationId
-      : message.characterId === characterId);
-    const removedMessageIds = new Set(removedMessages.map((message) => message.id));
-    const records = loadImageGenerationRecords([]).value;
-    const removedRecords = records.filter((record) => removedMessageIds.has(record.messageId)
-      && (relationId ? record.relationId === relationId : record.characterId === characterId));
-    if (removedRecords.length) {
-      const removedRecordIds = new Set(removedRecords.map((record) => record.id));
-      saveImageGenerationRecords(records.filter((record) => !removedRecordIds.has(record.id)));
-      removedRecords.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete cleared image asset:", error)));
-    }
-    if (relationId) {
-      setRedPacketStatuses((previous) => {
-        const next = removePaymentStatusesForMessages(removePaymentStatusesByRelation(previous, relationId), removedMessages);
-        writeJson(RED_PACKET_STATUSES_KEY, next);
-        return next;
-      });
-    }
-    onClearMessages?.(characterId, undefined, relationId);
-  };
-
-  /**
-   * Clears all relationship-owned memory and generated artifacts while keeping
-   * the Character and its friendship relationship intact.
-   */
-  const clearFriendScopedMemory = (friendId: string, relationId: string) => {
-    const relationMoments = moments.filter((moment) => moment.relationId === relationId);
-    const relationMomentIds = new Set(relationMoments.map((moment) => moment.id));
-    const relationCommentIds = new Set(
-      moments.flatMap((moment) => getMomentComments(moment)
-        .filter((comment) => comment.relationId === relationId)
-        .map((comment) => `${moment.id}:${comment.id}`)),
-    );
-
-    clearMessagesAndLinkedArtifacts(friendId, relationId);
-    removeCharacterLifeEventsForRelations([relationId]);
-    removeCharacterTruthForRelations([relationId]);
-    removeProactiveTopicsForRelations([relationId]);
-    onSaveRelationships(relationships.map((relation) => relation.id === relationId
-      ? {
-        ...relation,
-        compressedMemory: undefined,
-        lastImmediateSummaryMsgId: undefined,
-        lastActiveTime: undefined,
-        updatedAt: Date.now(),
-      }
-      : relation));
-    onDeleteMomentsByRelation?.(relationId);
-    onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
-
-    setMomentTranslations((previous) => Object.fromEntries(
-      Object.entries(previous).filter(([momentId]) => !relationMomentIds.has(momentId)),
-    ));
-    setMomentFavorites((previous) => previous.filter((favorite) => !relationMomentIds.has(favorite.momentId)));
-    setCommentTranslations((previous) => Object.fromEntries(
-      Object.entries(previous).filter(([key]) => {
-        const separator = key.indexOf(":");
-        const momentId = separator >= 0 ? key.slice(0, separator) : key;
-        return !relationMomentIds.has(momentId) && !relationCommentIds.has(key);
-      }),
-    ));
-
-    const innerVoices = loadInnerVoiceRecords([]).value;
-    const remainingInnerVoices = removeInnerVoicesByRelation(innerVoices, relationId);
-    if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
-
-    const imageRecords = loadImageGenerationRecords([]).value;
-    const removedImageRecords = imageRecords.filter((record) => record.relationId === relationId);
-    if (removedImageRecords.length) {
-      saveImageGenerationRecords(removeImageGenerationRecordsByRelation(imageRecords, relationId));
-      removedImageRecords.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete relation image asset:", error)));
-    }
-
-    const diaryCleanup = cleanupDiaryForRelations({
-      relationIds: [relationId],
-      entries: loadDiaryEntries().value,
-      shares: loadDiaryShares().value,
-      tasks: loadDiaryGenerationTasks().value,
-      translations: loadDiaryTranslations().value,
-    });
-    saveDiaryEntries(diaryCleanup.entries);
-    saveDiaryShares(diaryCleanup.shares);
-    saveDiaryGenerationTasks(diaryCleanup.tasks);
-    saveDiaryTranslations(diaryCleanup.translations);
-
-    setRedPacketStatuses((previous) => {
-      const next = removePaymentStatusesByRelation(previous, relationId);
-      writeJson(RED_PACKET_STATUSES_KEY, next);
-      return next;
-    });
-    onDeleteRelationshipMusic?.(relationId);
-
-    const forumShares = loadForumShares().value;
-    const forumThreads = loadForumThreads().value;
-    const forumReplies = loadForumReplies().value;
-    const forumMutation: { shares?: typeof forumShares; threads?: typeof forumThreads; replies?: typeof forumReplies; generationTasks?: ReturnType<typeof loadForumGenerationTasks>["value"]; actorStates?: ReturnType<typeof loadForumActorStates>["value"]; activityTasks?: ReturnType<typeof loadForumActivityTasks>["value"] } = {};
-    const remainingForumShares = removeForumSharesByRelation(forumShares, relationId);
-    if (remainingForumShares.length !== forumShares.length) forumMutation.shares = remainingForumShares;
-    const unlinkedForumThreads = unlinkForumPrivateAuthorByRelation(forumThreads, relationId);
-    if (unlinkedForumThreads.some((thread, index) => thread !== forumThreads[index])) forumMutation.threads = unlinkedForumThreads;
-    const unlinkedForumReplies = forumReplies.map((reply) =>
-      reply.privateActor?.kind === "relationship" && reply.privateActor.relationId === relationId
-        ? (() => { const { privateActor: _privateActor, ...publicReply } = reply; return publicReply; })()
-        : reply);
-    if (unlinkedForumReplies.some((reply, index) => reply !== forumReplies[index])) forumMutation.replies = unlinkedForumReplies;
-    forumMutation.generationTasks = removeForumGenerationTasksByRelation(loadForumGenerationTasks().value, relationId);
-    forumMutation.actorStates = loadForumActorStates().value.filter((state) =>
-      state.actor.kind !== "relationship" || state.actor.relationId !== relationId);
-    forumMutation.activityTasks = loadForumActivityTasks().value.map((task) => ({
-      ...task,
-      pendingEvents: task.pendingEvents.filter((event) =>
-        event.privateActor?.kind !== "relationship" || event.privateActor.relationId !== relationId),
-    }));
-    commitForumMutation(forumMutation);
-
-    offlineStories
-      .filter((story) => story.relationId === relationId)
-      .forEach((story) => onDeleteOfflineStory?.(story.id));
-    removeStoredValue(getOfflineModeStorageKey(relationId));
-    removeStoredValue(getOfflineStoryStorageKey(relationId));
-
-    const memoLedger = readJson<Record<string, unknown>>(USER_MEMO_MENTION_LEDGER_KEY, {}).value;
-    if (Object.prototype.hasOwnProperty.call(memoLedger, relationId)) {
-      const { [relationId]: _removed, ...remainingLedger } = memoLedger;
-      writeJson(USER_MEMO_MENTION_LEDGER_KEY, remainingLedger);
-    }
-    proactiveMessageInFlightRef.current.delete(relationId);
-    setInitiatedChatIds((previous) => previous.filter((id) => id !== relationId));
-    setLastReadTimestamps((previous) => {
-      const next = { ...previous };
-      delete next[relationId];
-      return next;
-    });
-  };
+  const { handleDeleteFriend } = useChatDeleteFriendAction({
+    activeCharacter,
+    activeIdentityId,
+    activeRelationship,
+    activeChatRelationId,
+    relationships,
+    characters,
+    memories,
+    offlineStories,
+    relationForCharacter,
+    belongsToActiveIdentity,
+    clearMessagesAndLinkedArtifacts,
+    onSaveRelationships,
+    onDeleteMomentsByRelation,
+    onSaveMemories,
+    onDeleteRelationshipMusic,
+    onDeleteOfflineStory,
+    onSaveCharacter,
+    setRedPacketStatuses,
+    proactiveMessageInFlightRef,
+    setInitiatedChatIds,
+    setLastReadTimestamps,
+    setIsShowingCardModal,
+    setActiveChatCharId,
+    setActiveChatRelationId,
+    showToast,
+  });
 
 
   const LONG_PRESS_DELAY = 500;
   const LONG_PRESS_MOVE_TOLERANCE = 10;
   const longPressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
-
-  const handleMomentTextPointerDown = (
-    e: React.PointerEvent,
-    momentId: string,
-    text: string,
-    authorName: string,
-    authorAvatar: string,
-    isOwn: boolean,
-    timestamp: number
-  ) => {
-    const clientX = e.clientX;
-    const clientY = e.clientY;
-
-    if (e.pointerType === "mouse" && e.button !== 0) return;
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    longPressOriginRef.current = { x: clientX, y: clientY };
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      // Pointer capture is unavailable in a few older mobile browsers.
-    }
-
-    longPressTimerRef.current = setTimeout(() => {
-      longPressTimerRef.current = null;
-      longPressOriginRef.current = null;
-      setMomentContextMenu({
-        momentId,
-        text,
-        x: clientX,
-        y: clientY,
-        authorName,
-        authorAvatar,
-        isOwn,
-        timestamp,
-      });
-    }, LONG_PRESS_DELAY);
-  };
-
-  const handleMomentTextPointerUpOrLeave = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    longPressOriginRef.current = null;
-  };
-
-  const handleMomentTextPointerMove = (event: React.PointerEvent) => {
-    const origin = longPressOriginRef.current;
-    if (longPressTimerRef.current && origin
-      && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-      longPressOriginRef.current = null;
-    }
-  };
-
-  const handleMomentCommentPointerDown = (
-    event: React.PointerEvent,
-    momentId: string,
-    comment: MomentComment,
-  ) => {
-    const clientX = event.clientX;
-    const clientY = event.clientY;
-    suppressCommentClickRef.current = false;
-    if (commentLongPressTimerRef.current) clearTimeout(commentLongPressTimerRef.current);
-    commentLongPressOriginRef.current = { x: clientX, y: clientY };
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture is unavailable in a few older mobile browsers.
-    }
-    commentLongPressTimerRef.current = setTimeout(() => {
-      suppressCommentClickRef.current = true;
-      commentLongPressTimerRef.current = null;
-      commentLongPressOriginRef.current = null;
-      setCommentContextMenu({
-        momentId,
-        commentId: comment.id,
-        text: comment.content,
-        x: clientX,
-        y: clientY,
-      });
-    }, 550);
-  };
-
-  const clearMomentCommentLongPress = () => {
-    if (commentLongPressTimerRef.current) {
-      clearTimeout(commentLongPressTimerRef.current);
-      commentLongPressTimerRef.current = null;
-    }
-    commentLongPressOriginRef.current = null;
-  };
-
-  const handleMomentCommentPointerMove = (event: React.PointerEvent) => {
-    const origin = commentLongPressOriginRef.current;
-    if (commentLongPressTimerRef.current && origin
-      && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
-      clearMomentCommentLongPress();
-    }
-  };
-
-  const handleMomentCommentClick = (momentId: string, comment: MomentComment) => {
-    if (suppressCommentClickRef.current) {
-      suppressCommentClickRef.current = false;
-      return;
-    }
-    setReplyingToCommentMap(prev => ({ ...prev, [momentId]: comment }));
-    setShowCommentInputMap(prev => ({ ...prev, [momentId]: true }));
-  };
-
-  const confirmDeleteMomentComment = () => {
-    if (!commentDeleteTarget || !onDeleteCommentFromMoment) return;
-    onDeleteCommentFromMoment(commentDeleteTarget.momentId, commentDeleteTarget.commentId);
-    setCommentDeleteTarget(null);
-    showToast("评论已删除");
-  };
-
-  const handleMomentTextContextMenu = (
-    e: React.MouseEvent,
-    momentId: string,
-    text: string,
-    authorName: string,
-    authorAvatar: string,
-    isOwn: boolean,
-    timestamp: number
-  ) => {
-    e.preventDefault();
-    setMomentContextMenu({
-      momentId,
-      text,
-      x: e.clientX,
-      y: e.clientY,
-      authorName,
-      authorAvatar,
-      isOwn,
-      timestamp,
-    });
-  };
-
-  const handleCopyMomentText = (text: string) => {
-    navigator.clipboard.writeText(text);
-    showToast("已复制到剪贴板");
-    setMomentContextMenu(null);
-  };
-
-  const handleFavoriteMoment = (momentId: string, text: string, authorName: string, authorAvatar: string, timestamp: number) => {
-    const isAlreadyFaved = momentFavorites.some(f => f.momentId === momentId && f.content === text);
-    if (isAlreadyFaved) {
-      setMomentFavorites(prev => prev.filter(f => !(f.momentId === momentId && f.content === text)));
-      showToast("已取消收藏");
-    } else {
-      const newFav = {
-        id: `fav-moment-${Date.now()}`,
-        momentId,
-        authorName,
-        authorAvatar,
-        content: text,
-        timestamp: timestamp || Date.now()
-      };
-      setMomentFavorites(prev => [newFav, ...prev]);
-      showToast("已收藏");
-    }
-    setMomentContextMenu(null);
-  };
-
-  const handleTranslateMoment = async (momentId: string, text: string) => {
-    setMomentContextMenu(null);
-    if (momentTranslations[momentId]) {
-      const copy = { ...momentTranslations };
-      delete copy[momentId];
-      setMomentTranslations(copy);
-      return;
-    }
-
-    showToast("正在翻译中...");
-    try {
-      const res = await apiTranslate({
-        text,
-        apiKey: settings.apiKey || "",
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-      });
-      if (res && res.text) {
-        setMomentTranslations(prev => ({
-          ...prev,
-          [momentId]: res.text
-        }));
-        showToast("翻译完成");
-      } else {
-        showToast("翻译无结果");
-      }
-    } catch (err) {
-      console.error("Translate moment failed:", err);
-      showToast(err instanceof Error ? err.message : "翻译失败，请检查 API 配置");
-    }
-  };
-
-  const handleTranslateMomentComment = async (momentId: string, commentId: string, text: string) => {
-    setCommentContextMenu(null);
-    const translationKey = getMomentCommentTranslationKey(momentId, commentId);
-    if (commentTranslations[translationKey]) {
-      setCommentTranslations((previous) => {
-        const next = { ...previous };
-        delete next[translationKey];
-        return next;
-      });
-      return;
-    }
-
-    showToast("正在翻译中...");
-    try {
-      const res = await apiTranslate({
-        text,
-        apiKey: settings.apiKey || "",
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-      });
-      if (res?.text) {
-        setCommentTranslations((previous) => ({ ...previous, [translationKey]: res.text }));
-        showToast("翻译完成");
-      } else {
-        showToast("翻译无结果");
-      }
-    } catch (error) {
-      console.error("Translate moment comment failed:", error);
-      showToast(error instanceof Error ? error.message : "翻译失败，请检查 API 配置");
-    }
-  };
-
-  const handleDeleteMomentClick = (momentId: string) => {
-    setMomentContextMenu(null);
-    if (confirm("确定要删除这条朋友圈吗？")) {
-      if (onDeleteMoment) {
-        onDeleteMoment(momentId);
-        showToast("已删除朋友圈");
-      } else {
-        showToast("删除失败：未提供删除接口");
-      }
-    }
-  };
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -4177,7 +2242,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       ? message.relationId === activeRelationship.id
       : message.characterId === activeChatCharId && activeCharacter?.isGroupChat));
     const msgCount = currentChatMsgs.length;
-    
+
     const isFreshOpen = lastActiveCharIdRef.current !== activeChatCharId;
     const lastMsg = currentChatMsgs[currentChatMsgs.length - 1];
     const isUserSent = lastMsg && lastMsg.sender === "user";
@@ -4266,720 +2331,90 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     });
   }, [pendingDiaryShareMessageId, activeRelationship?.id, activeRelationship?.conversationId, activeRelationship?.userIdentityId, activeCharacter?.id, activeCharacter?.isGroupChat, activeIdentityId, messages.length, onDiaryShareHandled]);
 
-  const handleRegenerateResponse = async (targetMsg: Message, oocComment: string) => {
-    if (!activeChatCharId || !activeCharacter) return;
-
-    // 1. Delete target message
-    if (onDeleteMessage) deleteMessageAndLinkedImage(targetMsg.id);
-
-    // 2. Find the chat history excluding the targetMsg
-      const previousMessages = currentChatMessages.filter((m) => m.id !== targetMsg.id);
-    // Find the last user message
-      const lastUserMsg = [...previousMessages].reverse().find((m) => m.sender === "user");
-      if (!lastUserMsg) return;
-      const regenerationCognitiveContext = activeRelationship && !activeCharacter.isGroupChat
-        ? (() => {
-          try {
-            const relationEvents = listCharacterEventsByRelation(activeRelationship.id);
-            const relationshipProjection = buildRelationshipCognitiveProjection({
-              relation: activeRelationship,
-              events: relationEvents,
-              now: Date.now(),
-            });
-            return buildCharacterCognitiveContext({
-              character: activeCharacter,
-              relation: activeRelationship,
-              memories: [],
-              events: relationEvents.map((event) => ({
-                event,
-                promptVisibility: event.status === "active"
-                  && (event.kind === "relationship_created" || event.kind === "offline_story_completed")
-                  ? "safe" as const
-                  : "private" as const,
-              })),
-              timeContext: { now: Date.now() },
-              knowledgeBoundary: createDirectChatKnowledgeBoundary(),
-              conversationId: activeRelationship.conversationId,
-              relationshipTimeline: relationshipProjection.timeline,
-              routine: resolveChatRoutine(
-                buildCharacterRoutine(activeCharacter.routine),
-                resolveChatTurnSettings(activeCharacter).enableTimeAwareness,
-              ),
-            });
-          } catch {
-            return undefined;
-          }
-        })()
-        : undefined;
-
-    setIsTyping(true);
-    let pendingOfflineHandoffForReply: OfflineStory | undefined;
-
-    try {
-      // Short-term real-time context limit: contextMemoryLimit (range 10~50, default 20), capped globally at 50
-      const limit = Math.min(50, activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20);
-      
-      // Exclude lastUserMsg from the history parameter since it is sent as the main message parameter.
-      const msgsForHistory = previousMessages.filter(m => m.id !== lastUserMsg.id);
-      const turnSettings = resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter);
-      const currentMessageContextText = serializeMessageContentForPrompt(lastUserMsg, {
-        mode: "history",
-        userName: settings.name,
-        characterName: activeCharacter.name,
-      });
-      const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
-      const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
-        enableTimeAwareness: turnSettings.enableTimeAwareness,
-        currentMessageAt: lastUserMsg.timestamp,
-        latestHistoryMessageAt: latestHistoryMessage?.timestamp,
-      });
-      const isConnectedVoiceCall = activeAttachModal === "calling" && callingStatus === "connected";
-      const callTopicShiftDetected = detectCallTopicShift({
-        isConnectedVoiceCall,
-        userText: currentMessageContextText,
-        callTranscript,
-      });
-      const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
-
-      // Map history with timestamps for time awareness
-      const requestTime = new Date();
-      const historyPartition = partitionDirectChatHistoryByCurrentDay({
-        messages: msgsForHistory,
-        currentMessageAt: lastUserMsg.timestamp,
-        enableTimeAwareness: turnSettings.enableTimeAwareness,
-      });
-      const slicedMsgs = historyPartition.liveMessages.slice(-limit);
-      const historicalReferenceLines = historyPartition.historicalMessages.map((message) => {
-        const speaker = message.sender === "user" ? "用户" : activeCharacter.name;
-        const content = serializeMessageContentForPrompt(message, {
-          mode: "history",
-          userName: settings.name,
-          characterName: activeCharacter.name,
-          includeCallTranscript: false,
-        }).replace(/\s+/gu, " ").trim().slice(0, 240);
-        return `- ${new Date(message.timestamp).toLocaleString("zh-CN", { hour12: false })}｜${speaker}：${content}`;
-      });
-      const crossDayHistoricalReference = buildCrossDayHistoricalReferencePrompt(historicalReferenceLines);
-      const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
-          userName: settings.name,
-          characterName: activeCharacter.name,
-        }).map((turn) => ({
-          role: turn.role,
-          text: turnSettings.enableTimeAwareness
-            ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
-            : turn.text,
-        })));
-
-      let timeLogString = "";
-      if (turnSettings.enableTimeAwareness) {
-        timeLogString = slicedMsgs.map((m) => {
-          const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
-            month: "long",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false
-          });
-          const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
-          let snippet = serializeMessageContentForPrompt(m, {
-            mode: "history",
-            userName: settings.name,
-            characterName: activeCharacter.name,
-            includeCallTranscript: false,
-          });
-          if (snippet.length > 80) snippet = snippet.slice(0, 80) + "...";
-          return `- ${senderName}: "${snippet}" (发送于: ${timeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`;
-        }).join("\n");
-      }
-
-      const mainPromptText = buildDirectChatMainPrompt({
-        characterName: activeCharacter.name,
-        disableBracketActions: turnSettings.disableBracketActions,
-        characterProfile: [activeCharacter.remark, activeCharacter.age, activeCharacter.gender, activeCharacter.personality, activeCharacter.backstory].filter(Boolean).join("；"),
-      });
-
-      const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
-      const characterDescriptionText = characterProjection.description.content;
-      let characterContextText = `[🚨 记忆与上下文关联优先级规则]:
-1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
-2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
-3. 历史检索及短期上下文：需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
-      if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
-
-      // Add OOC comment correction as high priority instruction
-      characterContextText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
-Your previous response was marked as "OOC" (Out Of Character). 
-Feedback from the user: "${oocComment}".
-Please read the feedback carefully and rewrite your response to perfectly match your profile. Do NOT repeat the previous tone/behavior!`;
-
-      // Recall memories
-      const topK = recallSettings?.recallCount || 5;
-      const relevantMemories = shouldLoadLongTermMemory
-        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, scenario: "chat" })
-        : [];
-      const truthRetrieval = activeRelationship
-        ? retrieveTruthForPrivatePrompt({
-          scope: {
-            relationId: activeRelationship.id,
-            characterId: activeRelationship.characterId,
-            userIdentityId: activeRelationship.userIdentityId,
-            conversationId: activeRelationship.conversationId,
-          },
-          queryText: currentMessageContextText,
-          limit: topK,
-          claims: loadKnowledgeClaims().value,
-          summaries: loadConversationSummaries().value,
-          corrections: loadBehaviorCorrections().value,
-        })
-        : undefined;
-      const shadowedLegacyMemoryIds = new Set(truthRetrieval?.shadowedLegacyMemoryIds || []);
-      const visibleLegacyMemories = relevantMemories.filter((memory) =>
-        !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
-      );
-      if (visibleLegacyMemories.length > 0) {
-        characterContextText += formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆:\n");
-      }
-      if (truthRetrieval) {
-        characterContextText += formatTruthRetrievalForPrompt(truthRetrieval);
-      }
-
-      const interveningOfflineHandoff = getInterveningOfflineHandoff(lastUserMsg.timestamp);
-      const latestOfflineContinuationMemory = interveningOfflineHandoff?.memory || selectFreshOfflineHandoffMemory({
-        memories: memories || [],
-        relationId: activeRelationship?.id,
-        queryText: currentMessageContextText,
-      });
-      pendingOfflineHandoffForReply = getPendingOfflineHandoff();
-      if (pendingOfflineHandoffForReply) {
-        const matchingSummary = latestOfflineContinuationMemory
-          && isOfflineStoryHandoffMemory(latestOfflineContinuationMemory, pendingOfflineHandoffForReply)
-          ? latestOfflineContinuationMemory
-          : undefined;
-        const pendingOfflineHistoryAnchor = buildPendingOfflineTimelineHandoff(
-          pendingOfflineHandoffForReply,
-          lastUserMsg.timestamp,
-          matchingSummary,
-        );
-        characterContextText += pendingOfflineHistoryAnchor;
-        history.push({ role: "user", text: pendingOfflineHistoryAnchor });
-      } else if (latestOfflineContinuationMemory) {
-        characterContextText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, lastUserMsg.timestamp);
-      }
-
-      const userProfileText = `User Profile:
-- Nickname: ${settings.name}
-- Personality/Bio: ${settings.bio}`;
-      const userKnowledgeBoundary = formatUserKnowledgeBoundary();
-      const relationshipContext = characterProjection.relationship?.content || "";
-
-      const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
-      const offlineStoriesContextRegen = getOfflineStoriesContextForOnlineChat();
-      const musicContext = activeRelationship
-        ? buildRelationMusicContext({
-          userText: currentMessageContextText,
-          ownerIdentityId: activeRelationship.userIdentityId,
-          relationId: activeRelationship.id,
-          tracks: musicTracks,
-          identityStates: identityMusicStates,
-          relationshipStates: relationshipMusicStates,
-        })
-        : "";
-      const forumContext = activeRelationship
-        ? buildRelationForumContext({
-          ownerIdentityId: activeRelationship.userIdentityId,
-          relationId: activeRelationship.id,
-          conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
-          messages: previousMessages,
-          shares: loadForumShares().value,
-          threads: loadForumThreads().value,
-        })
-        : "";
-      const diaryContext = activeRelationship
-        ? buildRelationDiaryContext({
-          ownerIdentityId: activeRelationship.userIdentityId,
-          relationId: activeRelationship.id,
-          conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
-          messages: previousMessages,
-          shares: loadDiaryShares().value,
-        })
-        : "";
-      const userMemoContext = activeRelationship
-        ? loadUserMemoPromptContext({
-          scopeKey: activeRelationship.id,
-          queryText: currentMessageContextText,
-          hasUserMessage: Boolean(lastUserMsg),
-          nowMs: requestTime.getTime(),
-        }).text
-        : "";
-
-      // Context-aware trigger scanning: current message plus roughly ten recent messages.
-      const scanContextParts = [
-        currentMessageContextText,
-        ...previousMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
-      ];
-      const scanText = scanContextParts.filter(Boolean).join("\n");
-      const characterBehaviorPrompt = buildCharacterBehaviorPrompt({
-        character: activeCharacter,
-        currentMessage: currentMessageContextText,
-        recentContext: scanText,
-      });
-
-      // Use the unified World Book system blocks builder
-      const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText, {
-        scenario: "chat",
-        characterId: activeRelationship?.characterId || activeChatCharId || undefined,
-        userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
-        relationId: activeRelationship?.id,
-      });
-
-      // Assemble system instruction blocks
-      let assembledInstructions: string[] = [];
-
-      // 0. Base living human prompt
-      assembledInstructions.push(LIVING_HUMAN_PROMPT);
-
-      // 1. Main Prompt
-      assembledInstructions.push(mainPromptText);
-      if (musicContext) assembledInstructions.push(musicContext);
-      if (forumContext) assembledInstructions.push(forumContext);
-      if (diaryContext) assembledInstructions.push(diaryContext);
-      if (userMemoContext) assembledInstructions.push(userMemoContext);
-
-      if (isRedPacketMarkup(lastUserMsg.content)) {
-        assembledInstructions.push(buildRedPacketReactionPrompt(lastUserMsg.content));
-      }
-
-      if (isCrossDayNewSession || historyPartition.hasCrossDayHistory) {
-        assembledInstructions.push(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT);
-      }
-
-      // 1.5 Time awareness prompt if enabled
-      if (turnSettings.enableTimeAwareness) {
-        assembledInstructions.push(buildTimeAwarenessPrompt(requestTime, timeLogString));
-      }
-
-      const voiceIntervalPrompt = buildVoiceIntervalPrompt({
-        characterName: activeCharacter.name,
-        currentMessage: lastUserMsg,
-        recentMessages: slicedMsgs,
-      });
-      if (voiceIntervalPrompt) assembledInstructions.push(voiceIntervalPrompt);
-
-      // 2. After Main Prompt entries
-      const afterMainWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_main_prompt");
-      if (afterMainWorldBook) assembledInstructions.push(afterMainWorldBook);
-
-      // 3. Before Character Definition entries
-      const beforeCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_char_def");
-      if (beforeCharacterWorldBook) assembledInstructions.push(beforeCharacterWorldBook);
-
-      // 4. Character definition and personality are independent, single-source blocks.
-      assembledInstructions.push(characterDescriptionText);
-      assembledInstructions.push(characterProjection.personality.content);
-      if (relationshipContext) assembledInstructions.push(relationshipContext);
-      if (characterBehaviorPrompt) assembledInstructions.push(characterBehaviorPrompt);
-      if (characterContextText.trim()) assembledInstructions.push(characterContextText);
-
-      if (regenerationCognitiveContext) {
-        const cognitivePrompt = formatChatPromptContext(buildChatPromptContext(regenerationCognitiveContext, {
-          maxFacts: 0,
-          relevantMemoryIds: [],
-          hasConfirmedClaim: Boolean(truthRetrieval?.projection.confirmedFacts.length),
-          hasDerivedSummary: Boolean(truthRetrieval?.summaries.length),
-        }));
-        if (cognitivePrompt) assembledInstructions.push(cognitivePrompt);
-      }
-
-      // 5. After Character Definition entries
-      const afterCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_char_def");
-      if (afterCharacterWorldBook) assembledInstructions.push(afterCharacterWorldBook);
-
-      // 6. User Profile
-      assembledInstructions.push(userProfileText);
-      assembledInstructions.push(userKnowledgeBoundary);
-      assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
-      assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
-      assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
-      assembledInstructions.push(CHINESE_SEMANTIC_CONTINUITY_PROMPT);
-
-      // 7. Before Chat History entries
-      const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
-      if (beforeHistoryWorldBook) assembledInstructions.push(beforeHistoryWorldBook);
-
-      // 8. WeChat Moments Context memory
-      if (momentsContextRegen && shouldLoadLongTermMemory) {
-        assembledInstructions.push(momentsContextRegen);
-      }
-
-      // 8.5 Offline stories context memory
-      if (offlineStoriesContextRegen && shouldLoadLongTermMemory) {
-        assembledInstructions.push(offlineStoriesContextRegen);
-      }
-
-      assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
-      assembledInstructions.push(formatOnlineChatSpatialBoundary());
-      assembledInstructions.push(CHARACTER_MEDIA_USAGE_RULES);
-
-      // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
-      const allStickers2 = stickerGroups.flatMap(g => g.stickers);
-      if (activeAttachModal === "calling") {
-        assembledInstructions.push(...buildVoiceCallPrompts(callTopicShiftDetected));
-      } else if (allStickers2.length > 0) {
-        const userSentSticker = /^\[表情\]\|/.test(lastUserMsg.content);
-        const stickerListStr = allStickers2.map((sticker) =>
-          `- ${sticker.name}｜语义：${sticker.semanticDescription || `按名称“${sticker.name}”谨慎理解`}｜发送格式：[表情]|${sticker.name}|sticker://${sticker.id}`
-        ).join("\n");
-        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr, userSentSticker));
-      }
-
-      if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
-      const systemInstruction = finalizeCharacterChatSystemInstruction({
-        instructions: assembledInstructions,
-        characterProjection,
-        characterDescriptionText,
-        diagnosticLabel: "regenerate prompt",
-        finalPersonaRules: wbBlocks.allTriggered
-          .filter((entry) => entry.purpose === "persona_rule")
-          .map((entry) => `【${entry.title}】\n${entry.content}`),
-        finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
-          activeCharacter,
-          getVisibleWorldBookEntries(worldBookEntries || [], activeChatCharId || "", {
-            scenario: "chat",
-            characterId: activeRelationship?.characterId || activeChatCharId || undefined,
-            userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
-            relationId: activeRelationship?.id,
-          }).map((entry) => `${entry.title}\n${entry.content}`),
-        )),
-      });
-
-      const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
-      const promptMessage = serializeMessageContentForPrompt(lastUserMsg, {
-        mode: "current",
-        userName: settings.name,
-        characterName: activeCharacter.name,
-      });
-      const { data, candidates: replyCandidates } = await generateRegeneratedChatTurn({
-        prompt: { scenario: "regenerate", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
-        settings,
-        candidateContext: {
-          disableBracketActions: turnSettings.disableBracketActions,
-          keepPeriods,
-          characterId: activeChatCharId,
-          characterName: activeCharacter?.name,
-          userName: settings.name,
-          allowEmoji: false,
-          createId: (idx) => `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
-          currentTime: (idx) => Date.now() + idx,
-        },
-      });
-
-      if (data && data.text && replyCandidates) {
-        replyCandidates.messages.forEach(onSendMessage);
-        if (replyCandidates.messages.length > 0) {
-          recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
-        }
-      }
-    } catch (err: any) {
-      console.error("Regeneration error:", err);
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  const updateDraftChatIcon = (key: ChatIconKey, value: string) => {
-    setDraftChatIcons((previous) => {
-      const next = { ...previous };
-      const url = value.trim();
-      if (url) next[key] = url;
-      else delete next[key];
-      return next;
-    });
-  };
-
-  // Save settings draft
-  const handleSaveSettings = () => {
-    if (activeCharacter) {
-      const isEnablingAutoTranslate = draftEnableAutoTranslate && !activeCharacter.enableAutoTranslate;
-
-      let nextScheduledTime = activeRelationship?.scheduledProactiveTime;
-      if (!activeCharacter.isGroupChat && draftEnableProactiveChat && (!activeCharacter.enableProactiveChat || !nextScheduledTime)) {
-        const draftFriend: Character = {
-          ...activeCharacter,
-          proactiveStartTime: draftProactiveStartTime,
-          proactiveEndTime: draftProactiveEndTime,
-          enableProactiveChat: draftEnableProactiveChat,
-        };
-        nextScheduledTime = scheduleNextProactiveMessage(draftFriend);
-      } else if (!draftEnableProactiveChat && !activeCharacter.isGroupChat) {
-        nextScheduledTime = undefined;
-      }
-
-      if (activeRelationship) {
-        updateRelationshipSession(activeRelationship.id, {
-          scheduledProactiveTime: nextScheduledTime,
-          ...createProactiveOfflinePreferencePatch(draftEnableProactiveOffline),
-        });
-      }
-
-      onSaveCharacter({
-        ...activeCharacter,
-        name: activeCharacter.isGroupChat ? (draftRemark.trim() || activeCharacter.name) : activeCharacter.name,
-        remark: activeCharacter.isGroupChat ? undefined : (draftRemark.trim() || undefined),
-        avatar: activeCharacter.isGroupChat ? (draftAvatar || activeCharacter.avatar) : activeCharacter.avatar,
-        isPinned: draftIsPinned,
-        chatBg: draftChatBg,
-        customCss: draftCustomCss,
-        customChatCSS: draftCustomCss,
-        customChatIcons: draftChatIcons,
-        chatStylePreset: draftChatStylePreset,
-        ...(activeCharacter.isGroupChat ? {} : {
-          enableProactiveChat: draftEnableProactiveChat,
-          enableProactiveCall: draftEnableProactiveCall,
-          proactiveChatInterval: draftProactiveChatInterval,
-          proactiveStartTime: draftProactiveStartTime,
-          proactiveEndTime: draftProactiveEndTime,
-        }),
-        disableBracketActions: draftDisableBracketActions,
-        historyMemoryLimit: draftHistoryMemoryLimit,
-        contextMemoryLimit: draftContextMemoryLimit,
-        retrievalHistoryLimit: draftRetrievalHistoryLimit,
-        archiveTemplateType: draftArchiveTemplateType,
-        autoArchiveInterval: draftAutoArchiveInterval,
-        enableAutoArchive: draftEnableAutoArchive,
-        enableAutoSummary: draftEnableAutoArchive, // synced with enableAutoArchive
-        summaryTriggerRound: draftAutoArchiveInterval, // synced with autoArchiveInterval
-        enableTimeAwareness: draftEnableTimeAwareness,
-        enableAutoTranslate: draftEnableAutoTranslate,
-        minimaxVoiceId: draftMinimaxVoiceId.trim() || undefined,
-        mosslandVoiceId: draftMosslandVoiceId.trim() || undefined,
-        minimaxSpeed: draftMinimaxSpeed,
-        voiceFrequency: draftVoiceFrequency,
-        enableImageGeneration: draftEnableImageGeneration,
-        imageAppearancePrompt: draftImageAppearancePrompt.trim() || undefined,
-        imageNegativePrompt: draftImageNegativePrompt.trim() || undefined,
-        imageReferenceAssetId: draftImageReferenceAssetId,
-        imageReferenceMimeType: draftImageReferenceMimeType,
-        imageReferenceUpdatedAt: draftImageReferenceAssetId ? Date.now() : undefined,
-      });
-
-      // Automatically translate existing non-Chinese messages in current chat
-      if (isEnablingAutoTranslate && onUpdateMessage) {
-        const currentChatMessages = messages.filter(
-          (m) => (activeRelationship ? m.relationId === activeRelationship.id : m.characterId === activeCharacter.id && activeCharacter.isGroupChat)
-            && m.sender === "character" && !m.isNarration && !m.translation
-        );
-
-        currentChatMessages.forEach((msg) => {
-          if (containsNonChineseText(msg.content)) {
-            apiTranslate({
-              text: msg.content,
-              apiKey: settings.apiKey || "",
-              model: settings.selectedModel,
-              apiEndpoint: settings.apiEndpoint,
-            })
-              .then((res) => {
-                if (res && res.text && res.text !== msg.content) {
-                  onUpdateMessage(msg.id, { translation: res.text }, msg);
-                }
-              })
-              .catch((err) => {
-                console.error("Batch auto-translation error:", err);
-              });
-          }
-        });
-      }
-
-      setIsEditingRemark(false);
-      setAdvancedSettingsSection(null);
-      setIsShowingCardModal(false);
-    }
-  };
-
-  // Remove a member from the active group chat
-  const handleRemoveGroupMember = (memberId: string) => {
-    if (!activeCharacter || !activeCharacter.memberIds) return;
-    const member = characters.find(c => c.id === memberId);
-    const memberName = member ? (member.remark || member.name) : "成员";
-    
-    const updatedMemberIds = activeCharacter.memberIds.filter(id => id !== memberId);
-    
-    // Update character
-    const updatedChar = {
-      ...activeCharacter,
-      memberIds: updatedMemberIds,
-    };
-    onSaveCharacter(updatedChar);
-
-    // Create a narration message for member removal
-    const removeNarration: Message = {
-      id: `group-narrate-${Date.now()}`,
-      characterId: activeCharacter.id,
-      sender: "character",
-      isNarration: true,
-      content: `您将 ${memberName} 移出了群聊`,
-      timestamp: Date.now(),
-    };
-    onSendMessage(removeNarration);
-  };
-
-  // Add selected members to the active group chat
-  const handleAddGroupMembers = (newMemberIds: string[]) => {
-    if (!activeCharacter || !activeCharacter.memberIds) return;
-    if (newMemberIds.length === 0) return;
-
-    const updatedMemberIds = [...activeCharacter.memberIds, ...newMemberIds];
-    
-    // Update character
-    const updatedChar = {
-      ...activeCharacter,
-      memberIds: updatedMemberIds,
-    };
-    onSaveCharacter(updatedChar);
-
-    // Generate names of invited members
-    const invitedNames = newMemberIds.map(id => {
-      const c = characters.find(char => char.id === id);
-      return c ? (c.remark || c.name) : "";
-    }).filter(Boolean).join("、");
-
-    // Create initial narration message
-    const addNarration: Message = {
-      id: `group-narrate-${Date.now()}`,
-      characterId: activeCharacter.id,
-      sender: "character",
-      isNarration: true,
-      content: `您邀请了 ${invitedNames} 加入了群聊`,
-      timestamp: Date.now(),
-    };
-    onSendMessage(addNarration);
-
-    setShowAddMemberModal(false);
-  };
-
-  // Set chat specific background wallpaper (draft)
-  const handleDraftChatBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const compressed = await compressImage(file, 1000, 1000, 0.7);
-        setDraftChatBg(compressed);
-      } catch (err) {
-        console.error("Chat background compression failed:", err);
-      }
-    }
-  };
-
-  // Memory Extraction Handler (Extracting facts & moments instead of a big blob)
-  const handleExtractMemories = async (manualMessagesOverride?: Message[]) => {
-    if (!activeChatCharId || !activeCharacter || !activeDirectScope) return 0;
-    const extractionScope = activeDirectScope;
-
-    setIsCompressingMemory(true);
-    try {
-      const limitToSearch = activeCharacter.retrievalHistoryLimit || 100;
-      const messagesToCompress = (manualMessagesOverride || currentChatMessages).slice(-limitToSearch);
-      if (messagesToCompress.length === 0) {
-        return 0;
-      }
-      
-      const isDelicate = activeCharacter.archiveTemplateType === "delicate";
-      const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
-      const result = await MemoryService.extractMemories({
-        character: activeCharacter,
-        characterId: activeChatCharId,
-        relationId: extractionScope.relationId,
-        userIdentityId: extractionScope.userIdentityId,
-        conversationId: extractionScope.conversationId,
-        recentMessages: messagesToCompress,
-        existingMemories: memories || [],
-        scenario: "chat",
-        apiKey: settings.apiKey,
-        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
-        apiEndpoint: settings.apiEndpoint,
-        templateType: activeCharacter.archiveTemplateType,
-        createId: () => (Date.now() + Math.random()).toString(),
-        currentTime: () => Date.now(),
-        formatContent: (items, formatOptions) => isDelicate
-          ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
-          : formatExtractedMemorySummary(headerLabel, items),
-      }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
-      if (result.apiError) {
-        console.error("Extract memory API error:", result.apiError);
-        return -1;
-      }
-      if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
-        console.error("Knowledge claims could not be persisted; compatibility Memory was not updated.");
-        return -1;
-      }
-      const extractedSummary = createConversationSummaryRecord({
-        scope: extractionScope,
-        claims: result.acceptedClaims,
-        sourceMessageIds: messagesToCompress.map((message) => message.id),
-        generatedAt: Date.now(),
-        rangeStartAt: messagesToCompress[0]?.timestamp,
-        rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
-      });
-      if (extractedSummary) {
-        const summaryWrite = saveConversationSummaries([...loadConversationSummaries().value, extractedSummary]);
-        if (!summaryWrite.success) console.error("Conversation summary cache could not be persisted:", summaryWrite.error);
-      }
-      if (result.extractedMemories.length > 0) {
-        onSaveMemories(MemoryService.mergeMemories(memories || [], result.extractedMemories));
-      }
-      // Advance automatic-summary progress when Truth accepted claims even if
-      // no display-only compatibility Memory was created.
-      return Math.max(result.extractedMemories.length, result.acceptedClaims.length);
-    } catch (err: any) {
-      console.error("Memory extraction error:", err);
-    } finally {
-      setIsCompressingMemory(false);
-    }
-    return -1;
-  };
-
   // Manual Trigger Proactive Message simulation
 
-  const scheduleNextProactiveMessage = (friend: Character): number => {
-    const startTime = friend.proactiveStartTime || "09:00";
-    const endTime = friend.proactiveEndTime || "22:00";
-    const now = new Date();
-    
-    const [startH, startM] = startTime.split(":").map(Number);
-    const [endH, endM] = endTime.split(":").map(Number);
-    
-    const startMinutes = startH * 60 + startM;
-    let endMinutes = endH * 60 + endM;
-    
-    const isOvernight = endMinutes < startMinutes;
-    if (isOvernight) {
-      endMinutes += 24 * 60;
-    }
+  const { handleSaveSettings } = useChatSaveSettings({
+    activeCharacter,
+    activeRelationship,
+    settings,
+    messages,
+    onSaveCharacter,
+    onUpdateMessage,
+    updateRelationshipSession,
+    scheduleNextProactiveMessage,
+    setIsEditingRemark,
+    setAdvancedSettingsSection,
+    setIsShowingCardModal,
+    draftEnableAutoTranslate,
+    draftEnableProactiveChat,
+    draftProactiveStartTime,
+    draftProactiveEndTime,
+    draftEnableProactiveOffline,
+    draftRemark,
+    draftAvatar,
+    draftIsPinned,
+    draftChatBg,
+    draftCustomCss,
+    draftChatIcons,
+    draftChatStylePreset,
+    draftEnableProactiveCall,
+    draftProactiveChatInterval,
+    draftDisableBracketActions,
+    draftHistoryMemoryLimit,
+    draftContextMemoryLimit,
+    draftRetrievalHistoryLimit,
+    draftArchiveTemplateType,
+    draftAutoArchiveInterval,
+    draftEnableAutoArchive,
+    draftEnableTimeAwareness,
+    draftMinimaxVoiceId,
+    draftMosslandVoiceId,
+    draftMinimaxSpeed,
+    draftVoiceFrequency,
+    draftEnableImageGeneration,
+    draftImageAppearancePrompt,
+    draftImageNegativePrompt,
+    draftImageReferenceAssetId,
+    draftImageReferenceMimeType,
+  });
 
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const windowStartMs = todayStart.getTime() + startMinutes * 60000;
-    const windowEndMs = todayStart.getTime() + endMinutes * 60000;
-
-    let possibleStartMs = windowStartMs;
-    const currentTimeMs = now.getTime();
-
-    if (currentTimeMs >= windowEndMs) {
-      // Today's window is in the past. Schedule in tomorrow's window.
-      const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-      const tomorrowStartMs = tomorrowStart.getTime() + startMinutes * 60000;
-      const tomorrowEndMs = tomorrowStart.getTime() + endMinutes * 60000;
-      const randomOffset = Math.random() * (tomorrowEndMs - tomorrowStartMs);
-      return Math.floor(tomorrowStartMs + randomOffset);
-    } else if (currentTimeMs > windowStartMs) {
-      // Currently inside today's window. Schedule between now and the end of the window.
-      possibleStartMs = currentTimeMs;
-      const randomOffset = Math.random() * (windowEndMs - possibleStartMs);
-      return Math.floor(possibleStartMs + randomOffset);
-    } else {
-      // Before today's window. Schedule between today's start and today's end.
-      const randomOffset = Math.random() * (windowEndMs - windowStartMs);
-      return Math.floor(windowStartMs + randomOffset);
-    }
-  };
+  const { handleExtractMemories } = useChatMemoryExtraction({
+    activeChatCharId,
+    activeCharacter,
+    activeDirectScope,
+    currentChatMessages,
+    memories,
+    settings,
+    recallSettings,
+    setIsCompressingMemory,
+    onSaveMemories,
+  });
+  const { updateDraftChatIcon } = useChatDraftChatIcon(setDraftChatIcons);
+  const { handleRegenerateResponse } = useChatRegenerationAction({
+    activeChatCharId, activeCharacter, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
+    activeRelationship, listCharacterEventsByRelation, buildRelationshipCognitiveProjection, buildCharacterCognitiveContext,
+    createDirectChatKnowledgeBoundary, resolveChatRoutine, buildCharacterRoutine, resolveChatTurnSettings, setIsTyping,
+    latestActiveCharacterRef, settings, serializeMessageContentForPrompt, shouldUseCrossDayHistoryBoundary,
+    activeAttachModal, callingStatus, callTranscript, detectCallTopicShift, partitionDirectChatHistoryByCurrentDay,
+    formatHistoricalMessageForPrompt, describeHistoricalRelativeTime, serializeMessageToPromptTurns, buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt,
+    projectCharacterPrompt, recallSettings, MemoryService, memories, retrieveTruthForPrivatePrompt,
+    loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatMemoriesForPrompt, formatUserKnowledgeBoundary,
+    formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
+    getPendingOfflineHandoff, buildPendingOfflineTimelineHandoff, isOfflineStoryHandoffMemory,
+    buildOfflineTimelineHandoff, allMoments, activeIdentityId, getKnownMomentsContextString,
+    getOfflineStoriesContextForOnlineChat, musicTracks, identityMusicStates, relationshipMusicStates,
+    buildRelationMusicContext, loadForumShares, loadForumThreads, buildRelationForumContext, getConversationId,
+    loadDiaryShares, buildRelationDiaryContext, loadUserMemoPromptContext, buildCharacterBehaviorPrompt,
+    worldBookEntries, buildWorldBookSystemBlocks, LIVING_HUMAN_PROMPT, buildRedPacketReactionPrompt,
+    NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, buildTimeAwarenessPrompt, buildVoiceIntervalPrompt,
+    formatStructuralWorldBookSection, buildVoiceCallPrompts, stickerGroups, isRedPacketMarkup,
+    buildStickerResponsePrompt, WORLD_BOOK_CONTEXT_PRIORITY, finalizeCharacterChatSystemInstruction,
+    formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage, getVisibleWorldBookEntries,
+    formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary, CHARACTER_MEDIA_USAGE_RULES,
+    DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, CURRENT_SCENE_CONTINUITY_PROMPT,
+    CHINESE_SEMANTIC_CONTINUITY_PROMPT, generateRegeneratedChatTurn, createId, onSendMessage, formatChatPromptContext, buildChatPromptContext,
+    recordPendingOfflineHandoffDelivery,
+  });
 
   // Automated background proactive message generator for any character
   const triggerProactiveFor = async (relationId: string, customTaskText?: string, backdateTimestamp?: number) => {
@@ -5117,13 +2552,13 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         characterId: friend.id,
         disableBracketActions: friend.disableBracketActions || false,
         keepPeriods,
-        createId: (idx) => `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+        createId: () => createId("friend-proactive"),
         currentTime: (idx) => backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
         cognitiveContext,
         proactiveOfflineAllowedModes,
         directiveNow: Date.now(),
         transformBubble: (bubbleText, idx) => {
-          const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText, proactiveReplyContext);
+          const isVoice = canConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText, proactiveReplyContext);
           if (!isVoice) return bubbleText;
           const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
           return `[语音]|${secs}|${bubbleText}`;
@@ -5174,42 +2609,6 @@ Please read the feedback carefully and rewrite your response to perfectly match 
    * Confirmed/asserted Truth and user-authored manual memories may be used;
    * inferred claims and automatic compatibility mirrors may not be published.
    */
-  const buildRelationMomentContext = (
-    character: Character,
-    relationship: CharacterRelationship,
-    occurredAt: number,
-  ) => {
-    const confirmedClaimMemories: MemoryItem[] = loadKnowledgeClaims().value
-      .filter((claim) => claim.relationId === relationship.id
-        && claim.characterId === relationship.characterId
-        && claim.userIdentityId === relationship.userIdentityId
-        && claim.status === "active"
-        && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
-      .map((claim) => ({
-        id: `moment-claim:${claim.id}`,
-        characterId: claim.characterId,
-        relationId: claim.relationId,
-        content: claim.statement,
-        timestamp: claim.recordedAt,
-        importance: 5,
-      }));
-    const explicitManualMemories = (memories || []).filter((memory) =>
-      memory.characterId === character.id
-      && memory.relationId === relationship.id
-      && memory.isManual === true);
-    return buildMomentCognitiveContext({
-      character,
-      relationship,
-      memories: [...confirmedClaimMemories, ...explicitManualMemories],
-      events: listCharacterEventsByRelation(relationship.id),
-      occurredAt,
-      routine: resolveChatRoutine(
-        buildCharacterRoutine(character.routine),
-        character.enableTimeAwareness !== false,
-      ),
-    });
-  };
-
   const sendTextImage = () => {
     const description = imageRequestText.trim();
     if (!description) {
@@ -5221,39 +2620,55 @@ Please read the feedback carefully and rewrite your response to perfectly match 
     setShowImageGenerator(false);
   };
 
-  const momentSourceText = (context: CharacterCognitiveContext) => [
-    context.persona.personality,
-    context.persona.backstory,
-    ...context.knownFacts.map((fact) => fact.content),
-    ...context.recentEvents.map((event) => event.summary),
-  ].filter(Boolean).join("\n");
-
-  const MOMENT_PHOTO_ANALYSIS_PROMPT = `请客观识别这张朋友圈照片。只返回 JSON，不要代码块：
-{"name":"不超过12个中文字符的画面主题","description":"不超过120个中文字符，说明主体、场景、可见文字、动作和关键细节；不要猜测图片外的信息"}`;
-
-  const analyzeMomentPhoto = async (image: string): Promise<string | undefined> => {
-    if (!image || !settings.apiKey) return undefined;
-    try {
-      const blob = await fetch(image).then((response) => {
-        if (!response.ok) throw new Error(`Image fetch failed (${response.status}).`);
-        return response.blob();
-      });
-      const analysis = await aiAnalyzeSticker(
-        blob,
-        settings.apiKey,
-        settings.selectedModel || "gemini-3.5-flash",
-        settings.apiEndpoint,
-        MOMENT_PHOTO_ANALYSIS_PROMPT,
-      );
-      return analysis.description.trim() || analysis.name.trim() || undefined;
-    } catch (error) {
-      console.warn("Moment photo analysis failed:", error);
-      return undefined;
-    }
-  };
+  const analyzeMomentPhotoForCurrentSettings = (image: string) => analyzeMomentPhoto({
+    image,
+    apiKey: settings.apiKey,
+    selectedModel: settings.selectedModel,
+    apiEndpoint: settings.apiEndpoint,
+  });
 
   const getMomentCommentTranslationKey = (momentId: string, commentId: string) =>
     `${momentId}:${commentId}`;
+
+  const {
+    handleMomentTextPointerDown,
+    handleMomentTextPointerUpOrLeave,
+    handleMomentTextPointerMove,
+    handleMomentCommentPointerDown,
+    clearMomentCommentLongPress,
+    handleMomentCommentPointerMove,
+    handleMomentCommentClick,
+    confirmDeleteMomentComment,
+    handleMomentTextContextMenu,
+    handleCopyMomentText,
+    handleFavoriteMoment,
+    handleTranslateMoment,
+    handleTranslateMomentComment,
+    handleDeleteMomentClick,
+  } = useChatMomentActions({
+    settings,
+    momentTranslations,
+    commentTranslations,
+    momentFavorites,
+    commentDeleteTarget,
+    onDeleteMoment,
+    onDeleteCommentFromMoment,
+    showToast,
+    getMomentCommentTranslationKey,
+    setMomentContextMenu,
+    setCommentContextMenu,
+    setCommentDeleteTarget,
+    setMomentTranslations,
+    setCommentTranslations,
+    setMomentFavorites,
+    setReplyingToCommentMap,
+    setShowCommentInputMap,
+    longPressTimerRef,
+    longPressOriginRef,
+    commentLongPressTimerRef,
+    commentLongPressOriginRef,
+    suppressCommentClickRef,
+  });
 
   const readMomentImageSize = (image: string): Promise<{ width: number; height: number } | undefined> =>
     new Promise((resolve) => {
@@ -5299,56 +2714,20 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const friend = findMomentRelationshipCharacter(characters, relationship);
       if (!friend || friend.isGroupChat) continue;
       try {
-        const temporalContext = createMomentTemporalContext(new Date());
-        const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
-        const relationWorldKnowledge = buildMomentWorldKnowledge(
-          worldBookEntries || [], friend, relationship,
-          `${getMomentTargetDescription(newMo)}\n${momentSourceText(relationContext)}`,
-        );
-        const publicContext = buildPublicMomentContext({
+        const comment = await generateAutomaticMomentComment({
+          moment: newMo,
+          targetDescription: getMomentTargetDescription(newMo),
           character: friend,
-          moments: [newMo],
+          relationship,
+          worldBookEntries: worldBookEntries || [],
           topicHistory: loadMomentTopicRecords().value,
-          routine: resolveChatRoutine(
-            buildCharacterRoutine(friend.routine),
-            friend.enableTimeAwareness !== false,
-          ),
-          now: Date.now(),
-        });
-
-          const systemInstruction = `Your task: Write a short, natural comment on the Moment.
-🚨 [CRITICAL WECHAT COMMENT RULES]:
-1. The comment must be brief, extremely natural, and fit the character and current relationship context supplied by the Moment Prompt Adapter.
-2. Keep it under 35 characters and follow the character language policy below.
-3. No OOC, no narrative brackets like (微笑), just the direct comment text.
-4. You may naturally reference confirmed shared experiences or relationship facts from the supplied context, but never invent them or mention another relationship or user identity.
-${MOMENT_CHARACTER_EXPRESSION_PROMPT}
-${CHARACTER_LANGUAGE_POLICY}
-
-${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
-`;
-
-        const composedPrompt = PromptComposer.compose({
-          scenario: "moment-comment",
-          message: `[本次唯一评论目标]\n${getMomentTargetDescription(newMo)}\n\n只评论上面这条新动态。历史动态、历史评论和话题冷却仅用于避免重复措辞，禁止把其中的食物、物件或对话当成这条动态的内容。`,
-          history: [],
-          systemInstruction,
-        });
-        const comment = await requestAutomaticMomentComment({
+          knowledgeClaims: loadKnowledgeClaims().value,
+          memories: memories || [],
+          events: listCharacterEventsByRelation(relationship.id),
+          settings,
           requestAi: apiChat,
-          request: {
-            ...composedPrompt,
-            apiKey: settings.apiKey,
-            model: settings.selectedModel || "gemini-3.5-flash",
-            apiEndpoint: settings.apiEndpoint,
-            apiTemperature: settings.apiTemperature,
-          },
-          character: friend,
           cleanText: (text) => cleanOnlineMessage(text, true),
-          temporalContext,
-          publicContext,
-          relationContext,
-          relationWorldKnowledge,
+          characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
         });
         if (comment) onAddCommentToMoment(newMo.id, {
           ...comment,
@@ -5401,67 +2780,22 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
     
     setTimeout(async () => {
       try {
-        const temporalContext = createMomentTemporalContext(new Date());
-        const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
-        const relationWorldKnowledge = buildMomentWorldKnowledge(
-          worldBookEntries || [], friend, relationship,
-          `${getMomentTargetDescription(targetMoment)}\n${userCommentText}\n${momentSourceText(relationContext)}`,
-        );
-        const publicContext = buildPublicMomentContext({
+        const reply = await generateAutomaticMomentReply({
+          targetMoment,
+          targetDescription: getMomentTargetDescription(targetMoment),
+          userCommentText,
+          replyingToContent: replyingTo?.content,
           character: friend,
-          moments: [{ ...targetMoment, comments: [] }],
-          comments: [
-            ...targetMoment.comments,
-            {
-              id: "public-comment-input",
-              authorName: settings.name,
-              authorAvatar: settings.avatar,
-              content: userCommentText,
-              timestamp: Date.now(),
-            },
-          ],
+          relationship,
+          worldBookEntries: worldBookEntries || [],
           topicHistory: loadMomentTopicRecords().value,
-          routine: resolveChatRoutine(
-            buildCharacterRoutine(friend.routine),
-            friend.enableTimeAwareness !== false,
-          ),
-          now: Date.now(),
-        });
-
-        const systemInstruction = `Your task: Write a short, extremely natural WeChat reply/comment.
-🚨 [CRITICAL WECHAT COMMENT RULES]:
-1. The reply must be brief, lively, extremely natural, and match the character and current relationship context supplied by the Moment Prompt Adapter.
-2. Keep it under 35 characters and follow the character language policy below.
-3. Speak directly to the user without formal prefixes. Do not write narrative actions or brackets like "(害羞)", just output the comment text.
-4. You may naturally reference only confirmed material from this supplied relationship context. Never invent shared experiences or use another relationship's information.
-${MOMENT_CHARACTER_EXPRESSION_PROMPT}
-${CHARACTER_LANGUAGE_POLICY}
-
-${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
-`;
-
-        const composedPrompt = PromptComposer.compose({
-          scenario: "moment-reply",
-          message: `[本次唯一回复目标]\n动态：${getMomentTargetDescription(targetMoment)}\n${replyingTo ? `用户正在回复你的评论：${replyingTo.content}\n` : ""}用户刚写的内容：${userCommentText}\n\n只回复“用户刚写的内容”。禁止延续其他朋友圈、其他评论线程或历史话题中的关键词。`,
-          history: [],
-          systemInstruction,
-        });
-        const reply = await requestMomentCommentReply({
+          knowledgeClaims: loadKnowledgeClaims().value,
+          memories: memories || [],
+          events: listCharacterEventsByRelation(relationship.id),
+          settings,
           requestAi: apiChat,
-          request: {
-          ...composedPrompt,
-          apiKey: settings.apiKey,
-          model: settings.selectedModel || "gemini-3.5-flash",
-          apiEndpoint: settings.apiEndpoint,
-          apiTemperature: settings.apiTemperature,
-          },
-          character: friend,
-          userName: settings.name,
           cleanText: (text) => cleanOnlineMessage(text, true),
-          temporalContext,
-          publicContext,
-          relationContext,
-          relationWorldKnowledge,
+          characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
         });
         if (reply) onAddCommentToMoment(momentId, {
           ...reply,
@@ -5478,70 +2812,21 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
     const friend = findMomentRelationshipCharacter(characters, relationship);
     if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return false;
     try {
-      const ownerMomentHistory = moments
-        .filter((moment) => Boolean(moment.characterId))
-        .filter((moment) => moment.characterId === friend.id)
-        .filter((moment) => (moment.ownerIdentityId || "identity-1") === (relationship.userIdentityId || "identity-1"))
-        .sort((left, right) => right.timestamp - left.timestamp)
-        .slice(0, 12);
-      const temporalContext = createMomentTemporalContext(new Date(occurredAt));
-      const relationContext = buildRelationMomentContext(friend, relationship, occurredAt);
-      const relationWorldKnowledge = buildMomentWorldKnowledge(
-        worldBookEntries || [], friend, relationship,
-        momentSourceText(relationContext),
-      );
-      const publicContext = buildPublicMomentContext({
-        character: friend,
-        moments: ownerMomentHistory,
+      const generated = await generateCharacterMomentPipeline({
+        relationship,
+        characters,
+        moments,
+        worldBookEntries: worldBookEntries || [],
+        knowledgeClaims: loadKnowledgeClaims().value,
+        memories: memories || [],
+        events: listCharacterEventsByRelation(relationship.id),
         topicHistory: loadMomentTopicRecords().value,
-        routine: resolveChatRoutine(
-          buildCharacterRoutine(friend.routine),
-          friend.enableTimeAwareness !== false,
-        ),
-        now: occurredAt,
-      });
-
-      const systemInstruction = `Your task: Write a WeChat Moment post from the character's scoped life context supplied by the Moment Prompt Adapter.
-🚨 [CRITICAL WECHAT MOMENT RULES]:
-1. The post must fit the character and may draw on confirmed material from this exact relationship, including confirmed offline experiences and relationship progress.
-2. The post content must be natural, engaging, and use the final output language specified below.
-3. Vary the form and length: a one-line fragment (5-30 Chinese characters), a short thought (20-60), or a concrete life record (60-160). Do not force every post into the same paragraph length or literary style.
-4. Write in first person only. Do NOT use OOC tags, narration brackets, AI labels, or talk like an AI. Just output the text of the Moment post.
-5. Moments do not support chat stickers or sticker links. Never output [表情]、[表情]|名称|URL、blob: URL, sticker names, or chat attachment markup. Use post text, with only the dedicated final "(配图：...)" text-image line permitted by rule 7.
-6. Do NOT include any parenthesized meta-narration or action descriptions like "(凌晨两点 范千发了条朋友圈)".
-7. Decide explicitly whether this post benefits from a visual. When a concrete scene, food, object, ticket, music, street view, outfit, or shared outing is central, prefer a text-image card. Add one final separate line in exactly this format: "(配图：图片描述)". This is an allowed Moment-only rendering instruction, not a chat attachment or body text.
-8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：" (e.g. "评论：别猜了 没说是谁 困了 睡觉"), we will automatically publish it as a real comment under your post.
-9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the supplied feed history. Prefer a specific detail from the scoped context over generic weather, tiredness, coffee, work, or vague feelings.
-10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or AI-inferred events. If there is no fresh scoped topic, output exactly "SKIP" and nothing else.
-
-${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
-`;
-
-      const composedPrompt = PromptComposer.compose({
-        scenario: "moment-post",
-        message: "请仅根据角色公开资料与公开动态历史，判断是否有值得发布且明显不同于历史动态的新内容；有则写一条，没有则只输出 SKIP。不要为了完成任务硬发。",
-        history: [],
-        systemInstruction,
-      });
-      const generated = await requestCharacterMomentOnce({
+        settings,
+        activeIdentityId,
+        occurredAt,
         requestAi: apiChat,
-        request: {
-        ...composedPrompt,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature,
-        },
-        character: friend,
-        ownerIdentityId: activeIdentityId,
-        parseContent: cleanAndExtractMoment,
-        relationId: relationship.id,
-        occurredAt: () => occurredAt,
-        temporalContext,
-        existingMoments: ownerMomentHistory,
-        publicContext,
-        relationContext,
-        relationWorldKnowledge,
+        cleanAndExtractMoment,
+        characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
       });
       if (generated.blockedReason === "prohibited-content") {
         // Automatic Moments are optional background content. A provider safety
@@ -5590,7 +2875,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
     let enriched = moment;
     if (moment.image) {
       const [description, imageSize] = await Promise.all([
-        moment.imageDescription ? Promise.resolve(moment.imageDescription) : analyzeMomentPhoto(moment.image),
+        moment.imageDescription ? Promise.resolve(moment.imageDescription) : analyzeMomentPhotoForCurrentSettings(moment.image),
         readMomentImageSize(moment.image),
       ]);
       enriched = {
@@ -5650,6 +2935,30 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       }
     }
   };
+
+  const proactivePassDependencies = {
+    relationships: activeRelationships,
+    characters,
+    messages: messagesRef.current,
+    settingsName: settings.name,
+    isOfflineStoryActiveFor,
+    processedCatchups: new Set(Object.entries(processedCatchupsRef.current).filter(([, processed]) => processed).map(([id]) => id)),
+    scheduleNextProactiveMessage,
+    updateRelationshipSession,
+    triggerProactiveFor,
+    checkAndTriggerCharacterMoments,
+  };
+  const runProactiveCatchup = async () => {
+    runProactiveCatchupPass(proactivePassDependencies);
+    proactivePassDependencies.processedCatchups.forEach((id) => { processedCatchupsRef.current[id] = true; });
+  };
+  const runBackgroundProactive = () => runBackgroundProactivePass(proactivePassDependencies);
+
+  useProactiveChatScheduler({
+    enabled: activeRelationships.length > 0,
+    runCatchupPass: runProactiveCatchup,
+    runBackgroundPass: runBackgroundProactive,
+  });
 
   // Moments publication
   const handleMomentImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -5847,67 +3156,17 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
   return (
     <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans select-none overflow-hidden relative" data-chat-shell>
-      <Modal
-        open={Boolean(innerVoiceCharacter)}
-        onClose={closeInnerVoice}
-        title={innerVoiceMode === "history" ? "历史心声" : "角色心声"}
-        description={innerVoiceCharacter ? (
-          <span className="flex items-center gap-2">
-            <RenderAvatar src={innerVoiceCharacter.avatar} alt="" name={innerVoiceCharacter.name} className="h-7 w-7 rounded-full object-cover" />
-            <span>{innerVoiceCharacter.remark || innerVoiceCharacter.name}</span>
-          </span>
-        ) : undefined}
-        ariaLabel="角色心声"
-        footer={innerVoiceMode === "current" ? (
-          <Button variant="secondary" fullWidth onClick={() => setInnerVoiceMode("history")}>查看历史心声</Button>
-        ) : (
-          <Button variant="secondary" fullWidth onClick={() => setInnerVoiceMode("current")}>返回当前心声</Button>
-        )}
-      >
-        {innerVoiceMode === "current" ? (
-          <div className="space-y-3">
-            {innerVoiceLoading && <p className="py-6 text-center text-sm text-[var(--color-text-secondary)]">正在捕捉此刻的心声…</p>}
-            {!innerVoiceLoading && innerVoiceError && <p className="py-6 text-center text-sm text-red-500">{innerVoiceError}</p>}
-            {!innerVoiceLoading && innerVoiceRecord && (
-              <Card variant="secondary" padding="md" className="space-y-3">
-                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">此刻的心声</h3>
-                <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-primary)]">{innerVoiceRecord.content}</p>
-                {innerVoiceRecord.translation && (
-                  <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-secondary)]">{innerVoiceRecord.translation}</p>
-                )}
-                <div className="border-t border-[var(--divider)]" />
-                <div className="space-y-1">
-                  <h4 className="text-xs font-semibold text-[var(--color-text-secondary)]">此刻情绪</h4>
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--color-text-primary)]">{getInnerVoiceEmotion(innerVoiceRecord)}</p>
-                </div>
-              </Card>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {innerVoiceHistory.length === 0 ? (
-              <p className="py-6 text-center text-sm text-[var(--color-text-secondary)]">还没有历史心声。</p>
-            ) : innerVoiceHistory.map((record) => (
-              <div key={record.id}>
-              <Card variant="outlined" padding="md" className="space-y-2">
-                <div className="flex items-center justify-between gap-3 text-xs text-[var(--color-text-secondary)]">
-                  <span>{new Date(record.createdAt).toLocaleString("zh-CN", { hour12: false })}</span>
-                </div>
-                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">此刻的心声</h3>
-                <p className="whitespace-pre-wrap text-sm leading-6">{record.content}</p>
-                {record.translation && <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--color-text-secondary)]">{record.translation}</p>}
-                <div className="border-t border-[var(--divider)]" />
-                <div className="space-y-1">
-                  <h4 className="text-xs font-semibold text-[var(--color-text-secondary)]">此刻情绪</h4>
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--color-text-primary)]">{getInnerVoiceEmotion(record)}</p>
-                </div>
-              </Card>
-              </div>
-            ))}
-          </div>
-        )}
-      </Modal>
-      
+      <InnerVoiceModal
+        character={innerVoiceController.character}
+        mode={innerVoiceController.mode}
+        onModeChange={innerVoiceController.setMode}
+        onClose={innerVoiceController.close}
+        loading={innerVoiceController.loading}
+        error={innerVoiceController.error}
+        record={innerVoiceController.record}
+        history={innerVoiceController.history}
+        getEmotion={innerVoiceController.getEmotion}
+      />
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter && isActiveChatScopeValid ? (
         <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"} data-user-chat-css={hasUserCustomChatCss ? "active" : "inactive"} data-chat-settings-open={isShowingCardModal ? "true" : "false"}>
@@ -8973,7 +6232,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 </div>
                 <div className="p-3 overflow-y-auto space-y-2 flex-1">
                   {(() => {
-                    const raw = localStorage.getItem("phone_music_tracks");
+                    const raw = readString("phone_music_tracks").value;
                     let userTracks: { title: string; artist: string }[] = [];
                     if (raw) {
                       try {
@@ -9373,367 +6632,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
               onClearCommentLongPress={clearMomentCommentLongPress}
             />
           )}
-          {false && activeTab === "moments" && (() => {
-            const filterChar = momentsFilterCharId ? characters.find((c) => c.id === momentsFilterCharId) : null;
-            const momentsTabName = filterChar ? (filterChar.remark || filterChar.name) : settings.name;
-            const momentsTabAvatar = filterChar ? filterChar.avatar : settings.avatar;
-            const momentsTabCover = filterChar ? (filterChar.momentsCover || "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop") : (settings.momentsCover || "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop");
-            return (
-              <div className="bg-white min-h-full pb-20 overflow-y-auto">
-                {/* Moments Cover banner */}
-                <div className="h-64 bg-slate-200 relative shrink-0">
-                  <img
-                    src={momentsTabCover}
-                    alt="Moments Cover"
-                    className="w-full h-full object-cover"
-                  />
-                  
-                  {/* Overlay Controls */}
-                  <button
-                    onClick={onClose}
-                    className="absolute top-4 left-4 p-1.5 rounded-full bg-black/40 hover:bg-black/65 text-white z-20 transition-colors shadow-sm"
-                    title="返回主页"
-                  >
-                    <ChevronLeft className="w-5 h-5" />
-                  </button>
-
-                  <div className="absolute top-4 right-4 flex gap-2.5 z-20">
-                    <label
-                      className="p-1.5 rounded-full bg-black/40 hover:bg-black/65 text-white cursor-pointer transition-colors shadow-sm"
-                      title="更换封面图"
-                    >
-                      <Camera className="w-5 h-5" />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleMomentsCoverUpload}
-                      />
-                    </label>
-                    <button
-                      onClick={() => setShowMomentPublisher(true)}
-                      className="p-1.5 rounded-full bg-black/40 hover:bg-black/65 text-white transition-colors shadow-sm"
-                      title="发布新动态"
-                    >
-                      <Plus className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {/* Overlapping User Avatar & Name */}
-                  <div className="absolute right-4 -bottom-6 flex items-end gap-3 z-30">
-                    <span className="text-sm font-bold text-white tracking-tight pb-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] select-none">
-                      {momentsTabName}
-                    </span>
-                    <img
-                      src={momentsTabAvatar}
-                      alt=""
-                      className="w-16 h-16 rounded-[12px] border-2 border-white object-cover bg-white shadow-md z-40"
-                    />
-                  </div>
-                </div>
-
-                {/* Top Spacing for Overlapping Avatar */}
-                <div className="h-10"></div>
-
-                {/* Filter State Banner */}
-                {momentsFilterCharId && (
-                  <div className="mx-4 my-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl flex justify-between items-center text-xs">
-                    <span className="font-medium text-slate-500">正在查看好友的朋友圈</span>
-                    <button
-                      onClick={() => setMomentsFilterCharId(null)}
-                      className="text-blue-500 hover:text-blue-600 font-bold"
-                    >
-                      查看全部
-                    </button>
-                  </div>
-                )}
-
-                {/* Moments publishing Modal inline */}
-                {showMomentPublisher && (
-                  <form
-                    onSubmit={handlePublishMoment}
-                    className="bg-white p-4 border border-slate-100 space-y-3 mx-4 my-3 rounded-2xl shadow-sm"
-                  >
-                    <div className="flex justify-between items-center pb-1">
-                      <span className="text-xs font-bold text-slate-400">分享新鲜事...</span>
-                      <button type="button" onClick={() => setShowMomentPublisher(false)} className="text-slate-400">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <textarea
-                      rows={3}
-                      value={momentInputText}
-                      onChange={(e) => setMomentInputText(e.target.value)}
-                      placeholder="说点什么吧，可以配个好看的插图..."
-                      className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed text-left"
-                    />
-
-                    <div className="flex justify-between items-center">
-                      <label className="cursor-pointer text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold">
-                        <ImageIcon className="w-4 h-4" />
-                        <span>添加配图</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleMomentImageUpload}
-                          className="hidden"
-                        />
-                      </label>
-
-                      <button
-                        type="button"
-                        onClick={() => setShowTextImageInput((value) => !value)}
-                        className="text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold"
-                      >
-                        <FileText className="w-4 h-4" />
-                        <span>文字图</span>
-                      </button>
-
-                      <button
-                        type="submit"
-                        className="px-4 py-1.5 bg-neutral-950 hover:bg-neutral-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
-                      >
-                        发布动态
-                      </button>
-                    </div>
-
-                    {showTextImageInput && (
-                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 space-y-2">
-                        <p className="text-[11px] text-slate-500">填写图片描述。发布后会以文字图显示，点击可查看完整描述。</p>
-                        <textarea
-                          rows={2}
-                          value={momentTextImageDescription}
-                          onChange={(e) => setMomentTextImageDescription(e.target.value)}
-                          placeholder="例如：傍晚的操场，跑道边放着一瓶喝了一半的水"
-                          className="w-full px-2.5 py-2 rounded-lg bg-white border border-slate-200 focus:outline-none text-xs resize-none"
-                        />
-                      </div>
-                    )}
-
-                    {momentAttachedImage && (
-                      <div className="relative w-24 h-24 rounded-lg overflow-hidden border">
-                        <img src={momentAttachedImage} alt="" className="w-full h-full object-cover" />
-                        <button
-                          type="button"
-                          onClick={() => setMomentAttachedImage(null)}
-                          className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    )}
-                  </form>
-                )}
-
-              {/* Moments list */}
-              <div className="px-4 divide-y divide-slate-100 max-w-md mx-auto">
-                {filteredMoments.length === 0 ? (
-                  <div className="text-center py-16 text-slate-400 text-xs">
-                    暂无动态，点击右上角相机发布第一条朋友圈吧！
-                  </div>
-                ) : (
-                  filteredMoments.map((mom) => {
-                    const hasLiked = mom.likes.includes(settings.name);
-                    const momChar = mom.characterId ? characters.find((c) => c.id === mom.characterId) : null;
-                    const momAuthorName = momChar ? (momChar.remark || momChar.name) : mom.authorName;
-                    const momAuthorAvatar = momChar ? momChar.avatar : mom.authorAvatar;
-                    const textImageDescription = mom.imageDescription || cleanAndExtractMoment(mom.content).imageDescription;
-                    return (
-                      <div key={mom.id} className="py-5 flex gap-3">
-                        
-                        {/* Author Avatar */}
-                        <img
-                          src={momAuthorAvatar}
-                          alt=""
-                          className="w-10 h-10 rounded-[6px] object-cover bg-slate-50 shrink-0 border border-slate-100"
-                        />
-
-                        {/* Right Content Column */}
-                        <div className="flex-1 min-w-0">
-                          {/* Name */}
-                          <h4 className="text-xs font-bold text-[#576b95] hover:underline cursor-pointer">
-                            {momAuthorName}
-                          </h4>
-
-                          {/* Content text */}
-                          <p 
-                            className="chat-long-press-target text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
-                            title="长按/右键 弹出菜单"
-                            onContextMenu={(e) => handleMomentTextContextMenu(
-                              e,
-                              mom.id,
-                              renderMomentContent(mom.content),
-                              momAuthorName,
-                              momAuthorAvatar,
-                              mom.characterId === undefined || mom.characterId === null,
-                              mom.timestamp
-                            )}
-                            onPointerDown={(e) => handleMomentTextPointerDown(
-                              e,
-                              mom.id,
-                              renderMomentContent(mom.content),
-                              momAuthorName,
-                              momAuthorAvatar,
-                              mom.characterId === undefined || mom.characterId === null,
-                              mom.timestamp
-                            )}
-                            onPointerUp={handleMomentTextPointerUpOrLeave}
-                            onPointerLeave={handleMomentTextPointerUpOrLeave}
-                            onPointerMove={handleMomentTextPointerMove}
-                          >
-                            {renderMomentContent(mom.content)}
-                          </p>
-
-                          {/* Translation block if exists */}
-                          {momentTranslations[mom.id] && (
-                            <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-600 leading-relaxed bg-slate-50/60 p-2.5 rounded-lg animate-fade-in">
-                              <div className="flex items-center gap-1 text-[9px] text-slate-400 mb-1 font-bold">
-                                <Languages className="w-3 h-3" />
-                                <span>翻译 (由 AI 翻译)</span>
-                              </div>
-                              <p className="whitespace-pre-wrap">{momentTranslations[mom.id]}</p>
-                            </div>
-                          )}
-
-                          {/* Attached Photo */}
-                          {textImageDescription && !mom.image && (
-                            <button
-                              type="button"
-                              onClick={() => setViewingImageDescription(textImageDescription)}
-                              className="mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm"
-                            >
-                              <ImageIcon className="w-4 h-4 text-slate-400 mb-4" />
-                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{textImageDescription}</p>
-                              <span className="block mt-2 text-[10px] text-slate-400">文字图 · 点击查看</span>
-                            </button>
-                          )}
-                          {mom.image && (
-                            <div className="mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
-                              <img src={mom.image} alt={mom.imageDescription || "朋友圈配图"} width={mom.imageWidth} height={mom.imageHeight} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />
-                            </div>
-                          )}
-
-                          {/* Footer Action Row */}
-                          <div className="flex justify-between items-center mt-3">
-                            <span className="text-[10px] text-slate-400 font-medium">
-                              {new Date(mom.timestamp).toLocaleDateString([], { month: '2-digit', day: '2-digit' })}{" "}
-                              {new Date(mom.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-                            </span>
-
-                            {/* Like / Comment small buttons */}
-                            <div className="flex items-center gap-4">
-                              <button
-                                onClick={() => onLikeMoment(mom.id, settings.name)}
-                                className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${
-                                  hasLiked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"
-                                }`}
-                              >
-                                <Heart className={`w-3.5 h-3.5 ${hasLiked ? "fill-rose-500 text-rose-500" : ""}`} />
-                                <span>{mom.likes.length || "赞"}</span>
-                              </button>
-
-                              <button
-                                onClick={() => {
-                                  const isOpen = showCommentInputMap[mom.id];
-                                  setShowCommentInputMap(prev => ({ ...prev, [mom.id]: !prev[mom.id] }));
-                                  if (isOpen) {
-                                    setReplyingToCommentMap(prev => {
-                                      const copy = { ...prev };
-                                      delete copy[mom.id];
-                                      return copy;
-                                    });
-                                  }
-                                }}
-                                className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-600 font-semibold transition-colors"
-                              >
-                                <MessageCircle className="w-3.5 h-3.5" />
-                                <span>{getMomentComments(mom).length || "评论"}</span>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Integrated Like & Comment Block (WeChat style) */}
-                          {(mom.likes.length > 0 || getMomentComments(mom).length > 0) && (
-                            <div className="moments-reaction-shelf bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
-                              {/* Likes list */}
-                              {mom.likes.length > 0 && (
-                                <div className="moments-reaction-divider flex items-center gap-1.5 text-[#576b95] font-bold flex-wrap pb-1">
-                                  <Heart className="w-3 h-3 text-rose-500 fill-current shrink-0" />
-                                  <span className="leading-tight">{mom.likes.join(", ")}</span>
-                                </div>
-                              )}
-
-                              {/* Comments list */}
-                              {getMomentComments(mom).length > 0 && (
-                                <div className="moments-comment-list py-0.5">
-                                  {getMomentComments(mom).map((comm) => {
-                                    const commChar = characters.find((c) => c.name === comm.authorName);
-                                    const commAuthorName = commChar ? (commChar.remark || commChar.name) : comm.authorName;
-                                    return (
-                                      <div
-                                        key={comm.id}
-                                        onClick={() => handleMomentCommentClick(mom.id, comm)}
-                                        onPointerDown={(event) => handleMomentCommentPointerDown(event, mom.id, comm)}
-                                        onPointerUp={clearMomentCommentLongPress}
-                                        onPointerLeave={clearMomentCommentLongPress}
-                                        onPointerMove={handleMomentCommentPointerMove}
-                                        onPointerCancel={clearMomentCommentLongPress}
-                                        onContextMenu={(event) => event.preventDefault()}
-                                        className="chat-long-press-target py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
-                                        title={`点击回复；长按翻译或删除评论`}
-                                      >
-                                        <span className="font-bold text-[#576b95] mr-1">
-                                          {commAuthorName}
-                                        </span>
-                                        <span className="text-slate-700">{comm.content}</span>
-                                        {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)] && (
-                                          <span className="mt-0.5 block whitespace-pre-wrap text-slate-500">
-                                            {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)]}
-                                          </span>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Quick inline comment input */}
-                          {showCommentInputMap[mom.id] && (
-                            <div className="flex gap-2 items-center bg-[#f7f7f7] border border-slate-200/30 rounded-lg px-2.5 py-1 mt-2">
-                              <input
-                                type="text"
-                                value={inlineCommentsTexts[mom.id] || ""}
-                                onChange={(e) =>
-                                  setInlineCommentsTexts({ ...inlineCommentsTexts, [mom.id]: e.target.value })
-                                }
-                                placeholder={replyingToCommentMap[mom.id] ? `回复${replyingToCommentMap[mom.id].authorName}：` : "发表评论..."}
-                                className="flex-1 bg-transparent border-none focus:outline-none text-[10px] text-slate-700 py-0.5"
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    handlePublishComment(mom.id);
-                                  }
-                                }}
-                              />
-                              <button
-                                onClick={() => handlePublishComment(mom.id)}
-                                className="text-[10px] text-blue-500 hover:text-blue-600 font-bold px-1"
-                              >
-                                发送
-                              </button>
-                            </div>
-                          )}
-
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )})()}
 
           {/* TABS: ME PROFILE (我) */}
           {activeTab === "me" && (

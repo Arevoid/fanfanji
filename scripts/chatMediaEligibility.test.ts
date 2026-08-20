@@ -7,6 +7,7 @@ import {
   shouldAutomaticallyConvertTextToVoice,
 } from "../src/features/chat/services/voiceMessageEligibility";
 import type { AutomaticVoiceConversionInput } from "../src/features/chat/services/voiceMessageEligibility";
+import { shouldConvertBubbleToVoice } from "../src/features/chat/services/voiceBubbleEligibility";
 
 const character = (overrides: Partial<Character> = {}): Character => ({
   id: "character-a",
@@ -34,6 +35,8 @@ const scope = {
   conversationId: "direct:relation-identity-a",
   userIdentityId: "identity-a",
 };
+
+const runtimeContext = { ...scope, isGroup: false };
 
 const eligible = (overrides: Partial<AutomaticVoiceConversionInput> = {}) =>
   shouldAutomaticallyConvertTextToVoice({
@@ -106,9 +109,27 @@ assert.equal(eligible({
 assert.equal(isExplicitVoiceRequest("我想听你的声音"), true);
 assert.equal(hasExplicitVoicePreference(character({ personality: "很爱发语音" })), true);
 
+assert.equal(shouldConvertBubbleToVoice({
+  enabled: false,
+  character: character({ voiceFrequency: "high" }),
+  lastUserMessage: message({ content: "给我发条语音吧" }),
+  recentMessages: [],
+  bubbleIndex: 0,
+  bubbleText: "你好",
+  replyContext: runtimeContext,
+}), false, "disabled TTS stays disabled at the UI boundary");
+assert.equal(shouldConvertBubbleToVoice({
+  enabled: true,
+  character: character({ voiceFrequency: "high" }),
+  lastUserMessage: message({ content: "给我发条语音吧" }),
+  recentMessages: [],
+  bubbleIndex: 0,
+  bubbleText: "你好",
+  replyContext: runtimeContext,
+}), true, "the UI boundary forwards a valid direct scope");
+
 const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
-assert.match(appChatSource, /shouldConvertBubbleToVoice\(turnCharacter, userMsg, messages, idx, bubbleText, replyContext\)/);
-assert.match(appChatSource, /shouldConvertBubbleToVoice\(friend, null, charMsgs, idx, bubbleText, proactiveReplyContext\)/);
-assert.match(appChatSource, /relationId: replyContext\.relationId/);
+assert.match(appChatSource, /canConvertBubbleToVoice\(turnCharacter, userMsg, messages, idx, bubbleText, replyContext\)/);
+assert.match(appChatSource, /canConvertBubbleToVoice\(friend, null, charMsgs, idx, bubbleText, proactiveReplyContext\)/);
 assert.doesNotMatch(appChatSource, /shouldConvertBubbleToVoice\(activeCharacter, userMsg, messages/);
 console.log("PASS character media policy keeps ordinary replies as text and protects explicit voice cases");

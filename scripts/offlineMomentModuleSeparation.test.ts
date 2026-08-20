@@ -8,6 +8,7 @@ import type { WorldBookEntry } from "../src/types";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const appChatSource = fs.readFileSync(path.join(root, "src/components/AppChat.tsx"), "utf8");
 const appOfflineSource = fs.readFileSync(path.join(root, "src/components/AppOffline.tsx"), "utf8");
+const generationSource = fs.readFileSync(path.join(root, "src/features/offline/hooks/useOfflineStoryGenerationActions.ts"), "utf8");
 const momentStateSource = fs.readFileSync(
   path.join(root, "src/features/moments/hooks/useMomentComposerState.ts"),
   "utf8",
@@ -16,8 +17,8 @@ const momentStateSource = fs.readFileSync(
 assert.match(appChatSource, /useMomentComposerState\(\)/);
 assert.doesNotMatch(appChatSource, /const \[momentInputText, setMomentInputText\] = useState/);
 assert.doesNotMatch(momentStateSource, /localStorage|sessionStorage|indexedDB/);
-assert.match(appOfflineSource, /collectOfflineWorldBookContext\(\{/);
-assert.match(appOfflineSource, /formatOfflineWorldBookEntries\(triggeredWorldBook\.values\(\)\)/);
+assert.match(generationSource, /collectOfflineWorldBookContext\(\{/);
+assert.match(generationSource, /formatOfflineWorldBookEntries\(triggeredWorldBook\.values\(\)\)/);
 
 const entry = (id: string, position: WorldBookEntry["position"]): WorldBookEntry => ({
   id,

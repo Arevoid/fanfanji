@@ -6,7 +6,7 @@ import { messageEntryDb } from "../src/core/storage/messageEntryDb";
 import { offlineStoryEntryDb } from "../src/core/storage/offlineStoryEntryDb";
 import { offlineStoryDb } from "../src/core/storage/offlineStoryDb";
 import { readingAssetDb } from "../src/core/storage/readingAssetDb";
-import { loadStorageMigrationState } from "../src/core/storage/storageMigrationState";
+import { loadStorageMigrationState, saveStorageMigrationState } from "../src/core/storage/storageMigrationState";
 import { buildSystemBackup, restoreSystemBackupIndexedDb } from "../src/features/settings/systemBackup";
 import { removeMigratedStorageCopies } from "../src/core/storage/storageDiagnostics";
 import { runStoragePreflight } from "../src/core/storage/storagePreflight";
@@ -70,6 +70,7 @@ assert.deepEqual(await messageEntryDb.loadAll(), messages);
 assert.deepEqual(await offlineStoryEntryDb.loadAll(), stories);
 assert.deepEqual(await offlineStoryDb.loadAll(), stories);
 assert.equal(loadStorageMigrationState()?.phase, "completed");
+assert.equal(loadStorageMigrationState()?.report?.completed, 2);
 assert.equal(localStorage.getItem("phone_messages_v3"), JSON.stringify(messages));
 assert.equal(localStorage.getItem("phone_offline_stories"), JSON.stringify(stories));
 
@@ -81,6 +82,35 @@ await offlineStoryEntryDb.replaceAll([]);
 await restoreSystemBackupIndexedDb(backup.indexedDb);
 assert.deepEqual(await messageEntryDb.loadAll(), messages);
 assert.deepEqual(await offlineStoryEntryDb.loadAll(), stories);
+
+// An interrupted migration must require an explicit recovery option, then
+// resume only the unfinished module and re-verify both modules.
+disableOfflineStoryEntryStore();
+const completedState = loadStorageMigrationState();
+assert.ok(completedState);
+assert.equal(saveStorageMigrationState({
+  ...completedState,
+  phase: "migrating",
+  updatedAt: Date.now(),
+  currentModule: "offlineStories",
+  completedModules: ["messages"],
+  report: {
+    completed: 1,
+    skipped: 0,
+    repaired: 0,
+    failed: 0,
+    modules: [{ module: "messages", status: "completed", records: messages.length, repaired: 0 }],
+  },
+}).success, true);
+await assert.rejects(
+  migrateContentStorage({ preflight: await runStoragePreflight() }),
+  /迁移预检未通过/,
+);
+const resumedReport = await migrateContentStorage({ resumeInterrupted: true });
+assert.equal(resumedReport.offlineStoryCount, stories.length);
+assert.equal(loadStorageMigrationState()?.phase, "completed");
+assert.deepEqual(await messageEntryDb.loadAll(), messages, "resume must preserve the completed module");
+assert.deepEqual(await offlineStoryEntryDb.loadAll(), stories, "resume must complete the interrupted module");
 
 const secondStory = { ...stories[0], id: "story-2", title: "第二个故事", updatedAt: 3 };
 await offlineStoryEntryDb.replaceAll([stories[0], secondStory]);

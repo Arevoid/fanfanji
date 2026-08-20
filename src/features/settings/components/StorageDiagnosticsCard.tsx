@@ -1,5 +1,7 @@
 import { formatStorageBytes, type StorageDiagnostics } from "../../../core/storage/storageDiagnostics";
 import type { StoragePreflightResult } from "../../../core/storage/storagePreflight";
+import { loadApiUsageMetrics, summarizeApiUsage } from "../../../core/monitoring/apiUsageMetrics";
+import { loadRuntimeErrorMetrics, summarizeRuntimeErrors } from "../../../core/monitoring/runtimeErrorMetrics";
 
 interface StorageDiagnosticsCardProps {
   diagnostics: StorageDiagnostics | null;
@@ -10,8 +12,11 @@ interface StorageDiagnosticsCardProps {
   onRefresh: () => void;
   onRunPreflight: () => void;
   onRunContentMigration: () => void;
+  onResumeInterruptedMigration: () => void;
   contentMigrationRunning: boolean;
   onRequestPersistence: () => void;
+  onDownloadDiagnosticReport: () => void;
+  onCleanOrphanedResources: () => void;
   onCleanMigratedCopies: () => void;
 }
 
@@ -24,10 +29,15 @@ export function StorageDiagnosticsCard({
   onRefresh,
   onRunPreflight,
   onRunContentMigration,
+  onResumeInterruptedMigration,
   contentMigrationRunning,
   onRequestPersistence,
+  onDownloadDiagnosticReport,
+  onCleanOrphanedResources,
   onCleanMigratedCopies,
 }: StorageDiagnosticsCardProps) {
+  const apiUsage = summarizeApiUsage(loadApiUsageMetrics());
+  const runtimeErrors = summarizeRuntimeErrors(loadRuntimeErrorMetrics());
   return (
     <>
       <div className="settings-section-header">存储空间</div>
@@ -48,10 +58,18 @@ export function StorageDiagnosticsCard({
             <div>浏览器总占用：{diagnostics.usage === undefined ? "不可用" : formatStorageBytes(diagnostics.usage)} / {diagnostics.quota === undefined ? "未知" : formatStorageBytes(diagnostics.quota)}</div>
             <div>应用版本：v{appVersion}</div>
             <div>数据版本：{diagnostics.dataSchemaVersion || "未设置（兼容模式）"}</div>
+            <div>当前 schema 基线：v{diagnostics.currentSchemaVersion}</div>
+            <div>迁移脚本版本：{diagnostics.migrationScriptVersion}</div>
             <div>备份版本：v{backupVersion}</div>
+            <div>API 调用统计（近 90 天）：{apiUsage.requests} 次，成功 {apiUsage.successes}，失败 {apiUsage.failures}，输入 {apiUsage.inputCharacters} 字符，输出 {apiUsage.outputCharacters} 字符</div>
+            <div>运行时错误统计（近 30 天）：{runtimeErrors.total} 次，{runtimeErrors.buckets} 种错误类型（仅记录类型与次数）</div>
             <div>最近备份：{lastBackupAt ? new Date(Number(lastBackupAt)).toLocaleString() : "暂无记录"}</div>
+            <div>最近迁移：{diagnostics.migrationState?.phase === "completed" ? new Date(diagnostics.migrationState.updatedAt).toLocaleString() : "暂无已完成迁移"}</div>
+            <div>未完成迁移：{diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" ? "是" : "否"}</div>
             <div>持久化许可：{diagnostics.persisted === undefined ? "未知" : diagnostics.persisted ? "已启用" : "未启用"}</div>
             {diagnostics.migrationState && <div>迁移状态：{diagnostics.migrationState.phase}（{diagnostics.migrationState.completedModules.length} 个模块已完成）</div>}
+            {diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" && diagnostics.migrationState.phase !== "failed" && diagnostics.migrationState.phase !== "cancelled" && <button type="button" disabled={contentMigrationRunning} onClick={onResumeInterruptedMigration} className="mt-2 rounded-[10px] bg-amber-600 px-3 py-2 font-bold text-white disabled:opacity-50">恢复未完成迁移</button>}
+            {diagnostics.migrationState?.report && <div>迁移报告：完成 {diagnostics.migrationState.report.completed}，跳过 {diagnostics.migrationState.report.skipped}，修复 {diagnostics.migrationState.report.repaired}，失败 {diagnostics.migrationState.report.failed}</div>}
             {diagnostics.migrationLock && <div>迁移锁：{diagnostics.migrationLock.ownerId}，有效至 {new Date(diagnostics.migrationLock.expiresAt).toLocaleString()}</div>}
             <div>状态：{diagnostics.pressure === "critical" ? "空间严重不足" : diagnostics.pressure === "warning" ? "空间偏高" : diagnostics.pressure === "normal" ? "正常" : "未知"}</div>
             <div>健康扫描：已检查 {diagnostics.health.checkedCollections} 个数据集合，发现 {diagnostics.health.findings.length} 项待检查问题</div>
@@ -60,6 +78,8 @@ export function StorageDiagnosticsCard({
             {diagnostics.health.findings.slice(0, 5).map((finding) => <div key={`${finding.key}-${finding.kind}`} className="text-amber-700">待检查：{finding.key} · {finding.detail}</div>)}
             {diagnostics.localStorageEntries.slice(0, 3).map((entry) => <div key={entry.key} className="truncate">最大项目：{entry.key}（{formatStorageBytes(entry.bytes)}）</div>)}
             {!diagnostics.persisted && <button type="button" onClick={onRequestPersistence} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">申请浏览器持久化存储</button>}
+            <button type="button" onClick={onDownloadDiagnosticReport} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">下载无隐私诊断报告</button>
+            <button type="button" onClick={onCleanOrphanedResources} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">清理已确认孤儿资源</button>
             <button type="button" onClick={onCleanMigratedCopies} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">清理已迁移副本</button>
           </div>
         )}

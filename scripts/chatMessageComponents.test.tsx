@@ -20,10 +20,12 @@ const messages = [
 const renderedIds: string[] = [];
 const rendered = renderToStaticMarkup(
   <MessageList
-    messages={messages}
-    scrollRef={{ current: null }}
-    className="flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list chat-message-list"
-    style={{ WebkitOverflowScrolling: "touch" }}
+  messages={messages}
+  scrollRef={{ current: null }}
+  className="flex-1 overflow-y-auto p-4 space-y-4 cv-messages-list chat-message-list"
+  style={{ WebkitOverflowScrolling: "touch" }}
+  contentClassName="message-content"
+  header={<div className="message-header">header</div>}
     renderMessage={(message, index) => {
       renderedIds.push(message.id);
       return <div key={message.id} className={`message-${message.sender}`} data-index={index}>{message.content}</div>;
@@ -82,6 +84,7 @@ const checks: Array<[string, boolean]> = [
   ["X input array is unchanged", messages.map((message) => message.id).join(",") === originalIds],
   ["Y render window keeps latest messages", renderedWindowIds.join(",") === "packet,transfer,call"],
   ["Z render window preserves absolute indexes", renderedWindowIndexes.join(",") === "7,8,9"],
+  ["AA window supports a header and content wrapper", rendered.includes("message-header") && rendered.includes("message-content")],
 ];
 
 for (const [name, passed] of checks) {

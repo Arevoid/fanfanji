@@ -4,13 +4,20 @@ import { MosslandTtsError, synthesizeMosslandSpeech } from "../server/mosslandTt
 import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { buildTranslationPrompt, callTextProvider, fetchTextModels, TextApiError } from "../server/textProtocolAdapters";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
+import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
 }
 
 function json(body: unknown, status = 200) {
-  return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
+  return Response.json(body, { status, headers: { "Cache-Control": "no-store", "Content-Security-Policy": CONTENT_SECURITY_POLICY } });
+}
+
+function withSecurityHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 async function requestBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -69,7 +76,7 @@ async function synthesizeMinimax(body: Record<string, unknown>): Promise<Respons
     const binary = atob(value);
     bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   }
-  return new Response(bytes, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
+  return new Response(bytes, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store", "Content-Security-Policy": CONTENT_SECURITY_POLICY } });
 }
 
 /**
@@ -79,11 +86,14 @@ async function synthesizeMinimax(body: Record<string, unknown>): Promise<Respons
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/healthz" && request.method === "GET") {
+      return json({ status: "ok", service: "fanfanji-worker", version: "0.0.0" });
+    }
     const isImageRoute = url.pathname.startsWith("/api/image/");
     const isMosslandRoute = url.pathname === "/api/mossland-tts";
     const isTextRoute = ["/api/chat", "/api/translate", "/api/test-key", "/api/models", "/api/extract-memories", "/api/summarize-personality"].includes(url.pathname);
     const isMinimaxRoute = url.pathname === "/api/minimax-tts";
-    if (!isImageRoute && !isMosslandRoute && !isTextRoute && !isMinimaxRoute) return env.ASSETS.fetch(request);
+    if (!isImageRoute && !isMosslandRoute && !isTextRoute && !isMinimaxRoute) return withSecurityHeaders(await env.ASSETS.fetch(request));
     if (request.method !== "POST") return json({ success: false, error: "代理接口只接受 POST 请求。" }, 405);
 
     const body = await requestBody(request);
@@ -152,7 +162,7 @@ export default {
       try {
         const result = await synthesizeMosslandSpeech(body);
         return new Response(result.audio, {
-          headers: { "Content-Type": result.contentType, "Cache-Control": "no-store" },
+          headers: { "Content-Type": result.contentType, "Cache-Control": "no-store", "Content-Security-Policy": CONTENT_SECURITY_POLICY },
         });
       } catch (error) {
         const status = error instanceof MosslandTtsError ? error.status : 500;

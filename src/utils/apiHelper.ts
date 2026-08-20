@@ -8,6 +8,21 @@ import {
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
 import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError } from "./fetchWithTimeout";
+import { recordApiUsage, type ApiUsageOperation } from "../core/monitoring/apiUsageMetrics";
+
+async function trackApiUsage<T>(operation: ApiUsageOperation, inputCharacters: number, request: () => Promise<T>): Promise<T> {
+  try {
+    const result = await request();
+    const output = typeof result === "object" && result !== null && "text" in result
+      ? String((result as { text?: unknown }).text || "").length
+      : 0;
+    recordApiUsage({ operation, succeeded: true, inputCharacters, outputCharacters: output });
+    return result;
+  } catch (error) {
+    recordApiUsage({ operation, succeeded: false, inputCharacters });
+    throw error;
+  }
+}
 
 const parseApiErrorText = (rawText: string): string => {
   const trimmed = rawText.trim();
@@ -256,7 +271,7 @@ async function directClientFetchModels(apiKey: string, apiEndpoint?: string): Pr
 // 2. Exported Wrapper Functions that try Backend first, then Fallback
 
 // chat wrapper
-export async function apiChat(params: {
+async function apiChatImpl(params: {
   message: string;
   history: any[];
   systemInstruction?: string;
@@ -315,6 +330,10 @@ export async function apiChat(params: {
     // A successful non-JSON response is not a valid chat backend response.
   }
   throw new Error("聊天 API 返回成功状态，但没有有效的文本响应。");
+}
+
+export async function apiChat(params: Parameters<typeof apiChatImpl>[0]): Promise<{ text: string }> {
+  return trackApiUsage("chat", params.message.length + params.history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0), () => apiChatImpl(params));
 }
 
 // test key wrapper
@@ -484,7 +503,7 @@ export async function apiTestImageConnection(params: {
 }
 
 // extract memories wrapper
-export async function apiExtractMemories(params: {
+async function apiExtractMemoriesImpl(params: {
   history: KnowledgeExtractionHistoryItem[];
   characterName: string;
   characterProfile?: string;
@@ -565,8 +584,12 @@ export async function apiExtractMemories(params: {
   }
 }
 
+export async function apiExtractMemories(params: Parameters<typeof apiExtractMemoriesImpl>[0]): Promise<Awaited<ReturnType<typeof apiExtractMemoriesImpl>>> {
+  return trackApiUsage("memory-extraction", params.history.reduce((total, entry) => total + String(entry.text || "").length, 0), () => apiExtractMemoriesImpl(params));
+}
+
 // summarize personality wrapper
-export async function apiSummarizePersonality(params: {
+async function apiSummarizePersonalityImpl(params: {
   references: any[];
   apiKey: string;
   model: string;
@@ -628,8 +651,13 @@ ${referencesText}
   }
 }
 
+export async function apiSummarizePersonality(params: Parameters<typeof apiSummarizePersonalityImpl>[0]): Promise<{ text: string }> {
+  const inputCharacters = params.references.reduce((total, reference) => total + String(reference?.title || "").length + String(reference?.content || "").length, 0);
+  return trackApiUsage("personality", inputCharacters, () => apiSummarizePersonalityImpl(params));
+}
+
 // translate wrapper
-export async function apiTranslate(params: {
+async function apiTranslateImpl(params: {
   text: string;
   apiKey: string;
   model: string;
@@ -709,6 +737,10 @@ ${params.text}
         ? describeApiRequestError(fallbackErr, "翻译")
         : fallbackErr.message || "直连翻译失败");
   }
+}
+
+export async function apiTranslate(params: Parameters<typeof apiTranslateImpl>[0]): Promise<{ text: string }> {
+  return trackApiUsage("translation", params.text.length, () => apiTranslateImpl(params));
 }
 
 type MemoryExtractionParams = Parameters<typeof apiExtractMemories>[0];

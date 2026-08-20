@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const interactionState = readFileSync(new URL("../src/features/chat/hooks/useChatMessageInteractionState.ts", import.meta.url), "utf8");
+const cleanupActions = readFileSync(new URL("../src/features/chat/hooks/useChatMessageCleanupActions.ts", import.meta.url), "utf8");
 
 assert.match(source, /const shouldOpenUpward = spaceBelow < Math\.min\(360, viewportHeight \* 0\.55\) && spaceAbove > spaceBelow/);
 assert.match(source, /top: shouldOpenUpward \? undefined/);
@@ -13,15 +15,15 @@ const deleteIndex = source.indexOf("<span>删除</span>");
 const multiDeleteIndex = source.indexOf("<span>多选删除</span>");
 assert.ok(deleteIndex >= 0 && multiDeleteIndex > deleteIndex, "multi-select delete must appear immediately after ordinary delete");
 
-assert.match(source, /const \[isMultiSelectDeleteMode, setIsMultiSelectDeleteMode\]/);
-assert.match(source, /const \[selectedMessageIds, setSelectedMessageIds\]/);
+assert.match(interactionState, /const \[isMultiSelectDeleteMode, setIsMultiSelectDeleteMode\]/);
+assert.match(interactionState, /const \[selectedMessageIds, setSelectedMessageIds\]/);
 assert.match(source, /wrapSelectableMessage\(messageElement/);
 assert.match(source, /toggleMultiSelectedMessage\(msg\.id\)/);
 assert.match(source, /chat-message-selection-toggle/);
 assert.match(source, /chat-multi-select-toolbar/);
 assert.match(source, /已选 \{selectedMessageIds\.size\} 条/);
-assert.match(source, /currentChatMessages\.filter\(\(message\) => selectedMessageIds\.has\(message\.id\)\)/);
-assert.match(source, /selectedMessages\.forEach\(\(message\) => deleteMessageAndLinkedImage\(message\.id\)\)/);
-assert.match(source, /确定删除选中的 \$\{selectedMessages\.length\} 条消息吗/);
+assert.match(cleanupActions, /currentChatMessages\.filter\(\(message\) => selectedMessageIds\.has\(message\.id\)\)/);
+assert.match(cleanupActions, /selectedMessages\.forEach\(\(message\) => deleteMessageAndLinkedImage\(message\.id\)\)/);
+assert.match(cleanupActions, /确定删除选中的 \$\{selectedMessages\.length\} 条消息吗/);
 
 console.log("PASS chat bubble menu adaptive placement and multi-select deletion UI");

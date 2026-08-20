@@ -12,6 +12,7 @@ import type {
   UserSettings,
   WorldBookEntry,
 } from "../../../types";
+import { createId as createApplicationId } from "../../../core/id/createId";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { buildPublicForumCognitiveContext } from "../../../domain/publicCognitive/publicContextBuilder";
 import type {
@@ -65,9 +66,7 @@ export interface ForumActivityPlanInput {
   publicWorldSettings?: readonly PublicWorldSettingCandidate[];
 }
 
-const id = (prefix: string): string => `${prefix}-${typeof crypto !== "undefined" && "randomUUID" in crypto
-  ? crypto.randomUUID()
-  : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const id = (prefix: string): string => createApplicationId(prefix);
 
 export const forumActorKey = (actor: ForumActorRef): string => actor.kind === "relationship"
   ? `relationship:${actor.relationId}`

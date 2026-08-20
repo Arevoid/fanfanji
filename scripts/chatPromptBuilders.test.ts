@@ -28,7 +28,12 @@ assert.equal(finalized.indexOf("最终角色专属表达锚点") > finalized.ind
 assert.equal(finalized.endsWith("FINAL_LANG"), true);
 
 const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
-assert.match(appChat, /buildGroupChatSystemInstruction/);
+const groupChatService = readFileSync(new URL("../src/features/chat/services/groupChatService.ts", import.meta.url), "utf8");
+const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${appChat}\n${regenerationSource}`;
+assert.match(groupChatService, /buildGroupChatSystemInstruction/);
+assert.match(groupChatService, /generateIsolatedGroupChatReplies/);
+assert.doesNotMatch(appChat, /buildGroupChatSystemInstruction/);
 assert.match(appChat, /buildProactiveChatSystemInstruction/);
 assert.doesNotMatch(appChat, /你正在扮演微信群聊中的多位群成员/);
 
@@ -44,7 +49,7 @@ assert.match(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, /绝对不得把你自己
 assert.match(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, /不得突然升级成厌恶、羞辱、贬低或攻击/);
 assert.match(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, /精确时间戳确实显示多日未联系时，可以按事实提及这段间隔/);
 assert.match(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, /嘴臭、毒舌或辱追表达可以正常保留/);
-assert.equal((appChat.match(/assembledInstructions\.push\(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES\)/g) || []).length, 2);
-assert.equal((appChat.match(/assembledInstructions\.push\(userKnowledgeBoundary\)/g) || []).length, 2);
+assert.equal((chatRuntimeSource.match(/assembledInstructions\.push\(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES\)/g) || []).length, 2);
+assert.equal((chatRuntimeSource.match(/assembledInstructions\.push\(userKnowledgeBoundary\)/g) || []).length, 2);
 
 console.log("Chat prompt builders: 20 acceptance checks passed");

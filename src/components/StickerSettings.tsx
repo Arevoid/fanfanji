@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Sticker, StickerGroup, UserSettings } from "../types";
 import { stickerDb, compressImage as compressStickerImage, aiAnalyzeSticker, loadStickerImageBlob } from "../utils/stickerDb";
 import { parseStickerImportLine } from "../utils/stickerImport";
+import { createId } from "../core/id/createId";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import {
   Trash2,
@@ -135,7 +136,7 @@ export default function StickerSettings({
     const newStickers: Sticker[] = [];
 
     for (const file of fileList) {
-      const stickerId = `sticker-local-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const stickerId = createId("sticker-local");
       // Extract file name minus extension
       const originalName = file.name.replace(/\.[^/.]+$/, "");
 
@@ -194,7 +195,7 @@ export default function StickerSettings({
     const newStickers: Sticker[] = [];
     for (const importedLine of importedLines) {
       const { url } = importedLine;
-      const stickerId = `sticker-url-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const stickerId = createId("sticker-url");
       // Extract file name from URL segments
       let extractedName = importedLine.name || "未命名表情";
       try {
@@ -715,7 +716,7 @@ export default function StickerSettings({
                 onClick={async () => {
                   if (!newGroupNameVal.trim()) return;
                   const newGroup: StickerGroup = {
-                    id: `group-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                    id: createId("group"),
                     name: newGroupNameVal.trim(),
                     stickers: [],
                   };

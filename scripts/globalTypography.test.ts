@@ -32,7 +32,7 @@ const settings = readFileSync(new URL("../src/components/AppSettings.tsx", impor
 const runtime = readFileSync(new URL("../src/features/theme/useGlobalTypography.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/index.css", import.meta.url), "utf8");
 const clearData = readFileSync(new URL("../src/features/settings/clearApplicationData.ts", import.meta.url), "utf8");
-const bootstrap = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const bootstrap = readFileSync(new URL("../public/firstPaintTheme.js", import.meta.url), "utf8");
 
 assert.match(app, /useGlobalTypography\(settings\)/);
 assert.match(settings, /accept="\.ttf,\.otf,\.woff,\.woff2/);

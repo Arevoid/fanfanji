@@ -1,3 +1,5 @@
+import { attachIndexedDbLifecycle } from "../core/storage/idbLifecycle";
+
 /** IndexedDB-backed custom font files. Settings only retain lightweight metadata. */
 class FontAssetDB {
   private readonly dbName = "FanfanFontAssets";
@@ -12,7 +14,11 @@ class FontAssetDB {
         const db = request.result;
         if (!db.objectStoreNames.contains(this.storeName)) db.createObjectStore(this.storeName);
       };
-      request.onsuccess = () => { this.db = request.result; resolve(request.result); };
+      request.onsuccess = () => {
+        this.db = request.result;
+        attachIndexedDbLifecycle(request.result, () => { this.db = null; });
+        resolve(request.result);
+      };
       request.onerror = () => reject(request.error);
     });
   }

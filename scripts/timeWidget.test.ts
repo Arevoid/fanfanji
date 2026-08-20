@@ -19,7 +19,7 @@ const types = readFileSync(new URL("../src/types.ts", import.meta.url), "utf8");
 const backup = readFileSync(new URL("../src/features/home/desktopModuleBackup.ts", import.meta.url), "utf8");
 assert.match(widgets, /export function TimeWidget/);
 assert.match(widgets, /time_widget_font_color_/);
-assert.match(widgets, /time_widget_font_color_\$\{id\}`\), "#1c1917"/);
+assert.match(widgets, /readString\(`time_widget_font_color_\$\{id\}`\)\.value, "#1c1917"/);
 assert.match(widgets, /bg-transparent/);
 assert.match(widgets, /items-center justify-center[\s\S]*text-\[clamp\(92px,28vw,118px\)\] font-normal/);
 assert.match(widgets, /text-\[17px\] font-bold[\s\S]*mt-4 whitespace-nowrap text-\[clamp\(92px,28vw,118px\)\]/);

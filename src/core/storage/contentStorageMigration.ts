@@ -13,12 +13,13 @@ import {
   isMessageEntryStoreEnabled,
   isOfflineStoryEntryStoreEnabled,
 } from "./contentStorageFlags";
-import { loadStorageMigrationState, saveStorageMigrationState, type StorageMigrationState } from "./storageMigrationState";
-import { createStorageMigrationOwnerId, releaseStorageMigrationLock, tryAcquireStorageMigrationLock } from "./storageMigrationLock";
+import { loadStorageMigrationState, saveStorageMigrationState, type StorageMigrationState, type StorageMigrationReport } from "./storageMigrationState";
+import { createStorageMigrationOwnerId, releaseStorageMigrationLock, takeOverExpiredStorageMigrationLock, tryAcquireStorageMigrationLock } from "./storageMigrationLock";
 import { runStoragePreflight, type StoragePreflightResult } from "./storagePreflight";
 import { beginContentStorageMigration } from "./contentStorageRuntimeLock";
+import { STORAGE_MIGRATION_SCRIPT_VERSION } from "./storageVersion";
 
-export const CONTENT_STORAGE_MIGRATION_ID = "content-entry-storage-v1";
+export const CONTENT_STORAGE_MIGRATION_ID = STORAGE_MIGRATION_SCRIPT_VERSION;
 
 export interface ContentStorageMigrationReport {
   messageCount: number;
@@ -36,6 +37,8 @@ export interface ContentStorageMigrationProgress {
 export interface ContentStorageMigrationOptions {
   onProgress?: (progress: ContentStorageMigrationProgress) => void;
   preflight?: StoragePreflightResult;
+  /** Must only be set from an explicit user-confirmed recovery action. */
+  resumeInterrupted?: boolean;
 }
 
 export class ContentStorageMigrationError extends Error {
@@ -73,6 +76,7 @@ function createMigrationState(): StorageMigrationState {
     startedAt: now,
     updatedAt: now,
     completedModules: [],
+    report: { completed: 0, skipped: 0, repaired: 0, failed: 0, modules: [] },
   };
 }
 
@@ -97,7 +101,11 @@ export async function migrateContentStorage(
   options: ContentStorageMigrationOptions = {},
 ): Promise<ContentStorageMigrationReport> {
   const onProgress = options.onProgress;
-  const preflight = options.preflight || await runStoragePreflight();
+  const resumeInterrupted = options.resumeInterrupted === true;
+  // A preflight captured before the user pressed the recovery button still
+  // contains the interrupted-state blocker, so recovery always refreshes it.
+  const preflight = (!resumeInterrupted && options.preflight)
+    || await runStoragePreflight({ allowInterruptedMigration: resumeInterrupted });
   if (preflight.status === "blocked" || preflight.status === "unknown") {
     throw new ContentStorageMigrationError("迁移预检未通过：请先解决空间、数据完整性或浏览器存储能力问题。");
   }
@@ -113,14 +121,29 @@ export async function migrateContentStorage(
   }
 
   const ownerId = createStorageMigrationOwnerId();
-  const lock = tryAcquireStorageMigrationLock(ownerId);
+  const lock = resumeInterrupted
+    ? takeOverExpiredStorageMigrationLock(ownerId)
+    : tryAcquireStorageMigrationLock(ownerId);
   if (!lock.acquired || !lock.lock) {
     throw new ContentStorageMigrationError(lock.reason === "expired"
       ? "检测到过期迁移锁，请先人工接管后重试。"
       : "另一个页面正在执行迁移，请关闭其他页面后重试。");
   }
 
-  const state = createMigrationState();
+  const previousState = loadStorageMigrationState();
+  const interruptedState = previousState
+    && previousState.id === CONTENT_STORAGE_MIGRATION_ID
+    && previousState.phase !== "completed"
+    && previousState.phase !== "failed"
+    && previousState.phase !== "cancelled"
+    ? previousState
+    : null;
+  if (interruptedState && !resumeInterrupted) {
+    throw new ContentStorageMigrationError(`上次迁移未完成（${interruptedState.phase}），请先确认恢复。`);
+  }
+  const state = interruptedState
+    ? { ...interruptedState, phase: "migrating" as const, updatedAt: Date.now(), error: undefined }
+    : createMigrationState();
   const previousMessageEntryEnabled = isMessageEntryStoreEnabled();
   const previousOfflineStoryEntryEnabled = isOfflineStoryEntryStoreEnabled();
   let previousMessages: Message[] | null = null;
@@ -130,12 +153,6 @@ export async function migrateContentStorage(
     releaseContentRuntimeLock = await beginContentStorageMigration();
     if (previousMessageEntryEnabled) previousMessages = await messageEntryDb.loadAll();
     if (previousOfflineStoryEntryEnabled) previousOfflineStories = await offlineStoryEntryDb.loadAll();
-    const previousState = loadStorageMigrationState();
-    if (previousState
-      && previousState.id === CONTENT_STORAGE_MIGRATION_ID
-      && (previousState.phase === "backup" || previousState.phase === "migrating" || previousState.phase === "verifying")) {
-      throw new ContentStorageMigrationError(`上次迁移未完成（${previousState.phase}），请先恢复或重新确认。`);
-    }
     saveStateOrThrow(state);
     onProgress?.({ phase: "backup", completed: 0, total: 2 });
 
@@ -149,20 +166,40 @@ export async function migrateContentStorage(
     state.updatedAt = Date.now();
     saveStateOrThrow(state);
 
-    await messageEntryDb.replaceAll(messages);
-    const messageMarker = enableMessageEntryStore();
-    if (!messageMarker.success) throw new ContentStorageMigrationError(`聊天迁移标记写入失败：${messageMarker.error || "write"}`);
-    state.completedModules = ["messages"];
+    if (!state.completedModules.includes("messages")) {
+      await messageEntryDb.replaceAll(messages);
+      const messageMarker = enableMessageEntryStore();
+      if (!messageMarker.success) throw new ContentStorageMigrationError(`聊天迁移标记写入失败：${messageMarker.error || "write"}`);
+      state.completedModules = [...state.completedModules, "messages"];
+    }
     state.currentModule = "messages";
+    state.report = {
+      ...(state.report as StorageMigrationReport),
+      completed: Math.max(1, (state.report as StorageMigrationReport | undefined)?.completed || 0),
+      modules: [
+        ...((state.report as StorageMigrationReport | undefined)?.modules || []).filter((module) => module.module !== "messages"),
+        { module: "messages", status: "completed", records: messages.length, repaired: 0 },
+      ],
+    };
     state.updatedAt = Date.now();
     saveStateOrThrow(state);
     onProgress?.({ phase: "messages", completed: 1, total: 2 });
 
-    await offlineStoryEntryDb.replaceAll(offlineStories);
-    const offlineMarker = enableOfflineStoryEntryStore();
-    if (!offlineMarker.success) throw new ContentStorageMigrationError(`线下故事迁移标记写入失败：${offlineMarker.error || "write"}`);
-    state.completedModules = ["messages", "offlineStories"];
+    if (!state.completedModules.includes("offlineStories")) {
+      await offlineStoryEntryDb.replaceAll(offlineStories);
+      const offlineMarker = enableOfflineStoryEntryStore();
+      if (!offlineMarker.success) throw new ContentStorageMigrationError(`线下故事迁移标记写入失败：${offlineMarker.error || "write"}`);
+      state.completedModules = [...state.completedModules, "offlineStories"];
+    }
     state.currentModule = "offlineStories";
+    state.report = {
+      ...(state.report as StorageMigrationReport),
+      completed: 2,
+      modules: [
+        ...((state.report as StorageMigrationReport | undefined)?.modules || []).filter((module) => module.module !== "offlineStories"),
+        { module: "offlineStories", status: "completed", records: offlineStories.length, repaired: 0 },
+      ],
+    };
     state.updatedAt = Date.now();
     saveStateOrThrow(state);
     onProgress?.({ phase: "offlineStories", completed: 2, total: 2 });
@@ -211,6 +248,14 @@ export async function migrateContentStorage(
     state.phase = "failed";
     state.updatedAt = Date.now();
     state.error = error instanceof Error ? error.message : String(error);
+    state.report = {
+      ...(state.report as StorageMigrationReport),
+      failed: 1,
+      modules: [
+        ...((state.report as StorageMigrationReport | undefined)?.modules || []).filter((module) => module.status !== "failed"),
+        { module: state.currentModule || "migration", status: "failed", records: 0, repaired: 0, error: state.error },
+      ],
+    };
     try { saveStateOrThrow(state); } catch (stateError) { console.error("[storage] Failed to save content migration failure state.", stateError); }
     throw error;
   } finally {

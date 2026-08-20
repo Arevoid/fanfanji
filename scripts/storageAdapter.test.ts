@@ -106,8 +106,8 @@ const collectSourceFiles = (directory: string): string[] => readdirSync(director
 const rawStorageMutationFiles = collectSourceFiles(sourceRoot)
   .filter((file) => /localStorage\.(?:setItem|removeItem)/.test(readFileSync(file, "utf8")))
   .map((file) => path.relative(sourceRoot, file).replaceAll("\\", "/"));
-assert.deepEqual(rawStorageMutationFiles, ["components/AppSettings.tsx"],
-  "only the backup import transaction may use raw localStorage mutations");
+assert.deepEqual(rawStorageMutationFiles, [],
+  "all application storage mutations must go through the storage adapter");
 assert.doesNotMatch(readFileSync(path.join(sourceRoot, "main.tsx"), "utf8"), /localStorage\.setItem\s*=/,
   "the app entry must not globally swallow storage write failures");
 

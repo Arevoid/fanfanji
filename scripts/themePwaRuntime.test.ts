@@ -3,11 +3,12 @@ import { readFileSync } from "node:fs";
 import { getThemeColor, resolveTheme, sanitizeAppearanceSettings } from "../src/features/theme/theme";
 
 const index = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const bootstrap = readFileSync(new URL("../public/firstPaintTheme.js", import.meta.url), "utf8");
 const manifest = readFileSync(new URL("../public/manifest.json", import.meta.url), "utf8");
-assert.match(index, /phone_appearance_settings/);
-assert.match(index, /document\.documentElement\.dataset\.theme/);
-assert.match(index, /document\.documentElement\.style\.colorScheme/);
-assert.match(index, /getElementById\("app-theme-color"\)/);
+assert.match(bootstrap, /phone_appearance_settings/);
+assert.match(bootstrap, /document\.documentElement\.dataset\.theme/);
+assert.match(bootstrap, /document\.documentElement\.style\.colorScheme/);
+assert.match(bootstrap, /getElementById\("app-theme-color"\)/);
 assert.deepEqual(sanitizeAppearanceSettings("broken"), { themeMode: "light" });
 assert.equal(resolveTheme("system", true), "dark");
 assert.equal(resolveTheme("system", false), "light");

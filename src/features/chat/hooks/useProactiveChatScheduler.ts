@@ -17,7 +17,12 @@ export function useProactiveChatScheduler({
     enabled,
     intervalMs: 15 * 60 * 1000,
     initialDelayMs: 0,
+    taskType: "proactive-chat-catchup",
+    reason: "scheduled-catchup",
+    recoveryPayload: { scope: "active-identity" },
     run: runCatchupPass,
+    pauseWhenHidden: true,
+    pauseWhenOffline: true,
   });
 
   useBackgroundScheduler({
@@ -25,6 +30,11 @@ export function useProactiveChatScheduler({
     enabled,
     intervalMs: 60 * 1000,
     initialDelayMs: 3000,
+    taskType: "proactive-chat-background",
+    reason: "scheduled-background-pass",
+    recoveryPayload: { scope: "active-identity" },
     run: runBackgroundPass,
+    pauseWhenHidden: true,
+    pauseWhenOffline: true,
   });
 }

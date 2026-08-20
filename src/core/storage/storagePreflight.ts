@@ -2,6 +2,7 @@ import { loadStorageMigrationState } from "./storageMigrationState";
 import { readString } from "./storageAdapter";
 import { storageKeys } from "./storageKeys";
 import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./contentStorageFlags";
+import { CURRENT_STORAGE_SCHEMA_VERSION, STORAGE_MIGRATION_SCRIPT_VERSION } from "./storageVersion";
 
 export type StoragePreflightModuleId = "messages" | "offlineStories";
 export type StoragePreflightSource = "indexeddb" | "localStorage" | "missing" | "unavailable" | "error";
@@ -33,8 +34,19 @@ export interface StoragePreflightResult {
   recommendedFreeBytes: number;
   messageEntryStoreEnabled: boolean;
   offlineStoryEntryStoreEnabled: boolean;
+  dataSchemaVersion: number | null;
+  currentSchemaVersion: number;
+  migrationScriptVersion: string;
   modules: StoragePreflightModuleSummary[];
   warnings: string[];
+}
+
+export interface StoragePreflightOptions {
+  /**
+   * Only an explicit recovery action may ignore the previous interrupted
+   * migration marker. Other storage blockers remain blocking.
+   */
+  allowInterruptedMigration?: boolean;
 }
 
 interface IndexedDbReadResult {
@@ -162,10 +174,20 @@ function createModuleSummary(
   };
 }
 
-export async function runStoragePreflight(): Promise<StoragePreflightResult> {
+export async function runStoragePreflight(options: StoragePreflightOptions = {}): Promise<StoragePreflightResult> {
   const storage = typeof window !== "undefined" ? window.localStorage : null;
   const existingDatabaseNames = await listExistingDatabaseNames();
   const warnings: string[] = [];
+  const schemaValue = readString(storageKeys.dataSchemaVersion);
+  const parsedSchemaVersion = schemaValue.found && schemaValue.valid && schemaValue.value !== null
+    ? Number(schemaValue.value)
+    : null;
+  const hasInvalidSchemaVersion = schemaValue.found
+    && (!schemaValue.valid || parsedSchemaVersion === null || !Number.isInteger(parsedSchemaVersion) || parsedSchemaVersion < 0);
+  const hasFutureSchemaVersion = parsedSchemaVersion !== null && Number.isInteger(parsedSchemaVersion)
+    && parsedSchemaVersion > CURRENT_STORAGE_SCHEMA_VERSION;
+  if (hasInvalidSchemaVersion) warnings.push("检测到无法识别的数据 schema 版本，已阻止迁移以保护旧数据。");
+  if (hasFutureSchemaVersion) warnings.push(`当前数据 schema v${parsedSchemaVersion} 高于此版本支持的 v${CURRENT_STORAGE_SCHEMA_VERSION}，请使用更新版本恢复。`);
   const localMessages = readLocalStorageArray(storage, storageKeys.messages, "LocalStorage 当前消息");
   const legacyMessages = localMessages.source === "missing"
     ? readLocalStorageArray(storage, storageKeys.legacyMessages, "LocalStorage 旧消息")
@@ -221,11 +243,14 @@ export async function runStoragePreflight(): Promise<StoragePreflightResult> {
   }
 
   const migrationState = loadStorageMigrationState();
-  if (migrationState && migrationState.phase !== "completed") {
+  const hasInterruptedMigration = Boolean(migrationState && migrationState.phase !== "completed");
+  if (hasInterruptedMigration && !options.allowInterruptedMigration) {
     warnings.push(`存在未完成的迁移状态（${migrationState.phase}），需要先恢复、回滚或人工确认。`);
   }
   const hasUnavailableSource = modules.some((module) => module.sources.some((source) => source.source === "unavailable" || source.source === "error"));
-  const status: StoragePreflightStatus = migrationState && migrationState.phase !== "completed"
+  const status: StoragePreflightStatus = hasInterruptedMigration && !options.allowInterruptedMigration
+    || hasInvalidSchemaVersion
+    || hasFutureSchemaVersion
     || invalidCount > 0
     || availableBytes !== undefined && availableBytes < recommendedFreeBytes
     ? "blocked"
@@ -243,6 +268,9 @@ export async function runStoragePreflight(): Promise<StoragePreflightResult> {
     recommendedFreeBytes,
     messageEntryStoreEnabled: isMessageEntryStoreEnabled(),
     offlineStoryEntryStoreEnabled: isOfflineStoryEntryStoreEnabled(),
+    dataSchemaVersion: Number.isInteger(parsedSchemaVersion) ? parsedSchemaVersion : null,
+    currentSchemaVersion: CURRENT_STORAGE_SCHEMA_VERSION,
+    migrationScriptVersion: STORAGE_MIGRATION_SCRIPT_VERSION,
     modules,
     warnings,
   };

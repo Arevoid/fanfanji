@@ -1,5 +1,6 @@
 import { apiTranslate } from "../../../utils/apiHelper";
 import type { ForumTranslation, UserSettings } from "../../../types";
+import { createId as createApplicationId } from "../../../core/id/createId";
 import {
   createForumTranslationHash,
   getForumTranslation,
@@ -9,9 +10,7 @@ import {
 
 const inFlightTranslations = new Map<string, Promise<ForumTranslation>>();
 
-const createId = (): string => `forum-translation-${typeof crypto !== "undefined" && "randomUUID" in crypto
-  ? crypto.randomUUID()
-  : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const createId = (): string => createApplicationId("forum-translation");
 
 export const getForumTranslationTargetLanguage = (_settings: UserSettings): string => "zh-CN";
 

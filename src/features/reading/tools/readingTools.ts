@@ -1,4 +1,5 @@
 import { loadReadingStore, saveReadingStore } from "../../../core/storage/repositories/readingRepository";
+import { createId } from "../../../core/id/createId";
 import type { StorageResult, StorageWriteResult } from "../../../core/storage/storageTypes";
 import type { ReadingAnnotation, ReadingBookPreferences, ReadingStore } from "../../../domain/reading/types";
 import type { ReadingBookContent, ReadingParagraphView } from "../reader/readingReader";
@@ -14,7 +15,7 @@ const defaultDependencies: ReadingToolDependencies = {
   loadStore: loadReadingStore,
   saveStore: saveReadingStore,
   now: () => Date.now(),
-  createId: (prefix) => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`,
+  createId,
 };
 
 const requireStore = (dependencies: ReadingToolDependencies): ReadingStore => {

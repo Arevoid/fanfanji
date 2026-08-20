@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { indexedDB } from "fake-indexeddb";
 import { runStoragePreflight } from "../src/core/storage/storagePreflight";
+import { storageKeys } from "../src/core/storage/storageKeys";
 
 const values = new Map<string, string>();
 const localStorage = {
@@ -50,6 +51,13 @@ assert.equal(result.modules.find((module) => module.id === "offlineStories")?.so
 assert.equal(result.modules.find((module) => module.id === "messages")?.sources.find((source) => source.source === "localStorage")?.records, 1);
 assert.equal(values.get("phone_messages_v3"), JSON.stringify([{ id: "legacy-message" }]));
 assert.equal(values.get("phone_offline_stories"), JSON.stringify([{ id: "legacy-story" }]));
+values.set(storageKeys.dataSchemaVersion, "99");
+const futureSchemaResult = await runStoragePreflight();
+assert.equal(futureSchemaResult.status, "blocked");
+assert.ok(futureSchemaResult.warnings.some((warning) => warning.includes("高于此版本支持")));
+assert.equal(futureSchemaResult.currentSchemaVersion, 0);
+assert.equal(futureSchemaResult.migrationScriptVersion, "content-entry-storage-v1");
+values.delete(storageKeys.dataSchemaVersion);
 
 await new Promise<void>((resolve, reject) => {
   const request = indexedDB.open("FanfanjiReadingMetadataDB");
@@ -64,4 +72,30 @@ await new Promise<void>((resolve, reject) => {
 });
 const missingSnapshotResult = await runStoragePreflight();
 assert.equal(missingSnapshotResult.modules.find((module) => module.id === "messages")?.sources.find((source) => source.label === "IndexedDB 消息快照")?.records, 0);
-console.log("PASS storage migration preflight reads message/offline sources without modifying data");
+
+values.set(storageKeys.migrationState, JSON.stringify({
+  id: "content-storage-migration",
+  sourceVersion: 1,
+  targetVersion: 2,
+  phase: "migrating",
+  startedAt: Date.now() - 1_000,
+  updatedAt: Date.now(),
+  completedModules: [],
+}));
+const interruptedResult = await runStoragePreflight();
+assert.equal(interruptedResult.status, "blocked");
+assert.ok(interruptedResult.warnings.some((warning) => warning.includes("存在未完成的迁移状态")));
+
+const recoveryResult = await runStoragePreflight({ allowInterruptedMigration: true });
+assert.notEqual(recoveryResult.status, "blocked");
+assert.equal(recoveryResult.warnings.some((warning) => warning.includes("存在未完成的迁移状态")), false);
+
+Object.defineProperty(globalThis, "navigator", {
+  value: { storage: { estimate: async () => ({ usage: 9_999, quota: 10_000 }) } },
+  configurable: true,
+});
+const recoveryWithLowQuotaResult = await runStoragePreflight({ allowInterruptedMigration: true });
+assert.equal(recoveryWithLowQuotaResult.status, "blocked");
+assert.ok(recoveryWithLowQuotaResult.warnings.some((warning) => warning.includes("可用空间不足")));
+
+console.log("PASS storage migration preflight reads sources and keeps recovery scoped to interrupted state");

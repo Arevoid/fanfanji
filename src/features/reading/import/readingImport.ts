@@ -1,4 +1,5 @@
 import { readingAssetDb } from "../../../core/storage/readingAssetDb";
+import { createId } from "../../../core/id/createId";
 import {
   loadReadingStore,
   saveReadingStoreDurably,
@@ -82,8 +83,7 @@ const defaultDependencies: ReadingImportDependencies = {
   saveStore: saveReadingStoreDurably,
   assetStore: readingAssetDb,
   now: () => Date.now(),
-  createId: (prefix) =>
-    `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`,
+  createId,
 };
 
 const extensionOf = (name: string): string =>

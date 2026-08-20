@@ -31,6 +31,13 @@ export interface IndexedDbRestoreReport {
   skippedKeys: string[];
 }
 
+export class SystemBackupRestoreError extends Error {
+  constructor(message: string, public readonly rollbackErrors: string[] = []) {
+    super(message);
+    this.name = "SystemBackupRestoreError";
+  }
+}
+
 export type SystemBackupLocalStorage = Record<string, string | null>;
 export type SystemBackupIndexedDb = Record<string, unknown>;
 
@@ -62,6 +69,21 @@ export interface SystemBackupEnvelope {
   indexedDb: SystemBackupIndexedDb;
   /** Optional integrity marker. Legacy v2/v3 backups without it remain valid. */
   checksum?: string;
+}
+
+export interface SystemBackupInspectionModule {
+  key: string;
+  kind: "array" | "object" | "null" | "invalid";
+  recordCount?: number;
+}
+
+export interface SystemBackupInspectionReport {
+  valid: boolean;
+  legacy: boolean;
+  version?: number;
+  localStorageKeyCount: number;
+  modules: SystemBackupInspectionModule[];
+  error?: string;
 }
 
 /** Splits the already-serialized backup into bounded Blob parts. The file
@@ -146,6 +168,24 @@ export async function buildSystemBackup(
 }
 
 /**
+ * Captures every known IndexedDB module, including an explicit null marker for
+ * an absent module. Import rollback uses this complete snapshot so a failure
+ * after one module has been written can restore both existing and newly
+ * created entry stores.
+ */
+export async function snapshotSystemBackupIndexedDb(): Promise<SystemBackupIndexedDb> {
+  const metadataEntries = await Promise.all(SYSTEM_BACKUP_INDEXED_DB_KEYS.map(async (key) => [
+    key,
+    await readingAssetDb.loadMetadataValue<unknown>(key),
+  ] as const));
+  const contentEntries = await Promise.all([
+    isMessageEntryStoreEnabled() ? messageEntryDb.loadAll().then((value) => [SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], value] as const) : Promise.resolve([SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], null] as const),
+    isOfflineStoryEntryStoreEnabled() ? offlineStoryEntryDb.loadAll().then((value) => [SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[1], value] as const) : Promise.resolve([SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[1], null] as const),
+  ]);
+  return Object.fromEntries([...metadataEntries, ...contentEntries].map(([key, value]) => [key, value == null ? null : cloneJson(value)]));
+}
+
+/**
  * Accepts the v2 envelope and the legacy flat object format. The caller still
  * validates localStorage keys because it owns the product-specific allowlist.
  */
@@ -207,6 +247,37 @@ export function parseSystemBackup(value: unknown): {
   return { localStorage, indexedDb, legacy: true };
 }
 
+/**
+ * Read-only recovery inspection. It deliberately never writes to localStorage
+ * or IndexedDB and returns only shape/count metadata, so an invalid backup can
+ * be reviewed before the destructive part of restore is even considered.
+ */
+export function inspectSystemBackup(value: unknown): SystemBackupInspectionReport {
+  try {
+    const parsed = parseSystemBackup(value);
+    const modules = Object.entries(parsed.indexedDb).map(([key, entry]) => ({
+      key,
+      kind: Array.isArray(entry) ? "array" as const : entry === null ? "null" as const : isRecord(entry) ? "object" as const : "invalid" as const,
+      ...(Array.isArray(entry) ? { recordCount: entry.length } : {}),
+    }));
+    return {
+      valid: modules.every((module) => module.kind !== "invalid"),
+      legacy: parsed.legacy,
+      version: isRecord(value) && typeof value.version === "number" ? value.version : undefined,
+      localStorageKeyCount: Object.keys(parsed.localStorage).length,
+      modules,
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      legacy: false,
+      localStorageKeyCount: 0,
+      modules: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexedDb): Promise<IndexedDbRestoreReport> {
   const previousValues = new Map<string, unknown | null>();
   const keysToRestore = SYSTEM_BACKUP_INDEXED_DB_KEYS.filter((key) => Object.hasOwn(indexedDb, key));
@@ -239,21 +310,33 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
       legacyMessageEntryRestored = true;
     }
     for (const key of contentKeysToRestore) {
-      if (!Array.isArray(indexedDb[key])) throw new Error(`备份中的 ${key} 数据格式无效`);
+      const value = indexedDb[key];
+      if (value !== null && !Array.isArray(value)) throw new Error(`备份中的 ${key} 数据格式无效`);
       if (key === "message-entry-v1") {
         previousValues.set(key, isMessageEntryStoreEnabled() ? await messageEntryDb.loadAll() : null);
-        await messageEntryDb.replaceAll(indexedDb[key] as never[]);
-        const enabled = enableMessageEntryStore();
-        if (!enabled.success) throw new Error(`无法启用聊天条目库：${enabled.error || "write"}`);
+        if (value === null) {
+          await messageEntryDb.clearAll();
+          disableMessageEntryStore();
+        } else {
+          await messageEntryDb.replaceAll(value as never[]);
+          const enabled = enableMessageEntryStore();
+          if (!enabled.success) throw new Error(`无法启用聊天条目库：${enabled.error || "write"}`);
+        }
       } else if (key === "offline-story-entry-v1") {
         previousValues.set(key, isOfflineStoryEntryStoreEnabled() ? await offlineStoryEntryDb.loadAll() : null);
-        await offlineStoryEntryDb.replaceAll(indexedDb[key] as never[]);
-        const enabled = enableOfflineStoryEntryStore();
-        if (!enabled.success) throw new Error(`无法启用线下条目库：${enabled.error || "write"}`);
+        if (value === null) {
+          await offlineStoryEntryDb.clearAll();
+          disableOfflineStoryEntryStore();
+        } else {
+          await offlineStoryEntryDb.replaceAll(value as never[]);
+          const enabled = enableOfflineStoryEntryStore();
+          if (!enabled.success) throw new Error(`无法启用线下条目库：${enabled.error || "write"}`);
+        }
       }
     }
     return { restoredKeys: [...keysToRestore, ...contentKeysToRestore, ...(legacyMessageEntryRestored ? ["message-entry-v1"] : [])], skippedKeys };
   } catch (error) {
+    const rollbackErrors: string[] = [];
     // Restore the exact pre-import values. This is a compensating transaction:
     // it never deletes a key unless that key was absent before the import.
     for (const [key, previousValue] of previousValues) {
@@ -265,6 +348,7 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
         }
       } catch (rollbackError) {
         console.error("IndexedDB backup restore rollback failed:", rollbackError);
+        rollbackErrors.push(`IndexedDB 元数据 ${key}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       }
     }
     for (const key of contentKeysToRestore) {
@@ -289,6 +373,7 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
         }
       } catch (rollbackError) {
         console.error("Content entry backup restore rollback failed:", rollbackError);
+        rollbackErrors.push(`${key}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       }
     }
     if (legacyMessageEntryRestored) {
@@ -303,8 +388,15 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
         }
       } catch (rollbackError) {
         console.error("Legacy message entry backup rollback failed:", rollbackError);
+        rollbackErrors.push(`message-entry-v1 legacy: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       }
     }
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new SystemBackupRestoreError(
+      rollbackErrors.length > 0
+        ? `${message}；回滚仍有 ${rollbackErrors.length} 项失败，请立即导出诊断报告并保留原始备份。`
+        : message,
+      rollbackErrors,
+    );
   }
 }

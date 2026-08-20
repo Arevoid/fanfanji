@@ -1,17 +1,52 @@
 import type { Character, ImageApiPreset, ImageGenerationRecord, Message, UserSettings } from "../../../types";
-import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
+import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
+import { getConversationId, type CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { buildCharacterImagePrompt } from "../../../domain/prompt/characterImagePrompt";
 import { assertImageGenerationTrigger } from "./imageGenerationIntent";
 import { assertReferenceImageCapability, inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "./imageProtocol";
 import { imageAssetDb } from "../../../utils/imageAssetDb";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../../../utils/fetchWithTimeout";
 
-type ImageScope =
+export type ImageScope =
   | { kind: "direct"; relationId: string; conversationId: string }
   | { kind: "group"; groupId: string; conversationId: string };
 
 function activePreset(settings: UserSettings): ImageApiPreset | undefined {
   return settings.imageApiPresets?.find((preset) => preset.id === settings.activeImageApiPresetId);
+}
+
+export function resolveCharacterImageContext(input: {
+  activeCharacter: Character;
+  activeRelationship?: CharacterRelationship;
+  currentMessages: readonly Message[];
+  characters: readonly Character[];
+}): {
+  character: Character;
+  relationship?: CharacterRelationship;
+  recentMessages: Message[];
+  scope: ImageScope;
+} | undefined {
+  const { activeCharacter, activeRelationship, currentMessages, characters } = input;
+  const target = activeCharacter.isGroupChat
+    ? (() => {
+        const lastSender = [...currentMessages].reverse().find((message) => message.sender === "character" && message.senderId);
+        return lastSender?.senderId
+          ? characters.find((character) => character.id === resolveCanonicalCharacterId(lastSender.senderId!, characters))
+          : undefined;
+      })()
+    : activeCharacter;
+  if (!target || (!activeCharacter.isGroupChat && !activeRelationship)) return undefined;
+  const scope: ImageScope = activeCharacter.isGroupChat
+    ? { kind: "group", groupId: activeCharacter.id, conversationId: `group:${activeCharacter.id}` }
+    : { kind: "direct", relationId: activeRelationship!.id, conversationId: activeRelationship!.conversationId || getConversationId(activeRelationship!.id) };
+  return {
+    character: target,
+    relationship: activeCharacter.isGroupChat ? undefined : activeRelationship,
+    recentMessages: activeCharacter.isGroupChat
+      ? [...currentMessages]
+      : currentMessages.filter((message) => message.relationId === activeRelationship!.id),
+    scope,
+  };
 }
 
 export function assertImageGenerationConfiguration(settings: UserSettings, character: Character): ImageApiPreset {

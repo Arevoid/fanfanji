@@ -5,7 +5,9 @@ import {
   filterSystemBackupLocalStorageForRestore,
   parseSystemBackup,
   restoreSystemBackupIndexedDb,
+  snapshotSystemBackupIndexedDb,
   splitSystemBackupJson,
+  SystemBackupRestoreError,
 } from "../src/features/settings/systemBackup";
 import { readingAssetDb } from "../src/core/storage/readingAssetDb";
 
@@ -55,12 +57,25 @@ assert.deepEqual(
   [["phone_messages_v3", "legacy-chat"], ["phone_settings", "settings"]],
   "legacy chat remains restorable when an entry-store payload is absent",
 );
+const originalPrototype = Object.prototype as { polluted?: boolean };
+delete originalPrototype.polluted;
+const hostileBackup = parseSystemBackup(JSON.parse(`{"format":"fanfanji-system-backup","version":3,"exportedAt":1,"localStorage":{"__proto__":"{\\"polluted\\":true}","phone_settings":"{\\"theme\\":\\"dark\\"}"},"indexedDb":{"__proto__":{"polluted":true},"unknown-module":[{"id":"ignored"}]}}`));
+assert.equal((Object.prototype as { polluted?: boolean }).polluted, undefined, "hostile JSON must not pollute Object.prototype");
+assert.equal(Object.prototype.hasOwnProperty.call(hostileBackup.localStorage, "__proto__"), true, "JSON keys remain data until the allowlist filters them");
+assert.deepEqual(
+  filterSystemBackupLocalStorageForRestore(Object.entries(hostileBackup.localStorage), {})
+    .filter(([key]) => new Set(["phone_settings"]).has(key)),
+  [["phone_settings", JSON.stringify({ theme: "dark" })]],
+  "restore only accepts explicitly allowlisted localStorage keys",
+);
 
 const parsed = parseSystemBackup(backup);
 assert.equal(parsed.legacy, false);
 assert.deepEqual(parsed.indexedDb["moments-v4"], moments);
 assert.equal(typeof backup.checksum, "string");
 assert.throws(() => parseSystemBackup({ ...backup, localStorage: { ...backup.localStorage, phone_worldbook_entries: "changed" } }), /校验失败/);
+const restoreError = new SystemBackupRestoreError("restore failed", ["messages-v4: write failed"]);
+assert.deepEqual(restoreError.rollbackErrors, ["messages-v4: write failed"]);
 const serializedBackup = "备份内容".repeat(20);
 assert.equal(splitSystemBackupJson(serializedBackup, 7).join(""), serializedBackup);
 assert.throws(() => splitSystemBackupJson(serializedBackup, 0), /分块大小无效/);
@@ -74,6 +89,14 @@ assert.deepEqual(legacy.indexedDb["character-archive-v4"], [{ id: "legacy-charac
 
 await restoreSystemBackupIndexedDb({ "character-archive-v4": [{ id: "restored-character" }] });
 assert.deepEqual(await readingAssetDb.loadMetadataValue("character-archive-v4"), [{ id: "restored-character" }]);
+
+const indexedDbSnapshot = await snapshotSystemBackupIndexedDb();
+assert.equal(indexedDbSnapshot["messages-v4"], null);
+assert.equal(indexedDbSnapshot["offline-story-entry-v1"], null);
+await restoreSystemBackupIndexedDb({ "message-entry-v1": [{ id: "temporary-message" }] });
+assert.equal(await readingAssetDb.loadMetadataValue("messages-v4"), null);
+await restoreSystemBackupIndexedDb(indexedDbSnapshot);
+assert.equal(await readingAssetDb.loadMetadataValue("messages-v4"), null);
 
 const originalSaveMetadataValue = readingAssetDb.saveMetadataValue.bind(readingAssetDb);
 let saveCount = 0;

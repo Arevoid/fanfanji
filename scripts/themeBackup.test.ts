@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { sanitizeSystemBackupValue } from "../src/components/AppSettings";
+import { sanitizeSystemBackupValue } from "../src/features/settings/systemBackupSanitizer";
 
 assert.equal(sanitizeSystemBackupValue("phone_appearance_settings", JSON.stringify({ themeMode: "dark" })), JSON.stringify({ themeMode: "dark" }));
 assert.equal(sanitizeSystemBackupValue("phone_appearance_settings", "broken"), JSON.stringify({ themeMode: "light" }));

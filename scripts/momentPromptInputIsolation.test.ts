@@ -4,6 +4,9 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const appChat = readFileSync(resolve(root, "src/components/AppChat.tsx"), "utf8");
+const momentGenerationSource = readFileSync(resolve(root, "src/features/moments/services/characterMomentGenerationPipeline.ts"), "utf8");
+const automaticCommentSource = readFileSync(resolve(root, "src/features/moments/services/automaticMomentCommentPipeline.ts"), "utf8");
+const automaticReplySource = readFileSync(resolve(root, "src/features/moments/services/automaticMomentReplyPipeline.ts"), "utf8");
 const momentStart = appChat.indexOf("const handleAutoCommentOnUserMoment");
 const momentEnd = appChat.indexOf("// Moments publication", momentStart);
 assert.notEqual(momentStart, -1, "Moment automation section should exist");
@@ -25,18 +28,19 @@ for (const forbidden of [
     `Moment automation must not inject private input: ${forbidden}`,
   );
 }
-assert.match(momentAutomation, /buildRelationMomentContext/, "Moment automation should use its relation-scoped cognitive projection");
+assert.match(momentGenerationSource, /buildRelationMomentContext/, "Moment generation should use its relation-scoped cognitive projection");
 assert.match(appChat, /listCharacterEventsByRelation\(relationship\.id\)/, "Moment events must be read through the current relationship only");
 assert.match(appChat, /buildMomentWorldKnowledge/, "Moment WorldBook context must be scoped before prompt injection");
-assert.ok(
-  (momentAutomation.match(/history: \[\]/g) || []).length >= 3,
-  "post, comment, and reply PromptComposer calls should provide no private chat history",
-);
+for (const source of [automaticCommentSource, automaticReplySource, momentGenerationSource]) {
+  assert.match(source, /history: \[\]/, "Moment AI prompts must provide no private chat history");
+}
 
 for (const service of [
   "src/features/moments/services/momentGenerator.ts",
   "src/features/moments/services/momentCommentService.ts",
   "src/features/moments/services/momentReplyService.ts",
+  "src/features/moments/services/characterMomentGenerationPipeline.ts",
+  "src/features/moments/services/automaticMomentCommentPipeline.ts",
 ]) {
   const source = readFileSync(resolve(root, service), "utf8");
   for (const forbidden of [

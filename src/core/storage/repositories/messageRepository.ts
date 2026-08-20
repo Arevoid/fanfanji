@@ -6,7 +6,7 @@ import { readingAssetDb } from "../readingAssetDb";
 import { remove } from "../storageAdapter";
 import { createLatestSnapshotWriter } from "../latestSnapshotWriter";
 import { isMessageEntryStoreEnabled } from "../contentStorageFlags";
-import { messageEntryDb } from "../messageEntryDb";
+import { messageEntryDb, type MessageEntryQuery } from "../messageEntryDb";
 
 const MESSAGE_METADATA_KEY = "messages-v4";
 let cachedMessages: Message[] | null = null;
@@ -105,6 +105,21 @@ export async function initializeMessages(fallback: Message[]): Promise<StorageRe
     }
   })();
   return initializationPromise;
+}
+
+export async function loadMessageWindow(query: MessageEntryQuery): Promise<Message[]> {
+  if (isMessageEntryStoreEnabled() && typeof indexedDB !== "undefined") {
+    try {
+      return await messageEntryDb.loadWindow(query);
+    } catch (error) {
+      console.warn("[storage] Message window query failed; using the in-memory snapshot.", error);
+    }
+  }
+  const source = cachedMessages || loadMessages([]).value;
+  const filtered = source.filter((message) => (!query.characterId || message.characterId === query.characterId)
+    && (!query.relationId || message.relationId === query.relationId)
+    && (!query.conversationId || message.conversationId === query.conversationId));
+  return filtered.slice(Math.max(0, query.offset || 0), Math.max(0, query.offset || 0) + Math.max(0, query.limit));
 }
 
 export async function flushMessages(): Promise<StorageWriteResult> {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { indexedDB } from "fake-indexeddb";
 import { inspectStorage } from "../src/core/storage/storageDiagnostics";
+import { storageKeys } from "../src/core/storage/storageKeys";
 
 const values = new Map<string, string>();
 const localStorage = {
@@ -59,4 +60,43 @@ assert.deepEqual(stickerResources && {
   missing: stickerResources.missing,
 }, { stored: 2, referenced: 2, orphaned: 1, missing: 1 });
 assert.equal(values.get("phone_messages_v3"), JSON.stringify([{ id: "m", imageAssetId: "referenced-image" }]));
+
+values.clear();
+await new Promise<void>((resolve, reject) => {
+  const request = indexedDB.open("FanfanjiMessageEntryDB", 2);
+  request.onupgradeneeded = () => {
+    const store = request.result.createObjectStore("messages", { keyPath: "recordId" });
+    store.createIndex("byPosition", "position");
+  };
+  request.onsuccess = () => {
+    const database = request.result;
+    const transaction = database.transaction("messages", "readwrite");
+    transaction.objectStore("messages").put({
+      recordId: "entry::0",
+      position: 0,
+      characterId: "character",
+      timestamp: 1,
+      message: { id: "entry", characterId: "character", sender: "character", content: "[图片]", imageAssetId: "entry-referenced-image", timestamp: 1 },
+    });
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => reject(transaction.error);
+  };
+  request.onerror = () => reject(request.error);
+});
+await new Promise<void>((resolve, reject) => {
+  const request = indexedDB.open("FanfanImageAssets", 1);
+  request.onsuccess = () => {
+    const database = request.result;
+    const transaction = database.transaction("images", "readwrite");
+    transaction.objectStore("images").put("image", "entry-referenced-image");
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => reject(transaction.error);
+  };
+  request.onerror = () => reject(request.error);
+});
+values.set(storageKeys.messageEntryStoreEnabled, "1");
+const migratedDiagnostics = await inspectStorage();
+const migratedImages = migratedDiagnostics.health.resources.find((resource) => resource.database === "FanfanImageAssets");
+assert.equal(migratedImages?.referenced, 1, "entry-store image references must participate in health scans");
+assert.equal(migratedImages?.orphaned, 2, "entry-store image references must not be reported as orphaned");
 console.log("PASS resource health scan reports orphan and missing assets without modifying data");

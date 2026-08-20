@@ -1,6 +1,7 @@
 import { Character, WorldBookEntry } from "../types";
 import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
 import JSZip from "jszip";
+import { createId } from "../core/id/createId";
 
 // PNG Character Card text chunk parser
 export async function parsePngChunks(file: File): Promise<string | null> {
@@ -217,7 +218,7 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
   }
 
   return {
-    id: `wb-entry-${characterId}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    id: createId(`wb-entry-${characterId}`),
     title: String(title),
     category: "世界书",
     content: String(stEntry.content || ""),
@@ -237,7 +238,7 @@ export const parseTextToWorldBookEntries = (text: string, filename: string): Wor
   if (!trimmedText) return [];
   
   return [{
-    id: "wb-" + Date.now() + "-" + Math.floor(Math.random() * 1000000),
+    id: createId("wb"),
     title: nameWithoutExt,
     content: trimmedText,
     characterId: "global",

@@ -19,6 +19,7 @@ import { normalizeForumThreadEngagement } from "../../../domain/forum/forumData"
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readArray, writeArray } from "./repositoryUtils";
+import { readString } from "../storageAdapter";
 
 export interface ForumStateSnapshot {
   revision: number;
@@ -79,7 +80,7 @@ const getRawForumFingerprint = (): string => {
     storageKeys.forumVisitHistory,
     storageKeys.forumLikeHistory,
     storageKeys.forumNotifications,
-  ].map((key) => localStorage.getItem(key) || "").join("\u0001");
+  ].map((key) => readString(key).value || "").join("\u0001");
 };
 
 const emitForumStateChanged = (): void => {

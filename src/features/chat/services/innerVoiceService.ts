@@ -1,4 +1,5 @@
 import type { Character, InnerVoiceRecord, Message, UserSettings, WorldBookEntry } from "../../../types";
+import { createId } from "../../../core/id/createId";
 import { apiChat } from "../../../utils/apiHelper";
 import { buildInnerVoicePrompt } from "../../../domain/prompt/innerVoicePrompt";
 import { PromptComposer } from "../../../domain/prompt/PromptComposer";
@@ -76,7 +77,7 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
   const parsed = parseInnerVoice(response.text);
   if (!parsed) return null;
   return {
-    id: `inner-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: createId("inner-voice"),
     characterId: input.character.id,
     relationId,
     groupId,

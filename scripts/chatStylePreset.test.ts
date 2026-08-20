@@ -21,6 +21,7 @@ assert.equal(resolveActiveChatStylePreset("default", undefined), "default");
 
 const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const appSettingsSource = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
+const settingsAppearanceSource = readFileSync(new URL("../src/features/settings/hooks/useSettingsAppearanceDraftState.ts", import.meta.url), "utf8");
 assert.match(
   appChatSource,
   /background: radial-gradient\(circle at 12% 8%, #ffffff 0%, #f3f7fb 42%, #e7eef7 100%\) !important;/,
@@ -48,7 +49,7 @@ for (const sharedDefault of [
   "CLASSIC_OTHER_BUBBLE_TEXT",
 ]) {
   assert.match(appChatSource, new RegExp(sharedDefault), `${sharedDefault} must drive the rendered chat`);
-  assert.match(appSettingsSource, new RegExp(sharedDefault), `${sharedDefault} must drive the settings preview`);
+  assert.match(settingsAppearanceSource, new RegExp(sharedDefault), `${sharedDefault} must drive the settings preview`);
 }
 assert.doesNotMatch(
   appChatSource,

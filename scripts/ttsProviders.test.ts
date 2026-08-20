@@ -19,20 +19,28 @@ assert.equal(shouldQueueCallSpeech("character", "电话里的回复"), true, "ch
 assert.equal(shouldQueueCallSpeech("user", "用户说话"), false, "user call subtitles are never synthesized as character speech");
 assert.equal(shouldQueueCallSpeech("character", "   "), false, "empty call subtitles are ignored");
 const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
-assert.match(appChatSource, /callTtsAudioRef\.current \|\| new Audio\(\)/, "call playback must reuse the gesture-unlocked audio element");
+const directReplyDeliverySource = readFileSync(new URL("../src/features/chat/services/directReplyDeliveryService.ts", import.meta.url), "utf8");
+const voiceBubbleEligibilitySource = readFileSync(new URL("../src/features/chat/services/voiceBubbleEligibility.ts", import.meta.url), "utf8");
+const chatDeliverySource = readFileSync(new URL("../src/features/chat/services/chatMessageDelivery.ts", import.meta.url), "utf8");
+const callPlaybackSource = readFileSync(new URL("../src/features/chat/hooks/useChatCallSpeechPlayback.ts", import.meta.url), "utf8");
+assert.match(callPlaybackSource, /callTtsAudioRef\.current \|\| new Audio\(\)/, "call playback must reuse the gesture-unlocked audio element");
 assert.match(appChatSource, /if \(!incoming\) unlockCallTtsPlayback\(\)/, "outgoing call taps must unlock mobile audio");
-assert.match(appChatSource, /settings\.enableMiniMaxTts && shouldQueueCallSpeech/, "the global TTS switch must govern call synthesis");
-assert.match(appChatSource, /if \(!settings\.enableMiniMaxTts\) return false/, "the global TTS switch must disable automatic normal-chat voice conversion");
-assert.match(appChatSource, /if \(callSpeechCompletion\) await callSpeechCompletion/, "the next call bubble must wait until the current speech finishes");
+assert.match(chatDeliverySource, /options\.settings\.enableMiniMaxTts && shouldQueueCallSpeech/, "the global TTS switch must govern call synthesis");
+assert.match(voiceBubbleEligibilitySource, /if \(!enabled\) return false/, "the global TTS switch must disable automatic normal-chat voice conversion");
+assert.match(directReplyDeliverySource, /if \(callSpeechCompletion\) await callSpeechCompletion/, "the next call bubble must wait until the current speech finishes");
 assert.match(
-  appChatSource,
+  callPlaybackSource,
   /const playback = audio\.play\(\);[\s\S]*revealCallSubtitleOnce\(\);[\s\S]*await playback/,
   "a character call subtitle must be revealed in the same turn that starts audio playback",
 );
-assert.match(appChatSource, /callSpeechGenerationRef\.current \+= 1/, "clearing a call must invalidate in-flight speech synthesis");
-assert.match(appChatSource, /const blob = await getSpeechForText[\s\S]*if \(isCancelledCallSpeech\(\)\) return/, "late TTS results must be discarded after hang-up");
-assert.match(appChatSource, /if \(callTtsObjectUrlRef\.current\)[\s\S]*URL\.revokeObjectURL/, "hang-up must revoke the active call audio URL");
-assert.match(appChatSource, /if \(isCancelledCallTurn\(\) \|\| signal\?\.aborted\) break/, "hang-up must stop unsent bubbles from the cancelled call turn");
+assert.match(callPlaybackSource, /callSpeechGenerationRef\.current \+= 1/, "clearing a call must invalidate in-flight speech synthesis");
+assert.match(callPlaybackSource, /const blob = await getSpeechForText[\s\S]*if \(isCancelledCallSpeech\(\)\) return/, "late TTS results must be discarded after hang-up");
+assert.match(callPlaybackSource, /if \(callTtsObjectUrlRef\.current\)[\s\S]*URL\.revokeObjectURL/, "hang-up must revoke the active call audio URL");
+assert.match(
+  directReplyDeliverySource,
+  /if \(input\.shouldCancel\(\) \|\| input\.signal\?\.aborted\) break/,
+  "hang-up must stop unsent bubbles from the cancelled call turn",
+);
 const canonicalCharacter: any = { id: "profile", name: "角色", mosslandVoiceId: "canonical-voice" };
 const contactCharacter: any = { id: "contact", name: "联系人", isContactInstance: true, profileSourceId: "profile" };
 assert.equal(

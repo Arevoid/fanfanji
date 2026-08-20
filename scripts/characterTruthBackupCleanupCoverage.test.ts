@@ -4,6 +4,7 @@ import fs from "node:fs";
 const settings = fs.readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 const app = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const chat = fs.readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const chatDeleteFriend = fs.readFileSync(new URL("../src/features/chat/hooks/useChatDeleteFriendAction.ts", import.meta.url), "utf8");
 const storageKeys = fs.readFileSync(new URL("../src/core/storage/storageKeys.ts", import.meta.url), "utf8");
 
 for (const key of [
@@ -18,7 +19,7 @@ for (const key of [
   assert.match(storageKeys, new RegExp(`"${key}"`), `${key} must have a canonical storage key`);
 }
 assert.match(app, /removeCharacterTruthForRelations\(relationIds\)/, "character deletion must clear truth records");
-assert.match(chat, /removeCharacterTruthForRelations\(\[relationId\]\)/, "relationship deletion must clear truth records");
+assert.match(`${chat}\n${chatDeleteFriend}`, /removeCharacterTruthForRelations\(\[relationId\]\)/, "relationship deletion must clear truth records");
 assert.match(app, /retractBySourceMessageIds\(\[id\], sourceScope\)/, "message deletion must retract source-linked claims");
 assert.match(app, /removeMomentTopicsForMoments\(\[momentId\]\)/, "Moment deletion must clear topic history");
 

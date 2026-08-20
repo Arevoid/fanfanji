@@ -13,7 +13,6 @@ export function useChatSettingsDraft() {
   const [draftIsPinned, setDraftIsPinned] = useState(false);
   const [draftChatBg, setDraftChatBg] = useState<string | undefined>();
   const [draftCustomCss, setDraftCustomCss] = useState("");
-  const [cssTemplateCopied, setCssTemplateCopied] = useState(false);
   const [draftChatIcons, setDraftChatIcons] = useState<ChatIconOverrides>({});
   const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
@@ -81,7 +80,7 @@ export function useChatSettingsDraft() {
     draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
     isDeleteMemberMode, setIsDeleteMemberMode, showAddMemberModal, setShowAddMemberModal,
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
-    draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss, cssTemplateCopied, setCssTemplateCopied,
+    draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
     draftEnableProactiveCall, setDraftEnableProactiveCall,

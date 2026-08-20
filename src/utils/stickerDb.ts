@@ -1,5 +1,6 @@
 import { Sticker, StickerGroup } from "../types";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./fetchWithTimeout";
+import { attachIndexedDbLifecycle } from "../core/storage/idbLifecycle";
 
 class StickerDB {
   private dbName = "StickerAppDB";
@@ -22,6 +23,7 @@ class StickerDB {
       };
       request.onsuccess = () => {
         this.db = request.result;
+        attachIndexedDbLifecycle(request.result, () => { this.db = null; });
         resolve(request.result);
       };
       request.onerror = () => reject(request.error);

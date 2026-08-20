@@ -1,5 +1,6 @@
 import { readJson, remove, writeJson } from "./storageAdapter";
 import { storageKeys } from "./storageKeys";
+import { createId } from "../id/createId";
 
 export const DEFAULT_STORAGE_MIGRATION_LOCK_TTL_MS = 60_000;
 
@@ -36,13 +37,6 @@ export const loadStorageMigrationLock = (): StorageMigrationLock | null => {
 };
 
 export const isStorageMigrationLockActive = (lock: StorageMigrationLock, now = Date.now()): boolean => lock.expiresAt > now;
-
-function createId(prefix: string): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 export const createStorageMigrationOwnerId = (): string => createId("page");
 
@@ -112,4 +106,3 @@ export function releaseStorageMigrationLock(lockId: string, ownerId: string): bo
   if (!existing || existing.id !== lockId || existing.ownerId !== ownerId) return false;
   return remove(storageKeys.migrationLock).success;
 }
-

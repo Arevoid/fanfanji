@@ -1,4 +1,5 @@
 import type { PromptHistoryEntry, PromptScenario } from "./promptTypes";
+import { createId } from "../../core/id/createId";
 
 export interface PromptDebugSnapshot {
   id: string;
@@ -20,7 +21,7 @@ const notify = () => listeners.forEach((listener) => listener());
 export function recordPromptDebugSnapshot(input: NewPromptDebugSnapshot): void {
   snapshots = [...snapshots, {
     ...input,
-    id: `prompt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: createId("prompt"),
     createdAt: Date.now(),
     history: input.history.map((entry) => ({ ...entry })),
     historyInjections: input.historyInjections.map((entry) => ({ ...entry })),

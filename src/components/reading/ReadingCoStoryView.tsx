@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createId } from "../../core/id/createId";
 import {
   ChevronLeft,
   Handshake,
@@ -49,9 +50,7 @@ interface ReadingCoStoryViewProps {
   settings?: UserSettings;
   onClose: () => void;
 }
-const makeId = (): string =>
-  globalThis.crypto?.randomUUID?.() ||
-  `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const makeId = (): string => createId("co-story-view");
 
 export default function ReadingCoStoryView({
   userIdentityId,

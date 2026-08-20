@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const chatSource = fs.readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const cssTemplateCopySource = fs.readFileSync(new URL("../src/features/chat/hooks/useChatCssTemplateCopy.ts", import.meta.url), "utf8");
 const templateSource = fs.readFileSync(new URL("../src/features/chat/styles/chatThemeTemplate.ts", import.meta.url), "utf8");
 const themeSource = `${chatSource}\n${templateSource}`;
 const settingsSource = fs.readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
@@ -47,8 +48,8 @@ assert.match(themeSource, /\/\*\s*\n\.cv-plus-icon svg,/);
 
 // The visible placeholder and both clipboard paths must use the same current template.
 assert.match(chatSource, /placeholder=\{COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE\}/);
-assert.match(chatSource, /navigator\.clipboard\.writeText\(COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE\)/);
-assert.match(chatSource, /textarea\.value = COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE/);
+assert.match(cssTemplateCopySource, /navigator\.clipboard\.writeText\(COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE\)/);
+assert.match(cssTemplateCopySource, /textarea\.value = COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE/);
 
 // Compatibility contract: append stable hooks without replacing legacy selectors.
 assert.match(chatSource, /voice-message-bar/);

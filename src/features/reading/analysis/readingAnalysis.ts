@@ -1,4 +1,5 @@
 import { loadReadingStore } from "../../../core/storage/repositories/readingRepository";
+import { createId as createApplicationId } from "../../../core/id/createId";
 import {
   getReadingBookBible,
   getReadingAnalysisTask,
@@ -20,8 +21,7 @@ import type {
 } from "../../../domain/reading/analysisTypes";
 import type { ReadingChapterAnalysisResult } from "./readingAnalysisProtocol";
 
-const createId = (prefix: string): string =>
-  `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const createId = (prefix: string): string => createApplicationId(prefix);
 const trim = (value: string, max: number): string => value.trim().slice(0, max);
 
 export class ReadingAnalysisError extends Error {

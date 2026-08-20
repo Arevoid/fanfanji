@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
+import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
-import { remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
+import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { initializeMessages, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
@@ -38,6 +39,7 @@ import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryT
 import { removeForumGenerationTasksByRelations } from "./domain/forum/forumGenerationGuard";
 import { loadImageGenerationRecords, removeImageGenerationRecordsByCharacter, saveImageGenerationRecords } from "./core/storage/repositories/imageGenerationRepository";
 import { applyLiquidGlassTextDefaults } from "./features/chat/styles/liquidGlassDefaults";
+import { useRuntimeErrorMonitoring } from "./features/monitoring/hooks/useRuntimeErrorMonitoring";
 import {
   bindDualMusicWidget,
   loadDualMusicWidgetConfigs,
@@ -368,6 +370,7 @@ const DEFAULT_SETTINGS: UserSettings = {
 const DEFAULT_MESSAGES: Message[] = [];
 
 export default function App() {
+  useRuntimeErrorMonitoring();
   const { resolvedTheme } = useTheme();
   useVisualViewport();
   const seedScheduleForFreshInstall = useRef(
@@ -680,7 +683,7 @@ export default function App() {
   // Restore local track object URLs on mount from IndexedDB
   useEffect(() => {
     const restoreLocalTracks = async () => {
-      const raw = localStorage.getItem("phone_music_tracks");
+      const raw = readString("phone_music_tracks").value;
       if (!raw) return;
       try {
         const parsedTracks = JSON.parse(raw) as MusicTrack[];
@@ -781,7 +784,7 @@ export default function App() {
   const phoneScreenRef = useRef<HTMLDivElement>(null);
 
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
-    const raw = localStorage.getItem("phone_installed_apps");
+    const raw = readString("phone_installed_apps").value;
     let parsed: string[] = ["chat", "archives", "worldbook", "music", "notes", "offline", "store", "settings"];
     if (!raw && seedScheduleForFreshInstall) parsed.push("schedule");
     if (raw) {
@@ -989,7 +992,7 @@ export default function App() {
 
   // HomeScreen layout items (Apps + Widgets)
   const [homeScreenItems, setHomeScreenItems] = useState<HomeScreenItem[]>(() => {
-    const raw = localStorage.getItem("phone_homescreen_items");
+    const raw = readString("phone_homescreen_items").value;
     let items: HomeScreenItem[];
     if (raw !== null) {
       try {
@@ -1024,7 +1027,7 @@ export default function App() {
   // default historical relationship. New direct data is always relation keyed.
   useEffect(() => {
     const rawFriendIds = (() => {
-      try { return JSON.parse(localStorage.getItem("phone_friend_ids") || "[]") as string[]; } catch { return []; }
+      try { return JSON.parse(readString("phone_friend_ids").value || "[]") as string[]; } catch { return []; }
     })();
     const result = migrateLegacyRelationshipData({
       characters,
@@ -1045,8 +1048,8 @@ export default function App() {
     if (result.migratedMemoryCount || result.deduplicatedRelationshipCount) setMemories(result.memories);
     if (result.migratedStoryCount || result.deduplicatedRelationshipCount) replaceOfflineStories(result.offlineStories);
     Object.entries(result.relationIdRemaps).forEach(([fromRelationId, toRelationId]) => {
-      const sourceStoryId = localStorage.getItem(getOfflineStoryStorageKey(fromRelationId));
-      if (sourceStoryId && !localStorage.getItem(getOfflineStoryStorageKey(toRelationId))) {
+      const sourceStoryId = readString(getOfflineStoryStorageKey(fromRelationId)).value;
+      if (sourceStoryId && !readString(getOfflineStoryStorageKey(toRelationId)).value) {
         writeString(getOfflineStoryStorageKey(toRelationId), sourceStoryId);
       }
       removeStoredValue(getOfflineStoryStorageKey(fromRelationId));
@@ -1158,7 +1161,7 @@ export default function App() {
   }).value);
 
   const [immediateSummaryTask, setImmediateSummaryTask] = useState<ImmediateSummaryTask>(() => {
-    const raw = localStorage.getItem("phone_immediate_summary_task");
+    const raw = readString("phone_immediate_summary_task").value;
     if (raw) {
       try {
         const parsed = JSON.parse(raw);
@@ -1243,7 +1246,7 @@ export default function App() {
         model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
         apiEndpoint: settings.apiEndpoint,
         templateType: char.archiveTemplateType,
-        createId: () => (Date.now() + Math.random()).toString(),
+        createId: () => createId("reading"),
         currentTime: () => Date.now(),
         formatContent: (items, formatOptions) => isDelicate
           ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
@@ -2074,7 +2077,7 @@ export default function App() {
         deletedCharacterIds,
       );
       try {
-        const parsed = JSON.parse(localStorage.getItem(RED_PACKET_STATUSES_KEY) || "{}") as RedPacketStatusMap;
+        const parsed = JSON.parse(readString(RED_PACKET_STATUSES_KEY).value || "{}") as RedPacketStatusMap;
         const removedMessages = messages.filter((message) => relationIds.includes(message.relationId || "") || characterIds.has(message.characterId));
         const withoutRelations = relationIds.reduce((statuses, relationId) => removePaymentStatusesByRelation(statuses, relationId), parsed);
         writeJson(RED_PACKET_STATUSES_KEY, removePaymentStatusesForMessages(withoutRelations, removedMessages));
@@ -2137,7 +2140,7 @@ export default function App() {
       // relation ID. Remove only the deleted character's relation entries.
       ["phone_initiated_chat_ids", "phone_last_read_timestamps"].forEach((key) => {
         try {
-          const raw = localStorage.getItem(key);
+          const raw = readString(key).value;
           if (!raw) return;
           const parsed = JSON.parse(raw);
           const next = Array.isArray(parsed)

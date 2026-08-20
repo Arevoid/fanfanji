@@ -107,6 +107,9 @@ assert.match(buildVoiceCallPrompts(false).join("\n"), /not loaded for this turn/
 assert.match(buildVoiceCallPrompts(true).join("\n"), /available because the user shifted/);
 
 const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
+const historySource = readFileSync(new URL("../src/features/chat/services/directChatHistoryContext.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${appChatSource}\n${regenerationSource}\n${historySource}`;
 for (const pattern of [
   /buildDirectChatMainPrompt\(/g,
   /buildTimeAwarenessPrompt\(/g,
@@ -114,16 +117,16 @@ for (const pattern of [
   /assembledInstructions\.push\(CURRENT_SCENE_CONTINUITY_PROMPT\)/g,
   /assembledInstructions\.push\(CHINESE_SEMANTIC_CONTINUITY_PROMPT\)/g,
 ]) {
-  assert.equal((appChatSource.match(pattern) || []).length, 2, `${pattern} must be shared by send and regeneration`);
+  assert.equal((chatRuntimeSource.match(pattern) || []).length, 2, `${pattern} must be shared by send and regeneration`);
 }
-assert.equal((appChatSource.match(/if \(musicContext\) assembledInstructions\.push\(musicContext\)/g) || []).length, 2);
-assert.equal((appChatSource.match(/if \(forumContext\) assembledInstructions\.push\(forumContext\)/g) || []).length, 2);
-assert.equal((appChatSource.match(/if \(diaryContext\) assembledInstructions\.push\(diaryContext\)/g) || []).length, 2);
-assert.equal((appChatSource.match(/NEW_DAY_CONVERSATION_BOUNDARY_PROMPT/g) || []).length >= 3, true);
-assert.equal((appChatSource.match(/assembledInstructions\.push\(DIRECT_CHAT_SINGLE_SPEAKER_RULE\)/g) || []).length, 2);
-assert.equal((appChatSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 2, "send and regeneration must share cross-day history routing");
-assert.equal((appChatSource.match(/partitionDirectChatHistoryByCurrentDay\(\{/g) || []).length, 2, "send and regeneration must remove old live-scene turns from current-day history");
-assert.equal((appChatSource.match(/&& !isCrossDayNewSession/g) || []).length, 0, "cross-day routing must not disable relation and offline memory retrieval");
-assert.equal((appChatSource.match(/buildVoiceCallPrompts\(callTopicShiftDetected\)/g) || []).length, 2);
+assert.equal((chatRuntimeSource.match(/if \(musicContext\) assembledInstructions\.push\(musicContext\)/g) || []).length, 2);
+assert.equal((chatRuntimeSource.match(/if \(forumContext\) assembledInstructions\.push\(forumContext\)/g) || []).length, 2);
+assert.equal((chatRuntimeSource.match(/if \(diaryContext\) assembledInstructions\.push\(diaryContext\)/g) || []).length, 2);
+assert.equal((chatRuntimeSource.match(/NEW_DAY_CONVERSATION_BOUNDARY_PROMPT/g) || []).length >= 3, true);
+assert.equal((chatRuntimeSource.match(/assembledInstructions\.push\(DIRECT_CHAT_SINGLE_SPEAKER_RULE\)/g) || []).length, 2);
+assert.equal((chatRuntimeSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 2, "send and regeneration must share cross-day history routing");
+assert.equal((chatRuntimeSource.match(/partitionDirectChatHistoryByCurrentDay\(\{/g) || []).length, 2, "send and regeneration must remove old live-scene turns from current-day history");
+assert.equal((chatRuntimeSource.match(/&& !isCrossDayNewSession/g) || []).length, 0, "cross-day routing must not disable relation and offline memory retrieval");
+assert.equal((chatRuntimeSource.match(/buildVoiceCallPrompts\(callTopicShiftDetected\)/g) || []).length, 2);
 
 console.log("Direct chat turn prompt parity tests passed");

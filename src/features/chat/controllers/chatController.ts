@@ -1,4 +1,5 @@
 import type { Character, Message, OfflineStory } from "../../../types";
+import { createId } from "../../../core/id/createId";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 import { createUserTextMessage } from "../services/messageFactory";
 
@@ -32,7 +33,7 @@ export function createChatUserMessage(input: {
   isInputNarration: boolean;
 }): Message {
   return createUserTextMessage({
-    id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    id: createId("user"),
     characterId: input.characterId,
     context: input.context,
     content: input.content,

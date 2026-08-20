@@ -1,0 +1,87 @@
+import type { Message } from "../../../types";
+import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../../../domain/prompt/historyTimeContext";
+import { buildCrossDayHistoricalReferencePrompt, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../prompts/directChatTurnPrompt";
+import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../prompts/messagePromptSerializer";
+import { formatWeChatTimestamp } from "./chatTime";
+
+export function buildDirectChatHistoryContext(input: {
+  messages: readonly Message[];
+  userMessageId?: string;
+  userMessageAt?: number;
+  enableTimeAwareness: boolean;
+  contextLimit: number;
+  characterName: string;
+  userName: string;
+  requestTime?: Date;
+}): {
+  finalMessages: Message[];
+  recentMessages: Message[];
+  history: Array<{ role: "user" | "model"; text: string }>;
+  messagesForHistory: Message[];
+  crossDayHistoricalReference: string;
+  timeLogString: string;
+  isCrossDayNewSession: boolean;
+  hasCrossDayHistory: boolean;
+  requestTime: Date;
+} {
+  const uniqueMessages = new Map<string, Message>();
+  input.messages.forEach((message) => { if (message) uniqueMessages.set(message.id, message); });
+  const finalMessages = Array.from(uniqueMessages.values()).sort((left, right) => left.timestamp - right.timestamp);
+  const latestMessage = finalMessages[finalMessages.length - 1];
+  const messagesForHistory = input.userMessageId && latestMessage?.id === input.userMessageId
+    ? finalMessages.slice(0, -1)
+    : finalMessages;
+  const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
+    enableTimeAwareness: input.enableTimeAwareness,
+    currentMessageAt: input.userMessageAt,
+    latestHistoryMessageAt: messagesForHistory[messagesForHistory.length - 1]?.timestamp,
+  });
+  const requestTime = input.requestTime || new Date();
+  const historyPartition = partitionDirectChatHistoryByCurrentDay({
+    messages: messagesForHistory,
+    currentMessageAt: input.userMessageAt,
+    enableTimeAwareness: input.enableTimeAwareness,
+  });
+  const recentMessages = historyPartition.liveMessages.slice(-Math.min(50, input.contextLimit));
+  const historicalReferenceLines = historyPartition.historicalMessages.map((message) => {
+    const speaker = message.sender === "user" ? "用户" : input.characterName;
+    const content = serializeMessageContentForPrompt(message, {
+      mode: "history", userName: input.userName, characterName: input.characterName, includeCallTranscript: false,
+    }).replace(/\s+/gu, " ").trim().slice(0, 240);
+    return `- ${new Date(message.timestamp).toLocaleString("zh-CN", { hour12: false })}｜${speaker}：${content}`;
+  });
+  const history = recentMessages.flatMap((message) => serializeMessageToPromptTurns(message, {
+    userName: input.userName,
+    characterName: input.characterName,
+  }).map((turn) => ({
+    role: turn.role,
+    text: input.enableTimeAwareness ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime) : turn.text,
+  })));
+  const timeLogString = input.enableTimeAwareness
+    ? recentMessages.reduce((lines, message) => {
+      const date = new Date(message.timestamp);
+      const day = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")}`;
+      if (lines.lastDay !== day) {
+        lines.values.push(`\n=== 居中分割时间标签: 【${formatWeChatTimestamp(message.timestamp)}】 ===`);
+        lines.lastDay = day;
+      }
+      const sender = message.sender === "user" ? "用户" : input.characterName;
+      const fullTime = `${day} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+      let snippet = serializeMessageContentForPrompt(message, { mode: "history", userName: input.userName, characterName: input.characterName, includeCallTranscript: false });
+      if (snippet.length > 80) snippet = `${snippet.slice(0, 80)}...`;
+      lines.values.push(`- ${sender}: "${snippet}" (发送于: ${fullTime}${describeHistoricalRelativeTime(message.content, message.timestamp, requestTime)})`);
+      return lines;
+    }, { lastDay: "", values: [] as string[] }).values.join("\n")
+    : "";
+  return {
+    finalMessages,
+    messagesForHistory,
+    recentMessages,
+    history,
+    crossDayHistoricalReference: buildCrossDayHistoricalReferencePrompt(historicalReferenceLines),
+    timeLogString,
+    isCrossDayNewSession,
+    hasCrossDayHistory: historyPartition.hasCrossDayHistory,
+    requestTime,
+  };
+}

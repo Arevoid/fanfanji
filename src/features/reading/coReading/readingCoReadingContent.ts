@@ -3,8 +3,9 @@ import { loadReadingStore } from "../../../core/storage/repositories/readingRepo
 import { buildAiReadingContext } from "./aiReadingBoundary";
 import type { ReadingComment, ReadingCommentAuthor, ReadingCommentKind, ReadingCommentSource, ReadingDiscussion, ReadingDiscussionMessage } from "../../../domain/reading/coReadingTypes";
 import type { ReadingRoomScope } from "../../../domain/reading/types";
+import { createId as createApplicationId } from "../../../core/id/createId";
 
-const createId = (prefix: string): string => `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const createId = (prefix: string): string => createApplicationId(prefix);
 
 export class ReadingCoReadingContentError extends Error {
   constructor(message: string, public readonly code: "validation" | "scope" | "spoiler" | "storage" = "validation") {

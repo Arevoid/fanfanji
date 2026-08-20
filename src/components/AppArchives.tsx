@@ -6,6 +6,7 @@ import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTav
 import { getSpeechForText } from "../utils/minimaxTts";
 import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../features/archives/characterExport";
 import { buildCharacterTtsOptions, type TtsProvider } from "../features/voice/ttsConfig";
+import { readString } from "../core/storage/storageAdapter";
 
 interface AppArchivesProps {
   characters: Character[];
@@ -140,7 +141,7 @@ export default function AppArchives({
 
       let settings: any = {};
       try {
-        const saved = localStorage.getItem("phone_settings");
+        const saved = readString("phone_settings").value;
         if (saved) settings = JSON.parse(saved);
       } catch (e) {
         console.error(e);
@@ -472,7 +473,7 @@ export default function AppArchives({
     
     setIsSummarizing(true);
     try {
-      const rawSettings = localStorage.getItem("phone_settings");
+    const rawSettings = readString("phone_settings").value;
       let apiKey = "";
       let model = "";
       let apiEndpoint = "";
