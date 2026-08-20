@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { Message } from "../../../types";
+import type { RedPacketMode } from "../../../types";
 import { parseCallRecord, type CallTranscriptItem } from "../services/messageParser";
 
 export type ChatAttachmentModal = "redpacket" | "music" | "location" | "file" | "calling" | "voice" | null;
@@ -23,10 +24,14 @@ export function useChatAttachmentState() {
   const [callRecordDetail, setCallRecordDetail] = useState<ReturnType<typeof parseCallRecord> | null>(null);
   const [redPacketAmount, setRedPacketAmount] = useState("8.88");
   const [redPacketGreeting, setRedPacketGreeting] = useState("恭喜发财，万事如意");
+  const [redPacketMode, setRedPacketMode] = useState<RedPacketMode>("lucky");
+  const [redPacketCount, setRedPacketCount] = useState("1");
+  const [redPacketRecipientId, setRedPacketRecipientId] = useState("");
   const [showRedPacketOpenModal, setShowRedPacketOpenModal] = useState(false);
   const [openRedPacketDetail, setOpenRedPacketDetail] = useState<{
     id: string; amount: string; greeting: string; senderName: string; senderAvatar: string;
-    sender: "user" | "character"; timestamp: number; message: Message;
+    sender: "user" | "character"; timestamp: number; message: Message; mode: RedPacketMode;
+    count: number; recipientId?: string; recipientName?: string;
   } | null>(null);
   const [isOpeningRedPacket, setIsOpeningRedPacket] = useState(false);
   const [, setOpenTransferDetail] = useState<{ amount: string; memo: string; isConfirmed: boolean } | null>(null);
@@ -42,7 +47,8 @@ export function useChatAttachmentState() {
     isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,
     callTranscript, setCallTranscript, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
     callRecordDetail, setCallRecordDetail, redPacketAmount, setRedPacketAmount,
-    redPacketGreeting, setRedPacketGreeting, showRedPacketOpenModal, setShowRedPacketOpenModal,
+    redPacketGreeting, setRedPacketGreeting, redPacketMode, setRedPacketMode, redPacketCount, setRedPacketCount,
+    redPacketRecipientId, setRedPacketRecipientId, showRedPacketOpenModal, setShowRedPacketOpenModal,
     openRedPacketDetail, setOpenRedPacketDetail, isOpeningRedPacket, setIsOpeningRedPacket,
     setOpenTransferDetail, setShowTransferDetailModal, setOpenVoiceId, voiceTimer, setVoiceTimer,
   };

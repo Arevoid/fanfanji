@@ -1,4 +1,4 @@
-type RedPacketStatus = "unclaimed" | "claimed" | "expired" | "refunded";
+type RedPacketStatus = "unclaimed" | "claimed" | "exhausted" | "expired" | "refunded";
 
 interface RedPacketCardProps {
   amount: string;
@@ -11,6 +11,7 @@ interface RedPacketCardProps {
 const statusLabel: Record<RedPacketStatus, string> = {
   unclaimed: "待领取",
   claimed: "已领取",
+  exhausted: "被抢光",
   expired: "已退回",
   refunded: "已退回",
 };

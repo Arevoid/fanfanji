@@ -6,7 +6,7 @@ import { readJson, readString, remove as removeStoredValue, writeJson, writeStri
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { createId } from "../core/id/createId";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
+import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
 import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
@@ -33,7 +33,7 @@ import { useChatProfileState } from "../features/chat/hooks/useChatProfileState"
 import { useChatGroupState } from "../features/chat/hooks/useChatGroupState";
 import type { VoiceCallStatus } from "../features/chat/services/messageTypes";
 import { shouldConvertBubbleToVoice } from "../features/chat/services/voiceBubbleEligibility";
-import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation } from "../features/chat/services/paymentScope";
+import { RED_PACKET_STATUSES_KEY, parseRedPacketPayload, removePaymentStatusesByRelation } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { isWorldBookEntryForAnyCharacter } from "../domain/worldbook/worldBookVisibility";
 import { aiAnalyzeRemoteSticker, aiAnalyzeSticker, loadStickerImageBlob, stickerDb } from "../utils/stickerDb";
@@ -791,6 +791,7 @@ export default function AppChat({
     setRedPacketStatuses,
     updateRedPacketStatus,
     getRedPacketActualStatus,
+    claimRedPacket,
   } = useChatPaymentState({
     activeIdentityId,
     activeRelationships,
@@ -798,6 +799,7 @@ export default function AppChat({
     messages,
     belongsToActiveIdentity,
     showToast,
+    onSendMessage: onSendMessageRaw,
   });
 
   const { cssTemplateCopied, copyCssExampleTemplate } = useChatCssTemplateCopy({ showToast });
@@ -852,7 +854,8 @@ export default function AppChat({
     isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,
     callTranscript, setCallTranscript, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
     callRecordDetail, setCallRecordDetail, redPacketAmount, setRedPacketAmount,
-    redPacketGreeting, setRedPacketGreeting, showRedPacketOpenModal, setShowRedPacketOpenModal,
+    redPacketGreeting, setRedPacketGreeting, redPacketMode, setRedPacketMode, redPacketCount, setRedPacketCount,
+    redPacketRecipientId, setRedPacketRecipientId, showRedPacketOpenModal, setShowRedPacketOpenModal,
     openRedPacketDetail, setOpenRedPacketDetail, isOpeningRedPacket, setIsOpeningRedPacket,
     setOpenTransferDetail, setShowTransferDetailModal, setOpenVoiceId, voiceTimer, setVoiceTimer,
   } = useChatAttachmentState();
@@ -2026,7 +2029,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const sendCustomMessage = (
     contentString: string,
     capturedContext = activeRuntimeContext,
-    options: { triggerReply?: boolean } = {},
+    options: { triggerReply?: boolean; redPacket?: RedPacketPayload } = {},
   ) => {
     if (!activeChatCharId || !activeCharacter || !isCapturedRuntimeCurrent(capturedContext)) return;
     const userMsg = createUserTextMessage({
@@ -2034,6 +2037,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       context: capturedContext,
       content: contentString,
       timestamp: Date.now(),
+      redPacket: options.redPacket,
     });
     const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
     onSendMessage(normalizedUserMsg);
@@ -5347,11 +5351,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           </button>
                         );
                       })() : isRedPacketMarkup(msg.content) ? (() => {
-                        const [, amount, greeting] = normalizePaymentMarkup(msg.content).split("|");
+                        const packet = parseRedPacketPayload(msg);
                         const status = getRedPacketActualStatus(msg);
-                        return <RedPacketCard amount={amount || "8.88"} greeting={greeting || "恭喜发财，万事如意"} status={status} isSelf={isSelf} onClick={() => {
+                        return <RedPacketCard amount={packet.totalAmount.toFixed(2)} greeting={packet.greeting} status={status} isSelf={isSelf} onClick={() => {
                           const char = characters.find((character) => character.id === msg.characterId);
-                          setOpenRedPacketDetail({ id: msg.id, amount: amount || "8.88", greeting: greeting || "恭喜发财", senderName: char?.remark || char?.name || "未知好友", senderAvatar: char?.avatar || "🧧", sender: msg.sender as "user" | "character", timestamp: msg.timestamp, message: msg });
+                          setOpenRedPacketDetail({ id: msg.id, amount: packet.totalAmount.toFixed(2), greeting: packet.greeting, senderName: char?.remark || char?.name || "未知好友", senderAvatar: char?.avatar || "🧧", sender: msg.sender as "user" | "character", timestamp: msg.timestamp, message: msg, mode: packet.mode, count: packet.count, recipientId: packet.recipientId, recipientName: packet.recipientName });
                           setShowRedPacketOpenModal(true);
                         }} />;
                       })() : isTransferMarkup(msg.content) ? (() => {
@@ -5850,6 +5854,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   onClick={() => {
                     setRedPacketAmount("8.88");
                     setRedPacketGreeting("恭喜发财，万事如意");
+                    setRedPacketMode("lucky");
+                    setRedPacketCount(activeCharacter?.isGroupChat ? String(Math.max(1, Math.min(3, (activeCharacter.memberIds || []).length))) : "1");
+                    setRedPacketRecipientId("");
                     setActiveAttachModal("redpacket");
                     setShowAttachPanel(false);
                   }}
@@ -6105,9 +6112,59 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 </div>
 
                 <div className="p-5 space-y-4 flex-1">
+                  {activeCharacter?.isGroupChat && (
+                    <div className="flex rounded-2xl bg-slate-100 p-1 gap-1">
+                      {(["lucky", "exclusive"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setRedPacketMode(mode)}
+                          className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${redPacketMode === mode ? "bg-white text-[#e15241] shadow-sm" : "text-slate-500"}`}
+                        >
+                          {mode === "lucky" ? "拼手气" : "专属"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeCharacter?.isGroupChat && redPacketMode === "lucky" && (
+                    <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-3">
+                      <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">红包个数</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          step="1"
+                          value={redPacketCount}
+                          onChange={(e) => setRedPacketCount(e.target.value)}
+                          className="bg-transparent text-stone-800 font-bold text-base focus:outline-none flex-1 w-full font-mono"
+                        />
+                        <span className="text-xs text-stone-400">个（群成员 {1 + (activeCharacter.memberIds || []).length} 人）</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeCharacter?.isGroupChat && redPacketMode === "exclusive" && (
+                    <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-3">
+                      <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">发给谁</label>
+                      <select
+                        value={redPacketRecipientId}
+                        onChange={(e) => setRedPacketRecipientId(e.target.value)}
+                        className="w-full bg-transparent text-stone-800 font-bold text-sm focus:outline-none"
+                      >
+                        <option value="">选择群成员</option>
+                        {(activeCharacter.memberIds || []).map((memberId) => {
+                          const member = characters.find((character) => character.id === memberId);
+                          return member ? <option key={member.id} value={member.id}>{member.remark || member.name}</option> : null;
+                        })}
+                      </select>
+                    </div>
+                  )}
+
                   {/* Amount Field */}
                   <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-3 focus-within:ring-1 focus-within:ring-[#e15241]/30 focus-within:border-[#e15241]/50 transition-all">
-                    <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">红包金额 (元)</label>
+                    <label className="block text-[9px] text-stone-400 font-extrabold uppercase tracking-wider mb-1.5">{activeCharacter?.isGroupChat && redPacketMode === "lucky" ? "总金额 (元)" : "金额 (元)"}</label>
                     <div className="flex items-center">
                       <span className="text-lg font-bold text-[#e15241] mr-1.5 font-mono">¥</span>
                       <input 
@@ -6151,6 +6208,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       const finalAmount = parseFloat(redPacketAmount) > 0 ? redPacketAmount : "8.88";
                       const finalGreeting = redPacketGreeting.trim() || "恭喜发财，万事如意";
                       const amt = parseFloat(finalAmount);
+                      const count = activeCharacter?.isGroupChat && redPacketMode === "lucky"
+                        ? Math.max(1, Math.floor(Number(redPacketCount) || 1))
+                        : 1;
+                      const recipient = characters.find((character) => character.id === redPacketRecipientId);
+                      if (activeCharacter?.isGroupChat && redPacketMode === "exclusive" && !recipient) {
+                        showToast("请选择一个群成员作为专属红包领取人");
+                        return;
+                      }
                       if (walletBalance < amt) {
                         showToast("❌ 零钱余额不足，请在“我” -> “钱包”中充值后再发送红包！");
                         return;
@@ -6160,7 +6225,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         const next = prev - amt;
                         return next;
                       });
-                      sendCustomMessage(`[红包]|${finalAmount}|${finalGreeting}`);
+                      const redPacket: RedPacketPayload = {
+                        mode: activeCharacter?.isGroupChat && redPacketMode === "exclusive" ? "exclusive" : "lucky",
+                        totalAmount: Number(amt.toFixed(2)),
+                        count,
+                        greeting: finalGreeting,
+                        ...(recipient ? { recipientId: recipient.id, recipientName: recipient.remark || recipient.name } : {}),
+                      };
+                      sendCustomMessage(`[红包]|${finalAmount}|${finalGreeting}`, activeRuntimeContext, { redPacket });
                       showToast(`已成功塞钱进红包并发送 ¥${amt.toFixed(2)}！🧧`);
                       setActiveAttachModal(null);
                     }}
@@ -6219,13 +6291,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         </h4>
                         <p className="text-[11px] text-white/70 mt-0.5">
                           {isSelf 
-                            ? (status === "claimed" ? "对方已领收红包" : "等待对方拆开中") 
-                            : (status === "claimed" ? "给您发了一个红包" : "给你塞钱进红包啦")}
+                            ? (status === "claimed" || status === "exhausted" ? "红包已被领取" : "等待对方拆开中")
+                            : (status === "claimed" || status === "exhausted" ? "给您发了一个红包" : "给你塞钱进红包啦")}
                         </p>
                       </div>
 
                       {/* Displaying state-specific header message */}
-                      {status === "claimed" ? (
+                      {status === "claimed" || status === "exhausted" ? (
                         <div className="pt-2 animate-fade-in">
                           <p className="text-[11px] text-yellow-100/80 italic font-mono">“{openRedPacketDetail.greeting}”</p>
                           <div className="mt-4 bg-white/10 border border-white/5 rounded-2xl py-4 px-6 text-center shadow-inner min-w-[200px]">
@@ -6265,7 +6337,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
                     {/* Footer / Golden Open Button block */}
                     <div className="flex flex-col items-center justify-center shrink-0 mt-6 relative h-28">
-                      {status === "unclaimed" && !isSelf ? (
+                      {status === "unclaimed" && !isSelf && !openRedPacketDetail.recipientId ? (
                         // THE LEGENDARY CHINESE "KAI" (OPEN) SPINNING BUTTON WITH BOUNCE SHADOW
                         <button
                           type="button"
@@ -6275,14 +6347,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             setTimeout(() => {
                               setIsOpeningRedPacket(false);
                               // Mark as claimed
-                              updateRedPacketStatus(openRedPacketDetail.message, "claimed");
-                              // Deposit money
-                              const parsed = parseFloat(openRedPacketDetail.amount);
-                              if (!isNaN(parsed)) {
+                              const parsed = claimRedPacket(openRedPacketDetail.message, `user:${activeIdentityId}`);
+                              if (parsed > 0) {
                                 setWalletBalance(prev => {
                                   const next = prev + parsed;
                                   return next;
                                 });
+                              } else {
+                                showToast(openRedPacketDetail.recipientName
+                                  ? `该红包仅限 ${openRedPacketDetail.recipientName} 领取`
+                                  : "红包已被领取或不符合领取条件");
+                                return;
                               }
                               showToast(`成功拆开红包，获得 ¥${parsed.toFixed(2)}！🎉`);
                             }, 1200);
@@ -6294,6 +6369,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         >
                           開
                         </button>
+                      ) : status === "unclaimed" && openRedPacketDetail.recipientId ? (
+                        <p className="text-xs text-yellow-100/80 text-center px-6">仅限 {openRedPacketDetail.recipientName || "指定群成员"} 领取</p>
                       ) : (
                         // Standard Close action for already-opened / expired cases
                         <button 

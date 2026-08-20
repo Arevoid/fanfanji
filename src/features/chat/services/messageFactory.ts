@@ -36,6 +36,7 @@ export function createUserTextMessage(input: UserMessageInput): Message {
     timestamp: input.timestamp,
     ...(input.isOffline !== undefined ? { isOffline: input.isOffline } : {}),
     ...(input.isNarration !== undefined ? { isNarration: input.isNarration } : {}),
+    ...(input.redPacket ? { redPacket: input.redPacket } : {}),
   };
 }
 
@@ -53,6 +54,7 @@ export function createCharacterTextMessage(input: CharacterMessageInput): Messag
     timestamp: input.timestamp,
     ...(input.isOffline !== undefined ? { isOffline: input.isOffline } : {}),
     ...(input.isNarration !== undefined ? { isNarration: input.isNarration } : {}),
+    ...(input.redPacket ? { redPacket: input.redPacket } : {}),
   };
 }
 

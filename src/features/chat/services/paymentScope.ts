@@ -1,11 +1,21 @@
-import type { Message } from "../../../types";
+import type { Message, RedPacketPayload } from "../../../types";
 
-export type RedPacketStatus = "claimed" | "expired" | "refunded";
+export type RedPacketStatus = "claimed" | "exhausted" | "expired" | "refunded";
 export type RedPacketStatusMap = Record<string, RedPacketStatus>;
 export type IdentityWalletBalances = Record<string, number>;
+export interface RedPacketClaim { claimantId: string; amount: number; claimedAt: number; }
+export type RedPacketClaimsMap = Record<string, RedPacketClaim[]>;
 
 export const IDENTITY_WALLET_BALANCES_KEY = "phone_identity_wallet_balances";
 export const RED_PACKET_STATUSES_KEY = "wechat_redpacket_statuses";
+export const RED_PACKET_CLAIMS_KEY = "wechat_redpacket_claims";
+
+export function parseRedPacketPayload(message: Pick<Message, "content" | "redPacket">): RedPacketPayload {
+  if (message.redPacket) return message.redPacket;
+  const [, amountText = "8.88", greeting = "恭喜发财，万事如意"] = message.content.split("|");
+  const totalAmount = Number.parseFloat(amountText) || 8.88;
+  return { mode: "lucky", totalAmount, count: 1, greeting };
+}
 
 /** Direct payment actions must use the relation as well as the message ID. */
 export const getPaymentStatusKey = (message: Pick<Message, "id" | "relationId" | "characterId">): string =>

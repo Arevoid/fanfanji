@@ -135,7 +135,7 @@ export function normalizeRedPacketAmount(value: unknown, fallback = DEFAULT_RED_
 
 /** Normalize both legacy aliases and malformed model-generated red packets. */
 export function normalizeRedPacketMarkup(content: string): string {
-  const normalized = content.replace(/^\[微信红包\]/u, "[红包]");
+  const normalized = content.trim().replace(/^\[微信红包\]/u, "[红包]");
   if (!normalized.startsWith("[红包]")) return normalized;
   const parts = normalized.split("|");
   const amount = normalizeRedPacketAmount(parts[1]);
@@ -146,7 +146,7 @@ export function normalizeRedPacketMarkup(content: string): string {
 export const normalizePaymentMarkup = (content: string): string => normalizeRedPacketMarkup(content)
   .replace(/^\[微信转账\]/u, "[转账]");
 
-export const isRedPacketMarkup = (content: string): boolean => /^\[(?:红包|微信红包)\]/.test(content);
+export const isRedPacketMarkup = (content: string): boolean => /^\[(?:红包|微信红包)\]/.test(content.trim());
 export const isTransferMarkup = (content: string): boolean => /^\[(?:转账|微信转账)\]/.test(content);
 export const isCallRecordMarkup = (content: string): boolean => /^\[通话记录\]\|/.test(content);
 

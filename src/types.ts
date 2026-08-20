@@ -104,6 +104,8 @@ export interface Message {
   senderId?: string;
   content: string;
   timestamp: number;
+  /** Optional structured metadata for red packets; legacy markup remains supported. */
+  redPacket?: RedPacketPayload;
   isBookmarked?: boolean;
   isOffline?: boolean;
   /** Snapshot-only online context. It informs a story but is never rendered as story text. */
@@ -853,6 +855,17 @@ export interface MemoryItem {
     chapterId?: string;
     paragraphAnchorId?: string;
   };
+}
+
+export type RedPacketMode = "lucky" | "exclusive";
+
+export interface RedPacketPayload {
+  mode: RedPacketMode;
+  totalAmount: number;
+  count: number;
+  greeting: string;
+  recipientId?: string;
+  recipientName?: string;
 }
 
 export interface MemoryVaultSettings {
