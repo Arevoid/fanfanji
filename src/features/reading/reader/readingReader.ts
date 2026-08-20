@@ -56,6 +56,9 @@ const defaultDependencies: ReadingReaderDependencies = {
   now: () => Date.now(),
 };
 
+const contentCache = new Map<string, ReadingBookContent>();
+const CONTENT_CACHE_LIMIT = 4;
+
 function requireStore(dependencies: Pick<ReadingReaderDependencies, "loadStore">): ReadingStore {
   const loaded = dependencies.loadStore();
   if (!loaded.valid) throw new ReadingReaderError("store-unavailable", "阅读数据当前不可用，已停止读取以保护现有内容");
@@ -75,6 +78,9 @@ export async function loadReadingBookContent(
 ): Promise<ReadingBookContent> {
   const store = requireStore(dependencies);
   const book = findBook(store, userIdentityId, bookId);
+  const cacheKey = `${userIdentityId}:${bookId}:${book.assetId}:${book.contentHash}`;
+  const cached = contentCache.get(cacheKey);
+  if (cached) return cached;
   const chapters = store.chapters
     .filter((chapter) => chapter.userIdentityId === userIdentityId && chapter.bookId === bookId)
     .sort((left, right) => left.order - right.order);
@@ -82,10 +88,16 @@ export async function loadReadingBookContent(
   const asset = await dependencies.assetStore.load(book.assetId, userIdentityId, bookId);
   if (!asset) throw new ReadingReaderError("asset-not-found", "小说正文文件不存在或不属于当前身份");
   const text = await asset.blob.text();
+  const anchorsByChapter = new Map<string, typeof store.paragraphAnchors>();
+  store.paragraphAnchors
+    .filter((anchor) => anchor.userIdentityId === userIdentityId && anchor.bookId === bookId)
+    .forEach((anchor) => {
+      const anchors = anchorsByChapter.get(anchor.chapterId) || [];
+      anchors.push(anchor);
+      anchorsByChapter.set(anchor.chapterId, anchors);
+    });
   const chapterViews = chapters.map((chapter) => {
-    const anchors = store.paragraphAnchors
-      .filter((anchor) => anchor.userIdentityId === userIdentityId && anchor.bookId === bookId && anchor.chapterId === chapter.id)
-      .sort((left, right) => left.ordinal - right.ordinal);
+    const anchors = (anchorsByChapter.get(chapter.id) || []).sort((left, right) => left.ordinal - right.ordinal);
     const paragraphs = anchors.map((anchor) => {
       if (anchor.characterStart > text.length || anchor.characterEnd > text.length) {
         throw new ReadingReaderError("content-not-ready", "正文版本与段落锚点不一致，请重新导入书籍");
@@ -97,7 +109,10 @@ export async function loadReadingBookContent(
   const readableCharacterLength = chapterViews.reduce((total, chapterView) =>
     total + chapterView.paragraphs.reduce((chapterTotal, paragraph) =>
       chapterTotal + paragraph.anchor.characterEnd - paragraph.anchor.characterStart, 0), 0);
-  return { book, chapters: chapterViews, sourceCharacterLength: Math.max(readableCharacterLength, 1) };
+  const result = { book, chapters: chapterViews, sourceCharacterLength: Math.max(readableCharacterLength, 1) };
+  contentCache.set(cacheKey, result);
+  while (contentCache.size > CONTENT_CACHE_LIMIT) contentCache.delete(contentCache.keys().next().value!);
+  return result;
 }
 
 export function getReadingProgress(

@@ -11,9 +11,6 @@ import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerial
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import { buildGroupMemberPrivateContext, type GroupMemberPrivateContextInput } from "../prompts/groupMemberPrivateContext";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage } from "../prompts/chatPromptBuilders";
-import { buildIsolatedGroupMemberDefinitions } from "../prompts/groupMemberPrivateContext";
-import { getVisibleWorldBookEntries } from "../../../utils/worldBook";
-import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../../../domain/prompt/characterLanguage";
 
 export type GroupChatTurnGenerator = (input: {
   prompt: {
@@ -153,10 +150,15 @@ export async function generateIsolatedGroupChatReplies(input: {
   currentTime: () => number;
   signal?: AbortSignal;
 }): Promise<{ messages: Message[]; members: Character[] } | null> {
-  const routerResult = await input.generateTurn({
+  // One request is intentionally used for the whole public group turn. Sending
+  // one request per member was expensive and also made the first-turn delivery
+  // look stuck while several sequential calls were in flight. Private member
+  // contexts are not merged here: doing so would expose one member's private
+  // memory to another member in the same model request.
+  const result = await input.generateTurn({
     prompt: {
       scenario: "group-chat",
-      message: `${buildGroupChatTaskMessage(input.historyText, input.hasUserMessage)}\n\n【本轮仅选择发言人】不要撰写正式回复。请选择本轮最自然会发言的 0—3 位成员，每位只输出占位内容“SELECT”，格式仍为 [SENDER_NAME: 角色原名]。`,
+      message: `${buildGroupChatTaskMessage(input.historyText, input.hasUserMessage)}\n\n【群聊本轮回复】请从群成员中选择 0—3 位自然会发言的人。直接输出正式回复；每条回复必须以 [SENDER_NAME: 角色原名] 开头。可以输出多位成员，也可以让某位成员输出多条短消息。不得替其他成员发言，不得输出群外角色。`,
       history: [],
       systemInstruction: buildGroupChatSystemInstruction({
         userName: input.userName,
@@ -176,62 +178,7 @@ export async function generateIsolatedGroupChatReplies(input: {
     signal: input.signal,
   });
   if (input.signal?.aborted) return null;
-
-  const selectedMembers = Array.from(new Map(routerResult.members.map((member) => [member.id, member])).values()).slice(0, 3);
-  const messages: Message[] = [];
-  const members: Character[] = [];
-  let sameTurnPublicHistory = input.historyText;
-  for (const member of selectedMembers) {
-    if (input.signal?.aborted) return null;
-    const publicDefinition = input.publicMemberDefinitions[input.groupMembers.findIndex((candidate) => candidate.id === member.id)] || "";
-    const memberDefinitions = buildIsolatedGroupMemberDefinitions({
-      publicDefinition,
-      publicRoster: input.groupMembers.map((candidate) => candidate.name),
-      privateContext: input.privateContextByMemberId.get(member.id) || "",
-    });
-    const memberLanguageInstruction = formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
-      member,
-      [
-        publicDefinition,
-        ...getVisibleWorldBookEntries(input.worldBookEntries, member.id, { scenario: "group", characterId: member.id })
-          .map((entry) => `${entry.title}\n${entry.content}`),
-      ],
-    ));
-    const isolatedDepthInjections = new Map(input.groupWorldBookBlocks.at_depth.map((entry) => [entry.sourceId, entry]));
-    (input.memberAtDepthInjections.get(member.id) || []).forEach((entry) => isolatedDepthInjections.set(entry.sourceId, entry));
-    const memberResult = await input.generateTurn({
-      prompt: {
-        scenario: "group-chat",
-        message: `${buildGroupChatTaskMessage(sameTurnPublicHistory, input.hasUserMessage)}\n\n【单成员生成】本次请求只允许 ${member.name} 发言。可以保持沉默；若发言，每一条都必须使用 [SENDER_NAME: ${member.name}]，不得代替其他成员输出。`,
-        history: [],
-        systemInstruction: `${buildGroupChatSystemInstruction({
-          userName: input.userName,
-          userBio: input.userBio,
-          groupName: input.groupName,
-          worldContext: input.groupWorldContext,
-          memberDefinitions,
-        })}\n\n---\n\n${memberLanguageInstruction}`,
-        historyInjections: [...isolatedDepthInjections.values()],
-      },
-      settings: input.settings,
-      members: [member],
-      groupId: input.groupId,
-      disableBracketActions: input.disableBracketActions,
-      createId: input.createReplyId,
-      currentTime: input.currentTime,
-      signal: input.signal,
-    });
-    if (input.signal?.aborted) return null;
-    messages.push(...memberResult.messages);
-    members.push(...memberResult.members);
-    if (memberResult.messages.length > 0) {
-      sameTurnPublicHistory = [
-        sameTurnPublicHistory,
-        ...memberResult.messages.map((message) => `${member.remark || member.name}: ${serializeMessageContentForPrompt(message, { mode: "history", userName: input.userName, characterName: member.remark || member.name })}`),
-      ].filter(Boolean).join("\n");
-    }
-  }
-  return { messages, members };
+  return result;
 }
 
 export async function generateGroupReplyCandidates(input: {

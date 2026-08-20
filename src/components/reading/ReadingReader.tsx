@@ -215,10 +215,10 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
     }
   }, [bookId, content, maybeSyncAiCompanion, room, userIdentityId]);
 
-  const scrollToAnchor = useCallback((anchorId: string, behavior: ScrollBehavior = "smooth", characterOffset = 0) => {
+  const scrollToAnchor = useCallback((anchorId: string, behavior: ScrollBehavior = "smooth", characterOffset = 0): boolean => {
     const container = scrollRef.current;
     const element = paragraphRefs.current.get(anchorId);
-    if (!container || !element) return;
+    if (!container || !element) return false;
     const ratio = element.textContent?.length ? characterOffset / element.textContent.length : 0;
     const containerRect = container.getBoundingClientRect();
     const elementRect = element.getBoundingClientRect();
@@ -226,26 +226,35 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
       const left = elementRect.left - containerRect.left + container.scrollLeft;
       const pageWidth = Math.max(container.clientWidth, 1);
       container.scrollTo({ left: Math.floor(Math.max(0, left) / pageWidth) * pageWidth, behavior });
-      return;
+      return true;
     }
     const elementTop = elementRect.top - containerRect.top + container.scrollTop;
     const top = elementTop - 48 + elementRect.height * Math.min(Math.max(ratio, 0), 1);
     container.scrollTo({ top, behavior });
+    return true;
   }, [preferences.pageMode]);
 
   useEffect(() => {
     if (!content || restoredRef.current) return;
-    restoredRef.current = true;
     const progress = getScopedReadingProgress(userIdentityId, bookId, room);
     const target = initialAnchorId || progress?.paragraphAnchorId || content.chapters[0]?.paragraphs[0]?.anchor.id;
     if (!target) return;
-    const frame = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        scrollToAnchor(target, "auto", initialAnchorId ? 0 : progress?.characterOffset || 0);
+    let attempts = 0;
+    let cancelled = false;
+    const restore = () => {
+      if (cancelled || restoredRef.current) return;
+      attempts += 1;
+      if (scrollToAnchor(target, "auto", initialAnchorId ? 0 : progress?.characterOffset || 0)) {
+        restoredRef.current = true;
         if (initialAnchorId && room && roomComments.some((comment) => comment.targetParagraphAnchorId === initialAnchorId)) setCommentThreadAnchorId(initialAnchorId);
-      });
+        return;
+      }
+      if (attempts < 5) window.requestAnimationFrame(restore);
+    };
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(restore);
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => { cancelled = true; window.cancelAnimationFrame(frame); };
   }, [bookId, content, initialAnchorId, room, roomComments, scrollToAnchor, userIdentityId]);
 
   useEffect(() => {
@@ -672,7 +681,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
       ) : error ? (
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center"><BookOpenText className="h-8 w-8 text-[var(--text-muted)]" /><p className="mt-4 text-sm font-bold">无法打开这本书</p><p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">{error}</p></div>
       ) : (
-        <main ref={scrollRef} onScroll={handleScroll} onClick={handleReaderEdgeClick} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 scroll-smooth ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
+        <main ref={scrollRef} onScroll={handleScroll} onClick={handleReaderEdgeClick} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
           <article
             className={preferences.pageMode === "horizontal" ? "h-full py-8" : "mx-auto max-w-[42rem]"}
             style={preferences.pageMode === "horizontal" ? {
@@ -699,6 +708,8 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
                       onContextMenu={(event) => { if (!window.getSelection()?.isCollapsed) event.preventDefault(); }}
                       className={`relative select-text rounded-md transition-colors ${annotations.some((item) => item.paragraphAnchorId === paragraph.anchor.id && item.kind === "note") ? "border-b border-dashed border-current" : ""}`}
                       style={{
+                        contentVisibility: "auto",
+                        containIntrinsicSize: "0 96px",
                         userSelect: "text",
                         WebkitUserSelect: "text",
                         fontSize: preferences.fontSize,

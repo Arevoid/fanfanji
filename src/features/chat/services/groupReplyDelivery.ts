@@ -42,17 +42,24 @@ export function scheduleGroupReplyDelivery(input: GroupReplyDeliveryInput): void
         stop();
         return;
       }
-      item.message.timestamp = now();
-      input.onSend(item.message);
-      currentIndex += 1;
-      if (currentIndex < input.items.length) {
-        input.onTypingMember(input.items[currentIndex].member);
-        input.onTyping(false);
-        setTimeoutFn(sendNext, 400);
-        return;
+      try {
+        item.message.timestamp = now();
+        input.onSend(item.message);
+        currentIndex += 1;
+        if (currentIndex < input.items.length) {
+          input.onTypingMember(input.items[currentIndex].member);
+          input.onTyping(false);
+          setTimeoutFn(sendNext, 400);
+          return;
+        }
+        input.onComplete(input.items.map((entry) => entry.message));
+      } catch {
+        // A delivery-side failure must never leave the chat in an endless
+        // typing state after the single group request has completed.
+        stop();
+      } finally {
+        if (currentIndex >= input.items.length) stop();
       }
-      stop();
-      input.onComplete(input.items.map((entry) => entry.message));
     }, 1500);
   };
 

@@ -10,6 +10,7 @@ import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHis
 import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./src/utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "./src/core/security/contentSecurityPolicy";
+import { assertImageGenerationTrigger } from "./src/features/chat/services/imageGenerationIntent";
 
 dotenv.config();
 
@@ -58,8 +59,10 @@ async function startServer() {
   app.post("/api/image/generate", async (req, res) => {
     try {
       const { trigger, userText } = req.body || {};
-      if (trigger !== "manual" && !(trigger === "explicit-user-text" && explicitImageRequest(String(userText || "")))) {
-        return res.status(403).json({ error: "图片生成已拦截：触发来源不是手动确认或明确的用户图片请求。" });
+      try {
+        assertImageGenerationTrigger(trigger, String(userText || ""));
+      } catch (error: any) {
+        return res.status(403).json({ error: error.message || "图片生成已拦截：不是明确的用户图片请求。" });
       }
       return res.json({ dataUrl: await generateImageWithProtocol(req.body) });
     } catch (error: any) {

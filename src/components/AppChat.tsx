@@ -945,6 +945,8 @@ export default function AppChat({
   const { voicePlayed, setVoicePlayed, voiceTranscribed, setVoiceTranscribed } = useChatVoiceMessageState();
 
   useEffect(() => {
+    bubbleLongPressRef.current.forEach(({ timer }) => clearTimeout(timer));
+    bubbleLongPressRef.current.clear();
     activeTtsAudio?.pause();
     if (voiceTimer) clearInterval(voiceTimer);
     clearCallSpeechQueue();
@@ -965,10 +967,16 @@ export default function AppChat({
     setSelectedMessageIds(new Set());
   }, [activeIdentityId, activeChatRelationId, activeChatCharId]);
 
+  useEffect(() => () => {
+    bubbleLongPressRef.current.forEach(({ timer }) => clearTimeout(timer));
+    bubbleLongPressRef.current.clear();
+  }, []);
+
   // Moments long-press popup refs remain local because handlers own their gesture lifecycle.
   const commentLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commentLongPressOriginRef = useRef<{ x: number; y: number } | null>(null);
   const suppressCommentClickRef = useRef(false);
+  const bubbleLongPressRef = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; origin: { x: number; y: number } }>());
 
   useEffect(() => {
     if (activeAttachModal === "file") {
@@ -1175,7 +1183,9 @@ export default function AppChat({
 
       if (groupResult.messages.length > 0) {
         repliesScheduled = false;
-        const validReplies = groupResult.messages.map((message, idx) => ({ message, member: groupResult.members[idx], idx }));
+        const validReplies = groupResult.messages
+          .map((message, idx) => ({ message, member: groupResult.members[idx], idx }))
+          .filter((item): item is { message: Message; member: Character; idx: number } => Boolean(item.member));
 
         if (validReplies.length > 0) {
           repliesScheduled = true;
@@ -5137,47 +5147,43 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       if (e.pointerType === "mouse" && e.button !== 0) return;
                       const clientX = e.clientX;
                       const clientY = e.clientY;
-      const origin = { x: e.clientX, y: e.clientY };
-      try {
-        e.currentTarget.setPointerCapture(e.pointerId);
-      } catch {
-        // Pointer capture is unavailable in a few older mobile browsers.
-      }
-      const timer = setTimeout(() => {
-        setActiveMenuMsg(msg);
-        setMenuPosition({ x: clientX, y: clientY });
-      }, LONG_PRESS_DELAY);
-      (e.currentTarget as any)._longPressTimer = timer;
-      (e.currentTarget as any)._longPressOrigin = origin;
+                      const origin = { x: clientX, y: clientY };
+                      const previous = bubbleLongPressRef.current.get(msg.id);
+                      if (previous) clearTimeout(previous.timer);
+                      const timer = setTimeout(() => {
+                        bubbleLongPressRef.current.delete(msg.id);
+                        setActiveMenuMsg(msg);
+                        setMenuPosition({ x: clientX, y: clientY });
+                      }, LONG_PRESS_DELAY);
+                      bubbleLongPressRef.current.set(msg.id, { timer, origin });
                     }}
                     onPointerUp={(e) => {
-                      const timer = (e.currentTarget as any)._longPressTimer;
-                      if (timer) clearTimeout(timer);
-                      (e.currentTarget as any)._longPressTimer = null;
-                      (e.currentTarget as any)._longPressOrigin = null;
+                      const pending = bubbleLongPressRef.current.get(msg.id);
+                      if (pending) {
+                        clearTimeout(pending.timer);
+                        bubbleLongPressRef.current.delete(msg.id);
+                      }
                     }}
                     onPointerCancel={(e) => {
-                      const timer = (e.currentTarget as any)._longPressTimer;
-                      if (timer) clearTimeout(timer);
-                      (e.currentTarget as any)._longPressTimer = null;
-                      (e.currentTarget as any)._longPressOrigin = null;
+                      const pending = bubbleLongPressRef.current.get(msg.id);
+                      if (pending) {
+                        clearTimeout(pending.timer);
+                        bubbleLongPressRef.current.delete(msg.id);
+                      }
                     }}
                     onPointerLeave={(e) => {
-                      const timer = (e.currentTarget as any)._longPressTimer;
-                      const origin = (e.currentTarget as any)._longPressOrigin as { x: number; y: number } | undefined;
-                      if (timer && origin && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
-                        clearTimeout(timer);
-                        (e.currentTarget as any)._longPressTimer = null;
-                        (e.currentTarget as any)._longPressOrigin = null;
+                      if (e.pointerType !== "mouse") return;
+                      const pending = bubbleLongPressRef.current.get(msg.id);
+                      if (pending && Math.hypot(e.clientX - pending.origin.x, e.clientY - pending.origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
+                        clearTimeout(pending.timer);
+                        bubbleLongPressRef.current.delete(msg.id);
                       }
                     }}
                     onPointerMove={(e) => {
-                      const timer = (e.currentTarget as any)._longPressTimer;
-                      const origin = (e.currentTarget as any)._longPressOrigin as { x: number; y: number } | undefined;
-                      if (timer && origin && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
-                        clearTimeout(timer);
-                        (e.currentTarget as any)._longPressTimer = null;
-                        (e.currentTarget as any)._longPressOrigin = null;
+                      const pending = bubbleLongPressRef.current.get(msg.id);
+                      if (pending && Math.hypot(e.clientX - pending.origin.x, e.clientY - pending.origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
+                        clearTimeout(pending.timer);
+                        bubbleLongPressRef.current.delete(msg.id);
                       }
                     }}
                     className="chat-long-press-target flex items-center gap-1 group relative cursor-pointer select-none"
