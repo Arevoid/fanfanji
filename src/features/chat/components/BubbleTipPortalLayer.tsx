@@ -7,6 +7,7 @@ type BubbleTipAnchor = {
   left: number;
   top: number;
   height: number;
+  backgroundColor: string;
 };
 
 export function BubbleTipPortalLayer({ enabled }: { enabled: boolean }) {
@@ -29,11 +30,23 @@ export function BubbleTipPortalLayer({ enabled }: { enabled: boolean }) {
         const rect = bubble.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
         const side = bubble.classList.contains("chat-bubble-self") ? "self" : "other";
-        next.push({ key: `${side}-${index}`, side, left: side === "self" ? rect.right : rect.left, top: rect.top, height: rect.height });
+        next.push({
+          key: `${side}-${index}`,
+          side,
+          left: side === "self" ? rect.right : rect.left,
+          top: rect.top,
+          height: rect.height,
+          backgroundColor: window.getComputedStyle(bubble).backgroundColor,
+        });
       });
       setAnchors((previous) => previous.length === next.length && previous.every((item, index) => {
         const candidate = next[index];
-        return item.key === candidate.key && item.side === candidate.side && Math.abs(item.left - candidate.left) < 0.5 && Math.abs(item.top - candidate.top) < 0.5 && Math.abs(item.height - candidate.height) < 0.5;
+        return item.key === candidate.key
+          && item.side === candidate.side
+          && item.backgroundColor === candidate.backgroundColor
+          && Math.abs(item.left - candidate.left) < 0.5
+          && Math.abs(item.top - candidate.top) < 0.5
+          && Math.abs(item.height - candidate.height) < 0.5;
       }) ? previous : next);
     };
     const scheduleUpdate = () => {
@@ -54,7 +67,7 @@ export function BubbleTipPortalLayer({ enabled }: { enabled: boolean }) {
 
   return <div ref={(node) => { if (node !== portalHost) setPortalHost(node); }} className="cv-bubble-tip-portal-layer" aria-hidden="true">
     {portalHost && anchors.map((anchor) => createPortal(
-      <div key={anchor.key} className="cv-bubble-tip-portal" style={{ left: anchor.left, top: anchor.top, width: 0, height: anchor.height }}><div className={`bubble-tip ${anchor.side}-tip`} /></div>,
+      <div key={anchor.key} className="cv-bubble-tip-portal" style={{ left: anchor.left, top: anchor.top, width: 0, height: anchor.height }}><div className={`bubble-tip ${anchor.side}-tip`} style={{ "--bubble-tip-bg": anchor.backgroundColor } as React.CSSProperties} /></div>,
       portalHost,
       anchor.key,
     ))}

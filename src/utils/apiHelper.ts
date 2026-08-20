@@ -60,8 +60,9 @@ async function directClientChat(params: {
   apiEndpoint?: string;
   apiTemperature?: number;
   streamCompatible?: boolean;
+  signal?: AbortSignal;
 }): Promise<{ text: string }> {
-  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible } = params;
+  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible, signal } = params;
 
   if (apiEndpoint && apiEndpoint.trim()) {
     // Custom OpenAI compatible API
@@ -96,7 +97,8 @@ async function directClientChat(params: {
         messages: messagesPayload,
         temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
         stream: streamCompatible || false
-      })
+      }),
+      signal,
     }, API_REQUEST_TIMEOUTS.textGeneration);
 
     if (!responseFetch.ok) {
@@ -202,7 +204,8 @@ async function directClientChat(params: {
             parts: [{ text: geminiPrompt.systemInstruction }]
           }
         } : {})
-      })
+      }),
+      signal,
     }, API_REQUEST_TIMEOUTS.textGeneration);
 
     if (!responseFetch.ok) {
@@ -262,13 +265,16 @@ export async function apiChat(params: {
   apiEndpoint?: string;
   apiTemperature?: number;
   streamCompatible?: boolean;
+  signal?: AbortSignal;
 }): Promise<{ text: string }> {
+  const { signal, ...requestBody } = params;
   let res: Response | null = null;
   try {
     res = await fetchWithTimeout("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+      body: JSON.stringify(requestBody),
+      signal,
     }, API_REQUEST_TIMEOUTS.textGeneration);
   } catch (err) {
     // A network failure means the optional app backend is genuinely absent.

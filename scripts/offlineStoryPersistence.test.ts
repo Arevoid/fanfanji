@@ -40,7 +40,7 @@ assert.match(app, /return persistOfflineStories\(updated, story\)/);
 assert.match(app, /offlineStoryDb\.loadAll\(\)/);
 assert.match(offline, /await storyPersistenceRef\.current/);
 assert.match(offline, /archivedAt: undefined,[\s\S]*memorySyncStatus: "pending"/);
-assert.match(settings, /backupData\.phone_offline_stories = JSON\.stringify\(mergeOfflineStoryCollections/);
+assert.match(settings, /backupData\.localStorage\.phone_offline_stories = JSON\.stringify\(mergeOfflineStoryCollections/);
 assert.match(settings, /await offlineStoryDb\.replaceAll\(parsedStories as OfflineStory\[\]\)/);
 
 console.log("PASS offline stories persist durably, merge newer snapshots, restore through backups, and reopen as pending progress");

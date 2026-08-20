@@ -10,6 +10,8 @@ export interface ReplyCandidateContext {
   disableBracketActions: boolean;
   keepPeriods: boolean;
   characterId?: string;
+  characterName?: string;
+  userName?: string;
   context?: ChatRuntimeContext;
   createId: (index: number) => string;
   currentTime: (index: number) => number;

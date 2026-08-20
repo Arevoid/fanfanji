@@ -25,9 +25,12 @@ if (typeof window !== "undefined") {
 
   if ("serviceWorker" in navigator) {
     const registerSW = () => {
-      navigator.serviceWorker.register("/sw.js")
+      navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
         .then((registration) => {
           console.log("[PWA] Service Worker registered successfully with scope:", registration.scope);
+          registration.update().catch((error) => {
+            console.warn("[PWA] Service Worker update check failed:", error);
+          });
         })
         .catch((error) => {
           console.error("[PWA] Service Worker registration failed:", error);

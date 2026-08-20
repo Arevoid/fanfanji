@@ -21,6 +21,24 @@ const bounded = (requested: number | undefined, fallback: number): number =>
 
 const compactPublicText = (value: string): string => value.trim().slice(0, MAX_PUBLIC_HISTORY_ITEM_LENGTH);
 
+const parsePromptLocalNow = (date: string, time: string): number => {
+  const match = `${date} ${time}`.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+  if (!match) return Date.now();
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5])).getTime();
+};
+
+const formatDatedMomentItem = (content: string, occurredAt: number | undefined, now: number): string => {
+  if (!occurredAt || !Number.isFinite(occurredAt)) return `- ${content}`;
+  const date = new Date(occurredAt);
+  const nowDate = new Date(now);
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const nowStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+  const days = Math.round((nowStart - start) / 86_400_000);
+  const relative = days === 0 ? "今天" : days === 1 ? "昨天" : days === 2 ? "前天" : days > 2 ? `${days}天前` : "未来时间（不可当作已发生）";
+  const absolute = date.toLocaleString("zh-CN", { hour12: false });
+  return `- [实际发生于 ${absolute}；相对本条朋友圈为“${relative}”] ${content}`;
+};
+
 type MomentPromptContextWithRoutine = MomentPromptContext & {
   routineContext?: CharacterCognitiveRoutineContext;
   topicContext?: {
@@ -36,12 +54,16 @@ function projectRelationMomentContext(options: MomentPromptAdapterOptions | unde
 > {
   const context = options?.relationContext;
   if (!context) return { relationFacts: [], relationEvents: [] };
+  const selectedFacts = selectChatPromptFacts(context, options);
   return {
     // A Moment may use the relationship stage as immediate context, but a
     // legacy summary is intentionally omitted: only confirmed facts/events
     // are eligible material for a relationship-scoped Moment.
     relationship: { stage: context.relationship.stage },
-    relationFacts: selectChatPromptFacts(context, options),
+    relationFacts: selectedFacts.map((fact) => ({
+      ...fact,
+      timestamp: context.knownFacts.find((candidate) => candidate.content === fact.content)?.timestamp,
+    })),
     relationEvents: selectSafePromptEvents(context, options),
   };
 }
@@ -217,6 +239,8 @@ export function appendMomentPublicPromptContext<T extends { systemInstruction?: 
 export function formatMomentPromptContext(context: MomentPromptContextWithRoutine | undefined): string {
   if (!context) return "";
 
+  const promptNow = parsePromptLocalNow(context.time.date, context.time.time);
+
   const persona = [
     `- Name: ${context.persona.name}`,
     ...(context.persona.personality ? [`- Personality: ${context.persona.personality}`] : []),
@@ -229,10 +253,10 @@ export function formatMomentPromptContext(context: MomentPromptContextWithRoutin
       ...(context.relationship.legacySummary ? [`- Historical relationship note (weak reference): ${context.relationship.legacySummary.content}`] : []),
     ]
     : [];
-  const relationFacts = context.relationFacts.map((fact) => `- ${fact.content}`);
-  const relationEvents = context.relationEvents.map((event) => `- ${event.summary}`);
+  const relationFacts = context.relationFacts.map((fact) => formatDatedMomentItem(fact.content, fact.timestamp, promptNow));
+  const relationEvents = context.relationEvents.map((event) => formatDatedMomentItem(event.summary, event.occurredAt, promptNow));
   const facts = context.publicFacts.map((fact) => `- ${fact.content}`);
-  const events = context.publicEvents.map((event) => `- ${event.summary}`);
+  const events = context.publicEvents.map((event) => formatDatedMomentItem(event.summary, event.occurredAt, promptNow));
   const worldKnowledge = context.publicWorldKnowledge.map((setting) => `- ${setting.title}: ${setting.content}`);
   const momentHistory = context.publicMomentHistory.map((moment) => `- ${moment.authorName}: ${moment.content}`);
   const commentHistory = context.publicCommentHistory.map((comment) => `- ${comment.authorName}: ${comment.content}`);
@@ -263,6 +287,7 @@ export function formatMomentPromptContext(context: MomentPromptContextWithRoutin
   return [
     "[PUBLIC-SAFE MOMENT COGNITIVE CONTEXT]",
     "Use only the scoped, confirmed information below when directly relevant. Do not invent shared scenes, locations, actions, or user experiences.",
+    "Every supplied occurrence timestamp and its relative-day label is authoritative. Never rewrite a yesterday/earlier event as happening today, this morning, or this noon.",
     "Character focus:",
     ...persona,
     ...relationship,

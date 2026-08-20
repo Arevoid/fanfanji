@@ -9,6 +9,7 @@ const settingsNavigation = fs.readFileSync(
 );
 const archives = fs.readFileSync(new URL("../src/components/AppArchives.tsx", import.meta.url), "utf8");
 const chat = fs.readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const composer = fs.readFileSync(new URL("../src/features/chat/components/ChatComposer.tsx", import.meta.url), "utf8");
 
 assert.doesNotMatch(offline, /当前模式不会自动同步记忆；请在剧本设置中手动确认同步/);
 assert.doesNotMatch(settings, /高级诊断\s*·\s*提示词检查器|PromptDebugPanel|prompt_debug/);
@@ -24,7 +25,8 @@ assert.match(
   /<section className="settings-card overflow-hidden[\s\S]*?<div className="flex items-center justify-between gap-3 border-b border-\[var\(--divider\)\] px-4 py-3">[\s\S]*?语音合成总开关[\s\S]*?<div className="space-y-2 px-4 py-4">[\s\S]*?语音平台[\s\S]*?Mossland 接口配置[\s\S]*?<\/section>/,
 );
 assert.doesNotMatch(settings, /className="space-y-2 border-b border-\[var\(--divider\)\] px-4 py-4"[\s\S]*?语音平台/);
-assert.match(chat, /onSubmit=\{\(e\) => \{[\s\S]*?handleSendOnly\(e\);[\s\S]*?type="button"[\s\S]*?onClick=\{\(e\) => handleSendAndReply\(e\)\}/);
+assert.match(composer, /void onSendOnly\(inputText, event\)/);
+assert.match(composer, /void onSendAndReply\(inputText, event\)/);
 assert.match(chat, /<Smile className="w-5 h-5 text-slate-800" \/>/);
 assert.match(chat, /<FolderHeart className="w-5 h-5 text-slate-800" \/>/);
 assert.match(chat, /Mossland VOICE ID[\s\S]*MiniMax VOICE ID/);

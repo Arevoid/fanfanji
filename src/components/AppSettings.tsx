@@ -57,6 +57,9 @@ import {
 } from "../features/settings/settingsNavigation";
 import { clearApplicationData } from "../features/settings/clearApplicationData";
 import { offlineStoryDb } from "../core/storage/offlineStoryDb";
+import { inspectStorage, removeMigratedStorageCopies, type StorageDiagnostics } from "../core/storage/storageDiagnostics";
+import { runStoragePreflight, type StoragePreflightResult } from "../core/storage/storagePreflight";
+import { migrateContentStorage } from "../core/storage/contentStorageMigration";
 import { mergeOfflineStoryCollections } from "../core/storage/repositories/offlineRepository";
 import { normalizeMosslandApiEndpoint } from "../features/voice/ttsConfig";
 import {
@@ -70,6 +73,13 @@ import {
   LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS,
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../features/chat/styles/liquidGlassDefaults";
+import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
+import { buildSystemBackup, filterSystemBackupLocalStorageForRestore, parseSystemBackup, restoreSystemBackupIndexedDb, splitSystemBackupJson } from "../features/settings/systemBackup";
+import { SYSTEM_BACKUP_VERSION } from "../features/settings/systemBackup";
+import { writeString } from "../core/storage/storageAdapter";
+import { storageKeys } from "../core/storage/storageKeys";
+import { StorageDiagnosticsCard } from "../features/settings/components/StorageDiagnosticsCard";
+import { APP_VERSION } from "../core/release/releaseInfo";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
@@ -98,6 +108,7 @@ interface AppSettingsProps {
   onSaveSettings: (update: UserSettingsUpdate) => boolean;
   onSavePreset: (preset: StylePreset) => void;
   onDeletePreset: (id: string) => void;
+  onSwitchIdentity?: (id: string) => void;
   onClose: () => void;
 }
 
@@ -161,7 +172,7 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
 `;
 
 const BACKUP_KEYS = [
-  "phone_calendar_events",
+  "phone_schedule_v1",
   "phone_characters",
   "phone_characters_v3",
   "phone_homescreen_items",
@@ -179,6 +190,16 @@ const BACKUP_KEYS = [
   "phone_forum_actor_states",
   "phone_forum_activity_tasks",
   "phone_forum_profiles",
+  "phone_forum_community_npcs",
+  "phone_forum_translations",
+  "phone_forum_stories",
+  "phone_forum_story_characters",
+  "phone_forum_story_users",
+  "phone_forum_story_threads",
+  "phone_forum_story_replies",
+  "phone_forum_story_events",
+  "phone_forum_story_updates",
+  "phone_forum_story_execution_logs",
   "phone_forum_visit_history",
   "phone_forum_like_history",
   "phone_forum_notifications",
@@ -203,6 +224,11 @@ const BACKUP_KEYS = [
   "phone_identity_music_states",
   "phone_relationship_music_states",
   "phone_offline_stories",
+  "phone_reading_store_v1",
+  "phone_reading_co_reading_store_v1",
+  "phone_reading_analysis_store_v1",
+  "phone_reading_story_store_v1",
+  "phone_reading_co_story_store_v1",
   "phone_presets",
   "phone_settings",
   "phone_appearance_settings",
@@ -215,13 +241,13 @@ const BACKUP_KEYS = [
 ] as const;
 
 const BACKUP_KEY_SET = new Set<string>(BACKUP_KEYS);
-type BackupData = Partial<Record<(typeof BACKUP_KEYS)[number], string | null>>;
 
 const LIGHT_BACKUP_KEYS = [
   "phone_characters",
   "phone_characters_v3",
   "phone_messages",
   "phone_messages_v3",
+  "phone_moments_v3",
   "phone_conversation_summaries",
   "phone_worldbook_entries",
   "phone_memory_vault_items",
@@ -238,19 +264,30 @@ const LIGHT_BACKUP_KEYS = [
   "phone_forum_replies",
   "phone_forum_shares",
   "phone_forum_profiles",
+  "phone_forum_community_npcs",
+  "phone_forum_translations",
   "phone_offline_stories",
+  "phone_reading_store_v1",
+  "phone_reading_co_reading_store_v1",
+  "phone_reading_analysis_store_v1",
+  "phone_reading_story_store_v1",
+  "phone_reading_co_story_store_v1",
 ] as const;
 
 async function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][]): Promise<void> {
-  const backupData: BackupData = {};
-  keys.forEach((key) => {
-    backupData[key] = sanitizeSystemBackupValue(key, localStorage.getItem(key));
-  });
+  const backup = await buildSystemBackup(localStorage, keys);
+  const backupData = {
+    ...backup,
+    localStorage: Object.fromEntries(Object.entries(backup.localStorage).map(([key, value]) => [
+      key,
+      sanitizeSystemBackupValue(key, value),
+    ])),
+  };
   if (keys.includes("phone_offline_stories")) {
     try {
-      const localStories = JSON.parse(backupData.phone_offline_stories || "[]") as OfflineStory[];
+      const localStories = JSON.parse(backupData.localStorage.phone_offline_stories || "[]") as OfflineStory[];
       const durableStories = await offlineStoryDb.loadAll();
-      backupData.phone_offline_stories = JSON.stringify(mergeOfflineStoryCollections(
+      backupData.localStorage.phone_offline_stories = JSON.stringify(mergeOfflineStoryCollections(
         Array.isArray(localStories) ? localStories : [],
         durableStories,
       ));
@@ -258,7 +295,7 @@ async function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][
       console.warn("Unable to include the durable offline-story copy in this backup.", error);
     }
   }
-  const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
+  const blob = new Blob(splitSystemBackupJson(JSON.stringify(backupData, null, 2)), { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -266,6 +303,7 @@ async function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][
   link.download = `xiaoshouji_backup_${dateStr}.json`;
   document.body.appendChild(link);
   link.click();
+  writeString(storageKeys.lastBackupAt, String(Date.now()));
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
@@ -422,6 +460,18 @@ function snapshotLocalStorage(): Map<string, string> {
   return snapshot;
 }
 
+async function assertBackupStorageCapacity(entries: readonly [string, string | null][]): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.storage?.estimate) return;
+  const estimate = await navigator.storage.estimate();
+  if (!estimate.quota || estimate.usage === undefined) return;
+  const additionalBytes = entries
+    .filter(([, value]) => typeof value === "string")
+    .reduce((total, [key, value]) => total + Math.max(0, (value?.length || 0) - (localStorage.getItem(key)?.length || 0)) * 2, 0);
+  if (estimate.usage + additionalBytes > estimate.quota * 0.95) {
+    throw new Error("浏览器本地存储空间不足，请先清理存储数据后再导入。线下故事会单独保存，不占用本地配置空间。");
+  }
+}
+
 export default function AppSettings({
   settings,
   bubbleStylePreset,
@@ -429,10 +479,59 @@ export default function AppSettings({
   onSaveSettings,
   onSavePreset,
   onDeletePreset,
+  onSwitchIdentity,
   onClose,
 }: AppSettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(null);
+  const [storageDiagnostics, setStorageDiagnostics] = useState<StorageDiagnostics | null>(null);
+  const [storagePreflight, setStoragePreflight] = useState<StoragePreflightResult | null>(null);
+  const [isContentStorageMigrationRunning, setIsContentStorageMigrationRunning] = useState(false);
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
+
+  const refreshStorageDiagnostics = async () => {
+    try {
+      setStorageDiagnostics(await inspectStorage());
+    } catch (error) {
+      console.warn("Unable to inspect browser storage.", error);
+    }
+  };
+  const runStorageMigrationPreflight = async () => {
+    try {
+      setStoragePreflight(await runStoragePreflight());
+    } catch (error) {
+      console.warn("Unable to run storage migration preflight.", error);
+      alert("迁移预检失败，现有数据未被修改。请先导出备份后重试。");
+    }
+  };
+  const runContentStorageMigration = async () => {
+    if (isContentStorageMigrationRunning) return;
+    if (!confirm("迁移前会自动下载一份完整备份。迁移将保留旧聊天和旧线下故事副本，不会修改角色、世界书、记忆或 API 配置。确认开始吗？")) return;
+    setIsContentStorageMigrationRunning(true);
+    try {
+      await downloadSystemBackup(LIGHT_BACKUP_KEYS);
+      const report = await migrateContentStorage({ preflight: storagePreflight || undefined });
+      alert(`迁移完成：${report.messageCount} 条聊天消息、${report.offlineStoryCount} 个线下故事（${report.offlineStoryMessageCount} 条线下消息）。旧数据副本已保留，应用将刷新。`);
+      window.location.reload();
+    } catch (error: any) {
+      alert(`迁移失败，旧数据未删除：${error?.message || "未知错误"}`);
+      setIsContentStorageMigrationRunning(false);
+      await refreshStorageDiagnostics();
+    }
+  };
+  const requestStoragePersistence = async () => {
+    if (typeof navigator === "undefined" || !navigator.storage?.persist) {
+      alert("当前浏览器不支持持久化存储申请。");
+      return;
+    }
+    try {
+      const granted = await navigator.storage.persist();
+      await refreshStorageDiagnostics();
+      alert(granted ? "已申请并启用持久化存储。" : "浏览器未授予持久化存储，现有数据不会被删除。");
+    } catch (error) {
+      console.warn("Unable to request persistent browser storage.", error);
+      alert("持久化存储申请失败，现有数据不会被删除。");
+    }
+  };
   const effectiveBubbleStylePreset = bubbleStylePreset || settings.globalChatStylePreset || "default";
 
   // PWA states
@@ -501,6 +600,7 @@ export default function AppSettings({
   const [fontOperationPending, setFontOperationPending] = useState(false);
   const [fontOperationMessage, setFontOperationMessage] = useState<string | null>(null);
   const [showBackupExportOptions, setShowBackupExportOptions] = useState(false);
+  const [lastBackupAt, setLastBackupAt] = useState(() => localStorage.getItem(storageKeys.lastBackupAt));
   const [isClearingApplicationData, setIsClearingApplicationData] = useState(false);
   const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
   const [widgetOpacity, setWidgetOpacity] = useState(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70);
@@ -521,28 +621,28 @@ export default function AppSettings({
   const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
   const [otherBubbleBg, setOtherBubbleBg] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-    : settings.otherBubbleBg || "#f4f4f5");
+    : settings.otherBubbleBg || CLASSIC_OTHER_BUBBLE_BACKGROUND);
   const [otherBubbleColor, setOtherBubbleColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-    : settings.otherBubbleColor || "#18181b");
+    : settings.otherBubbleColor || CLASSIC_OTHER_BUBBLE_TEXT);
   const [otherBubbleRadius, setOtherBubbleRadius] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
     : settings.otherBubbleRadius ?? 6);
   const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-    : settings.otherBubbleOpacity ?? 100);
+    : settings.otherBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY);
   const [selfBubbleBg, setSelfBubbleBg] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-    : settings.selfBubbleBg || "#18181b");
+    : settings.selfBubbleBg || CLASSIC_SELF_BUBBLE_BACKGROUND);
   const [selfBubbleColor, setSelfBubbleColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-    : settings.selfBubbleColor || "#ffffff");
+    : settings.selfBubbleColor || CLASSIC_SELF_BUBBLE_TEXT);
   const [selfBubbleRadius, setSelfBubbleRadius] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
     : settings.selfBubbleRadius ?? 6);
   const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(effectiveBubbleStylePreset === "liquid-glass"
     ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-    : settings.selfBubbleOpacity ?? 100);
+    : settings.selfBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY);
   const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
   const [hideNicknames, setHideNicknames] = useState(!!settings.hideNicknames);
 
@@ -585,22 +685,22 @@ export default function AppSettings({
   useEffect(() => {
     setOtherBubbleBg(isLiquidGlassChatStyle
       ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-      : settings.otherBubbleBg || "#f4f4f5");
+      : settings.otherBubbleBg || CLASSIC_OTHER_BUBBLE_BACKGROUND);
     setOtherBubbleColor(isLiquidGlassChatStyle
       ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-      : settings.otherBubbleColor || "#18181b");
+      : settings.otherBubbleColor || CLASSIC_OTHER_BUBBLE_TEXT);
     setOtherBubbleOpacity(isLiquidGlassChatStyle
       ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-      : settings.otherBubbleOpacity ?? 100);
+      : settings.otherBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY);
     setSelfBubbleBg(isLiquidGlassChatStyle
       ? settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-      : settings.selfBubbleBg || "#18181b");
+      : settings.selfBubbleBg || CLASSIC_SELF_BUBBLE_BACKGROUND);
     setSelfBubbleColor(isLiquidGlassChatStyle
       ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-      : settings.selfBubbleColor || "#ffffff");
+      : settings.selfBubbleColor || CLASSIC_SELF_BUBBLE_TEXT);
     setSelfBubbleOpacity(isLiquidGlassChatStyle
       ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-      : settings.selfBubbleOpacity ?? 100);
+      : settings.selfBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY);
     setOtherBubbleRadius(isLiquidGlassChatStyle
       ? settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
       : settings.otherBubbleRadius ?? 6);
@@ -1220,6 +1320,10 @@ export default function AppSettings({
   };
 
   const handleSwitchIdentity = (id: string) => {
+    if (onSwitchIdentity) {
+      onSwitchIdentity(id);
+      return;
+    }
     const idty = (settings.identities || []).find(i => i.id === id);
     if (idty) {
       setName(idty.name);
@@ -1366,12 +1470,29 @@ export default function AppSettings({
     { key: "worldbook", label: "世界书" },
     { key: "music", label: "音乐" },
     { key: "schedule", label: "日程" },
+    { key: "reading", label: "阅读" },
     { key: "forum", label: "论坛" },
     { key: "notes", label: "备忘录" },
     { key: "memory", label: "记忆书" },
     { key: "offline", label: "线下" },
     { key: "store", label: "应用商店" },
     { key: "settings", label: "设置" }
+  ];
+
+  const dockAppOptions = [
+    { key: "chat", label: "聊天" },
+    { key: "archives", label: "档案馆" },
+    { key: "worldbook", label: "世界书" },
+    { key: "music", label: "音乐" },
+    { key: "forum", label: "论坛" },
+    { key: "store", label: "应用商店" },
+    { key: "notes", label: "备忘录" },
+    { key: "diary", label: "日记" },
+    { key: "memory", label: "记忆书" },
+    { key: "offline", label: "线下" },
+    { key: "schedule", label: "日程" },
+    { key: "reading", label: "阅读" },
+    { key: "settings", label: "设置" },
   ];
 
   const handleBack = () => {
@@ -1785,35 +1906,35 @@ export default function AppSettings({
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("desktop")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
+                  className={`beauty-segment-control flex-1 font-bold rounded-[16px] transition-all ${
                     beautySubTab === "desktop"
                       ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
                       : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  桌面模块
+                  桌面布局
                 </button>
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("chat")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
+                  className={`beauty-segment-control flex-1 font-bold rounded-[16px] transition-all ${
                     beautySubTab === "chat"
                       ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
                       : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  聊天页面模块
+                  聊天页面
                 </button>
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("preset")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
+                  className={`beauty-segment-control flex-1 font-bold rounded-[16px] transition-all ${
                     beautySubTab === "preset"
                       ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
                       : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  主题预设模块
+                  主题预设
                 </button>
               </div>
 
@@ -2180,6 +2301,47 @@ export default function AppSettings({
                                 className="hidden"
                               />
                             </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Dock 栏应用槽位 */}
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+                    <div className="pb-1 border-b border-slate-50">
+                      <div>
+                        <span className="text-xs font-bold text-slate-700">Dock 栏应用</span>
+                        <p className="mt-1 text-[10px] leading-relaxed text-slate-400">四个常驻位置可以替换为任意应用，例如把音乐替换为线下；应用图标会自动跟随所选应用。</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {Array.from({ length: 4 }, (_, index) => {
+                        const dockApps = settings.dockApps?.length === 4
+                          ? settings.dockApps
+                          : ["chat", "music", "archives", "settings"];
+                        const selectedKey = dockApps[index] || "chat";
+                        return (
+                          <div
+                            key={index}
+                            className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 px-3 py-2.5"
+                          >
+                            <span className="w-12 shrink-0 text-[10px] font-bold text-slate-500">位置 {index + 1}</span>
+                            <select
+                              value={selectedKey}
+                              onChange={(event) => {
+                                const next = [...(settings.dockApps?.length === 4 ? settings.dockApps : ["chat", "music", "archives", "settings"] )];
+                                next[index] = event.target.value;
+                                handleSave({ dockApps: next });
+                              }}
+                              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:border-neutral-950"
+                              aria-label={`Dock 位置 ${index + 1}`}
+                            >
+                              {dockAppOptions.map((option) => (
+                                <option key={option.key} value={option.key}>{option.label}</option>
+                              ))}
+                            </select>
                           </div>
                         );
                       })}
@@ -3141,7 +3303,7 @@ export default function AppSettings({
                     <span className="w-9 shrink-0 text-right font-mono text-[10px] font-bold text-slate-700">{globalFontSize}px</span>
                   </div>
                   <div className="rounded-[14px] border border-slate-100 bg-slate-50 px-4 py-3 text-center text-sm text-slate-700" style={{ fontFamily: "var(--app-font-family)" }}>
-                    饭饭机 Aa 123 · 字体预览
+                    米饭机 Aa 123 · 字体预览
                   </div>
                 </div>
               </div>
@@ -3210,7 +3372,7 @@ export default function AppSettings({
                 </div>
 
                 <p className="text-[10px] text-slate-500 leading-relaxed">
-                  通过 PWA (Progressive Web App) 技术，您可以将<strong>饭饭机</strong>作为原生 App 安装到您的手机桌面。安装后点开可<strong>隐藏浏览器地址栏、实现沉浸式壁纸穿透状态栏、以及极其流畅的离线启动体验</strong>。
+                  通过 PWA (Progressive Web App) 技术，您可以将<strong>米饭机</strong>作为原生 App 安装到您的手机桌面。安装后点开可<strong>隐藏浏览器地址栏、实现沉浸式壁纸穿透状态栏、以及极其流畅的离线启动体验</strong>。
                 </p>
 
                 {isStandalone ? (
@@ -3230,7 +3392,7 @@ export default function AppSettings({
                         className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-extrabold rounded-[16px] text-xs transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span>立即安装「饭饭机」到主屏幕</span>
+                        <span>立即安装「米饭机」到主屏幕</span>
                       </button>
                     ) : (
                       <div className="bg-slate-50 p-3 rounded-[16px] border border-slate-100/80 text-[10px] text-slate-600 space-y-1.5">
@@ -3286,7 +3448,7 @@ export default function AppSettings({
                         className="w-full rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 text-left transition-colors hover:bg-[var(--surface-raised)]"
                       >
                         <span className="block text-sm font-semibold text-[var(--text-primary)]">完整导出</span>
-                        <span className="mt-1 block text-xs text-[var(--text-tertiary)]">本机内的所有数据完整导出</span>
+                        <span className="mt-1 block text-xs leading-5 text-[var(--text-tertiary)]">导出系统配置与结构化数据；阅读小说请在“阅读”应用导出含正文的阅读归档</span>
                       </button>
                       <button
                         type="button"
@@ -3312,7 +3474,7 @@ export default function AppSettings({
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">数据备份与还原</h3>
                 
                 <p className="text-[10px] text-slate-400 leading-relaxed">
-                  可以将本机内的配置打包导出备份，未来可在任何设备上导入此文件进行100%完美还原。音频和本地封面不会写入JSON，恢复后需重新导入本地文件。
+                  可以将本机配置和结构化数据打包导出，包含角色与朋友圈等 IndexedDB 数据。音频和本地封面不会写入 JSON，小说正文也不会写入系统 JSON；小说请在“阅读”应用使用独立阅读归档，才能连同正文、进度和标注一起恢复。
                 </p>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -3342,32 +3504,36 @@ export default function AppSettings({
                         const reader = new FileReader();
                         reader.onload = async () => {
                           try {
-                            const json: unknown = JSON.parse(reader.result as string);
-                            if (typeof json !== "object" || json === null || Array.isArray(json)) {
-                              throw new Error("无效的备份文件格式！");
-                            }
-
-                            const entries = Object.entries(json);
+                            const parsedBackup = parseSystemBackup(JSON.parse(reader.result as string));
+                            const entries = Object.entries(parsedBackup.localStorage);
                             if (entries.length === 0 || entries.some(([key, value]) => !BACKUP_KEY_SET.has(key) || (value !== null && typeof value !== "string"))) {
                               throw new Error("非有效的小手机备份文件！");
                             }
 
                             if (confirm("确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置 and 世界书数据且不可撤销！")) {
+                              const entriesToWrite = filterSystemBackupLocalStorageForRestore(entries, parsedBackup.indexedDb);
+                              await assertBackupStorageCapacity(entriesToWrite);
                               const snapshot = snapshotLocalStorage();
                               const writtenKeys: string[] = [];
+                              const previousOfflineStories = await offlineStoryDb.loadAll();
+                              let indexedDbRestoreReport = { restoredKeys: [] as string[], skippedKeys: [] as string[] };
+                              const hasOfflineEntryBackup = Array.isArray(parsedBackup.indexedDb["offline-story-entry-v1"]);
+                              const restoredOfflineStories = hasOfflineEntryBackup
+                                ? undefined
+                                : entries.find(([key]) => key === "phone_offline_stories")?.[1];
 
                               try {
-                                for (const [key, value] of entries) {
+                                for (const [key, value] of entriesToWrite) {
                                   if (typeof value === "string") {
                                     writtenKeys.push(key);
                                     localStorage.setItem(key, sanitizeSystemBackupValue(
                                       key,
                                       value,
-                                      json as Record<string, unknown>,
+                                      parsedBackup.localStorage,
                                     ) || value);
                                   }
                                 }
-                                const restoredOfflineStories = entries.find(([key]) => key === "phone_offline_stories")?.[1];
+                                indexedDbRestoreReport = await restoreSystemBackupIndexedDb(parsedBackup.indexedDb);
                                 if (typeof restoredOfflineStories === "string") {
                                   const parsedStories = JSON.parse(restoredOfflineStories) as unknown;
                                   if (!Array.isArray(parsedStories)) throw new Error("线下故事备份格式无效");
@@ -3386,6 +3552,11 @@ export default function AppSettings({
                                     console.error("Backup restore rollback failed:", rollbackError);
                                   }
                                 }
+                                try {
+                                  await offlineStoryDb.replaceAll(previousOfflineStories);
+                                } catch (offlineRollbackError) {
+                                  console.error("Backup restore offline-story rollback failed:", offlineRollbackError);
+                                }
                                 throw writeError;
                               }
 
@@ -3402,7 +3573,11 @@ export default function AppSettings({
                               }
                               // JSON backups intentionally exclude media/sticker blobs. Offline stories
                               // are restored to their durable store above before the app reloads.
-                              alert("导入成功！应用即将刷新加载新数据。");
+                              const restoredModuleCount = indexedDbRestoreReport.restoredKeys.length + (typeof restoredOfflineStories === "string" ? 1 : 0);
+                              const skippedModuleText = indexedDbRestoreReport.skippedKeys.length > 0
+                                ? `，跳过 ${indexedDbRestoreReport.skippedKeys.length} 个未知 IndexedDB 模块`
+                                : "";
+                              alert(`导入成功！已恢复 ${writtenKeys.length + restoredModuleCount} 个模块${skippedModuleText}。应用即将刷新加载新数据。`);
                               window.location.reload();
                             }
                           } catch (err: any) {
@@ -3416,6 +3591,28 @@ export default function AppSettings({
                   </label>
                 </div>
               </div>
+
+              <StorageDiagnosticsCard
+                diagnostics={storageDiagnostics}
+                preflight={storagePreflight}
+                appVersion={APP_VERSION}
+                backupVersion={SYSTEM_BACKUP_VERSION}
+                lastBackupAt={lastBackupAt}
+                onRefresh={() => void refreshStorageDiagnostics()}
+                onRunPreflight={() => void runStorageMigrationPreflight()}
+                onRunContentMigration={() => void runContentStorageMigration()}
+                contentMigrationRunning={isContentStorageMigrationRunning}
+                onRequestPersistence={() => void requestStoragePersistence()}
+                onCleanMigratedCopies={async () => {
+                  try {
+                    const removed = await removeMigratedStorageCopies();
+                    void refreshStorageDiagnostics();
+                    alert(removed.length ? `已清理 ${removed.length} 个已迁移副本。` : "没有可清理的已迁移副本。");
+                  } catch (error) {
+                    alert(`清理已迁移副本失败：${error instanceof Error ? error.message : String(error)}。原始数据未自动删除。`);
+                  }
+                }}
+              />
 
               <div className="settings-section-header">桌面模块</div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">

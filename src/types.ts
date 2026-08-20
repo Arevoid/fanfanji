@@ -265,6 +265,9 @@ export interface InnerVoiceRecord {
 
 export interface MomentComment {
   id: string;
+  /** Stable actor identity prevents comments from different relationships being mixed by display name. */
+  characterId?: string;
+  relationId?: string;
   authorName: string;
   authorAvatar: string;
   content: string;
@@ -285,6 +288,9 @@ export interface Moment {
   /** Legacy comments parsed from older post content that the user has removed. */
   deletedCommentIds?: string[];
   image?: string; // base64 or URL
+  /** Original aspect metadata retained so uploaded photos are never forced into a square tile. */
+  imageWidth?: number;
+  imageHeight?: number;
   /** A placeholder image rendered from text until image generation is available. */
   imageType?: "photo" | "text";
   imageDescription?: string;
@@ -592,17 +598,10 @@ export interface MusicPlaylist {
   tracks: string[]; // Track IDs
 }
 
-export interface CalendarEvent {
-  id: string;
-  date: string; // YYYY-MM-DD
-  title: string;
-  description?: string;
-  isDone: boolean;
-}
-
 export type WorldBookScope =
   | { kind: "global" }
   | { kind: "character"; characterId: string }
+  | { kind: "characters"; characterIds: string[] }
   | { kind: "identity"; userIdentityId: string }
   | { kind: "relationship"; relationId: string; characterId: string; userIdentityId: string };
 
@@ -617,6 +616,8 @@ export interface WorldBookEntry {
   content: string;
   timestamp: number;
   characterId?: string; // "global" or a specific character's ID
+  /** Multiple canonical characters that may use this entry. */
+  characterIds?: string[];
   /** New explicit scope; missing scope keeps legacy character/global reads compatible. */
   scope?: WorldBookScope;
   /** Public entries must opt in explicitly; missing visibility is legacy/private. */
@@ -648,6 +649,8 @@ export interface UserSettings {
   /** Distinguishes an explicit user/preset wallpaper from legacy placeholder defaults. */
   wallpaperSource?: "user" | "preset" | "legacy-default";
   customIcons: Record<string, string>; // appKey -> image base64/URL or empty
+  /** Four applications that remain pinned in the bottom Dock. */
+  dockApps?: string[];
   bubbleCss: string; // Custom bubble CSS
   globalCss: string; // Custom global CSS
   /** CSS scoped to active chat conversation screens only. */
@@ -840,6 +843,14 @@ export interface MemoryItem {
   timestamp: number;
   importance?: number; // 1-10, default 5
   isManual?: boolean;
+  /** A confirmed reading interaction may mirror into this exact relationship only. */
+  sourceReadingRoomId?: string;
+  sourceReadingCommentId?: string;
+  sourceReadingEvidence?: {
+    bookId: string;
+    chapterId?: string;
+    paragraphAnchorId?: string;
+  };
 }
 
 export interface MemoryVaultSettings {
@@ -866,6 +877,12 @@ export interface OfflineStory {
   relationId?: string;
   conversationId?: string;
   characterIds?: string[];
+  /** Frozen display data for multiplayer story cards; live characters remain authoritative for prompts. */
+  participantSnapshots?: Array<{
+    id: string;
+    name: string;
+    avatar?: string;
+  }>;
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -873,6 +890,10 @@ export interface OfflineStory {
   ifPrompt?: string;
   sourceChatId?: string; // Optional reference source
   sourceChatMsgCount?: number;
+  /** Confirmed appointment that explicitly opened this continuation. */
+  sourceAppointmentId?: string;
+  /** One-shot request for the inviting character to open the first scene. */
+  autoStartFirstAct?: boolean;
   messages: Message[];
   wordLimit?: number;
   partnerPerspective?: string;
@@ -894,6 +915,8 @@ export interface OfflineStory {
   importedContext?: {
     messages: Message[];
     memories: string[];
+    /** Deterministic facts extracted at the online → offline handoff. */
+    handoffFacts?: OfflineHandoffFact[];
     /** Group imports keep each member's relationship-private memory separate. */
     memberMemories?: Record<string, string[]>;
     worldBook: string[];
@@ -923,6 +946,19 @@ export interface Sticker {
   id: string;
   name: string;
   url: string; // Dynamic ObjectURL or base64/url
+  /** Cached multimodal understanding. Chat prompts use this instead of an inaccessible blob/url. */
+  semanticDescription?: string;
+}
+
+export interface OfflineHandoffFact {
+  id: string;
+  sourceMessageIds: string[];
+  speaker: "user" | "character";
+  kind: "schedule" | "plan" | "preference" | "context";
+  content: string;
+  /** Human-readable absolute local time resolved from relative words such as 明天/明晚. */
+  normalizedTime?: string;
+  sourceTimestamp: number;
 }
 
 export interface StickerGroup {

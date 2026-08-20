@@ -1,413 +1,150 @@
-import React, { useState } from "react";
-import { CalendarEvent } from "../types";
-import { Plus, Trash2, Check, X, ChevronLeft, ChevronRight } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import type { Appointment, ScheduleEntry } from "../domain/schedule/scheduleTypes";
+import { filterScheduleEntries, formatScheduleDate, SCHEDULE_FILTERS, SCHEDULE_STATUS_META, type ScheduleFilter } from "../features/schedule/schedulePresentation";
+import type { Character } from "../types";
+import AppointmentDetailSheet from "./schedule/AppointmentDetailSheet";
+import ScheduleEventCard from "./schedule/ScheduleEventCard";
 
 interface AppScheduleProps {
-  events: CalendarEvent[];
-  onAddEvent: (event: CalendarEvent) => void;
-  onToggleEventDone: (id: string) => void;
-  onDeleteEvent: (id: string) => void;
+  entries: ScheduleEntry[];
+  appointments: Appointment[];
+  characters: Character[];
+  onOpenChat: (characterId: string, relationId: string) => void;
   onClose: () => void;
 }
 
-export default function AppSchedule({
-  events,
-  onAddEvent,
-  onToggleEventDone,
-  onDeleteEvent,
-  onClose,
-}: AppScheduleProps) {
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDateStr, setSelectedDateStr] = useState(
-    new Date().toISOString().split("T")[0]
-  );
-  
-  // Stays vs Experiences tab
-  const [activeTab, setActiveTab] = useState<"stays" | "experiences">("stays");
+const WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
 
-  // Filter Mode: "exact" | "1day" | "2days"
-  const [filterRange, setFilterRange] = useState<"exact" | "1day" | "2days">("exact");
+const toDateKey = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
-  const [isAdding, setIsAdding] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newDesc, setNewDesc] = useState("");
+export default function AppSchedule({ entries, appointments, characters, onOpenChat, onClose }: AppScheduleProps) {
+  const [visibleMonth, setVisibleMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()));
+  const [filter, setFilter] = useState<ScheduleFilter>("upcoming");
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
 
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
+  const calendarCells = useMemo(() => {
+    const year = visibleMonth.getFullYear();
+    const month = visibleMonth.getMonth();
+    const mondayFirstOffset = (new Date(year, month, 1).getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    return [
+      ...Array.from({ length: mondayFirstOffset }, () => null),
+      ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
+    ];
+  }, [visibleMonth]);
 
-  // Get days in month
-  const firstDayIndex = new Date(year, month, 1).getDay();
-  // Adjust so Monday is 0 (since mockup has M T W T F S S)
-  const adjustedFirstDayIndex = firstDayIndex === 0 ? 6 : firstDayIndex - 1;
-  const totalDays = new Date(year, month + 1, 0).getDate();
+  const visibleEntries = useMemo(() => filterScheduleEntries(entries, filter), [entries, filter]);
+  const selectedEntries = visibleEntries.filter((entry) => entry.dateKey === selectedDate);
+  const selectedEntry = entries.find((entry) => entry.id === selectedEntryId);
+  const selectedAppointment = selectedEntry
+    ? appointments.find((appointment) => appointment.id === selectedEntry.appointmentId)
+    : undefined;
+  const year = visibleMonth.getFullYear();
+  const month = visibleMonth.getMonth();
 
-  const handlePrevMonth = () => {
-    setCurrentDate(new Date(year, month - 1, 1));
+  const characterFor = (characterId: string): Character | undefined => characters.find((character) => character.id === characterId);
+  const changeMonth = (offset: number) => {
+    const next = new Date(year, month + offset, 1);
+    setVisibleMonth(next);
+    setSelectedDate(toDateKey(next));
   };
-
-  const handleNextMonth = () => {
-    setCurrentDate(new Date(year, month + 1, 1));
-  };
-
-  const selectDay = (day: number) => {
-    const d = new Date(year, month, day);
-    const yearStr = d.getFullYear();
-    const monthStr = (d.getMonth() + 1).toString().padStart(2, "0");
-    const dayStr = d.getDate().toString().padStart(2, "0");
-    setSelectedDateStr(`${yearStr}-${monthStr}-${dayStr}`);
-  };
-
-  const handleCreateEvent = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
-
-    const newEv: CalendarEvent = {
-      id: Date.now().toString(),
-      date: selectedDateStr,
-      title: newTitle.trim(),
-      description: newDesc.trim() || undefined,
-      isDone: false,
-    };
-
-    onAddEvent(newEv);
-    setNewTitle("");
-    setNewDesc("");
-    setIsAdding(false);
-  };
-
-  const blanks = Array(adjustedFirstDayIndex).fill(null);
-  const daysInMonth = Array.from({ length: totalDays }, (_, i) => i + 1);
-  const calendarCells = [...blanks, ...daysInMonth];
-
-  const monthNamesEng = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
-  ];
-
-  // Logic to filter events based on exact, 1day, 2days range
-  const getFilteredEvents = () => {
-    return events.filter((ev) => {
-      if (filterRange === "exact") {
-        return ev.date === selectedDateStr;
-      } else if (filterRange === "1day") {
-        // Events within selectedDate +- 1 day
-        const selTime = new Date(selectedDateStr).getTime();
-        const evTime = new Date(ev.date).getTime();
-        const diffDays = Math.abs(evTime - selTime) / (1000 * 3600 * 24);
-        return diffDays <= 1;
-      } else {
-        // All events
-        return true;
-      }
-    });
-  };
-
-  const filteredEvents = getFilteredEvents();
 
   return (
-    <div data-theme-page="schedule" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans relative">
-      
-      {/* 1. Header with Close Button and Stays/Experiences Tab Switches */}
-      <div className="flex items-center justify-between px-4 py-3 shrink-0 relative border-b border-stone-100">
-        <button
-          onClick={onClose}
-          className="w-8 h-8 rounded-full border border-stone-200/60 flex items-center justify-center hover:bg-stone-50 transition-colors"
-          title="关闭"
-        >
-          <X className="w-4 h-4 text-neutral-700" />
+    <div data-theme-page="schedule" className="relative flex h-full flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text-primary)]">
+      <header className="relative flex shrink-0 items-center justify-between px-4 py-3">
+        <button id="schedule_back_btn" type="button" onClick={onClose} title="返回" aria-label="返回桌面" className="back-btn flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]">
+          <ChevronLeft className="h-5 w-5" />
         </button>
+        <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-extrabold tracking-tight">日程</h1>
+        <span className="h-9 w-9" aria-hidden="true" />
+      </header>
 
-        {/* Double labels tab bar */}
-        <div className="flex items-center space-x-6">
-          <button
-            onClick={() => setActiveTab("stays")}
-            className="relative py-1.5 text-sm font-bold transition-all"
-          >
-            <span className={activeTab === "stays" ? "text-neutral-950" : "text-stone-400"}>
-              Stays
-            </span>
-            {activeTab === "stays" && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-neutral-950 rounded-full" />
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("experiences")}
-            className="relative py-1.5 text-sm font-bold transition-all"
-          >
-            <span className={activeTab === "experiences" ? "text-neutral-950" : "text-stone-400"}>
-              Experiences
-            </span>
-            {activeTab === "experiences" && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-neutral-950 rounded-full" />
-            )}
-          </button>
-        </div>
-
-        <div className="w-8" /> {/* Balance spacer */}
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 pb-24">
-        
-        {/* 2. Top Rounded Card "Where / I'm flexible" */}
-        <div className="w-full bg-white border border-stone-200/60 rounded-[32px] p-4 flex items-center justify-between shadow-[0_4px_12px_rgba(0,0,0,0.03)]">
-          <span className="text-sm font-semibold text-neutral-900">Where</span>
-          <span className="text-sm font-bold text-stone-500">I'm flexible</span>
-        </div>
-
-        {/* 3. When's your trip? Section Card */}
-        <div className="bg-white border border-stone-200/60 rounded-[32px] p-4 shadow-[0_4px_12px_rgba(0,0,0,0.03)] space-y-4">
-          <h2 className="text-lg font-extrabold text-neutral-950 tracking-tight">
-            When's your trip?
-          </h2>
-
-          {/* Segment switch: "Choose dates" vs "I'm flexible" */}
-          <div className="bg-stone-100 rounded-[32px] p-1 flex border border-stone-200/60">
-            <button className="flex-1 py-2 rounded-[32px] bg-white text-xs font-bold text-neutral-950 shadow-sm transition-all">
-              Choose dates
-            </button>
-            <button className="flex-1 py-2 rounded-[32px] text-xs font-bold text-stone-400 hover:text-stone-600 transition-all">
-              I'm flexible
-            </button>
-          </div>
-
-          {/* Calendar month change header */}
-          <div className="flex items-center justify-between pt-2">
-            <h3 className="font-extrabold text-neutral-950 text-xs">
-              {monthNamesEng[month]} {year}
-            </h3>
-            <div className="flex items-center space-x-1.5">
-              <button
-                onClick={handlePrevMonth}
-                className="w-7 h-7 flex items-center justify-center border border-stone-200/60 rounded-full hover:bg-stone-50 transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4 text-stone-600" />
-              </button>
-              <button
-                onClick={handleNextMonth}
-                className="w-7 h-7 flex items-center justify-center border border-stone-200/60 rounded-full hover:bg-stone-50 transition-colors"
-              >
-                <ChevronRight className="w-4 h-4 text-stone-600" />
-              </button>
+      <main className="flex-1 overflow-y-auto px-4 pb-8">
+        <section className="rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-extrabold">{year}年{month + 1}月</h2>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => changeMonth(-1)} aria-label="上个月" className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-raised)]"><ChevronLeft className="h-4 w-4" /></button>
+              <button type="button" onClick={() => changeMonth(1)} aria-label="下个月" className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-raised)]"><ChevronRight className="h-4 w-4" /></button>
             </div>
           </div>
-
-          {/* Days abbreviations M T W T F S S */}
-          <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-stone-400">
-            <span>M</span>
-            <span>T</span>
-            <span>W</span>
-            <span>T</span>
-            <span>F</span>
-            <span>S</span>
-            <span>S</span>
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-[var(--text-secondary)]">
+            {WEEKDAY_LABELS.map((label) => <span key={label} className="py-1">{label}</span>)}
           </div>
-
-          {/* Days Grid */}
-          <div className="grid grid-cols-7 gap-1.5">
-            {calendarCells.map((cell, index) => {
-              if (cell === null) {
-                return <div key={`blank-${index}`} className="aspect-square" />;
-              }
-
-              const cellDateStr = `${year}-${(month + 1).toString().padStart(2, "0")}-${cell.toString().padStart(2, "0")}`;
-              const isSelected = cellDateStr === selectedDateStr;
-              const hasEvents = events.some((ev) => ev.date === cellDateStr);
-
+          <div className="mt-1 grid grid-cols-7 gap-1">
+            {calendarCells.map((day, index) => {
+              if (day === null) return <span key={`blank-${index}`} className="aspect-square" aria-hidden="true" />;
+              const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const isSelected = selectedDate === dateKey;
+              const dayEntries = visibleEntries.filter((entry) => entry.dateKey === dateKey);
               return (
-                <button
-                  key={`day-${cell}`}
-                  onClick={() => selectDay(cell)}
-                  className={`aspect-square rounded-full flex flex-col items-center justify-center relative text-xs font-semibold transition-all ${
-                    isSelected
-                      ? "bg-neutral-950 text-white"
-                      : "hover:bg-stone-100 text-stone-800"
-                  }`}
-                >
-                  <span>{cell}</span>
-                  {hasEvents && (
-                    <span
-                      className={`absolute bottom-1 w-1 h-1 rounded-full ${
-                        isSelected ? "bg-white" : "bg-neutral-950"
-                      }`}
-                    />
+                <button key={dateKey} type="button" onClick={() => setSelectedDate(dateKey)} aria-pressed={isSelected} className={`relative flex aspect-square items-center justify-center rounded-full text-xs font-bold transition-colors ${isSelected ? "bg-[var(--accent)] text-[var(--accent-contrast)]" : "hover:bg-[var(--surface-raised)]"}`}>
+                  {day}
+                  {dayEntries.length > 0 && (
+                    <span className="absolute bottom-1 flex gap-0.5" aria-hidden="true">
+                      {dayEntries.slice(0, 3).map((entry) => <span key={entry.id} className={`h-1 w-1 rounded-full ${isSelected ? "bg-[var(--accent-contrast)]" : SCHEDULE_STATUS_META[entry.status].dotClass}`} />)}
+                    </span>
                   )}
                 </button>
               );
             })}
           </div>
-        </div>
+        </section>
 
-        {/* 4. Filter Options Pills row */}
-        <div className="flex items-center space-x-2 py-1 overflow-x-auto select-none no-scrollbar shrink-0">
-          <button
-            onClick={() => setFilterRange("exact")}
-            className={`px-4 py-2 rounded-full text-xs font-bold border transition-all ${
-              filterRange === "exact"
-                ? "border-neutral-950 bg-neutral-950 text-white"
-                : "border-stone-200/60 text-stone-700 hover:bg-stone-50"
-            }`}
-          >
-            Exact dates
-          </button>
-          <button
-            onClick={() => setFilterRange("1day")}
-            className={`px-4 py-2 rounded-full text-xs font-bold border transition-all ${
-              filterRange === "1day"
-                ? "border-neutral-950 bg-neutral-950 text-white"
-                : "border-stone-200/60 text-stone-700 hover:bg-stone-50"
-            }`}
-          >
-            ± 1 day
-          </button>
-          <button
-            onClick={() => setFilterRange("2days")}
-            className={`px-4 py-2 rounded-full text-xs font-bold border transition-all ${
-              filterRange === "2days"
-                ? "border-neutral-950 bg-neutral-950 text-white"
-                : "border-stone-200/60 text-stone-700 hover:bg-stone-50"
-            }`}
-          >
-            ± 2 days
-          </button>
-        </div>
-
-        {/* 5. Today's Tasks/Todo list Section */}
-        <div className="bg-white border border-stone-200/60 rounded-[32px] p-4 shadow-[0_4px_12px_rgba(0,0,0,0.03)] space-y-3">
-          <div className="flex items-center justify-between border-b border-stone-100 pb-2">
-            <div>
-              <h3 className="font-extrabold text-neutral-950 text-xs">
-                {activeTab === "stays" ? "Stays (日程计划)" : "Experiences (任务备忘)"}
-              </h3>
-              <p className="text-[10px] text-stone-400 mt-0.5 font-medium">
-                {selectedDateStr} {filterRange === "exact" ? "" : `(${filterRange === "1day" ? "周边三天" : "全部"})`}
-              </p>
-            </div>
-            <button
-              onClick={() => setIsAdding(true)}
-              className="px-3 py-1.5 bg-neutral-950 text-white hover:bg-neutral-900 rounded-full text-xs font-extrabold transition-colors flex items-center gap-1 shadow-sm"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>添加</span>
+        <nav aria-label="日程状态筛选" className="no-scrollbar mt-4 flex gap-2 overflow-x-auto pb-1">
+          {SCHEDULE_FILTERS.map((item) => (
+            <button key={item.id} type="button" onClick={() => setFilter(item.id)} aria-pressed={filter === item.id} className={`schedule-filter-control shrink-0 rounded-full border font-bold transition-colors ${filter === item.id ? "border-[var(--button-primary-bg)] bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]"}`}>
+              {item.label}
             </button>
-          </div>
+          ))}
+        </nav>
 
-          {/* Add task Inline Form */}
-          {isAdding && (
-            <form onSubmit={handleCreateEvent} className="p-4 bg-stone-50 border border-stone-200/60 rounded-[32px] space-y-3">
-              <div>
-                <label className="block text-[10px] font-bold text-stone-500 mb-1">标题 *</label>
-                <input
-                  type="text"
-                  required
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="去做什么？"
-                  className="w-full px-4 py-2 rounded-[8px] bg-white border border-stone-200/60 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-medium"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-stone-500 mb-1">备注 (可选)</label>
-                <input
-                  type="text"
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  placeholder="添加说明"
-                  className="w-full px-4 py-2 rounded-[8px] bg-white border border-stone-200/60 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-xs font-medium"
-                />
-              </div>
-              <div className="flex justify-end gap-2 text-xs font-bold pt-1">
-                <button
-                  type="button"
-                  onClick={() => setIsAdding(false)}
-                  className="px-4 py-2 text-stone-500 hover:bg-stone-100 rounded-full"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-neutral-950 text-white hover:bg-neutral-900 rounded-full shadow-sm"
-                >
-                  保存
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* Tasks list */}
-          {filteredEvents.length === 0 ? (
-            <div className="text-center py-6 text-stone-400 text-xs">
-              无日程规划。
+        <section className="mt-4">
+          <h2 className="px-1 text-sm font-extrabold">{formatScheduleDate(selectedDate)}</h2>
+          {selectedEntries.length === 0 ? (
+            <div className="mt-3 flex min-h-52 flex-col items-center justify-center rounded-[28px] border border-dashed border-[var(--border)] bg-[var(--surface)] px-7 text-center">
+              <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--surface-raised)] text-[var(--text-secondary)]"><CalendarDays className="h-7 w-7" /></span>
+              <p className="text-sm font-extrabold">{entries.length === 0 ? "暂时没有线下约定" : "这个日期没有相关约定"}</p>
+              <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">对方发起并由你接受的见面安排，会按照当前状态显示在这里。</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {filteredEvents.map((ev) => (
-                <div
-                  key={ev.id}
-                  className={`flex items-start justify-between p-3 rounded-[32px] border transition-all ${
-                    ev.isDone
-                      ? "bg-stone-50/50 border-stone-100 text-stone-400"
-                      : "bg-white border-stone-100 hover:border-stone-200 text-neutral-800"
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5 flex-1 min-w-0 pl-1">
-                    <button
-                      onClick={() => onToggleEventDone(ev.id)}
-                      className={`p-0.5 rounded-full border mt-0.5 transition-colors ${
-                        ev.isDone
-                          ? "bg-neutral-950 border-neutral-950 text-white"
-                          : "border-stone-300 hover:border-neutral-950 text-transparent"
-                      }`}
-                    >
-                      <Check className="w-3.5 h-3.5" strokeWidth={3} />
-                    </button>
-                    <div className="min-w-0">
-                      <p className={`text-xs font-bold leading-normal truncate ${ev.isDone ? "line-through text-stone-400" : ""}`}>
-                        {ev.title}
-                      </p>
-                      {ev.description && (
-                        <p className="text-[10px] text-stone-400 mt-0.5 truncate leading-relaxed">
-                          {ev.description}
-                        </p>
-                      )}
-                    </div>
+            <div className="mt-3 space-y-3">
+              {selectedEntries.map((entry) => {
+                const character = characterFor(entry.characterId);
+                return (
+                  <div key={entry.id}>
+                    <ScheduleEventCard entry={entry} characterName={character?.remark || character?.name || "好友"} characterAvatar={character?.avatar} onOpen={() => setSelectedEntryId(entry.id)} />
                   </div>
-
-                  <button
-                    onClick={() => onDeleteEvent(ev.id)}
-                    className="p-1 text-stone-300 hover:text-red-500 transition-colors pr-2"
-                    title="删除日程"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
-        </div>
-      </div>
+        </section>
+      </main>
 
-      {/* 6. Absolute Footer aligned with Figma Standard */}
-      <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-stone-100 px-6 py-4 flex items-center justify-between z-30">
-        <button
-          onClick={() => {
-            // Optional clear fields or clear state
-            setFilterRange("exact");
-            setSelectedDateStr(new Date().toISOString().split("T")[0]);
-          }}
-          className="text-stone-400 font-bold hover:text-neutral-950 transition-colors text-xs underline underline-offset-4"
-        >
-          Clear
-        </button>
-        <button
-          onClick={() => {
-            setIsAdding(true);
-          }}
-          className="bg-neutral-950 text-white text-xs font-bold px-6 py-3 rounded-full hover:bg-neutral-900 transition-all flex items-center space-x-1"
-        >
-          <span>Next</span>
-        </button>
-      </div>
-
+      {selectedEntry && selectedAppointment && (() => {
+        const character = characterFor(selectedEntry.characterId);
+        return (
+          <AppointmentDetailSheet
+            appointment={selectedAppointment}
+            entry={selectedEntry}
+            characterName={character?.remark || character?.name || "好友"}
+            characterAvatar={character?.avatar}
+            onClose={() => setSelectedEntryId(null)}
+            onOpenChat={() => onOpenChat(selectedEntry.characterId, selectedEntry.relationId)}
+          />
+        );
+      })()}
     </div>
   );
 }

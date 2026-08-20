@@ -10,6 +10,13 @@ const selector = chat.slice(selectorStart, selectorEnd);
 assert.ok(selectorStart >= 0 && selectorEnd > selectorStart);
 assert.doesNotMatch(selector, /onTouchStart=/, "chat sticker picker must not delete on long press");
 assert.doesNotMatch(selector, /确认要在分组中删除表情/, "chat sticker picker must not expose deletion");
+assert.match(selector, /sendStickerMessage\(sticker\)/, "sending a sticker must enter the semantic/reply pipeline");
+assert.doesNotMatch(selector, /triggerReply:\s*false/, "sticker sends must no longer suppress the character reply");
+assert.match(chat, /semanticDescription/, "chat must cache and pass multimodal sticker meaning instead of a blob URL");
+assert.match(chat, /const sendStickerMessage = \(sticker: Sticker\) =>/, "sticker delivery must not wait for visual analysis");
+assert.match(chat, /sendCustomMessage\(\s*`\[表情\]\|\$\{sticker\.name\}/, "sticker markup must be sent immediately");
+assert.match(chat, /void enrichStickerSemanticDescription\(sticker\)/, "sticker semantic analysis must run in the background");
+assert.match(chat, /stickerSemanticAnalysisInFlightRef/, "duplicate sticker analysis requests must be coalesced");
 
 const textImageModalStart = chat.indexOf("{showImageGenerator && (");
 const textImageModalEnd = chat.indexOf("{/* Active Chat Footer Input form */}", textImageModalStart);

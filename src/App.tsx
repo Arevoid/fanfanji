@@ -5,23 +5,27 @@ import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
-import { loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
-import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
-import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
+import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
+import { initializeMessages, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
+import { initializeMomentRepository, loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
 import { removeMemoriesForMoment } from "./features/moments/services/momentMemory";
 import { sanitizeMomentPublishText } from "./features/moments/services/momentContent";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
-import { loadOfflineStories, mergeOfflineStoryCollections, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
+import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
 import { offlineStoryDb } from "./core/storage/offlineStoryDb";
+import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./core/storage/contentStorageFlags";
+import { isContentStorageMigrationActive } from "./core/storage/contentStorageRuntimeLock";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, saveConversationSummaries, retractConversationSummariesBySourceMessageIds } from "./core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections, saveBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
 import { loadCharacterKnowledgeMigrationState, saveCharacterKnowledgeMigrationState } from "./core/storage/repositories/characterKnowledgeMigrationRepository";
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
-import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
+import { loadScheduleStore, saveScheduleStore, upsertAppointment } from "./core/storage/repositories/scheduleRepository";
+import { projectAppointmentsToScheduleEntries } from "./domain/schedule/scheduleProjection";
+import type { Appointment } from "./domain/schedule/scheduleTypes";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
@@ -51,7 +55,7 @@ import { isTransparencyPreservedImage } from "./utils/pngParser";
 import { DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
 import { messageMatchesMutationScope, type MessageMutationScope } from "./features/chat/context/directInteractionScope";
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, removePaymentStatusesForMessages, type RedPacketStatusMap } from "./features/chat/services/paymentScope";
-import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
+import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
 import { 
   AlbumWidget, 
   CalendarAlbumWidget,
@@ -93,6 +97,7 @@ import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/s
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
 import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
+import { containsNonChineseText } from "./utils/textLanguage";
 import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
 import {
   migrateLegacyClassicBubblePreset,
@@ -101,8 +106,10 @@ import {
 import StatusBar from "./components/StatusBar";
 import { resolveActiveChatStylePreset } from "./features/chat/styles/chatStylePreset";
 import { useForumActivityEngine } from "./features/forum/hooks/useForumActivityEngine";
+import { shouldSeedScheduleForFreshInstall } from "./features/home/freshInstallPolicy";
 import {
   BookOpen,
+  BookOpenText,
   Bookmark,
   CalendarDays,
   Cloud,
@@ -134,6 +141,8 @@ const loadAppStore = () => import("./components/AppStore");
 const loadAppSettings = () => import("./components/AppSettings");
 const loadAppMemory = () => import("./components/AppMemory");
 const loadAppOffline = () => import("./components/AppOffline");
+const loadAppSchedule = () => import("./components/AppSchedule");
+const loadAppReading = () => import("./components/AppReading");
 
 const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   chat: loadAppChat,
@@ -147,9 +156,16 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   settings: loadAppSettings,
   memory: loadAppMemory,
   offline: loadAppOffline,
+  schedule: loadAppSchedule,
+  reading: loadAppReading,
 };
 
-const IDLE_PRELOAD_APP_IDS = ["archives", "worldbook", "notes", "store", "settings"] as const;
+// Warm only the most frequently opened app after the first paint. Other app
+// chunks are still prefetched on pointer-down and loaded on demand, avoiding
+// a large post-startup memory spike on long-running mobile sessions.
+const IDLE_PRELOAD_APP_IDS = [
+  "chat",
+] as const;
 
 const preloadApp = (appId: string) => {
   const loader = APP_LOADERS[appId];
@@ -167,11 +183,18 @@ const AppStore = React.lazy(loadAppStore);
 const AppSettings = React.lazy(loadAppSettings);
 const AppMemory = React.lazy(loadAppMemory);
 const AppOffline = React.lazy(loadAppOffline);
+const AppSchedule = React.lazy(loadAppSchedule);
+const AppReading = React.lazy(loadAppReading);
 
 function LazyAppBoundary({ children }: React.PropsWithChildren) {
   return (
     <React.Suspense
-      fallback={<div className="h-full bg-[var(--app-bg)]" aria-hidden="true" />}
+      fallback={(
+        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] text-[var(--text-secondary)]" role="status" aria-live="polite">
+          <span className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" aria-hidden="true" />
+          <span className="text-xs font-semibold">正在打开…</span>
+        </div>
+      )}
     >
       {children}
     </React.Suspense>
@@ -191,6 +214,7 @@ const AppIcons = {
   settings: (className = "w-6 h-6") => <SettingsIcon className={className} strokeWidth={1.8} />,
   forum: (className = "w-6 h-6") => <Images className={className} strokeWidth={1.8} />,
   schedule: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
+  reading: (className = "w-6 h-6") => <BookOpenText className={className} strokeWidth={1.8} />,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.8} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.8} />,
@@ -237,6 +261,7 @@ const DEFAULT_HOME_SCREEN_ITEMS: HomeScreenItem[] = [
   { id: "store", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 0 } },
   { id: "settings", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 1 } },
   { id: "notes", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 0 } },
+  { id: "schedule", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 1 } },
 ];
 
 const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
@@ -253,6 +278,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   selectedModel: "gemini-3.5-flash",
   wallpaper: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
   customIcons: {},
+  dockApps: ["chat", "music", "archives", "settings"],
   globalChatStylePreset: "default",
   bubbleCss: "",
   globalCss: ``,
@@ -344,6 +370,9 @@ const DEFAULT_MESSAGES: Message[] = [];
 export default function App() {
   const { resolvedTheme } = useTheme();
   useVisualViewport();
+  const seedScheduleForFreshInstall = useRef(
+    typeof window !== "undefined" && shouldSeedScheduleForFreshInstall(window.localStorage),
+  ).current;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -362,6 +391,28 @@ export default function App() {
 
   // Load initial states from LocalStorage or fallbacks
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
+
+  useEffect(() => {
+    let active = true;
+    initializeCharacterRepository(DEFAULT_CHARACTERS).then((result) => {
+      if (active && result.valid) {
+        skipNextCharactersPersistenceRef.current = true;
+        setCharacters(result.value);
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    initializeMomentRepository([]).then((result) => {
+      if (active && result.valid) {
+        skipNextMomentsPersistenceRef.current = true;
+        setMoments(result.value);
+      }
+    });
+    return () => { active = false; };
+  }, []);
 
   const [settings, setSettingsState] = useState<UserSettings>(() => {
     const loadedSettings = loadSettings(DEFAULT_SETTINGS).value;
@@ -388,9 +439,24 @@ export default function App() {
     return true;
   };
 
-  const [messages, setMessages] = useState<Message[]>(() => loadMessages(DEFAULT_MESSAGES).value.filter((message) =>
-    !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
-  ));
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const initial = isMessageEntryStoreEnabled() && typeof indexedDB !== "undefined"
+      ? []
+      : loadMessages(DEFAULT_MESSAGES).value;
+    return initial.filter((message) => !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)));
+  });
+
+  useEffect(() => {
+    let active = true;
+    void initializeMessages(DEFAULT_MESSAGES).then((result) => {
+      if (!active || !result.valid) return;
+      skipNextMessagesPersistenceRef.current = true;
+      setMessages(result.value.filter((message) =>
+        !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
+      ));
+    });
+    return () => { active = false; };
+  }, []);
 
   const [moments, setMoments] = useState<Moment[]>(() => loadMoments([]).value);
 
@@ -416,7 +482,22 @@ export default function App() {
 
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => readArray<MusicPlaylist>("phone_music_playlists", []).value);
 
-  const [calendarEvents] = useState<CalendarEvent[]>(() => loadCalendarEvents([]).value);
+  const [scheduleStore, setScheduleStore] = useState(() => loadScheduleStore().value);
+  const scheduleStoreRef = useRef(scheduleStore);
+  scheduleStoreRef.current = scheduleStore;
+  const handleSaveAppointment = (appointment: Appointment): boolean => {
+    const result = upsertAppointment(scheduleStoreRef.current, appointment);
+    if (!result.success) return false;
+    const persisted = saveScheduleStore(result.store);
+    if (!persisted.success) return false;
+    scheduleStoreRef.current = result.store;
+    setScheduleStore(result.store);
+    return true;
+  };
+  const scheduleEntries = React.useMemo(
+    () => projectAppointmentsToScheduleEntries(scheduleStore.appointments),
+    [scheduleStore.appointments],
+  );
 
   const [worldBookEntries, setWorldBookEntries] = useState<WorldBookEntry[]>(() => loadWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES).value);
 
@@ -425,6 +506,7 @@ export default function App() {
   const [chatModuleActivated, setChatModuleActivated] = useState(false);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
+  const [pendingOfflineStoryId, setPendingOfflineStoryId] = useState<string | null>(null);
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
@@ -438,24 +520,34 @@ export default function App() {
   }, [activeApp]);
 
   // Offline Stories State & Handlers
-  const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => loadOfflineStories([]).value);
+  const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => (
+    isOfflineStoryEntryStoreEnabled() && typeof indexedDB !== "undefined"
+      ? []
+      : loadOfflineStories([]).value
+  ));
   const offlineStoriesRef = useRef(offlineStories);
   const offlineStoriesHydratedRef = useRef(false);
   const deletedOfflineStoryIdsRef = useRef(new Set<string>());
   const charactersPersistenceReady = useRef(false);
   const messagesPersistenceReady = useRef(false);
   const momentsPersistenceReady = useRef(false);
+  const skipNextCharactersPersistenceRef = useRef(false);
+  const skipNextMessagesPersistenceRef = useRef(false);
+  const skipNextMomentsPersistenceRef = useRef(false);
   const presetsPersistenceReady = useRef(false);
-  const calendarPersistenceReady = useRef(false);
   const worldBookPersistenceReady = useRef(false);
   const memoriesPersistenceReady = useRef(false);
   const skipNextMemoriesPersistenceRef = useRef(false);
   const characterIdentityMigrationLogRef = useRef(new Set<string>());
   const memorySettingsPersistenceReady = useRef(false);
   const relationshipsPersistenceReady = useRef(false);
+  const tracksPersistenceReady = useRef(false);
+  const playlistsPersistenceReady = useRef(false);
+  const dualMusicConfigsPersistenceReady = useRef(false);
+  const identityMusicStatesPersistenceReady = useRef(false);
+  const relationshipMusicStatesPersistenceReady = useRef(false);
 
   const persistOfflineStories = async (stories: OfflineStory[], changedStory?: OfflineStory): Promise<boolean> => {
-    const localResult = saveOfflineStories(stories);
     let durableSuccess = false;
     try {
       if (changedStory) await offlineStoryDb.save(changedStory);
@@ -464,8 +556,7 @@ export default function App() {
     } catch (error) {
       console.error("Failed to save offline stories to IndexedDB:", error);
     }
-    if (!localResult.success) console.error("Failed to save offline stories to localStorage:", localResult.error);
-    return localResult.success || durableSuccess;
+    return durableSuccess;
   };
 
   const replaceOfflineStories = (stories: readonly OfflineStory[]): void => {
@@ -476,8 +567,6 @@ export default function App() {
     });
     offlineStoriesRef.current = nextStories;
     setOfflineStories(nextStories);
-    const localResult = saveOfflineStories(nextStories);
-    if (!localResult.success) console.error("Failed to save offline stories to localStorage:", localResult.error);
     if (offlineStoriesHydratedRef.current) {
       void offlineStoryDb.replaceAll(nextStories).catch((error) => {
         console.error("Failed to replace offline stories in IndexedDB:", error);
@@ -506,11 +595,20 @@ export default function App() {
         durableStories.filter((story) => !deletedOfflineStoryIdsRef.current.has(story.id)),
       );
       offlineStoriesHydratedRef.current = true;
+      const durableInMergeOrder = [...durableStories].sort((left, right) => right.updatedAt - left.updatedAt);
+      const alreadySynchronized = JSON.stringify(durableInMergeOrder) === JSON.stringify(merged);
+      if (!alreadySynchronized) {
+        await offlineStoryDb.replaceAll(merged);
+      } else if (isContentStorageMigrationActive()) {
+        // A migration owns the storage boundary. Leave the fallback untouched
+        // until the migration either succeeds and reloads or fails safely.
+        return;
+      }
+      // Only remove the fallback after the durable write has succeeded. This
+      // protects LocalStorage when a migration or IndexedDB write fails.
+      removeStoredValue("phone_offline_stories");
       offlineStoriesRef.current = merged;
       setOfflineStories(merged);
-      const localResult = saveOfflineStories(merged);
-      if (!localResult.success) console.warn("Offline stories exceed localStorage capacity; IndexedDB remains authoritative.");
-      await offlineStoryDb.replaceAll(merged);
     }).catch((error) => {
       offlineStoriesHydratedRef.current = true;
       console.warn("Unable to hydrate the durable offline-story store; using localStorage only.", error);
@@ -685,6 +783,7 @@ export default function App() {
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
     const raw = localStorage.getItem("phone_installed_apps");
     let parsed: string[] = ["chat", "archives", "worldbook", "music", "notes", "offline", "store", "settings"];
+    if (!raw && seedScheduleForFreshInstall) parsed.push("schedule");
     if (raw) {
       try {
         const candidate = JSON.parse(raw);
@@ -695,7 +794,7 @@ export default function App() {
         // Keep the safe defaults when a legacy value is malformed.
       }
     }
-    const filtered = parsed.filter(id => id !== "schedule");
+    const filtered = parsed;
     if (!filtered.includes("notes")) {
       filtered.push("notes");
     }
@@ -900,14 +999,16 @@ export default function App() {
         items = [];
       }
     } else {
-      items = DEFAULT_HOME_SCREEN_ITEMS.map((item) => ({
+      items = DEFAULT_HOME_SCREEN_ITEMS
+        .filter((item) => item.id !== "schedule" || seedScheduleForFreshInstall)
+        .map((item) => ({
         ...item,
         position: item.position ? { ...item.position } : undefined,
-      }));
+        }));
     }
 
     items = items
-      .filter((item) => item.id !== "schedule" && !(item.widgetType === "album" && item.size === "1x4"))
+      .filter((item) => !(item.widgetType === "album" && item.size === "1x4"))
       .map((item) => item.widgetType === "album" && item.size === "2x4"
         ? { ...item, widgetType: "calendar-album" }
         : item);
@@ -1771,6 +1872,10 @@ export default function App() {
       charactersPersistenceReady.current = true;
       return;
     }
+    if (skipNextCharactersPersistenceRef.current) {
+      skipNextCharactersPersistenceRef.current = false;
+      return;
+    }
     const result = saveCharacters(characters);
     if (!result.success) console.error("Failed to save characters to localStorage:", result.error);
   }, [characters]);
@@ -1780,6 +1885,10 @@ export default function App() {
       messagesPersistenceReady.current = true;
       return;
     }
+    if (skipNextMessagesPersistenceRef.current) {
+      skipNextMessagesPersistenceRef.current = false;
+      return;
+    }
     const result = saveMessages(messages);
     if (!result.success) console.error("Failed to save messages to localStorage:", result.error);
   }, [messages]);
@@ -1787,6 +1896,10 @@ export default function App() {
   useEffect(() => {
     if (!momentsPersistenceReady.current) {
       momentsPersistenceReady.current = true;
+      return;
+    }
+    if (skipNextMomentsPersistenceRef.current) {
+      skipNextMomentsPersistenceRef.current = false;
       return;
     }
     const result = saveMoments(moments);
@@ -1803,6 +1916,10 @@ export default function App() {
   }, [presets]);
 
   useEffect(() => {
+    if (!tracksPersistenceReady.current) {
+      tracksPersistenceReady.current = true;
+      return;
+    }
     try {
       writeJson("phone_music_tracks", tracks.map((track) =>
         track.isLocal ? { ...track, url: "" } : track));
@@ -1811,26 +1928,39 @@ export default function App() {
     }
   }, [tracks]);
 
-  useEffect(() => { saveDualMusicWidgetConfigs(dualMusicConfigs); }, [dualMusicConfigs]);
-  useEffect(() => { saveIdentityMusicStates(identityMusicStates); }, [identityMusicStates]);
-  useEffect(() => { saveRelationshipMusicStates(relationshipMusicStates); }, [relationshipMusicStates]);
+  useEffect(() => {
+    if (!dualMusicConfigsPersistenceReady.current) {
+      dualMusicConfigsPersistenceReady.current = true;
+      return;
+    }
+    saveDualMusicWidgetConfigs(dualMusicConfigs);
+  }, [dualMusicConfigs]);
+  useEffect(() => {
+    if (!identityMusicStatesPersistenceReady.current) {
+      identityMusicStatesPersistenceReady.current = true;
+      return;
+    }
+    saveIdentityMusicStates(identityMusicStates);
+  }, [identityMusicStates]);
+  useEffect(() => {
+    if (!relationshipMusicStatesPersistenceReady.current) {
+      relationshipMusicStatesPersistenceReady.current = true;
+      return;
+    }
+    saveRelationshipMusicStates(relationshipMusicStates);
+  }, [relationshipMusicStates]);
 
   useEffect(() => {
+    if (!playlistsPersistenceReady.current) {
+      playlistsPersistenceReady.current = true;
+      return;
+    }
     try {
       writeJson("phone_music_playlists", playlists);
     } catch (e) {
       console.error("Failed to save playlists to localStorage:", e);
     }
   }, [playlists]);
-
-  useEffect(() => {
-    if (!calendarPersistenceReady.current) {
-      calendarPersistenceReady.current = true;
-      return;
-    }
-    const result = saveCalendarEvents(calendarEvents);
-    if (!result.success) console.error("Failed to save calendar events to localStorage:", result.error);
-  }, [calendarEvents]);
 
   useEffect(() => {
     if (!worldBookPersistenceReady.current) {
@@ -1908,14 +2038,16 @@ export default function App() {
   }, []);
 
   // Handle character creation & updates
-  const handleSaveCharacter = (char: Character) => {
-    setCharacters((prev) => {
-      const exists = prev.some((c) => c.id === char.id);
-      if (exists) {
-        return prev.map((c) => (c.id === char.id ? char : c));
-      }
-      return [...prev, char];
-    });
+  const handleSaveCharacter = async (char: Character): Promise<boolean> => {
+    const exists = characters.some((candidate) => candidate.id === char.id);
+    const nextCharacters = exists
+      ? characters.map((candidate) => candidate.id === char.id ? char : candidate)
+      : [...characters, char];
+    setCharacters(nextCharacters);
+    const queued = saveCharacters(nextCharacters);
+    if (!queued.success) return false;
+    const persisted = await flushCharacters();
+    return persisted.success;
   };
 
   const handleDeleteCharacter = (id: string, skipConfirm = false) => {
@@ -2089,14 +2221,7 @@ export default function App() {
       !messageToSave.content.startsWith("data:image/") &&
       !messageToSave.content.startsWith("[红包]")
     ) {
-      // Check if text is non-Chinese
-      const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(messageToSave.content);
-      const hasKorean = /[\uac00-\ud7af]/.test(messageToSave.content);
-      const hasChinese = /[\u4e00-\u9fa5]/.test(messageToSave.content);
-      const hasEnglish = /[a-zA-Z]{3,}/.test(messageToSave.content);
-      const isNonChinese = hasJapanese || hasKorean || (!hasChinese && hasEnglish);
-
-      if (isNonChinese) {
+      if (containsNonChineseText(messageToSave.content)) {
         apiTranslate({
           text: messageToSave.content,
           apiKey: settings.apiKey || "",
@@ -2183,13 +2308,31 @@ export default function App() {
   const handleAddMoment = (newMo: Moment) => {
     const content = sanitizeMomentPublishText(newMo.content);
     if (!content && !newMo.image && !newMo.imageDescription) return;
-    setMoments((prev) => [{
+    const normalized = {
       ...newMo,
       content,
       comments: newMo.comments
         .map((comment) => ({ ...comment, content: sanitizeMomentPublishText(comment.content) }))
         .filter((comment) => Boolean(comment.content)),
-    }, ...prev]);
+    };
+    // Publishing is immediate; background photo understanding later upserts
+    // the same Moment with semantic/aspect metadata instead of duplicating it.
+    setMoments((prev) => {
+      const existing = prev.find((moment) => moment.id === normalized.id);
+      if (!existing) return [normalized, ...prev];
+      const comments = [...existing.comments];
+      for (const comment of normalized.comments) {
+        const index = comments.findIndex((candidate) => candidate.id === comment.id);
+        if (index >= 0) comments[index] = comment;
+        else comments.push(comment);
+      }
+      return [{
+        ...existing,
+        ...normalized,
+        likes: [...new Set([...existing.likes, ...normalized.likes])],
+        comments,
+      }, ...prev.filter((moment) => moment.id !== normalized.id)];
+    });
   };
 
   const handleLikeMoment = (id: string, userName: string) => {
@@ -2229,7 +2372,12 @@ export default function App() {
       (remaining, moment) => removeMemoriesForMoment(remaining, moment),
       previous,
     ));
-    setMoments((previous) => previous.filter((moment) => moment.relationId !== relationId));
+    setMoments((previous) => previous
+      .filter((moment) => moment.relationId !== relationId)
+      .map((moment) => ({
+        ...moment,
+        comments: moment.comments.filter((comment) => comment.relationId !== relationId),
+      })));
   };
 
   const handleAddCommentToMoment = (momentId: string, comment: MomentComment) => {
@@ -2293,10 +2441,6 @@ export default function App() {
       return next;
     });
   };
-
-  // Calendar Schedule handlers
-
-
 
   // Music Handlers
   const handleAddMusicTrack = (track: MusicTrack) => {
@@ -2493,6 +2637,16 @@ export default function App() {
       icon: AppIcons.offline(),
     },
     {
+      id: "schedule",
+      name: "日程",
+      icon: AppIcons.schedule(),
+    },
+    {
+      id: "reading",
+      name: "阅读",
+      icon: AppIcons.reading(),
+    },
+    {
       id: "settings",
       name: "设置",
       icon: AppIcons.settings(),
@@ -2505,6 +2659,26 @@ export default function App() {
     avatar: settings.avatar,
     signature: settings.signature,
     bio: settings.bio,
+  };
+  const handleSwitchIdentity = (identityId: string) => {
+    const identity = settings.identities?.find((item) => item.id === identityId);
+    if (!identity) return;
+    setActiveChatCharId(null);
+    setActiveChatRelationId(null);
+    const nextSettings = {
+      ...settingsRef.current,
+      activeIdentityId: identity.id,
+      name: identity.name,
+      avatar: identity.avatar,
+      signature: identity.signature || "",
+      bio: identity.bio || "",
+    };
+    settingsRef.current = nextSettings;
+    setSettingsState(nextSettings);
+    const saved = saveSettings(nextSettings);
+    if (!saved.success) {
+      alert("身份已切换，但当前浏览器存储空间不足，刷新页面后可能无法保留本次切换。请先清理存储空间。");
+    }
   };
   // Keep forum activity processing alive while the user navigates between apps.
   // The engine still respects document visibility and persists all pending work.
@@ -2654,6 +2828,14 @@ export default function App() {
         .phone-screen-container .back-btn:not(.chat-header-control--plain),
         .phone-screen-container #schedule_back_btn {
           border-radius: 32px !important;
+        }
+
+        /* Reading covers and co-reading cards intentionally use tighter book-like corners. */
+        .phone-screen-container [data-reading-book-cover] {
+          border-radius: 8px !important;
+        }
+        .phone-screen-container [data-reading-book-card] {
+          border-radius: 12px !important;
         }
 
         /* 3. Strict 16px Padding & Gap of 12px */
@@ -3432,8 +3614,9 @@ export default function App() {
                 const iconSizeStyle = isHiddenNames 
                   ? { width: "60px", height: "60px" } 
                   : { width: "52px", height: "52px" };
-                const isTransparentDockIcon = (appId: string) =>
-                  isTransparencyPreservedImage(settings.customIcons[appId]);
+                const dockAppIds = (settings.dockApps?.length === 4
+                  ? settings.dockApps
+                  : ["chat", "music", "archives", "settings"]);
 
                 return (
                   <div 
@@ -3447,98 +3630,33 @@ export default function App() {
                       borderRadius: settings.dockBorderRadius !== undefined ? `${settings.dockBorderRadius}px` : "26px"
                     }}
                   >
-                    <div className="flex items-center justify-center w-full h-full">
-                      {installedAppIds.includes("chat") ? (
-                        <button
-                          onClick={() => setActiveApp("chat")}
-                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                            isTransparentDockIcon("chat")
-                              ? "transparent-custom-icon"
-                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                          }`}
-                          style={{ borderRadius: isTransparentDockIcon("chat") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                        >
-                          {settings.customIcons["chat"] ? (
-                            <img src={settings.customIcons["chat"]} alt="" className={`w-full h-full ${isTransparentDockIcon("chat") ? "object-contain" : "object-cover"}`} />
-                          ) : (
-                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                              {AppIcons.chat()}
-                            </div>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="shrink-0" style={iconSizeStyle} />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center w-full h-full">
-                      {installedAppIds.includes("music") ? (
-                        <button
-                          onClick={() => setActiveApp("music")}
-                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                            isTransparentDockIcon("music")
-                              ? "transparent-custom-icon"
-                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                          }`}
-                          style={{ borderRadius: isTransparentDockIcon("music") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                        >
-                          {settings.customIcons["music"] ? (
-                            <img src={settings.customIcons["music"]} alt="" className={`w-full h-full ${isTransparentDockIcon("music") ? "object-contain" : "object-cover"}`} />
-                          ) : (
-                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                              {AppIcons.music()}
-                            </div>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="shrink-0" style={iconSizeStyle} />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center w-full h-full">
-                      {installedAppIds.includes("archives") ? (
-                        <button
-                          onClick={() => setActiveApp("archives")}
-                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                            isTransparentDockIcon("archives")
-                              ? "transparent-custom-icon"
-                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                          }`}
-                          style={{ borderRadius: isTransparentDockIcon("archives") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                        >
-                          {settings.customIcons["archives"] ? (
-                            <img src={settings.customIcons["archives"]} alt="" className={`w-full h-full ${isTransparentDockIcon("archives") ? "object-contain" : "object-cover"}`} />
-                          ) : (
-                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                              {AppIcons.archives()}
-                            </div>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="shrink-0" style={iconSizeStyle} />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center w-full h-full">
-                      <button
-                        onPointerDown={() => preloadApp("settings")}
-                        onClick={() => setActiveApp("settings")}
-                        className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                          isTransparentDockIcon("settings")
-                            ? "transparent-custom-icon"
-                            : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                        }`}
-                        style={{ borderRadius: isTransparentDockIcon("settings") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                      >
-                        {settings.customIcons["settings"] ? (
-                          <img src={settings.customIcons["settings"]} alt="" className={`w-full h-full ${isTransparentDockIcon("settings") ? "object-contain" : "object-cover"}`} />
-                        ) : (
-                          <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                            {AppIcons.settings()}
-                          </div>
-                        )}
-                      </button>
-                    </div>
+                    {dockAppIds.map((appId) => {
+                      const appIcon = AppIcons[appId as keyof typeof AppIcons];
+                      const customIcon = settings.customIcons[appId];
+                      const isTransparentIcon = isTransparencyPreservedImage(customIcon);
+                      return (
+                        <div key={appId} className="flex items-center justify-center w-full h-full">
+                          <button
+                            onPointerDown={() => preloadApp(appId)}
+                            onClick={() => setActiveApp(appId)}
+                            className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
+                              isTransparentIcon
+                                ? "transparent-custom-icon"
+                                : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
+                            }`}
+                            style={{ borderRadius: isTransparentIcon ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
+                          >
+                            {customIcon ? (
+                              <img src={customIcon} alt="" className={`w-full h-full ${isTransparentIcon ? "object-contain" : "object-cover"}`} />
+                            ) : (
+                              <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
+                                {appIcon ? appIcon() : AppIcons.chat()}
+                              </div>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })()}
@@ -3605,6 +3723,7 @@ export default function App() {
                     onUpdateMessage={handleUpdateMessage}
                     onClose={() => setActiveApp(null)}
                     onSaveSettings={setSettings}
+                    onSwitchIdentity={handleSwitchIdentity}
                     onNavigateToApp={setActiveApp}
                     worldBookEntries={worldBookEntries}
                     onClearMessages={handleClearMessages}
@@ -3616,8 +3735,14 @@ export default function App() {
                     activeChatRelationId={activeChatRelationId}
                     setActiveChatRelationId={setActiveChatRelationId}
                     onSaveRelationships={setRelationships}
+                    appointments={scheduleStore.appointments}
+                    onSaveAppointment={handleSaveAppointment}
                     offlineStories={offlineStories}
                     onSaveOfflineStory={handleSaveOfflineStory}
+                    onOpenOfflineStory={(storyId) => {
+                      setPendingOfflineStoryId(storyId);
+                      setActiveApp("offline");
+                    }}
                     onDeleteOfflineStory={handleDeleteOfflineStory}
                     onDeleteCharacter={handleDeleteCharacter}
                     onDeleteRelationshipMusic={handleDeleteRelationshipMusic}
@@ -3716,6 +3841,35 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
+                {activeApp === "schedule" && (
+                  <LazyAppBoundary>
+                    <AppSchedule
+                      entries={scheduleEntries}
+                      appointments={scheduleStore.appointments}
+                      characters={characters}
+                      onOpenChat={(characterId, relationId) => {
+                        setActiveChatCharId(characterId);
+                        setActiveChatRelationId(relationId);
+                        setActiveApp("chat");
+                      }}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {activeApp === "reading" && (
+                  <LazyAppBoundary>
+                    <AppReading
+                      userIdentityId={activeIdentityId}
+                      settings={settings}
+                      characters={characters}
+                      relationships={relationships}
+                      worldBookEntries={worldBookEntries}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
                 {activeApp === "diary" && (
                   <LazyAppBoundary>
                     <AppDiary
@@ -3764,6 +3918,7 @@ export default function App() {
                         characters.find((character) => character.id === activeChatCharId)?.chatStylePreset,
                         settings.globalChatStylePreset,
                       )}
+                      onSwitchIdentity={handleSwitchIdentity}
                       presets={presets}
                       onSaveSettings={setSettings}
                       onSavePreset={handleSavePreset}
@@ -3800,9 +3955,15 @@ export default function App() {
                       relationships={relationships}
                       settings={settings}
                       offlineStories={offlineStories}
+                      openStoryId={pendingOfflineStoryId}
+                      onOpenOfflineStoryHandled={(storyId) => {
+                        setPendingOfflineStoryId((current) => current === storyId ? null : current);
+                      }}
                       messages={messages}
                       activeChatCharId={activeChatCharId}
                       worldBookEntries={worldBookEntries}
+                      appointments={scheduleStore.appointments}
+                      onSaveAppointment={handleSaveAppointment}
                       onSaveOfflineStory={handleSaveOfflineStory}
                       onSaveRelationships={setRelationships}
                       onDeleteOfflineStory={handleDeleteOfflineStory}

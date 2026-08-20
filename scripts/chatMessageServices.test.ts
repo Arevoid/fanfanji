@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../src/features/chat/services/messageFactory";
-import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
+import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
 
 const clean = (text: string) => cleanAiReplyText(text, false);
 
@@ -24,6 +24,7 @@ assert.equal(isCallRecordMarkup("[通话记录]|语音通话|00:02|%5B%5D"), tru
 assert.deepEqual(splitAiReplyBubbles("成员A：你好。\n成员B：收到！", false), ["成员A：你好", "成员B：收到！"]);
 assert.deepEqual(splitAiReplyBubbles("", false), []);
 assert.deepEqual(splitAiReplyBubbles("普通文本。\n[红包]|1|hi\n结束！", false), ["普通文本", "[红包]|1|hi", "结束！"]);
+assert.deepEqual(removeRedundantCharacterBubbles(["好，哥下来了", "嗯，哥下楼了", "外面有点凉"]), ["好，哥下来了", "外面有点凉"]);
 assert.equal(stripInternalDeliveryMarkers("第一句\n[15:10]\n第二句\n【下午 3：10】"), "第一句\n\n第二句");
 assert.equal(stripInternalDeliveryMarkers("催什么催\n[消息发送时间：2026年8月2日星期日\n17:52]"), "催什么催");
 assert.equal(stripInternalDeliveryMarkers("第一句\n[消息发送于 2026-08-02 18:11]\n第二句"), "第一句\n\n第二句");
@@ -45,7 +46,9 @@ assert.deepEqual(createCharacterTextMessage({ id: "c1", characterId: "c1", conte
 assert.deepEqual(createGroupCharacterMessage({ id: "g1", characterId: "group", senderId: "member", content: "group hello", timestamp: 3 }), { id: "g1", characterId: "group", sender: "character", senderId: "member", content: "group hello", timestamp: 3 });
 assert.deepEqual(createUserTextMessage({ id: "q1", characterId: "c1", content: "引用内容", timestamp: 4, isOffline: true, isNarration: false }), { id: "q1", characterId: "c1", sender: "user", content: "引用内容", timestamp: 4, isOffline: true, isNarration: false });
 
-assert.equal(normalizePaymentMarkup("[微信红包]|1|x"), "[红包]|1|x");
+assert.equal(normalizePaymentMarkup("[微信红包]|1|x"), "[红包]|1.00|x");
+assert.equal(normalizePaymentMarkup("[红包]|金额|x"), "[红包]|8.88|x");
+assert.equal(normalizePaymentMarkup("[红包]|¥168|x"), "[红包]|168.00|x");
 assert.equal(isRedPacketMarkup("[微信红包]|1|x"), true);
 assert.equal(isTransferMarkup("[微信转账]|1|x"), true);
 assert.deepEqual(parseCallRecord("[通话记录]|语音通话|00:02|%5B%5D"), { callType: "语音通话", status: "completed", direction: "outgoing", duration: "00:02", transcript: [] });

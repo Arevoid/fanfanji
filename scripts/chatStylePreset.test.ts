@@ -20,6 +20,7 @@ assert.equal(
 assert.equal(resolveActiveChatStylePreset("default", undefined), "default");
 
 const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const appSettingsSource = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 assert.match(
   appChatSource,
   /background: radial-gradient\(circle at 12% 8%, #ffffff 0%, #f3f7fb 42%, #e7eef7 100%\) !important;/,
@@ -39,6 +40,20 @@ assert.doesNotMatch(
   appChatSource,
   /chat-bubble-(?:self|other)\s+\*/,
   "bubble theme rules must not leak into quotes, payments, or other nested special content",
+);
+for (const sharedDefault of [
+  "CLASSIC_SELF_BUBBLE_BACKGROUND",
+  "CLASSIC_SELF_BUBBLE_TEXT",
+  "CLASSIC_OTHER_BUBBLE_BACKGROUND",
+  "CLASSIC_OTHER_BUBBLE_TEXT",
+]) {
+  assert.match(appChatSource, new RegExp(sharedDefault), `${sharedDefault} must drive the rendered chat`);
+  assert.match(appSettingsSource, new RegExp(sharedDefault), `${sharedDefault} must drive the settings preview`);
+}
+assert.doesNotMatch(
+  appChatSource,
+  /settings\.selfBubbleBg\s*\?[^;]+var\(--button-primary-bg\)/s,
+  "an unset saved colour must not fall back to the unrelated blue primary-button token",
 );
 
 console.log("chat style preset resolution tests passed");

@@ -9,11 +9,12 @@ assert.match(bindingBlock, /border-\[var\(--border\)\]/);
 assert.match(bindingBlock, /text-\[var\(--text-secondary\)\]/);
 assert.match(bindingBlock, /bg-\[var\(--input-bg\)\]/);
 assert.match(bindingBlock, /text-\[var\(--text-primary\)\]/);
-assert.match(bindingBlock, /focus:ring-\[var\(--accent\)\]/);
+assert.match(bindingBlock, /type="checkbox"/);
+assert.match(bindingBlock, /可多选/);
 assert.doesNotMatch(bindingBlock, /bg-stone-|bg-white|text-stone-/);
 assert.match(source, /setBindingType\("character"\)/);
-assert.match(source, /setBoundCharacterId/);
+assert.match(source, /setBoundCharacterIds/);
 assert.equal((source.match(/bg-\[var\(--segmented-active-bg\)\]/g) ?? []).length, 5);
 assert.equal((source.match(/text-\[var\(--segmented-active-text\)\]/g) ?? []).length, 5);
 
-console.log("PASS WorldBook exclusive character binding uses theme tokens without changing scope behavior");
+console.log("PASS WorldBook multi-character binding uses theme tokens and checkbox selection");

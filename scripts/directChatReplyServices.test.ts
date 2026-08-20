@@ -9,6 +9,8 @@ const candidateContext = (rawText: string) => ({
   disableBracketActions: false,
   keepPeriods: false,
   characterId: "char-a",
+  characterName: "阿砚",
+  userName: "饭饭",
   createId: (index: number) => `id-${index}`,
   currentTime: (index: number) => 100 + index,
 });
@@ -29,6 +31,7 @@ assert.deepEqual(createDirectReplyCandidates(candidateContext("你好。再见�
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句\n[15:10]\n第二句\n【15：10】")).messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句\n[消息发送于 2026-08-02 18:11]\n第二句\n[消息发送于 2026-08-02 18:11]")).messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.equal(createDirectReplyCandidates(candidateContext("引用回复")).messages[0].content, "引用回复");
+assert.deepEqual(createDirectReplyCandidates(candidateContext("阿砚：我到了\n饭饭：那你进来吧\n阿砚：好")).messages.map((message) => message.content), ["我到了"], "invented user turns and the character's self-answer must be discarded");
 assert.equal(request.systemInstruction.includes("worldbook"), true);
 assert.equal(request.systemInstruction.includes("memory"), true);
 assert.equal(request.systemInstruction.includes("time"), true);
@@ -45,8 +48,9 @@ const regenerated = createRegeneratedReplyCandidates(candidateContext("第一句
 assert.deepEqual(regenerated.messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.deepEqual(regenerated.messages.map((message) => message.id), ["id-0", "id-1"]);
 assert.deepEqual(regenerated.messages.map((message) => message.timestamp), [100, 101]);
-assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[微信红包]|1|x")).messages.map((message) => message.content), ["[微信红包]|1|x"]);
+assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[微信红包]|1|x")).messages.map((message) => message.content), ["[红包]|1.00|x"]);
 assert.equal(createRegeneratedReplyCandidates(candidateContext("旧消息")).messages.length, 1);
+assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("第一句\n用户：我替你回答\n第二句")).messages.map((message) => message.content), ["第一句"]);
 assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("新的回复\n[15:10]")).messages.map((message) => message.content), ["新的回复"]);
 assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[消息发送于 2026-08-02 18:11]")).messages, []);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("[第2秒]")).messages, []);

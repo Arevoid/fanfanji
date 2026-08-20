@@ -191,13 +191,38 @@
 .offline-guidance-content em { border-radius: 999px; padding: 2px 6px; background: #f3f3f1; color: #8a8a8d; font-size: calc(10px * var(--app-font-scale, 1)); font-style: normal; font-weight: 500; }
 .offline-guidance-content textarea { min-height: 94px; font-size: calc(13px * var(--app-font-scale, 1)); }
 .offline-guidance-note { margin: 2px 0 14px; color: #98989d; font-size: calc(11px * var(--app-font-scale, 1)); line-height: 1.6; }
-.offline-editor-content { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+.offline-editor-modal {
+  /* The default modal is intentionally compact. Story editing needs enough
+     room for a scene, while still staying inside the keyboard-adjusted
+     visual viewport on mobile. */
+  max-height: min(82vh, calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom))) !important;
+}
+.offline-editor-content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 .offline-editor-author { display: flex; align-items: center; gap: 9px; margin: 0 0 12px; }
 .offline-editor-author img,
 .offline-editor-author > span { width: 32px; height: 32px; border: 1px solid #ececea; border-radius: 50%; background: #f1f1ef; object-fit: cover; }
 .offline-editor-author strong { display: block; color: #343438; font-size: calc(12px * var(--app-font-scale, 1)); line-height: calc(16px * var(--app-font-scale, 1)); }
 .offline-editor-author small { display: block; margin-top: 1px; color: #98989d; font-size: calc(10px * var(--app-font-scale, 1)); }
-.offline-editor-textarea { min-height: 0; flex: 1; resize: none; font-size: calc(15px * var(--app-font-scale, 1)); line-height: 1.82; letter-spacing: .01em; }
+.offline-editor-textarea {
+  min-height: 300px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  resize: none;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  font-size: calc(15px * var(--app-font-scale, 1));
+  line-height: 1.82;
+  letter-spacing: .01em;
+}
 
 @media (max-width: 440px) {
   .offline-workspace-header { padding-inline: 12px; }

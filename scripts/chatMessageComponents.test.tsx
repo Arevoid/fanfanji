@@ -37,6 +37,24 @@ const normalQuote = renderToStaticMarkup(<QuotedMessagePreview message={makeMess
 const fileQuote = renderToStaticMarkup(<QuotedMessagePreview message={makeMessage("q2", "[文件]|计划书")} senderName="角色" onClear={() => undefined} closeIcon={<span>×</span>} />);
 const mediaQuote = renderToStaticMarkup(<QuotedMessagePreview message={makeMessage("q3", "[位置]|东京站")} senderName="角色" onClear={() => undefined} closeIcon={<span>×</span>} />);
 const originalIds = messages.map((message) => message.id).join(",");
+const renderedWindowIds: string[] = [];
+const renderedWindowIndexes: number[] = [];
+renderToStaticMarkup(
+  <MessageList
+    messages={messages}
+    scrollRef={{ current: null }}
+    className="chat-message-list"
+    style={{}}
+    renderWindowSize={3}
+    renderMessage={(message, index) => {
+      renderedWindowIds.push(message.id);
+      renderedWindowIndexes.push(index);
+      return <div key={message.id}>{message.content}</div>;
+    }}
+  >
+    <div />
+  </MessageList>,
+);
 const checks: Array<[string, boolean]> = [
   ["A user text", rendered.includes("普通文本")],
   ["B character text", rendered.includes("多行\n文本")],
@@ -62,6 +80,8 @@ const checks: Array<[string, boolean]> = [
   ["V key classes", rendered.includes("cv-messages-list chat-message-list") && normalQuote.includes("animate-fade-in")],
   ["W order is unchanged", renderedIds.join(",") === originalIds],
   ["X input array is unchanged", messages.map((message) => message.id).join(",") === originalIds],
+  ["Y render window keeps latest messages", renderedWindowIds.join(",") === "packet,transfer,call"],
+  ["Z render window preserves absolute indexes", renderedWindowIndexes.join(",") === "7,8,9"],
 ];
 
 for (const [name, passed] of checks) {

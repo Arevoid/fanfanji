@@ -1,4 +1,5 @@
 import type { Character, WorldBookEntry } from "../../types";
+import { getWorldBookCharacterIds } from "../../domain/worldbook/worldBookVisibility";
 
 export type PortableCharacterProfile = Pick<Character,
   "name" | "age" | "avatar" | "gender" | "mbti" | "personality" | "backstory" | "replyLanguage" | "greeting"
@@ -49,6 +50,51 @@ export const createCharacterFromImportedProfile = (value: unknown, id: string): 
   };
 };
 
+const cleanRecognizedValue = (value: string): string => value
+  .replace(/^\s*(?:\*\*|__)/, "")
+  .replace(/(?:\*\*|__)\s*$/, "")
+  .trim();
+
+const readRawDocumentField = (text: string, labels: string): string => {
+  const match = text.match(new RegExp(
+    `^\\s*(?:[>#+\\-*•]\\s*)*(?:\\*\\*|__)?\\s*(?:${labels})\\s*(?:\\*\\*|__)?\\s*[:：]\\s*(.+?)\\s*$`,
+    "im",
+  ));
+  return match?.[1] ? cleanRecognizedValue(match[1]) : "";
+};
+
+export const extractRawDocumentCharacterMetadata = (text: string) => {
+  const name = readRawDocumentField(text, "姓名|角色名|name|character\\s*name");
+  const ageValue = readRawDocumentField(text, "年龄|age");
+  const ageMatch = ageValue.match(/\d{1,3}/);
+  return {
+    name,
+    age: ageMatch ? Number(ageMatch[0]) : "" as const,
+    gender: readRawDocumentField(text, "性别|gender|sex"),
+  };
+};
+
+/**
+ * TXT/DOCX imports are plain archive documents. Recognize only name, age and
+ * gender while keeping the entire extracted source in one unchanged field.
+ */
+export const createCharacterFromRawDocument = (text: string, filename: string, id: string): Character => {
+  const metadata = extractRawDocumentCharacterMetadata(text);
+  return {
+    id,
+    name: metadata.name || filename.replace(/\.[^/.]+$/, "").trim() || "未命名角色",
+    age: metadata.age,
+    avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
+    gender: metadata.gender,
+    mbti: "",
+    personality: text,
+    backstory: "",
+    greeting: "",
+    album: [],
+    references: [],
+  };
+};
+
 const toWorldBookEntry = (entry: WorldBookEntry) => ({
   keys: (entry.keywords || "").split(/[,，]/).map((key) => key.trim()).filter(Boolean),
   content: entry.content,
@@ -68,7 +114,7 @@ export const buildCharacterExport = (
 ) => {
   const profile = toPortableCharacterProfile(character);
   const boundEntries = includeWorldBook
-    ? worldBookEntries.filter((entry) => entry.characterId === character.id)
+    ? worldBookEntries.filter((entry) => getWorldBookCharacterIds(entry).includes(character.id))
     : [];
 
   return {

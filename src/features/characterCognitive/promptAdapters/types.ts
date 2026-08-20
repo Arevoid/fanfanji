@@ -29,6 +29,8 @@ export interface CognitivePromptRelationship {
 export interface CognitivePromptFact {
   content: string;
   importance?: number;
+  /** Occurrence/record time retained for temporal grounding in adapters that render it. */
+  timestamp?: number;
 }
 
 export interface CognitivePromptEvent {

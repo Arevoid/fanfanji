@@ -3,6 +3,9 @@ import { imageAssetDb } from "../../utils/imageAssetDb";
 import { stickerDb } from "../../utils/stickerDb";
 import { offlineStoryDb } from "../../core/storage/offlineStoryDb";
 import { fontAssetDb } from "../../utils/fontAssetDb";
+import { readingAssetDb } from "../../core/storage/readingAssetDb";
+import { messageEntryDb } from "../../core/storage/messageEntryDb";
+import { isMessageEntryStoreEnabled } from "../../core/storage/contentStorageFlags";
 
 type ClearableStorage = Pick<Storage, "clear">;
 type ClearableCacheStorage = Pick<CacheStorage, "keys" | "delete">;
@@ -23,8 +26,10 @@ function getDefaultDependencies(): ClearApplicationDataDependencies {
       () => audioDb.clearAll(),
       () => imageAssetDb.clearAll(),
       () => stickerDb.clearAll(),
+      () => isMessageEntryStoreEnabled() ? messageEntryDb.clearAll() : Promise.resolve(),
       () => offlineStoryDb.clearAll(),
       () => fontAssetDb.clearAll(),
+      () => readingAssetDb.clearAll(),
     ],
   };
 }

@@ -22,7 +22,7 @@ export function RedPacketCard({ amount, greeting, status, isSelf, onClick }: Red
       <div className="special-payment-card__top"><span className="special-payment-card__title">红包</span><span className="special-payment-card__status">{action}</span></div>
       <div className="special-payment-card__money">¥{amount}</div>
       <div className="special-payment-card__note">{greeting}</div>
-      <span className="special-payment-card__brand">Pay</span>
+      <span className="special-payment-card__brand redpacket-card__brand">Pay</span>
     </button>
   );
 }

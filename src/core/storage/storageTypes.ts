@@ -8,7 +8,10 @@ export type StorageErrorKind =
   | "write"
   | "remove"
   | "verification"
-  | "rollback";
+  | "rollback"
+  | "scope"
+  | "duplicate"
+  | "missing";
 
 export interface StorageResult<T> {
   value: T;

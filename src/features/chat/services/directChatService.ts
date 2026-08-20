@@ -1,16 +1,18 @@
 import { createCharacterTextMessage } from "./messageFactory";
-import { cleanAiReplyText, normalizePaymentMarkup, splitAiReplyBubbles } from "./messageParser";
+import { cleanAiReplyText, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripSimulatedUserTurns } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatServiceTypes";
 
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(
-    cleanAiReplyText(context.rawText, context.disableBracketActions),
+    stripSimulatedUserTurns(cleanAiReplyText(context.rawText, context.disableBracketActions), context),
     context.allowEmoji,
   ));
   // Never fall back to rawText here: it may consist solely of a model's fake
   // “sent a photo” claim that the parser intentionally removed.
-  const bubbles = cleanedText ? splitAiReplyBubbles(cleanedText, context.keepPeriods) : [];
+  const bubbles = cleanedText
+    ? removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup))
+    : [];
   return {
     cleanedText,
     bubbleTexts: bubbles,

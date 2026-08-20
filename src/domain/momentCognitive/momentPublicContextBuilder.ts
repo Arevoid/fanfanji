@@ -43,11 +43,17 @@ function projectPublicCharacterProfile(
 function projectCurrentTime(
   currentTime: BuildMomentPublicCognitiveContextInput["currentTime"],
 ): MomentPublicTimeContext {
-  const iso = new Date(currentTime.now).toISOString();
+  const local = new Date(currentTime.now);
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  const localDate = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`;
+  const localTime = `${pad(local.getHours())}:${pad(local.getMinutes())}`;
   return {
     now: currentTime.now,
-    date: currentTime.date || iso.slice(0, 10),
-    time: currentTime.time || iso.slice(11, 16),
+    // `toISOString()` is UTC and made a 07:00 local post look like a prior-day
+    // late-night post to the model. Moment timestamps and UI are local-time
+    // semantics, so the prompt projection must use the same clock.
+    date: currentTime.date || localDate,
+    time: currentTime.time || localTime,
     ...(currentTime.timezone ? { timezone: currentTime.timezone } : {}),
     ...(currentTime.period ? { period: currentTime.period } : {}),
   };

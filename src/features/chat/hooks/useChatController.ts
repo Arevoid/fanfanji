@@ -11,6 +11,7 @@ import { getPendingExplicitImageRequest } from "../services/imageGenerationInten
 export type ChatResponseHandler = (
   userMessage: Message | null,
   history?: Message[],
+  signal?: AbortSignal,
 ) => Promise<void> | void;
 
 export type CharacterImageHandler = (
@@ -31,6 +32,7 @@ export interface UseChatControllerOptions {
   isInputNarration: boolean;
   activeOfflineStoryId: string | null;
   runtimeContext: ChatRuntimeContext;
+  onReplyStopped?: () => void;
 }
 
 /**
@@ -51,17 +53,24 @@ export function useChatController({
   isInputNarration,
   activeOfflineStoryId,
   runtimeContext,
+  onReplyStopped,
 }: UseChatControllerOptions) {
-  const [chatInputText, setChatInputText] = useState("");
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
   const replyInFlightRef = useRef(false);
+  const replyAbortControllerRef = useRef<AbortController | null>(null);
+  const [isReplyInFlight, setIsReplyInFlight] = useState(false);
 
   const scopeKey = runtimeContext.isGroup
     ? `group:${runtimeContext.groupId || runtimeContext.characterId || ""}:${runtimeContext.conversationId || ""}`
     : `direct:${runtimeContext.userIdentityId}:${runtimeContext.relationId || ""}:${runtimeContext.conversationId || ""}`;
   useEffect(() => {
-    setChatInputText("");
     setQuotedMessage(null);
+    // Do not abort a reply when this controller unmounts. AppChat is a view
+    // layer: navigating home, opening another app, or switching browser tabs
+    // must not cancel the character's API request. The parent App and its
+    // message repository stay mounted, so the captured response can still be
+    // persisted and will be visible when the conversation is opened again.
+    // Cancellation remains explicit through stopReply().
   }, [scopeKey]);
 
   const quoteBelongsToRuntime = (message: Message): boolean => runtimeContext.isGroup
@@ -71,16 +80,15 @@ export function useChatController({
       && (!message.conversationId || message.conversationId === runtimeContext.conversationId);
 
   // Handle Send Message (User sends only, no immediate reply)
-  const handleSendOnly = async (event?: FormEvent) => {
+  const handleSendOnly = async (inputText: string, event?: FormEvent) => {
     if (event) event.preventDefault();
-    if (!chatInputText.trim() || !activeChatCharId || !activeCharacter) return;
+    if (!inputText.trim() || !activeChatCharId || !activeCharacter) return;
 
     const safeQuotedMessage = quotedMessage && quoteBelongsToRuntime(quotedMessage) ? quotedMessage : null;
     const userMsgText = safeQuotedMessage && activeCharacter
-      ? formatQuotedChatInput(chatInputText.trim(), safeQuotedMessage, activeCharacter)
-      : chatInputText.trim();
+      ? formatQuotedChatInput(inputText.trim(), safeQuotedMessage, activeCharacter)
+      : inputText.trim();
     if (quotedMessage) setQuotedMessage(null);
-    setChatInputText("");
 
     const userMessage = createChatUserMessage({
       context: runtimeContext,
@@ -99,19 +107,22 @@ export function useChatController({
   };
 
   // Handle Send Message and Trigger AI reply
-  const handleSendAndReply = async (event?: FormEvent) => {
+  const handleSendAndReply = async (inputText: string, event?: FormEvent) => {
     if (event) event.preventDefault();
     if (!activeChatCharId || !activeCharacter || replyInFlightRef.current) return;
     replyInFlightRef.current = true;
+    setIsReplyInFlight(true);
+    const abortController = new AbortController();
+    replyAbortControllerRef.current = abortController;
 
     try {
-      if (!chatInputText.trim()) {
+      if (!inputText.trim()) {
         // If user input is empty, trigger AI response directly (continue the story)
-        await generateResponseForUserMessage(null, currentChatMessages);
+        await generateResponseForUserMessage(null, currentChatMessages, abortController.signal);
         return;
       }
 
-      const rawUserRequest = chatInputText.trim();
+      const rawUserRequest = inputText.trim();
       const pendingImageRequest = !isOfflineModeActive
         ? getPendingExplicitImageRequest(rawUserRequest, currentChatMessages)
         : null;
@@ -121,7 +132,6 @@ export function useChatController({
         ? formatQuotedChatInput(rawUserRequest, safeQuotedMessage, activeCharacter)
         : rawUserRequest;
       if (quotedMessage) setQuotedMessage(null);
-      setChatInputText("");
 
       const userMessage = createChatUserMessage({
         context: runtimeContext,
@@ -148,18 +158,30 @@ export function useChatController({
       const history = isOfflineModeActive && activeOfflineStoryId && onSaveOfflineStory
         ? (updatedOfflineMessages || currentChatMessages)
         : [...currentChatMessages, userMessage];
-      await generateResponseForUserMessage(userMessage, history);
+      await generateResponseForUserMessage(userMessage, history, abortController.signal);
     } finally {
       replyInFlightRef.current = false;
+      if (replyAbortControllerRef.current === abortController) replyAbortControllerRef.current = null;
+      setIsReplyInFlight(false);
     }
   };
 
+  const stopReply = () => {
+    const controller = replyAbortControllerRef.current;
+    if (!controller) return;
+    controller.abort();
+    replyAbortControllerRef.current = null;
+    replyInFlightRef.current = false;
+    setIsReplyInFlight(false);
+    onReplyStopped?.();
+  };
+
   return {
-    chatInputText,
-    setChatInputText,
     quotedMessage,
     setQuotedMessage,
     handleSendOnly,
     handleSendAndReply,
+    stopReply,
+    isReplyInFlight,
   };
 }

@@ -161,7 +161,37 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 
 /* 红包与转账共享卡片入口，同时保留各自专用入口。 */
 .chat-message--payment { border-radius: 18px; }
-.chat-message--red-packet { /* 红包专属背景和文字。 */ }
+.chat-message--red-packet {
+  /* 红包卡片：背景、标题、金额、备注和状态胶囊。 */
+  --redpacket-bg: linear-gradient(135deg, #0d1b1e, #101d20 72%, #17292c);
+  --redpacket-title-color: #f8fafc;
+  --redpacket-money-color: #ffffff;
+  --redpacket-status-color: #d7dde0;
+  --redpacket-note-color: rgba(241, 245, 249, 0.88);
+  --redpacket-status-bg: #f5f7f4;
+  --redpacket-status-text: #102124;
+}
+
+/* 按红包状态覆盖整张卡片和“待领取/已领取”状态胶囊。 */
+.chat-message--red-packet[data-status="unclaimed"] {
+  --redpacket-bg: #071719;
+  --redpacket-status-bg: #f5f7f4;
+  --redpacket-status-text: #172020;
+}
+.chat-message--red-packet[data-status="claimed"] {
+  --redpacket-bg: #687170;
+  --redpacket-title-color: #e8eeee;
+  --redpacket-money-color: #f5f8f7;
+  --redpacket-status-bg: #d7ddda;
+  --redpacket-status-text: #59615f;
+  filter: none;
+}
+.chat-message--red-packet[data-status="expired"],
+.chat-message--red-packet[data-status="refunded"] {
+  --redpacket-bg: #64748b;
+  --redpacket-status-bg: #e2e8f0;
+  --redpacket-status-text: #475569;
+}
 .chat-message--transfer { /* 转账专属背景和文字。 */ }
 
 /* 分享卡片。 */

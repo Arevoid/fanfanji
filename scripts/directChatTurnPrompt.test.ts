@@ -9,6 +9,7 @@ import {
   buildVoiceCallPrompts,
   buildVoiceIntervalPrompt,
   CURRENT_SCENE_CONTINUITY_PROMPT,
+  CHINESE_SEMANTIC_CONTINUITY_PROMPT,
   detectCallTopicShift,
   NEW_DAY_CONVERSATION_BOUNDARY_PROMPT,
   partitionDirectChatHistoryByCurrentDay,
@@ -19,6 +20,7 @@ const mainPrompt = buildDirectChatMainPrompt({ characterName: "测试角色", di
 assert.match(mainPrompt, /RED PACKET CAPABILITY/);
 assert.match(mainPrompt, /unless that is your explicit character人设/);
 assert.match(mainPrompt, /ordinary greeting or short message/);
+assert.match(mainPrompt, /Never simulate a user reply/);
 assert.match(buildDirectChatMainPrompt({ characterName: "测试角色", disableBracketActions: true }), /pure conversational speech/);
 
 const timePrompt = buildTimeAwarenessPrompt(new Date("2026-08-11T08:30:00+08:00"), "HISTORY_MARK");
@@ -34,6 +36,9 @@ assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /outcome may be unknown/);
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /Never silently replace one activity/);
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /not automatically still pending forever/);
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /I'm away travelling/);
+assert.match(CHINESE_SEMANTIC_CONTINUITY_PROMPT, /省略“你／我／他”/);
+assert.match(CHINESE_SEMANTIC_CONTINUITY_PROMPT, /炖盅，你吃饱了吗/);
+assert.match(CHINESE_SEMANTIC_CONTINUITY_PROMPT, /上下文仍无法确定意图/);
 assert.doesNotMatch(CURRENT_SCENE_CONTINUITY_PROMPT, /promises, and relationship facts.*still in effect/);
 assert.match(timePrompt, /历史消息里的“明天／今晚／下周”/);
 assert.match(timePrompt, /有关联就连贯回应新旧信息/);
@@ -61,6 +66,7 @@ assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /who acts, who travels, who waits/
 assert.match(buildRedPacketReactionPrompt("[红包]|6.66|开心"), /¥6\.66/);
 assert.match(buildRedPacketReactionPrompt("[红包]|6.66|开心"), /开心/);
 assert.match(buildStickerResponsePrompt("[表情]|笑|url"), /\[表情\]\|笑\|url/);
+assert.match(buildStickerResponsePrompt("震惊小狗｜语义：瞪大眼睛｜发送格式：[表情]|震惊小狗|sticker://dog", true), /不(?:见|到)|看不见|加载失败/);
 
 const recentVoice = {
   id: "voice-1",
@@ -106,6 +112,7 @@ for (const pattern of [
   /buildTimeAwarenessPrompt\(/g,
   /buildVoiceIntervalPrompt\(/g,
   /assembledInstructions\.push\(CURRENT_SCENE_CONTINUITY_PROMPT\)/g,
+  /assembledInstructions\.push\(CHINESE_SEMANTIC_CONTINUITY_PROMPT\)/g,
 ]) {
   assert.equal((appChatSource.match(pattern) || []).length, 2, `${pattern} must be shared by send and regeneration`);
 }
@@ -113,6 +120,7 @@ assert.equal((appChatSource.match(/if \(musicContext\) assembledInstructions\.pu
 assert.equal((appChatSource.match(/if \(forumContext\) assembledInstructions\.push\(forumContext\)/g) || []).length, 2);
 assert.equal((appChatSource.match(/if \(diaryContext\) assembledInstructions\.push\(diaryContext\)/g) || []).length, 2);
 assert.equal((appChatSource.match(/NEW_DAY_CONVERSATION_BOUNDARY_PROMPT/g) || []).length >= 3, true);
+assert.equal((appChatSource.match(/assembledInstructions\.push\(DIRECT_CHAT_SINGLE_SPEAKER_RULE\)/g) || []).length, 2);
 assert.equal((appChatSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 2, "send and regeneration must share cross-day history routing");
 assert.equal((appChatSource.match(/partitionDirectChatHistoryByCurrentDay\(\{/g) || []).length, 2, "send and regeneration must remove old live-scene turns from current-day history");
 assert.equal((appChatSource.match(/&& !isCrossDayNewSession/g) || []).length, 0, "cross-day routing must not disable relation and offline memory retrieval");

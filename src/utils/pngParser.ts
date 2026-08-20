@@ -1,5 +1,6 @@
 import { Character, WorldBookEntry } from "../types";
 import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
+import JSZip from "jszip";
 
 // PNG Character Card text chunk parser
 export async function parsePngChunks(file: File): Promise<string | null> {
@@ -501,28 +502,107 @@ export function compressImagePreservingTransparency(
 export const isTransparencyPreservedImage = (value?: string | null): boolean =>
   /^data:image\/png(?:;|,)/i.test(value || "");
 
-// @ts-ignore
-import mammothCode from "mammoth/mammoth.browser.min.js?raw";
+let mammothCodePromise: Promise<string> | null = null;
+
+const loadMammothCode = async (): Promise<string> => {
+  if (!mammothCodePromise) {
+    // Keep the large browser parser out of the initial bundle. It is only
+    // needed when a user imports a DOCX file; the OOXML path remains the
+    // immediate compatibility fallback if this optional chunk fails.
+    // @ts-ignore Vite resolves the ?raw asset at build time.
+    mammothCodePromise = import("mammoth/mammoth.browser.min.js?raw")
+      .then((module) => module.default);
+  }
+  return mammothCodePromise;
+};
+
+const decodeDocxXml = (value: string): string => value
+  .replace(/&lt;/g, "<")
+  .replace(/&gt;/g, ">")
+  .replace(/&quot;/g, '"')
+  .replace(/&apos;/g, "'")
+  .replace(/&amp;/g, "&")
+  .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+  .replace(/&#x([\da-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
+
+export const extractTextFromDocxXml = (xml: string): string => decodeDocxXml(xml
+  .replace(/<w:tab\b[^>]*\/?\s*>/gi, "\t")
+  .replace(/<w:(?:br|cr)\b[^>]*\/?\s*>/gi, "\n")
+  .replace(/<\/w:p>/gi, "\n")
+  .replace(/<(?:[\w.-]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?t>/gi, "$1")
+  .replace(/<[^>]+>/g, ""))
+  .replace(/[ \t]+\n/g, "\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+
+export async function extractSupplementalDocxText(arrayBuffer: ArrayBuffer): Promise<{ main: string; supplemental: string }> {
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const documentXml = await zip.file("word/document.xml")?.async("string") || "";
+  const main = extractTextFromDocxXml(documentXml);
+  const sections: string[] = [];
+  const supplementalFiles = Object.keys(zip.files)
+    .filter((name) => /^word\/(?:header\d+|footer\d+|comments|footnotes|endnotes)\.xml$/i.test(name))
+    .sort();
+  for (const name of supplementalFiles) {
+    const xml = await zip.file(name)?.async("string") || "";
+    const content = extractTextFromDocxXml(xml);
+    if (!content || sections.includes(content)) continue;
+    const label = /header/i.test(name)
+      ? "页眉"
+      : /footer/i.test(name)
+        ? "页脚"
+        : /footnotes/i.test(name)
+          ? "脚注"
+          : /endnotes/i.test(name)
+            ? "尾注"
+            : "批注";
+    sections.push(`【${label}】\n${content}`);
+  }
+  return { main, supplemental: sections.join("\n\n") };
+}
 
 export async function safeParseDocx(arrayBuffer: ArrayBuffer): Promise<string> {
+  // OOXML is the compatibility baseline. It does not require dynamic code
+  // execution, so restrictive and older mobile WebViews can still import the
+  // complete document when the Mammoth browser bundle cannot initialize.
+  const extracted = await extractSupplementalDocxText(arrayBuffer);
   const g = typeof window !== "undefined" ? window : globalThis;
   // @ts-ignore
   if (!g.mammoth) {
     try {
+      const mammothCode = await loadMammothCode();
       const fn = new Function("exports", "module", "define", mammothCode);
       fn(undefined, undefined, undefined);
     } catch (e) {
       console.error("Failed to load mammoth browser bundle", e);
+      if (extracted.main) {
+        return [extracted.main, extracted.supplemental].filter(Boolean).join("\n\n");
+      }
       throw new Error("初始化 DOCX 解析器失败");
     }
   }
   // @ts-ignore
   const mammothInstance = g.mammoth;
   if (!mammothInstance) {
+    if (extracted.main) {
+      return [extracted.main, extracted.supplemental].filter(Boolean).join("\n\n");
+    }
     throw new Error("DOCX 解析器未加载成功");
   }
-  const result = await mammothInstance.extractRawText({ arrayBuffer });
-  return result.value;
+  let mammothText = "";
+  try {
+    const result = await mammothInstance.extractRawText({ arrayBuffer });
+    mammothText = typeof result.value === "string" ? result.value : "";
+  } catch (error) {
+    console.warn("Mammoth DOCX extraction failed; using OOXML fallback.", error);
+  }
+  const compact = (value: string) => value.replace(/\s+/gu, "");
+  const rawCompact = compact(extracted.main);
+  const mammothCompact = compact(mammothText);
+  // Mammoth's paragraph spacing is preferred only when it contains every
+  // piece of OOXML body text. A simple length comparison can hide omissions.
+  const main = rawCompact && mammothCompact.includes(rawCompact) ? mammothText : extracted.main;
+  return [main, extracted.supplemental].filter((part) => part.trim()).join("\n\n");
 }
 
 

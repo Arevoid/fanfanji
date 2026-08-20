@@ -1,4 +1,5 @@
 import type { Character } from "../../../types";
+import type { CharacterRoutine } from "../../../domain/characterLife/characterRoutine/characterRoutineTypes";
 
 /** Settings that affect the next generated chat turn, resolved at send time. */
 export interface ChatTurnSettings {
@@ -17,3 +18,13 @@ export const resolveChatTurnSettings = (
   enableTimeAwareness: character?.enableTimeAwareness !== false,
   disableBracketActions: Boolean(character?.disableBracketActions),
 });
+
+/**
+ * Time awareness controls both the explicit clock prompt and derived routine
+ * hints such as "sleeping". Keep this gate next to the turn settings so all
+ * chat entry points apply the same legacy-safe default.
+ */
+export const resolveChatRoutine = (
+  routine: CharacterRoutine | undefined,
+  enableTimeAwareness: boolean,
+): CharacterRoutine | undefined => enableTimeAwareness ? routine : undefined;

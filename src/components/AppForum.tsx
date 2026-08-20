@@ -1721,7 +1721,7 @@ export default function AppForum({
                 rows={1}
                 maxLength={2000}
                 placeholder={replyingTo ? `回复 ${replyingTo.floor} 楼…` : "写下你的回复…"}
-                className="max-h-24 min-h-10 flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] leading-5 outline-none focus:border-slate-400"
+                className="forum-composer-input max-h-24 min-h-10 flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] leading-5 outline-none focus:border-slate-400"
               />
               <button
                 type="button"
@@ -1771,7 +1771,7 @@ export default function AppForum({
               onChange={(event) => setPostTitle(event.target.value)}
               maxLength={80}
               placeholder="输入帖子标题"
-              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-slate-400"
+              className="forum-composer-input h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-slate-400"
             />
             <span className="mt-1 block text-right text-[10px] text-slate-300">{postTitle.length}/80</span>
           </label>
@@ -1783,7 +1783,7 @@ export default function AppForum({
               maxLength={5000}
               rows={7}
               placeholder="分享你想讨论的内容"
-              className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-6 outline-none focus:border-slate-400"
+              className="forum-composer-input w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-6 outline-none focus:border-slate-400"
             />
             <span className="mt-1 block text-right text-[10px] text-slate-300">{postBody.length}/5000</span>
           </label>

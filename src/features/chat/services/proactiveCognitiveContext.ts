@@ -48,6 +48,8 @@ export interface ProactiveTopicContext {
 export type ProactiveCognitiveContext = CharacterCognitiveContext & {
   routineContext?: ProactiveRoutineContext;
   topicContext?: ProactiveTopicContext;
+  /** Whether request-scoped clock and routine hints may reach the prompt. */
+  timeAwareness?: boolean;
 };
 
 const PROACTIVE_TOPIC_CONTEXT_LIMIT = 8;
@@ -124,8 +126,12 @@ export function buildProactiveCognitiveContext(input: {
   routine?: CharacterRoutine;
   /** Optional relation-scoped history used only for generation diversity hints. */
   topicHistory?: readonly ProactiveTopicRecord[];
+  /** Legacy characters default to enabled; false suppresses all derived time context. */
+  timeAwareness?: boolean;
 }): ProactiveCognitiveContext | undefined {
   try {
+    const timeAwareness = input.timeAwareness !== false;
+    const routine = timeAwareness ? input.routine : undefined;
     const relationshipProjection = buildRelationshipCognitiveProjection({
       relation: input.relationship,
       events: input.events,
@@ -150,15 +156,21 @@ export function buildProactiveCognitiveContext(input: {
       input.relationship.id,
       input.occurredAt,
     );
-    if (!input.routine && !topicContext) return context;
+    if (!routine && !topicContext) {
+      return {
+        ...context,
+        timeAwareness,
+      };
+    }
 
     return {
       ...context,
+      timeAwareness,
       ...(topicContext ? { topicContext } : {}),
-      ...(!input.routine ? {} : {
+      ...(!routine ? {} : {
         routineContext: {
-          period: classifyTimeOfDay(input.occurredAt, input.routine.timezone),
-          state: getCurrentRoutineState(input.routine, input.occurredAt),
+          period: classifyTimeOfDay(input.occurredAt, routine.timezone),
+          state: getCurrentRoutineState(routine, input.occurredAt),
         },
       }),
     };

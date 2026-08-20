@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile } from "../src/features/archives/characterExport";
+import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../src/features/archives/characterExport";
 
 const character = {
   id: "char-a",
@@ -91,5 +91,21 @@ assert.deepEqual(imported, {
   references: [],
 });
 assert.equal(characterExportFilename('祁/澈'), "祁_澈-角色卡.json");
+
+const rawText = "  姓名：完整姓名\n年龄：27\n性别：女\n↓世界书部分。\n规则：也不要拆分\n\n";
+const rawDocument = createCharacterFromRawDocument(rawText, "完整角色.docx", "raw-character");
+assert.equal(rawDocument.name, "完整姓名");
+assert.equal(rawDocument.age, 27);
+assert.equal(rawDocument.gender, "女");
+assert.equal(rawDocument.personality, rawText, "TXT/DOCX source text must remain byte-for-byte unchanged after extraction");
+assert.equal(rawDocument.backstory, "");
+assert.deepEqual(rawDocument.references, []);
+
+const markdownProfile = "解之遥-人设卡\n\n### 【基本信息】\n\n**姓名**：解之遥\n**性别**：男\n**年龄**：24岁\n\n其余原文必须完整保留。";
+const markdownDocument = createCharacterFromRawDocument(markdownProfile, "解之遥-人设卡.docx", "markdown-character");
+assert.equal(markdownDocument.name, "解之遥");
+assert.equal(markdownDocument.age, 24);
+assert.equal(markdownDocument.gender, "男");
+assert.equal(markdownDocument.personality, markdownProfile);
 
 console.log("character export tests passed");

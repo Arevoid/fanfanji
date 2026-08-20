@@ -84,6 +84,7 @@ export function migrateLegacyRelationshipData(input: RelationshipMigrationInput)
       compressedMemory: current.compressedMemory || duplicate.compressedMemory,
       lastActiveTime: Math.max(current.lastActiveTime || 0, duplicate.lastActiveTime || 0) || undefined,
       scheduledProactiveTime: Math.max(current.scheduledProactiveTime || 0, duplicate.scheduledProactiveTime || 0) || undefined,
+      enableProactiveOffline: current.enableProactiveOffline === true || duplicate.enableProactiveOffline === true || undefined,
       lastProactiveCallAt: Math.max(current.lastProactiveCallAt || 0, duplicate.lastProactiveCallAt || 0) || undefined,
       proactiveCallBackoffUntil: Math.max(current.proactiveCallBackoffUntil || 0, duplicate.proactiveCallBackoffUntil || 0) || undefined,
       proactiveCallDayKey: current.proactiveCallDayKey || duplicate.proactiveCallDayKey,

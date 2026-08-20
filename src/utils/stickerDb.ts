@@ -1,4 +1,4 @@
-import { StickerGroup } from "../types";
+import { Sticker, StickerGroup } from "../types";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./fetchWithTimeout";
 
 class StickerDB {
@@ -142,6 +142,23 @@ class StickerDB {
 
 export const stickerDb = new StickerDB();
 
+/** Resolve the actual bytes for local, cached-URL, data-URL and reachable remote stickers. */
+export async function loadStickerImageBlob(sticker: Sticker): Promise<Blob | null> {
+  const cached = await stickerDb.getStickerImage(sticker.id);
+  if (cached) return cached;
+  if (!sticker.url || sticker.url.startsWith("blob:")) return null;
+  try {
+    const response = await fetchWithTimeout(sticker.url, undefined, API_REQUEST_TIMEOUTS.remoteAsset);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    const compressed = await compressImage(blob);
+    await stickerDb.saveStickerImage(sticker.id, compressed);
+    return compressed;
+  } catch {
+    return null;
+  }
+}
+
 // Compress image to max 240x240px while preserving original aspect ratio
 export function compressImage(fileOrBlob: Blob): Promise<Blob> {
   return new Promise((resolve) => {
@@ -209,17 +226,80 @@ export function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-// AI auto naming according to sticker image content
-export async function aiNameSticker(
+export interface StickerSemanticAnalysis {
+  name: string;
+  description: string;
+}
+
+const stickerAnalysisPrompt = `请识别这张聊天表情包的画面、文字和表达意图。只返回 JSON，不要代码块：
+{"name":"不超过8个中文字符的传神名称","description":"不超过80个中文字符，说明画面、可见文字、情绪以及适合在什么语境使用"}`;
+
+const cleanStickerAnalysis = (raw: string): StickerSemanticAnalysis => {
+  const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  try {
+    const parsed = JSON.parse(text) as { name?: unknown; description?: unknown };
+    const name = typeof parsed.name === "string" ? parsed.name.replace(/[“”。！、？?.\s]/g, "").slice(0, 8) : "";
+    const description = typeof parsed.description === "string" ? parsed.description.trim().slice(0, 120) : "";
+    if (name && description) return { name, description };
+  } catch {
+    // Some compatible providers ignore JSON-only instructions. Keep a useful
+    // semantic fallback rather than failing the entire sticker send.
+  }
+  const fallback = text.replace(/[“”"。！、？?\n\r]/g, " ").replace(/\s+/g, " ").trim();
+  const name = fallback.replace(/\s/g, "").slice(0, 8) || "未命名表情";
+  return { name, description: fallback.slice(0, 120) || name };
+};
+
+/** Let an OpenAI-compatible multimodal endpoint fetch an http(s) sticker when
+ * browser CORS prevents the client from reading its bytes. */
+export async function aiAnalyzeRemoteSticker(
+  remoteUrl: string,
+  apiKey: string,
+  model: string,
+  apiEndpoint?: string,
+): Promise<StickerSemanticAnalysis> {
+  if (!apiKey || !apiEndpoint || !/^https?:\/\//i.test(remoteUrl)) {
+    throw new Error("Remote sticker analysis requires an API endpoint, key and http(s) image URL.");
+  }
+  let endpointUrl = apiEndpoint.trim();
+  if (!endpointUrl.endsWith("/chat/completions")) {
+    endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
+  }
+  const response = await fetchWithTimeout(endpointUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: model || "gpt-4o-mini",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: stickerAnalysisPrompt },
+          { type: "image_url", image_url: { url: remoteUrl } },
+        ],
+      }],
+    }),
+  }, API_REQUEST_TIMEOUTS.textGeneration);
+  if (!response.ok) throw new Error(`Remote sticker analysis failed (${response.status}).`);
+  const data = await response.json();
+  const text = data.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("Empty remote sticker analysis response.");
+  return cleanStickerAnalysis(text);
+}
+
+// Analyze once when a sticker is first used/named. The cached description is
+// safe to send to text-only chat models; local blob URLs never leave the client.
+export async function aiAnalyzeSticker(
   blob: Blob,
   apiKey: string,
   model: string,
-  apiEndpoint?: string
-): Promise<string> {
+  apiEndpoint?: string,
+  analysisPrompt: string = stickerAnalysisPrompt,
+): Promise<StickerSemanticAnalysis> {
   if (!apiKey) {
     throw new Error("No API Key configured. Please configure it in Settings.");
   }
   const base64 = await blobToBase64(blob);
+  const mimeType = blob.type || "image/png";
 
   // If using custom endpoint
   if (apiEndpoint && apiEndpoint.trim()) {
@@ -243,12 +323,12 @@ export async function aiNameSticker(
               content: [
                 {
                   type: "text",
-                  text: "请用极其简短的中文词语（如'大笑'、'开心'、'委屈'、'震惊'，不超过6个字，不要标点）来给这张表情包命名。",
+                  text: analysisPrompt,
                 },
                 {
                   type: "image_url",
                   image_url: {
-                    url: `data:image/png;base64,${base64}`,
+                    url: `data:${mimeType};base64,${base64}`,
                   },
                 },
               ],
@@ -260,7 +340,7 @@ export async function aiNameSticker(
       if (res.ok) {
         const data = await res.json();
         const text = data.choices?.[0]?.message?.content?.trim();
-        if (text) return text.replace(/[“”。！、？?.\s]/g, "").substring(0, 8);
+        if (text) return cleanStickerAnalysis(text);
       }
     } catch (err) {
       console.warn("Custom endpoint sticker naming failed:", err);
@@ -276,11 +356,11 @@ export async function aiNameSticker(
       {
         parts: [
           {
-            text: "请分析这张表情包图片的内容和情绪，起一个非常简短传神的中文名字（例如：'哭泣'、'流泪熊猫'、'给你一拳'、'加油'、'赞'、'委屈'）。只返回名字本身，不要任何标点符号、不要任何解释、不要双引号，字数严格控制在6个字以内。",
+            text: analysisPrompt,
           },
           {
             inlineData: {
-              mimeType: "image/png",
+              mimeType,
               data: base64,
             },
           },
@@ -289,7 +369,7 @@ export async function aiNameSticker(
     ],
     generationConfig: {
       temperature: 0.4,
-      maxOutputTokens: 20,
+      maxOutputTokens: 160,
     },
   };
 
@@ -307,7 +387,17 @@ export async function aiNameSticker(
   const result = await response.json();
   const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (text) {
-    return text.replace(/[“”。！、？?.\s]/g, "").substring(0, 8);
+    return cleanStickerAnalysis(text);
   }
   throw new Error("Empty response from AI naming model");
+}
+
+// Backward-compatible API for callers that only need a display name.
+export async function aiNameSticker(
+  blob: Blob,
+  apiKey: string,
+  model: string,
+  apiEndpoint?: string,
+): Promise<string> {
+  return (await aiAnalyzeSticker(blob, apiKey, model, apiEndpoint)).name;
 }

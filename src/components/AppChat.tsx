@@ -5,33 +5,50 @@ import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../u
 import { readJson, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
+import { Character, Message, Moment, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, InnerVoiceRecord, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
+import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
+import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
+import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
+import type { Appointment, AppointmentMode } from "../domain/schedule/scheduleTypes";
+import { getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
+import { isAppointmentReadyForOfflineEntry, startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
+import { containsNonChineseText } from "../utils/textLanguage";
 import { cleanAiReplyText as cleanOnlineMessage, createCallRecordMarkup, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDistribution";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
-import { canTriggerProactiveVoiceCall, createProactiveCallRejectionPatch, createProactiveCallTriggerPatch, resolveOutgoingCallResolution } from "../features/chat/services/proactiveVoiceCallPolicy";
+import { createProactiveCallRejectionPatch, isEmotionallyChargedCallContext, resolveOutgoingCallResolution } from "../features/chat/services/proactiveVoiceCallPolicy";
+import { useProactiveCallScheduler } from "../features/chat/hooks/useProactiveCallScheduler";
 import type { VoiceCallStatus } from "../features/chat/services/messageTypes";
 import { shouldAutomaticallyConvertTextToVoice } from "../features/chat/services/voiceMessageEligibility";
 import { IDENTITY_WALLET_BALANCES_KEY, RED_PACKET_STATUSES_KEY, getPaymentStatusKey, loadIdentityWalletBalances, readRedPacketStatus, removePaymentStatusesByRelation, removePaymentStatusesForMessages, writeRedPacketStatus, type IdentityWalletBalances, type RedPacketStatus, type RedPacketStatusMap } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
-import { stickerDb } from "../utils/stickerDb";
+import { isWorldBookEntryForAnyCharacter } from "../domain/worldbook/worldBookVisibility";
+import { aiAnalyzeRemoteSticker, aiAnalyzeSticker, loadStickerImageBlob, stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
 import { buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineMemorySourceMessages, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectInterveningOfflineHandoff, selectPendingOfflineHandoffStory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
+import { buildCharacterBehaviorPrompt } from "../domain/prompt/characterBehaviorProfile";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
-import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
-import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
+import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
+import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CHINESE_SEMANTIC_CONTINUITY_PROMPT, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
+import { loadUserMemoPromptContext, USER_MEMO_MENTION_LEDGER_KEY } from "../features/chat/prompts/userMemoContext";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
 import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/services/offlineMemberMemorySnapshot";
+import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../domain/offlineStory/offlineHandoffContext";
 import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage, buildProactiveChatSystemInstruction, finalizeCharacterChatSystemInstruction } from "../features/chat/prompts/chatPromptBuilders";
+import { buildProactiveOfflineInvitationPrompt } from "../features/chat/prompts/proactiveOfflineInvitationPrompt";
+import { buildProactiveOfflineResponsePrompt } from "../features/chat/prompts/proactiveOfflineResponsePrompt";
+import { parseProactiveOfflineInvitationDirective } from "../features/chat/services/proactiveOfflineInvitationProtocol";
+import { applyProactiveOfflineResponse, parseProactiveOfflineResponseDirective } from "../features/chat/services/proactiveOfflineResponseProtocol";
+import { deriveProactiveOfflineContextEvidence, deriveProactiveOfflinePresenceEvidence } from "../features/chat/services/proactiveOfflineContext";
 import { buildGroupMemberPrivateContext, buildIsolatedGroupMemberDefinitions } from "../features/chat/prompts/groupMemberPrivateContext";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
@@ -53,13 +70,14 @@ import { generateInnerVoice } from "../features/chat/services/innerVoiceService"
 import { generateCharacterImage } from "../features/chat/services/characterImageService";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
-import { resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
+import { resolveChatRoutine, resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
 import { getChatTypingScopeKey, getVisibleChatTyping, setChatScopeCharacterOverride, setChatScopeTyping, type ChatTypingScopeState } from "../features/chat/services/chatTypingScope";
 import { createChatSideEffectController, markChatInitiated, markChatRead, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
 import { useChatAttachmentState } from "../features/chat/hooks/useChatAttachmentState";
 import { resolveActiveChatStylePreset } from "../features/chat/styles/chatStylePreset";
+import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
 import { COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE } from "../features/chat/styles/chatThemeTemplate";
 import { ChatSettingsSwitch as SettingsSwitch } from "../features/chat/components/ChatSettingsSwitch";
 import { ChatAvatar as RenderAvatar } from "../features/chat/components/ChatAvatar";
@@ -90,6 +108,7 @@ import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from 
 import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
 import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryTranslations, saveDiaryEntries, saveDiaryGenerationTasks, saveDiaryShares, saveDiaryTranslations } from "../core/storage/repositories/diaryRepository";
 import { cleanupDiaryForRelations } from "../domain/diary/diaryCleanup";
+import { useProactiveChatScheduler } from "../features/chat/hooks/useProactiveChatScheduler";
 import { Button, Card, Modal } from "./ui";
 import StickerSettings from "./StickerSettings";
 import ChatIcon from "./ChatIcon";
@@ -100,8 +119,7 @@ import { ConversationList } from "../features/chat/components/ConversationList";
 import { MessageList } from "../features/chat/components/MessageList";
 import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
-import { ChatComposer } from "../features/chat/components/ChatComposer";
-import { ChatTextInput } from "../features/chat/components/ChatTextInput";
+import { ChatComposer, ChatInputBar } from "../features/chat/components/ChatComposer";
 import { BubbleTipPortalLayer } from "../features/chat/components/BubbleTipPortalLayer";
 import {
   VISUAL_VIEWPORT_CHANGE_EVENT,
@@ -110,6 +128,7 @@ import {
 import { scrollContainerToBottom } from "../features/viewport/scrollContainer";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
+import { LocationCard } from "../features/chat/components/SpecialMessage/LocationCard";
 import { MomentsApp } from "../features/moments/MomentsApp";
 import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
@@ -125,7 +144,7 @@ import {
 } from "../features/chat/styles/liquidGlassDefaults";
 import { sanitizeMomentPublishText } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
-import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
+import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, findMomentRelationshipCharacter, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
 import { useMomentComposerState } from "../features/moments/hooks/useMomentComposerState";
 import {
   MessageSquare,
@@ -169,7 +188,8 @@ import {
   Loader2,
   Database,
   Check,
-  Edit3
+  Edit3,
+  Square
 } from "lucide-react";
 
 import { getSpeechForText } from "../utils/minimaxTts";
@@ -219,6 +239,7 @@ interface AppChatProps {
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => void;
   onClose: () => void;
   onSaveSettings: (settings: UserSettings) => void;
+  onSwitchIdentity?: (id: string) => void;
   onNavigateToApp: (appId: string) => void;
   worldBookEntries?: WorldBookEntry[];
   onClearMessages?: (charId: string, keepLastCount?: number, relationId?: string) => void;
@@ -230,8 +251,11 @@ interface AppChatProps {
   activeChatRelationId: string | null;
   setActiveChatRelationId: (id: string | null) => void;
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
+  appointments?: Appointment[];
+  onSaveAppointment?: (appointment: Appointment) => boolean;
   offlineStories?: OfflineStory[];
-  onSaveOfflineStory?: (story: OfflineStory) => void;
+  onSaveOfflineStory?: (story: OfflineStory) => boolean | void | Promise<boolean>;
+  onOpenOfflineStory?: (storyId: string) => void;
   onDeleteOfflineStory?: (storyId: string) => void;
   onDeleteCharacter?: (id: string, skipConfirm?: boolean) => void;
   onDeleteRelationshipMusic?: (relationId: string) => void;
@@ -267,6 +291,7 @@ export default function AppChat({
   onUpdateMessage,
   onClose,
   onSaveSettings,
+  onSwitchIdentity,
   onNavigateToApp,
   worldBookEntries = [],
   onClearMessages,
@@ -278,8 +303,11 @@ export default function AppChat({
   activeChatRelationId,
   setActiveChatRelationId,
   onSaveRelationships,
+  appointments = [],
+  onSaveAppointment,
   offlineStories = [],
   onSaveOfflineStory,
+  onOpenOfflineStory,
   onDeleteOfflineStory,
   onDeleteCharacter,
   onDeleteRelationshipMusic,
@@ -673,6 +701,7 @@ export default function AppChat({
 
   // Sticker groups state
   const [stickerGroups, setStickerGroups] = useState<StickerGroup[]>([]);
+  const stickerSemanticAnalysisInFlightRef = useRef(new Set<string>());
   const triggerCreateStickerGroupRef = useRef<(() => void) | null>(null);
   const [activeStickerGroupIndex, setActiveStickerGroupIndex] = useState<number>(0);
   const [showStickerSelector, setShowStickerSelector] = useState<boolean>(false);
@@ -778,6 +807,17 @@ export default function AppChat({
   // Navigation State
   const activeRelationship = activeChatRelationId ? relationships.find((relation) => relation.id === activeChatRelationId) : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
+  const [appointmentClock, setAppointmentClock] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setAppointmentClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const readyOfflineAppointment = activeRelationship
+    ? appointments.find((appointment) => appointment.relationId === activeRelationship.id
+      && appointment.characterId === activeRelationship.characterId
+      && appointment.userIdentityId === activeRelationship.userIdentityId
+      && isAppointmentReadyForOfflineEntry(appointment, appointmentClock))
+    : undefined;
   const characterCustomChatCss = activeCharacter?.customChatCSS || activeCharacter?.customCss || "";
   // bubbleCss is the legacy preset field. Keep it as a scoped compatibility
   // source so existing user presets still work without leaking styles outside
@@ -870,9 +910,10 @@ export default function AppChat({
   const getPendingOfflineHandoff = (): OfflineStory | undefined => {
     const pending = selectPendingOfflineHandoffStory({
       stories: offlineStories,
-      relationId: activeRelationship?.id,
-      characterId: activeRelationship?.characterId,
-      conversationId: activeRelationship?.conversationId,
+      relationId: activeCharacter?.isGroupChat ? undefined : activeRelationship?.id,
+      groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
+      characterId: activeCharacter?.isGroupChat ? activeCharacter.id : activeRelationship?.characterId,
+      conversationId: activeCharacter?.isGroupChat ? `group:${activeCharacter.id}` : activeRelationship?.conversationId,
     });
     if (pending) return pending;
 
@@ -882,8 +923,12 @@ export default function AppChat({
     const now = Date.now();
     const recentUntrackedStory = [...offlineStories]
       .filter((story) => !story.onlineHandoff && story.mode === "continue" && Boolean(story.archivedAt))
-      .filter((story) => story.relationId === activeRelationship?.id && story.characterId === activeRelationship?.characterId)
-      .filter((story) => !activeRelationship?.conversationId || !story.conversationId || story.conversationId === activeRelationship.conversationId)
+      .filter((story) => activeCharacter?.isGroupChat
+        ? story.relationId === undefined && story.characterId === activeCharacter.id && story.conversationId === `group:${activeCharacter.id}`
+        : story.relationId === activeRelationship?.id && story.characterId === activeRelationship?.characterId)
+      .filter((story) => activeCharacter?.isGroupChat
+        ? true
+        : !activeRelationship?.conversationId || !story.conversationId || story.conversationId === activeRelationship.conversationId)
       .filter((story) => now - (story.archivedAt || 0) >= 0 && now - (story.archivedAt || 0) <= 2 * 60 * 60 * 1000)
       .filter((story) => currentChatMessages.filter((message) => message.sender === "character" && message.timestamp > (story.archivedAt || 0)).length <= 3)
       .sort((left, right) => (right.archivedAt || 0) - (left.archivedAt || 0))[0];
@@ -940,7 +985,7 @@ export default function AppChat({
     });
   };
   const getInterveningOfflineHandoff = (currentOnlineAt?: number) => {
-    if (!currentOnlineAt || !activeRelationship?.id) return undefined;
+    if (!currentOnlineAt || (!activeRelationship?.id && !activeCharacter?.isGroupChat)) return undefined;
     const currentDate = new Date(currentOnlineAt);
     const currentDayStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime();
     const previousOnlineAt = [...currentChatMessages]
@@ -949,7 +994,8 @@ export default function AppChat({
     return selectInterveningOfflineHandoff({
       stories: offlineStories,
       memories: memories || [],
-      relationId: activeRelationship.id,
+      relationId: activeCharacter?.isGroupChat ? undefined : activeRelationship?.id,
+      groupId: activeCharacter?.isGroupChat ? activeCharacter.id : undefined,
       after: previousOnlineAt,
       before: currentOnlineAt,
     });
@@ -1058,7 +1104,7 @@ export default function AppChat({
         ? message.relationId === activeRelationship.id
         : message.characterId === groupId && activeCharacter?.isGroupChat,
       );
-      const interveningOfflineHandoff = relationId ? getInterveningOfflineHandoff(triggerMessage.timestamp) : undefined;
+      const interveningOfflineHandoff = relationId || activeCharacter?.isGroupChat ? getInterveningOfflineHandoff(triggerMessage.timestamp) : undefined;
       const latestOfflineMemory = interveningOfflineHandoff?.memory || (relationId
         ? selectFreshOfflineHandoffMemory({
           memories: memories || [],
@@ -1066,7 +1112,7 @@ export default function AppChat({
           queryText: triggerMessage.content,
         })
         : undefined);
-      const pendingOfflineStory = relationId ? getPendingOfflineHandoff() : undefined;
+      const pendingOfflineStory = relationId || activeCharacter?.isGroupChat ? getPendingOfflineHandoff() : undefined;
       const offlineContinuityContext = pendingOfflineStory
         ? buildPendingOfflineTimelineHandoff(
           pendingOfflineStory,
@@ -1454,8 +1500,35 @@ export default function AppChat({
   const isOfflineModeActive = false;
   const isInputNarration = false;
   const activeOfflineStoryId = null;
-  const handleStartOfflineFromMsg = (msg: Message) => {
+  const handleStartOfflineFromMsg = async (
+    msg: Message,
+    appointment?: Appointment,
+    handoffMessages?: readonly Message[],
+  ) => {
     if (!activeChatCharId || !activeCharacter) return;
+    if (appointment && (!activeRelationship
+      || appointment.relationId !== activeRelationship.id
+      || appointment.characterId !== activeRelationship.characterId
+      || appointment.userIdentityId !== activeRelationship.userIdentityId)) {
+      showToast("这条线下约定不属于当前聊天关系");
+      return;
+    }
+    if (appointment) {
+      const inProgressAppointment = startAppointmentOfflineSession(appointment, Date.now());
+      if (!inProgressAppointment || !onSaveAppointment?.(inProgressAppointment)) {
+        showToast("线下约定暂时无法开始，请稍后重试");
+        return;
+      }
+      const existingStory = offlineStories.find((story) => story.sourceAppointmentId === appointment.id
+        && story.relationId === appointment.relationId);
+      if (existingStory && activeRelationship) {
+        writeString(getOfflineModeStorageKey(activeRelationship.id), "true");
+        writeString(getOfflineStoryStorageKey(activeRelationship.id), existingStory.id);
+        onOpenOfflineStory?.(existingStory.id);
+        onNavigateToApp?.("offline");
+        return;
+      }
+    }
     
     const charName = activeCharacter.remark || activeCharacter.name;
     const offlineParticipantIds = activeCharacter.isGroupChat
@@ -1463,14 +1536,20 @@ export default function AppChat({
       : [activeChatCharId];
     const offlineParticipantSet = new Set(offlineParticipantIds);
     // The direct menu action used to import only the clicked message. Snapshot
-    // the whole configured context window so the offline scene has a real handoff.
-    const contextLimit = activeCharacter.contextMemoryLimit || 20;
-    const recentOnlineMessages = messages
+    // a durable relation window so the offline scene has a real handoff.
+    const handoffSourceMessages = (handoffMessages ? [...handoffMessages] : messages)
       .filter((item) => !item.isOffline && (activeRelationship
         ? item.relationId === activeRelationship.id
-        : item.characterId === activeChatCharId && activeCharacter?.isGroupChat))
-      .slice(-contextLimit * 2);
+        : item.characterId === activeChatCharId && activeCharacter?.isGroupChat));
+    // A handoff is a durable continuity boundary, not the normal short-term
+    // chat context. Keep a generous raw snapshot (facts are extracted from the
+    // complete relation history below) so a 50-message conversation does not
+    // silently lose its earlier commitments.
+    const recentOnlineMessages = handoffSourceMessages.slice(-OFFLINE_HANDOFF_MESSAGE_LIMIT);
     const sourceMessages = recentOnlineMessages.length > 0 ? recentOnlineMessages : [msg];
+    const handoffFacts = buildOfflineHandoffFacts(
+      handoffSourceMessages.length > 0 ? handoffSourceMessages : [msg],
+    );
     const snapshotTimestamp = Date.now();
     const importedMessages = sourceMessages.map((item, index) => ({
       ...item,
@@ -1493,9 +1572,10 @@ export default function AppChat({
       memories: activeRelationship
         ? memories.filter((memory) => memory.relationId === activeRelationship.id).map((memory) => memory.content)
         : [],
+      ...(handoffFacts.length > 0 ? { handoffFacts } : {}),
       ...(memberMemories ? { memberMemories } : {}),
       worldBook: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId))
+        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set([activeChatCharId, ...offlineParticipantSet])))
         .map((entry) => `${entry.title}: ${entry.content}`),
       importedAt: snapshotTimestamp,
     };
@@ -1504,15 +1584,29 @@ export default function AppChat({
       id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       characterId: activeChatCharId,
       relationId: activeRelationship?.id,
-      conversationId: activeRelationship?.conversationId,
+      conversationId: activeCharacter.isGroupChat
+        ? `group:${activeCharacter.id}`
+        : activeRelationship?.conversationId,
       // A group is only a container; the actual offline actors are its members.
       characterIds: offlineParticipantIds.length > 0 ? offlineParticipantIds : [activeChatCharId],
-      title: `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
+      ...(activeCharacter.isGroupChat ? {
+        participantSnapshots: offlineParticipantIds
+          .map((participantId) => characters.find((character) => character.id === participantId))
+          .filter((character): character is Character => Boolean(character))
+          .map((character) => ({
+            id: character.id,
+            name: character.remark || character.name,
+            avatar: character.avatar,
+          })),
+      } : {}),
+      title: appointment
+        ? `${getCurrentAppointmentProposal(appointment)?.activity || appointment.title} - ${new Date().toLocaleDateString()}`
+        : `「${charName}」的聊天剧本 - ${new Date().toLocaleDateString()}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: "continue",
       worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => !entry.characterId || entry.characterId === "global" || entry.characterId === activeChatCharId || offlineParticipantSet.has(entry.characterId)),
+        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set([activeChatCharId, ...offlineParticipantSet]))),
       knowledgeSnapshot: activeRelationship ? Array.from(new Set([
         ...loadKnowledgeClaims().value
           .filter((claim) => claim.relationId === activeRelationship.id
@@ -1527,6 +1621,7 @@ export default function AppChat({
       ])) : [],
       sourceChatId: activeChatCharId,
       sourceChatMsgCount: importedMessages.length,
+      ...(appointment ? { sourceAppointmentId: appointment.id, autoStartFirstAct: true } : {}),
       importedContext,
       enableTimeAwareness: Boolean(activeCharacter.enableTimeAwareness),
       // Imported online chat is context only; the offline page starts with new story content.
@@ -1534,7 +1629,12 @@ export default function AppChat({
     };
     
     if (onSaveOfflineStory) {
-      onSaveOfflineStory(newStory);
+      const saveResult = onSaveOfflineStory(newStory);
+      const saved = saveResult instanceof Promise ? await saveResult : saveResult !== false;
+      if (!saved) {
+        showToast("线下故事保存失败，请稍后重试");
+        return;
+      }
     }
     
     if (activeRelationship) {
@@ -1545,8 +1645,48 @@ export default function AppChat({
     showToast("已无痛切换到线下故事模式");
 
     if (onNavigateToApp) {
+      onOpenOfflineStory?.(newStory.id);
       onNavigateToApp("offline");
     }
+  };
+
+  /**
+   * Start a relation-scoped offline story only after the online transcript
+   * confirms a concrete present-tense handoff. A character's clear arrival
+   * claim can complete an explicit user “发起线下” request; otherwise both
+   * speakers still need concrete presence claims. Future plans and ordinary
+   * affection never switch the workspace by themselves.
+   */
+  const maybeAutoStartOfflineFromPresence = (input: {
+    relationship: CharacterRelationship;
+    messages: readonly Message[];
+    sourceMessage?: Message;
+  }) => {
+    if (!activeCharacter || activeCharacter.isGroupChat || !activeRelationship) return;
+    if (activeRelationship.id !== input.relationship.id || !input.relationship.enableProactiveOffline) return;
+    if (isOfflineStoryActiveFor(input.relationship.id)) return;
+    const evidence = deriveProactiveOfflinePresenceEvidence({ messages: input.messages });
+    const hasConfirmedHandoff = evidence.state === "co_location_confirmed"
+      || (evidence.userRequestedOffline && evidence.characterClaimedArrival);
+    if (!hasConfirmedHandoff) return;
+    if (offlineAutoStartInFlightRef.current.has(input.relationship.id)) return;
+
+    offlineAutoStartInFlightRef.current.add(input.relationship.id);
+    const readyAppointment = appointments
+      .filter((appointment) => appointment.relationId === input.relationship.id
+        && appointment.characterId === input.relationship.characterId
+        && appointment.userIdentityId === input.relationship.userIdentityId
+        && (appointment.status === "confirmed" || appointment.status === "preparing" || appointment.status === "ready"))
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    handleStartOfflineFromMsg(
+      input.sourceMessage || [...input.messages].at(-1)!,
+      readyAppointment,
+      input.messages,
+    );
+    showToast("已确认你们正在同一地点，正在进入线下故事");
+    // Navigation/storage updates are synchronous, but release the guard on
+    // the next task so a stale queued reply cannot create a second story.
+    window.setTimeout(() => offlineAutoStartInFlightRef.current.delete(input.relationship.id), 0);
   };
 
   const handleTranslateMessage = (msg: Message) => {
@@ -1625,7 +1765,8 @@ export default function AppChat({
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
     draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss, cssTemplateCopied, setCssTemplateCopied,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
-    draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveCall, setDraftEnableProactiveCall,
+    draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
+    draftEnableProactiveCall, setDraftEnableProactiveCall,
     draftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
     draftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
@@ -1743,7 +1884,7 @@ export default function AppChat({
 
           // If the user sent it, refund the money to user's wallet
           if (msg.sender === "user") {
-            const [_, amountStr] = msg.content.split("|");
+            const [_, amountStr] = normalizePaymentMarkup(msg.content).split("|");
             const amt = parseFloat(amountStr || "0");
             if (!isNaN(amt) && amt > 0) {
               refundAmountTotal += amt;
@@ -1770,6 +1911,16 @@ export default function AppChat({
   // Memory Compression and Proactive Chat states
   const [isCompressingMemory, setIsCompressingMemory] = useState(false);
   const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
+  // Stop background generation after an authentication failure so a missing
+  // or invalid provider key cannot create a repeated request/logging loop.
+  const backgroundGenerationBlockedRef = useRef(false);
+  // Prevent a burst of streamed/direct replies from opening duplicate offline
+  // stories before the navigation state has caught up.
+  const offlineAutoStartInFlightRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    backgroundGenerationBlockedRef.current = false;
+  }, [settings.apiKey, settings.apiEndpoint, settings.selectedModel]);
   const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
   const [showDisbandGroupModal, setShowDisbandGroupModal] = useState(false);
   const [, setEditingMemoryText] = useState("");
@@ -1820,11 +1971,21 @@ export default function AppChat({
     timestamp: number;
   } | null>(null);
   const [commentDeleteTarget, setCommentDeleteTarget] = useState<{ momentId: string; commentId: string } | null>(null);
+  const [commentContextMenu, setCommentContextMenu] = useState<{
+    momentId: string;
+    commentId: string;
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const commentLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commentLongPressOriginRef = useRef<{ x: number; y: number } | null>(null);
   const suppressCommentClickRef = useRef(false);
 
   const [momentTranslations, setMomentTranslations] = useState<Record<string, string>>(() =>
     readJson<Record<string, string>>("phone_moment_translations", {}).value);
+  const [commentTranslations, setCommentTranslations] = useState<Record<string, string>>(() =>
+    readJson<Record<string, string>>("phone_moment_comment_translations", {}).value);
 
   const [momentFavorites, setMomentFavorites] = useState<{
     id: string;
@@ -1848,6 +2009,10 @@ export default function AppChat({
   useEffect(() => {
     writeJson("phone_moment_translations", momentTranslations);
   }, [momentTranslations]);
+
+  useEffect(() => {
+    writeJson("phone_moment_comment_translations", commentTranslations);
+  }, [commentTranslations]);
 
   useEffect(() => {
     writeJson("phone_moment_favorites", momentFavorites);
@@ -1934,10 +2099,10 @@ export default function AppChat({
       : relation));
   };
 
-  // Proactive contact catch-up on load (supports background clear / offline delivery)
-  useEffect(() => {
-    if (activeRelationships.length === 0) return;
-
+  // Proactive contact catch-up on load (supports background clear / offline delivery).
+  // Keep this in the same scheduler boundary as the recurring pass so a tab
+  // cannot accidentally create a second independent timer during re-renders.
+  const runProactiveCatchupPass = async () => {
     activeRelationships.forEach((relation) => {
       const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters));
       if (!friend || friend.isGroupChat) return;
@@ -1964,14 +2129,11 @@ export default function AppChat({
         triggerProactiveFor(relation.id, catchupPrompt, sched);
       }
     });
-  }, [activeRelationships, characters, relationships]);
+  };
 
-  // Background proactive check (every minute)
-  useEffect(() => {
-    const initialMomentCheck = setTimeout(() => {
-      void checkAndTriggerCharacterMoments();
-    }, 3000);
-    const checkProactive = setInterval(() => {
+  // Background proactive check (every minute). The scheduler owns the timer
+  // and prevents overlapping passes; the trigger policy below is unchanged.
+  const runBackgroundProactivePass = async () => {
       const now = new Date();
       const hh = now.getHours().toString().padStart(2, "0");
       const mm = now.getMinutes().toString().padStart(2, "0");
@@ -2042,13 +2204,14 @@ export default function AppChat({
       });
 
       // Run character moments check
-      void checkAndTriggerCharacterMoments();
-    }, 60000);
-    return () => {
-      clearTimeout(initialMomentCheck);
-      clearInterval(checkProactive);
-    };
-  }, [activeRelationships, characters, moments, relationships]);
+      await checkAndTriggerCharacterMoments();
+  };
+
+  useProactiveChatScheduler({
+    enabled: activeRelationships.length > 0,
+    runCatchupPass: runProactiveCatchupPass,
+    runBackgroundPass: runBackgroundProactivePass,
+  });
 
   // Calling timer
   useEffect(() => {
@@ -2101,7 +2264,7 @@ export default function AppChat({
     setShowAttachPanel(false);
   };
 
-  const finishVoiceCall = (requestedStatus: VoiceCallStatus) => {
+  const finishVoiceCall = (requestedStatus: VoiceCallStatus, options: { userEndedCall?: boolean } = {}) => {
     if (!activeChatCharId || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
       clearCallSpeechQueue();
       resetCallTtsPlayback();
@@ -2134,8 +2297,17 @@ export default function AppChat({
       const claim = createDeterministicArtifactClaim({ message: callRecord, scope: activeDirectScope });
       if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture voice-call knowledge claim.");
     }
-    if (isIncomingCall && status !== "completed") {
-      updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallRejectionPatch(Date.now()));
+    if (isIncomingCall && (status !== "completed" || options.userEndedCall)) {
+      const recentContext = messagesRef.current
+        .filter((message) => message.relationId === activeVoiceCallScope.relationId && !message.isOffline)
+        .slice(-12)
+        .map((message) => message.content)
+        .concat(callTranscript.map((item) => getCallTranscriptText(item.content || "")))
+        .join("\n");
+      updateRelationshipSession(
+        activeVoiceCallScope.relationId,
+        createProactiveCallRejectionPatch(Date.now(), isEmotionallyChargedCallContext(recentContext)),
+      );
     }
     clearCallSpeechQueue();
     if (activeTtsAudio) activeTtsAudio.pause();
@@ -2146,7 +2318,7 @@ export default function AppChat({
     setVoiceCallRelationId(null);
   };
 
-  const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled");
+  const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled", { userEndedCall: true });
 
   // Resolve an outgoing invitation instead of making every character answer automatically.
   useEffect(() => {
@@ -2188,32 +2360,9 @@ export default function AppChat({
     setCallingInputText("");
   };
 
-  // Enabled contacts may call while their chat is open, with relationship-scoped
-  // persistence, quiet-hours checks, daily limits and rejection backoff.
-  useEffect(() => {
-    if (!activeChatCharId || !activeCharacter || !activeRelationship || !activeVoiceCallScope || activeCharacter.isGroupChat || !activeCharacter.enableProactiveCall) return;
-    const timer = setInterval(() => {
-      if (activeAttachModal || isOfflineStoryActiveFor(activeVoiceCallScope.relationId)) return;
-      const now = Date.now();
-      const latestMessageAt = messagesRef.current
-        .filter((message) => message.relationId === activeVoiceCallScope.relationId && !message.isOffline)
-        .reduce((latest, message) => Math.max(latest, message.timestamp), 0) || undefined;
-      if (!canTriggerProactiveVoiceCall({
-        now,
-        relation: activeRelationship,
-        latestMessageAt,
-        startTime: activeCharacter.proactiveStartTime,
-        endTime: activeCharacter.proactiveEndTime,
-        randomValue: Math.random(),
-      })) return;
-      updateRelationshipSession(activeVoiceCallScope.relationId, createProactiveCallTriggerPatch(activeRelationship, now));
-      beginVoiceCall(true);
-    }, 60 * 1000);
-    return () => clearInterval(timer);
-  }, [activeChatCharId, activeCharacter?.enableProactiveCall, activeCharacter?.isGroupChat, activeCharacter?.proactiveStartTime, activeCharacter?.proactiveEndTime, activeAttachModal, activeIdentityId, activeVoiceCallScope?.relationId, activeRelationship?.lastProactiveCallAt, activeRelationship?.proactiveCallBackoffUntil, activeRelationship?.proactiveCallCount, activeRelationship?.proactiveCallDayKey]);
-
-  const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[]) => {
+  const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[], signal?: AbortSignal) => {
     if (!activeChatCharId || !activeCharacter) return;
+    if (signal?.aborted) return;
     setIsTyping(true);
     let repliesScheduled = false;
 
@@ -2340,12 +2489,15 @@ ${memberWbText}`;
         disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
         createId: (index) => `group-route-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 5)}`,
         currentTime: () => Date.now(),
+        signal,
       });
+      if (signal?.aborted) return;
       const selectedMembers = Array.from(new Map(routerResult.members.map((member) => [member.id, member])).values()).slice(0, 3);
       const isolatedMessages: Message[] = [];
       const isolatedMembers: Character[] = [];
       let sameTurnPublicHistory = historyText;
       for (const member of selectedMembers) {
+        if (signal?.aborted) return;
         const memberPrivateContext = privateContextByMemberId.get(member.id) || "";
         const publicDefinition = publicMemberDefinitions[groupMembers.findIndex((candidate) => candidate.id === member.id)] || "";
         const memberDefinitions = buildIsolatedGroupMemberDefinitions({
@@ -2387,7 +2539,9 @@ ${memberWbText}`;
           disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
           createId: (index) => `group-reply-${Date.now()}-${member.id}-${index}-${Math.random().toString(36).slice(2, 7)}`,
           currentTime: () => Date.now(),
+          signal,
         });
+        if (signal?.aborted) return;
         isolatedMessages.push(...memberResult.messages);
         isolatedMembers.push(...memberResult.members);
         if (memberResult.messages.length > 0) {
@@ -2430,6 +2584,11 @@ ${memberWbText}`;
           let currentIdx = 0;
           
           const sendNext = () => {
+            if (signal?.aborted) {
+              setIsTyping(false);
+              setTypingCharacterOverride(null);
+              return;
+            }
             if (currentIdx >= validReplies.length) {
               setIsTyping(false);
               setTypingCharacterOverride(null);
@@ -2444,6 +2603,11 @@ ${memberWbText}`;
 
             // Simulate typing for 1500ms
             setTimeout(() => {
+              if (signal?.aborted) {
+                setIsTyping(false);
+                setTypingCharacterOverride(null);
+                return;
+              }
               currentItem.message.timestamp = Date.now();
               onSendMessage(currentItem.message);
 
@@ -2453,6 +2617,11 @@ ${memberWbText}`;
                 setTypingCharacterOverride(validReplies[currentIdx].member);
                 setIsTyping(false); 
                 setTimeout(() => {
+                  if (signal?.aborted) {
+                    setIsTyping(false);
+                    setTypingCharacterOverride(null);
+                    return;
+                  }
                   sendNext();
                 }, 400);
               } else {
@@ -2465,6 +2634,11 @@ ${memberWbText}`;
 
           // Start sequence after brief buffer
           setTimeout(() => {
+            if (signal?.aborted) {
+              setIsTyping(false);
+              setTypingCharacterOverride(null);
+              return;
+            }
             sendNext();
           }, 500);
         }
@@ -2472,6 +2646,7 @@ ${memberWbText}`;
         persistPublicGroupTurn([]);
       }
     } catch (err) {
+      if (signal?.aborted) return;
       console.error("Group chat response generation failed:", err);
     } finally {
       if (!repliesScheduled) {
@@ -2520,12 +2695,35 @@ ${memberWbText}`;
     });
   };
 
+  const persistProactiveOfflineInvitation = (input: {
+    relationship: CharacterRelationship;
+    directive: Parameters<typeof createProactiveAppointment>[0]["directive"];
+    sourceMessageId: string;
+    now: number;
+  }): boolean => {
+    if (!onSaveAppointment) return false;
+    return onSaveAppointment(createProactiveAppointment({
+      id: `appointment:${input.relationship.id}:${input.sourceMessageId}`,
+      proposalId: `proposal:${input.sourceMessageId}`,
+      scope: {
+        relationId: input.relationship.id,
+        characterId: input.relationship.characterId,
+        userIdentityId: input.relationship.userIdentityId,
+      },
+      directive: input.directive,
+      sourceMessageId: input.sourceMessageId,
+      now: input.now,
+    }));
+  };
+
   const executeDirectReplyPipeline = async (
     userMsg: Message | null,
     customHistoryOverride?: Message[],
     cognitiveContext?: CharacterCognitiveContext,
     replyContext: ChatRuntimeContext = activeRuntimeContext,
+    signal?: AbortSignal,
   ) => {
+    if (signal?.aborted) return;
     setIsTyping(true);
     const callTurnGeneration = activeAttachModal === "calling" && callingStatus === "connected"
       ? callSpeechGenerationRef.current
@@ -2536,7 +2734,34 @@ ${memberWbText}`;
     // may have been created by an earlier render, so its captured character
     // must never decide the next prompt or output filtering.
     const turnCharacter = latestActiveCharacterRef.current || activeCharacter;
+    const turnRelationship = latestActiveRelationshipRef.current;
     const turnSettings = resolveChatTurnSettings(turnCharacter);
+    const pendingProactiveOfflineAppointment = turnRelationship && userMsg?.sender === "user"
+      ? appointments.find((appointment) => appointment.relationId === turnRelationship.id
+        && appointment.characterId === turnRelationship.characterId
+        && appointment.userIdentityId === turnRelationship.userIdentityId
+        && (appointment.status === "awaiting_user" || appointment.status === "negotiating"))
+      : undefined;
+    let proactiveOfflineAllowedModes: AppointmentMode[] = [];
+    if (turnRelationship
+      && !replyContext.isGroup
+      && replyContext.relationId === turnRelationship.id
+      && replyContext.userIdentityId === turnRelationship.userIdentityId
+      && activeAttachModal !== "calling") {
+      const sourceMessages = customHistoryOverride ? [...customHistoryOverride] : [...currentChatMessages];
+      if (userMsg && !sourceMessages.some((message) => message.id === userMsg.id)) sourceMessages.push(userMsg);
+      const eligibility = evaluateProactiveOfflineEligibility({
+        enabled: turnRelationship.enableProactiveOffline === true,
+        scope: {
+          relationId: turnRelationship.id,
+          characterId: turnRelationship.characterId,
+          userIdentityId: turnRelationship.userIdentityId,
+        },
+        appointments,
+        context: deriveProactiveOfflineContextEvidence({ messages: sourceMessages, source: "direct_reply" }),
+      });
+      if (eligibility.eligible) proactiveOfflineAllowedModes = eligibility.allowedModes;
+    }
     let pendingOfflineHandoffForReply: OfflineStory | undefined;
     const isRedPacket = userMsg && isRedPacketMarkup(userMsg.content);
     if (isRedPacket) {
@@ -2679,6 +2904,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         : buildDirectChatMainPrompt({
           characterName: activeCharacter.name,
           disableBracketActions: turnSettings.disableBracketActions,
+          characterProfile: [activeCharacter.remark, activeCharacter.age, activeCharacter.gender, activeCharacter.personality, activeCharacter.backstory].filter(Boolean).join("；"),
         });
 
       const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
@@ -2812,6 +3038,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           shares: loadDiaryShares().value,
         })
         : "";
+      const userMemoContext = activeRelationship
+        ? loadUserMemoPromptContext({
+          scopeKey: activeRelationship.id,
+          queryText: currentMessageContextText,
+          hasUserMessage: Boolean(userMsg),
+          nowMs: requestTime.getTime(),
+        }).text
+        : "";
 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
@@ -2819,6 +3053,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         ...currentChatMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
+      const characterBehaviorPrompt = buildCharacterBehaviorPrompt({
+        character: activeCharacter,
+        currentMessage: currentMessageContextText,
+        recentContext: scanText,
+      });
 
       // Use the unified World Book system blocks builder
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText, {
@@ -2839,6 +3078,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       if (musicContext) assembledInstructions.push(musicContext);
       if (forumContext) assembledInstructions.push(forumContext);
       if (diaryContext) assembledInstructions.push(diaryContext);
+      if (userMemoContext) assembledInstructions.push(userMemoContext);
 
       // 1.2 Red Packet Reaction Prompt
       if (isRedPacket && userMsg) {
@@ -2878,6 +3118,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       assembledInstructions.push(characterDescriptionText);
       assembledInstructions.push(characterProjection.personality.content);
       if (relationshipContext) assembledInstructions.push(relationshipContext);
+      if (characterBehaviorPrompt) assembledInstructions.push(characterBehaviorPrompt);
       if (characterContextText.trim()) assembledInstructions.push(characterContextText);
 
       // The adapter receives the relation-scoped cognitive snapshot and emits
@@ -2893,11 +3134,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       assembledInstructions.push(userProfileText);
       assembledInstructions.push(userKnowledgeBoundary);
       assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
+      assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
 
       // Recent dialogue is already present in the role-correct history. Do not
       // copy it into a system block: duplicate user wording encourages parroting
       // and can swap first-person ownership on short replies.
       assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
+      assembledInstructions.push(CHINESE_SEMANTIC_CONTINUITY_PROMPT);
 
       // 7. Before Chat History entries
       const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
@@ -2923,11 +3166,28 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const allStickers1 = stickerGroups.flatMap(g => g.stickers);
       if (activeAttachModal === "calling") {
         assembledInstructions.push(...buildVoiceCallPrompts(callTopicShiftDetected));
-      } else if (allStickers1.length > 0 && /^\[表情\]\|/.test(userMsg?.content || "")) {
-        const stickerListStr = allStickers1.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
-        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr));
+      } else if (allStickers1.length > 0) {
+        const userSentSticker = /^\[表情\]\|/.test(userMsg?.content || "");
+        const stickerListStr = allStickers1.map((sticker) =>
+          `- ${sticker.name}｜语义：${sticker.semanticDescription || `按名称“${sticker.name}”谨慎理解`}｜发送格式：[表情]|${sticker.name}|sticker://${sticker.id}`
+        ).join("\n");
+        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr, userSentSticker));
       }
 
+      if (proactiveOfflineAllowedModes.length > 0) {
+        assembledInstructions.push(buildProactiveOfflineInvitationPrompt({
+          allowedModes: proactiveOfflineAllowedModes,
+          now: Date.now(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }));
+      }
+      if (pendingProactiveOfflineAppointment) {
+        assembledInstructions.push(buildProactiveOfflineResponsePrompt({
+          appointment: pendingProactiveOfflineAppointment,
+          now: Date.now(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }));
+      }
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       const systemInstruction = finalizeCharacterChatSystemInstruction({
         instructions: assembledInstructions,
@@ -2960,9 +3220,25 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const data = await requestDirectChatTurn({
         prompt: { scenario: "direct-chat", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
         settings,
+        signal,
       });
 
+      if (signal?.aborted) return;
+
       if (data && data.text) {
+        const proactiveOfflineResponseParse = parseProactiveOfflineResponseDirective({
+          text: data.text,
+          appointment: pendingProactiveOfflineAppointment,
+          latestUserText: userMsg?.sender === "user" ? userMsg.content : "",
+          now: Date.now(),
+        });
+        data.text = proactiveOfflineResponseParse.visibleText;
+        const proactiveOfflineParse = parseProactiveOfflineInvitationDirective({
+          text: data.text,
+          allowedModes: proactiveOfflineAllowedModes,
+          now: Date.now(),
+        });
+        data.text = proactiveOfflineParse.visibleText;
         // Clean any accidental "[发送时间: ...]" prefixes
         data.text = data.text.replace(/\[\s*发送时间\s*:\s*[^\]]+\]/gi, "").trim();
 
@@ -3005,11 +3281,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
           // Send each segment with realistic typing delays and real-time timestamps
           for (let idx = 0; idx < newMsgs.length; idx++) {
+            if (signal?.aborted) return;
             const m = newMsgs[idx];
             setIsTyping(true);
             const chars = m.content.length;
             const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
             await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
+            if (signal?.aborted) return;
             
             m.timestamp = Date.now();
             onSendMessage(m);
@@ -3017,6 +3295,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             
             if (idx < newMsgs.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
+              if (signal?.aborted) return;
             }
           }
 
@@ -3038,6 +3317,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             disableBracketActions: turnSettings.disableBracketActions,
             keepPeriods,
             context: replyContext,
+            characterName: activeCharacter?.name,
+            userName: settings.name,
             allowEmoji: mayCharacterUseEmoji({
               latestUserMessage: userMsg?.content,
               recentCharacterMessages: currentChatMessages
@@ -3056,7 +3337,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           const createdMessages: Message[] = [];
           
           for (let idx = 0; idx < replyCandidates.messages.length; idx++) {
-            if (isCancelledCallTurn()) break;
+            if (isCancelledCallTurn() || signal?.aborted) break;
             const charMsg = replyCandidates.messages[idx];
             const bubbleText = replyCandidates.bubbleTexts[idx];
             
@@ -3064,7 +3345,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             const chars = bubbleText.length;
             const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
             await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
-            if (isCancelledCallTurn()) break;
+            if (signal?.aborted) return;
+            if (isCancelledCallTurn() || signal?.aborted) break;
             
             charMsg.timestamp = Date.now();
             const callSpeechCompletion = onSendMessage(charMsg);
@@ -3074,15 +3356,49 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             // In a voice call, keep subtitles and speech in lockstep: show one
             // bubble, play it completely, then allow the next bubble to appear.
             if (callSpeechCompletion) await callSpeechCompletion;
-            if (isCancelledCallTurn()) break;
+            if (isCancelledCallTurn() || signal?.aborted) break;
             
             if (idx < replyCandidates.messages.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
+              if (signal?.aborted) break;
             }
           }
 
           if (createdMessages.length > 0) {
             recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
+            if (proactiveOfflineResponseParse.directive && pendingProactiveOfflineAppointment && userMsg) {
+              const updatedAppointment = applyProactiveOfflineResponse({
+                appointment: pendingProactiveOfflineAppointment,
+                directive: proactiveOfflineResponseParse.directive,
+                userMessageId: userMsg.id,
+                characterMessageId: createdMessages[0].id,
+                now: createdMessages[0].timestamp,
+              });
+              if (!updatedAppointment || !onSaveAppointment?.(updatedAppointment)) {
+                console.warn("Proactive offline response could not be persisted.");
+              }
+            }
+            if (proactiveOfflineParse.directive && turnRelationship) {
+              const saved = persistProactiveOfflineInvitation({
+                relationship: turnRelationship,
+                directive: proactiveOfflineParse.directive,
+                sourceMessageId: createdMessages[0].id,
+                now: createdMessages[0].timestamp,
+              });
+              if (!saved) console.warn("Proactive offline invitation could not be persisted.");
+            }
+            // A character can naturally complete an already-started arrival
+            // exchange (for example, “我在门口”) without emitting a special
+            // invitation directive.  Check the transcript after all reply
+            // bubbles are persisted so both sides' concrete presence claims
+            // are available before handing off to the offline workspace.
+            if (turnRelationship && !replyContext.isGroup) {
+              maybeAutoStartOfflineFromPresence({
+                relationship: turnRelationship,
+                messages: [...sourceMsgs, ...createdMessages],
+                sourceMessage: createdMessages[createdMessages.length - 1],
+              });
+            }
           }
 
           chatSideEffectController.afterReplySuccess({
@@ -3098,7 +3414,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           });
         }
       } else {
-        if (isCancelledCallTurn()) return;
+        if (isCancelledCallTurn() || signal?.aborted) return;
         const errMsg = createCharacterTextMessage({
           id: (Date.now() + 1).toString(),
           context: replyContext,
@@ -3108,7 +3424,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         onSendMessage(errMsg);
       }
     } catch (err: any) {
-      if (isCancelledCallTurn()) return;
+      if (isCancelledCallTurn() || signal?.aborted) return;
       const errMsgStr = err?.message || "";
       const isQuotaOrKeyError = errMsgStr.toLowerCase().includes("api_key") || 
                                 errMsgStr.toLowerCase().includes("key") || 
@@ -3185,7 +3501,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           knowledgeBoundary: createDirectChatKnowledgeBoundary(),
           conversationId: runtimeContext.conversationId || undefined,
           relationshipTimeline: relationshipProjection.timeline,
-          routine: buildCharacterRoutine(currentCharacter.routine),
+          routine: resolveChatRoutine(
+            buildCharacterRoutine(currentCharacter.routine),
+            resolveChatTurnSettings(currentCharacter).enableTimeAwareness,
+          ),
         });
       } catch {
         // Cognitive context is read-only and must never block the legacy reply
@@ -3194,8 +3513,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
     },
     generateGroupReply: generateResponseForGroupChat,
-    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext, context }) =>
-      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext, context),
+    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext, context, signal }) =>
+      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext, context, signal),
   });
 
   const chatSideEffectController = createChatSideEffectController({
@@ -3209,7 +3528,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const generateResponseForUserMessage = async (
     userMsg: Message | null,
     customHistoryOverride?: Message[],
-  ) => chatReplyController.generate({ userMsg, customHistoryOverride });
+    signal?: AbortSignal,
+  ) => chatReplyController.generate({ userMsg, customHistoryOverride, signal });
 
   const sendCustomMessage = (
     contentString: string,
@@ -3242,6 +3562,66 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     // to send text before asking the character to answer.
     if (options.triggerReply !== false) {
       generateResponseForUserMessage(normalizedUserMsg);
+    }
+  };
+
+  const enrichStickerSemanticDescription = async (sticker: Sticker) => {
+    if (sticker.semanticDescription || !settings.apiKey || stickerSemanticAnalysisInFlightRef.current.has(sticker.id)) return;
+    stickerSemanticAnalysisInFlightRef.current.add(sticker.id);
+    try {
+      const imageBlob = await loadStickerImageBlob(sticker);
+      const analysis = imageBlob
+        ? await aiAnalyzeSticker(
+          imageBlob,
+          settings.apiKey,
+          settings.selectedModel,
+          settings.apiEndpoint,
+        )
+        : await aiAnalyzeRemoteSticker(
+          sticker.url,
+          settings.apiKey,
+          settings.selectedModel,
+          settings.apiEndpoint,
+        );
+      if (analysis.description) {
+        const resolvedSticker = {
+          ...sticker,
+          semanticDescription: analysis.description,
+        };
+        const ownerGroup = stickerGroups.find((group) => group.stickers.some((item) => item.id === sticker.id));
+        if (ownerGroup) {
+          const updatedGroup = {
+            ...ownerGroup,
+            stickers: ownerGroup.stickers.map((item) => item.id === sticker.id ? resolvedSticker : item),
+          };
+          // Cache enrichment after the message is already visible. A slow
+          // provider or IndexedDB write must never block sticker delivery.
+          await stickerDb.saveGroup(updatedGroup);
+          setStickerGroups((groups) => groups.map((group) => group.id === updatedGroup.id ? updatedGroup : group));
+        }
+      }
+    } catch (error) {
+      // A text-only or temporarily unavailable multimodal provider must not
+      // prevent the user from sending the sticker. Its name remains a safe fallback.
+      console.warn("Sticker semantic analysis unavailable; using its saved name.", error);
+    } finally {
+      stickerSemanticAnalysisInFlightRef.current.delete(sticker.id);
+    }
+  };
+
+  const sendStickerMessage = (sticker: Sticker) => {
+    const capturedContext = activeRuntimeContext;
+    const semanticDescription = sticker.semanticDescription || `这是名为“${sticker.name}”的聊天表情包`;
+
+    // Deliver the sticker optimistically. Visual understanding is enrichment
+    // for later turns, not a prerequisite for showing the user's message.
+    sendCustomMessage(
+      `[表情]|${sticker.name}|sticker://${sticker.id}|${encodeURIComponent(semanticDescription)}`,
+      capturedContext,
+    );
+
+    if (!sticker.semanticDescription && settings.apiKey) {
+      void enrichStickerSemanticDescription(sticker);
     }
   };
 
@@ -3296,12 +3676,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   };
 
   const {
-    chatInputText,
-    setChatInputText,
     quotedMessage,
     setQuotedMessage,
     handleSendOnly,
     handleSendAndReply,
+    stopReply,
+    isReplyInFlight,
   } = useChatController({
     activeChatCharId,
     activeCharacter,
@@ -3315,6 +3695,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     isInputNarration,
     activeOfflineStoryId,
     runtimeContext: activeRuntimeContext,
+    onReplyStopped: () => {
+      setIsTyping(false);
+      setTypingCharacterOverride(null);
+    },
   });
 
   const deleteMessageAndLinkedImage = (messageId: string) => {
@@ -3388,8 +3772,125 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     onClearMessages?.(characterId, undefined, relationId);
   };
 
+  /**
+   * Clears all relationship-owned memory and generated artifacts while keeping
+   * the Character and its friendship relationship intact.
+   */
+  const clearFriendScopedMemory = (friendId: string, relationId: string) => {
+    const relationMoments = moments.filter((moment) => moment.relationId === relationId);
+    const relationMomentIds = new Set(relationMoments.map((moment) => moment.id));
+    const relationCommentIds = new Set(
+      moments.flatMap((moment) => getMomentComments(moment)
+        .filter((comment) => comment.relationId === relationId)
+        .map((comment) => `${moment.id}:${comment.id}`)),
+    );
 
-  const longPressTimerRef = useRef<any>(null);
+    clearMessagesAndLinkedArtifacts(friendId, relationId);
+    removeCharacterLifeEventsForRelations([relationId]);
+    removeCharacterTruthForRelations([relationId]);
+    removeProactiveTopicsForRelations([relationId]);
+    onSaveRelationships(relationships.map((relation) => relation.id === relationId
+      ? {
+        ...relation,
+        compressedMemory: undefined,
+        lastImmediateSummaryMsgId: undefined,
+        lastActiveTime: undefined,
+        updatedAt: Date.now(),
+      }
+      : relation));
+    onDeleteMomentsByRelation?.(relationId);
+    onSaveMemories(memories.filter((memory) => memory.relationId !== relationId));
+
+    setMomentTranslations((previous) => Object.fromEntries(
+      Object.entries(previous).filter(([momentId]) => !relationMomentIds.has(momentId)),
+    ));
+    setMomentFavorites((previous) => previous.filter((favorite) => !relationMomentIds.has(favorite.momentId)));
+    setCommentTranslations((previous) => Object.fromEntries(
+      Object.entries(previous).filter(([key]) => {
+        const separator = key.indexOf(":");
+        const momentId = separator >= 0 ? key.slice(0, separator) : key;
+        return !relationMomentIds.has(momentId) && !relationCommentIds.has(key);
+      }),
+    ));
+
+    const innerVoices = loadInnerVoiceRecords([]).value;
+    const remainingInnerVoices = removeInnerVoicesByRelation(innerVoices, relationId);
+    if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
+
+    const imageRecords = loadImageGenerationRecords([]).value;
+    const removedImageRecords = imageRecords.filter((record) => record.relationId === relationId);
+    if (removedImageRecords.length) {
+      saveImageGenerationRecords(removeImageGenerationRecordsByRelation(imageRecords, relationId));
+      removedImageRecords.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete relation image asset:", error)));
+    }
+
+    const diaryCleanup = cleanupDiaryForRelations({
+      relationIds: [relationId],
+      entries: loadDiaryEntries().value,
+      shares: loadDiaryShares().value,
+      tasks: loadDiaryGenerationTasks().value,
+      translations: loadDiaryTranslations().value,
+    });
+    saveDiaryEntries(diaryCleanup.entries);
+    saveDiaryShares(diaryCleanup.shares);
+    saveDiaryGenerationTasks(diaryCleanup.tasks);
+    saveDiaryTranslations(diaryCleanup.translations);
+
+    setRedPacketStatuses((previous) => {
+      const next = removePaymentStatusesByRelation(previous, relationId);
+      writeJson(RED_PACKET_STATUSES_KEY, next);
+      return next;
+    });
+    onDeleteRelationshipMusic?.(relationId);
+
+    const forumShares = loadForumShares().value;
+    const forumThreads = loadForumThreads().value;
+    const forumReplies = loadForumReplies().value;
+    const forumMutation: { shares?: typeof forumShares; threads?: typeof forumThreads; replies?: typeof forumReplies; generationTasks?: ReturnType<typeof loadForumGenerationTasks>["value"]; actorStates?: ReturnType<typeof loadForumActorStates>["value"]; activityTasks?: ReturnType<typeof loadForumActivityTasks>["value"] } = {};
+    const remainingForumShares = removeForumSharesByRelation(forumShares, relationId);
+    if (remainingForumShares.length !== forumShares.length) forumMutation.shares = remainingForumShares;
+    const unlinkedForumThreads = unlinkForumPrivateAuthorByRelation(forumThreads, relationId);
+    if (unlinkedForumThreads.some((thread, index) => thread !== forumThreads[index])) forumMutation.threads = unlinkedForumThreads;
+    const unlinkedForumReplies = forumReplies.map((reply) =>
+      reply.privateActor?.kind === "relationship" && reply.privateActor.relationId === relationId
+        ? (() => { const { privateActor: _privateActor, ...publicReply } = reply; return publicReply; })()
+        : reply);
+    if (unlinkedForumReplies.some((reply, index) => reply !== forumReplies[index])) forumMutation.replies = unlinkedForumReplies;
+    forumMutation.generationTasks = removeForumGenerationTasksByRelation(loadForumGenerationTasks().value, relationId);
+    forumMutation.actorStates = loadForumActorStates().value.filter((state) =>
+      state.actor.kind !== "relationship" || state.actor.relationId !== relationId);
+    forumMutation.activityTasks = loadForumActivityTasks().value.map((task) => ({
+      ...task,
+      pendingEvents: task.pendingEvents.filter((event) =>
+        event.privateActor?.kind !== "relationship" || event.privateActor.relationId !== relationId),
+    }));
+    commitForumMutation(forumMutation);
+
+    offlineStories
+      .filter((story) => story.relationId === relationId)
+      .forEach((story) => onDeleteOfflineStory?.(story.id));
+    removeStoredValue(getOfflineModeStorageKey(relationId));
+    removeStoredValue(getOfflineStoryStorageKey(relationId));
+
+    const memoLedger = readJson<Record<string, unknown>>(USER_MEMO_MENTION_LEDGER_KEY, {}).value;
+    if (Object.prototype.hasOwnProperty.call(memoLedger, relationId)) {
+      const { [relationId]: _removed, ...remainingLedger } = memoLedger;
+      writeJson(USER_MEMO_MENTION_LEDGER_KEY, remainingLedger);
+    }
+    proactiveMessageInFlightRef.current.delete(relationId);
+    setInitiatedChatIds((previous) => previous.filter((id) => id !== relationId));
+    setLastReadTimestamps((previous) => {
+      const next = { ...previous };
+      delete next[relationId];
+      return next;
+    });
+  };
+
+
+  const LONG_PRESS_DELAY = 500;
+  const LONG_PRESS_MOVE_TOLERANCE = 10;
+  const longPressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleMomentTextPointerDown = (
     e: React.PointerEvent,
@@ -3403,9 +3904,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     const clientX = e.clientX;
     const clientY = e.clientY;
 
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressOriginRef.current = { x: clientX, y: clientY };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture is unavailable in a few older mobile browsers.
+    }
 
     longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressOriginRef.current = null;
       setMomentContextMenu({
         momentId,
         text,
@@ -3416,7 +3926,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         isOwn,
         timestamp,
       });
-    }, 600);
+    }, LONG_PRESS_DELAY);
   };
 
   const handleMomentTextPointerUpOrLeave = () => {
@@ -3424,22 +3934,45 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+    longPressOriginRef.current = null;
   };
 
-  const handleMomentTextPointerMove = () => {
-    if (longPressTimerRef.current) {
+  const handleMomentTextPointerMove = (event: React.PointerEvent) => {
+    const origin = longPressOriginRef.current;
+    if (longPressTimerRef.current && origin
+      && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
+      longPressOriginRef.current = null;
     }
   };
 
-  const handleMomentCommentPointerDown = (momentId: string, commentId: string) => {
+  const handleMomentCommentPointerDown = (
+    event: React.PointerEvent,
+    momentId: string,
+    comment: MomentComment,
+  ) => {
+    const clientX = event.clientX;
+    const clientY = event.clientY;
     suppressCommentClickRef.current = false;
     if (commentLongPressTimerRef.current) clearTimeout(commentLongPressTimerRef.current);
+    commentLongPressOriginRef.current = { x: clientX, y: clientY };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is unavailable in a few older mobile browsers.
+    }
     commentLongPressTimerRef.current = setTimeout(() => {
       suppressCommentClickRef.current = true;
       commentLongPressTimerRef.current = null;
-      setCommentDeleteTarget({ momentId, commentId });
+      commentLongPressOriginRef.current = null;
+      setCommentContextMenu({
+        momentId,
+        commentId: comment.id,
+        text: comment.content,
+        x: clientX,
+        y: clientY,
+      });
     }, 550);
   };
 
@@ -3447,6 +3980,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     if (commentLongPressTimerRef.current) {
       clearTimeout(commentLongPressTimerRef.current);
       commentLongPressTimerRef.current = null;
+    }
+    commentLongPressOriginRef.current = null;
+  };
+
+  const handleMomentCommentPointerMove = (event: React.PointerEvent) => {
+    const origin = commentLongPressOriginRef.current;
+    if (commentLongPressTimerRef.current && origin
+      && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
+      clearMomentCommentLongPress();
     }
   };
 
@@ -3546,6 +4088,38 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
   };
 
+  const handleTranslateMomentComment = async (momentId: string, commentId: string, text: string) => {
+    setCommentContextMenu(null);
+    const translationKey = getMomentCommentTranslationKey(momentId, commentId);
+    if (commentTranslations[translationKey]) {
+      setCommentTranslations((previous) => {
+        const next = { ...previous };
+        delete next[translationKey];
+        return next;
+      });
+      return;
+    }
+
+    showToast("正在翻译中...");
+    try {
+      const res = await apiTranslate({
+        text,
+        apiKey: settings.apiKey || "",
+        model: settings.selectedModel || "gemini-3.5-flash",
+        apiEndpoint: settings.apiEndpoint,
+      });
+      if (res?.text) {
+        setCommentTranslations((previous) => ({ ...previous, [translationKey]: res.text }));
+        showToast("翻译完成");
+      } else {
+        showToast("翻译无结果");
+      }
+    } catch (error) {
+      console.error("Translate moment comment failed:", error);
+      showToast(error instanceof Error ? error.message : "翻译失败，请检查 API 配置");
+    }
+  };
+
   const handleDeleteMomentClick = (momentId: string) => {
     setMomentContextMenu(null);
     if (confirm("确定要删除这条朋友圈吗？")) {
@@ -3569,6 +4143,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     messagesRef.current = messages;
   }, [messages]);
 
+  // Enabled contacts may call while their chat is open, with relationship-scoped
+  // persistence, quiet-hours checks, daily limits and rejection backoff.
+  useProactiveCallScheduler({
+    character: activeCharacter,
+    relationship: activeRelationship,
+    voiceCallScope: activeVoiceCallScope,
+    activeAttachModal,
+    messagesRef,
+    isOfflineStoryActiveFor,
+    updateRelationshipSession,
+    beginVoiceCall,
+  });
+
   // Pre-seed moments if state empty
   const allMoments = (moments.length === 0 ? PRESEED_MOMENTS : moments)
     .filter((moment) => belongsToActiveIdentity(moment.ownerIdentityId));
@@ -3576,7 +4163,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   // Auto scroll in chats with smart detection
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!activeChatCharId || !container) return;
+    if (!activeChatCharId || !container) {
+      // Closing a chat must make the next visit a fresh open, including when
+      // the user opens the same character again.
+      if (!activeChatCharId) {
+        lastActiveCharIdRef.current = null;
+        lastMsgCountRef.current = 0;
+      }
+      return;
+    }
 
     const currentChatMsgs = messages.filter((message) => !message.isOffline && (activeRelationship
       ? message.relationId === activeRelationship.id
@@ -3596,12 +4191,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     lastMsgCountRef.current = msgCount;
 
     if (isFreshOpen || isUserSent || isNearBottom || isTyping) {
-      setTimeout(() => {
-        const currentContainer = scrollContainerRef.current;
-        if (currentContainer) {
-          scrollContainerToBottom(currentContainer, isFreshOpen ? "auto" : "smooth");
-        }
-      }, 50);
+      const behavior = isFreshOpen ? "auto" : "smooth";
+      // The message list can finish its layout one or more frames after the
+      // chat shell mounts, especially on mobile.
+      const scrollAfterLayout = () => {
+        requestAnimationFrame(() => {
+          const currentContainer = scrollContainerRef.current;
+          if (currentContainer) scrollContainerToBottom(currentContainer, behavior);
+        });
+      };
+      scrollAfterLayout();
+      const timer = window.setTimeout(scrollAfterLayout, 80);
+      return () => window.clearTimeout(timer);
     }
   }, [messages.length, activeChatCharId, activeChatRelationId, isTyping]);
 
@@ -3616,6 +4217,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const container = scrollContainerRef.current;
       if (!container) return;
       const metrics = (event as CustomEvent<VisualViewportMetrics>).detail;
+      const visualViewport = window.visualViewport;
+      const composer = document.querySelector<HTMLElement>(
+        "#conv-screen .chat-input-area",
+      );
+      if (composer) {
+        requestAnimationFrame(() => {
+          const viewportBottom = visualViewport
+            ? visualViewport.offsetTop + visualViewport.height
+            : window.innerHeight;
+          const overlap = Math.max(0, composer.getBoundingClientRect().bottom - viewportBottom);
+          document.documentElement.style.setProperty("--chat-keyboard-lift", `${Math.ceil(overlap)}px`);
+        });
+      }
       const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
       // Keyboard shrink increases this distance by roughly the keyboard inset.
       // Compensate for it without dragging a reader away from older history.
@@ -3631,6 +4245,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     window.addEventListener(VISUAL_VIEWPORT_CHANGE_EVENT, handleViewportChange);
     return () => {
       window.removeEventListener(VISUAL_VIEWPORT_CHANGE_EVENT, handleViewportChange);
+      document.documentElement.style.removeProperty("--chat-keyboard-lift");
     };
   }, [activeChatCharId]);
 
@@ -3686,7 +4301,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               knowledgeBoundary: createDirectChatKnowledgeBoundary(),
               conversationId: activeRelationship.conversationId,
               relationshipTimeline: relationshipProjection.timeline,
-              routine: buildCharacterRoutine(activeCharacter.routine),
+              routine: resolveChatRoutine(
+                buildCharacterRoutine(activeCharacter.routine),
+                resolveChatTurnSettings(activeCharacter).enableTimeAwareness,
+              ),
             });
           } catch {
             return undefined;
@@ -3777,6 +4395,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const mainPromptText = buildDirectChatMainPrompt({
         characterName: activeCharacter.name,
         disableBracketActions: turnSettings.disableBracketActions,
+        characterProfile: [activeCharacter.remark, activeCharacter.age, activeCharacter.gender, activeCharacter.personality, activeCharacter.backstory].filter(Boolean).join("；"),
       });
 
       const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
@@ -3884,6 +4503,14 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           shares: loadDiaryShares().value,
         })
         : "";
+      const userMemoContext = activeRelationship
+        ? loadUserMemoPromptContext({
+          scopeKey: activeRelationship.id,
+          queryText: currentMessageContextText,
+          hasUserMessage: Boolean(lastUserMsg),
+          nowMs: requestTime.getTime(),
+        }).text
+        : "";
 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
@@ -3891,6 +4518,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         ...previousMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
+      const characterBehaviorPrompt = buildCharacterBehaviorPrompt({
+        character: activeCharacter,
+        currentMessage: currentMessageContextText,
+        recentContext: scanText,
+      });
 
       // Use the unified World Book system blocks builder
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], activeChatCharId || "", scanText, {
@@ -3911,6 +4543,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       if (musicContext) assembledInstructions.push(musicContext);
       if (forumContext) assembledInstructions.push(forumContext);
       if (diaryContext) assembledInstructions.push(diaryContext);
+      if (userMemoContext) assembledInstructions.push(userMemoContext);
 
       if (isRedPacketMarkup(lastUserMsg.content)) {
         assembledInstructions.push(buildRedPacketReactionPrompt(lastUserMsg.content));
@@ -3944,6 +4577,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       assembledInstructions.push(characterDescriptionText);
       assembledInstructions.push(characterProjection.personality.content);
       if (relationshipContext) assembledInstructions.push(relationshipContext);
+      if (characterBehaviorPrompt) assembledInstructions.push(characterBehaviorPrompt);
       if (characterContextText.trim()) assembledInstructions.push(characterContextText);
 
       if (regenerationCognitiveContext) {
@@ -3964,7 +4598,9 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       assembledInstructions.push(userProfileText);
       assembledInstructions.push(userKnowledgeBoundary);
       assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
+      assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
       assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
+      assembledInstructions.push(CHINESE_SEMANTIC_CONTINUITY_PROMPT);
 
       // 7. Before Chat History entries
       const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
@@ -3988,9 +4624,12 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const allStickers2 = stickerGroups.flatMap(g => g.stickers);
       if (activeAttachModal === "calling") {
         assembledInstructions.push(...buildVoiceCallPrompts(callTopicShiftDetected));
-      } else if (allStickers2.length > 0 && /^\[表情\]\|/.test(lastUserMsg.content)) {
-        const stickerListStr = allStickers2.map(s => `[表情]|${s.name}|${s.url}`).join("\n");
-        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr));
+      } else if (allStickers2.length > 0) {
+        const userSentSticker = /^\[表情\]\|/.test(lastUserMsg.content);
+        const stickerListStr = allStickers2.map((sticker) =>
+          `- ${sticker.name}｜语义：${sticker.semanticDescription || `按名称“${sticker.name}”谨慎理解`}｜发送格式：[表情]|${sticker.name}|sticker://${sticker.id}`
+        ).join("\n");
+        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr, userSentSticker));
       }
 
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
@@ -4026,6 +4665,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           disableBracketActions: turnSettings.disableBracketActions,
           keepPeriods,
           characterId: activeChatCharId,
+          characterName: activeCharacter?.name,
+          userName: settings.name,
           allowEmoji: false,
           createId: (idx) => `${Date.now()}-regen-${idx}-${Math.random().toString(36).substr(2, 5)}`,
           currentTime: (idx) => Date.now() + idx,
@@ -4074,7 +4715,10 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       }
 
       if (activeRelationship) {
-        updateRelationshipSession(activeRelationship.id, { scheduledProactiveTime: nextScheduledTime });
+        updateRelationshipSession(activeRelationship.id, {
+          scheduledProactiveTime: nextScheduledTime,
+          ...createProactiveOfflinePreferencePatch(draftEnableProactiveOffline),
+        });
       }
 
       onSaveCharacter({
@@ -4126,13 +4770,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         );
 
         currentChatMessages.forEach((msg) => {
-          const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(msg.content);
-          const hasKorean = /[\uac00-\ud7af]/.test(msg.content);
-          const hasChinese = /[\u4e00-\u9fa5]/.test(msg.content);
-          const hasEnglish = /[a-zA-Z]{3,}/.test(msg.content);
-          const isNonChinese = hasJapanese || hasKorean || (!hasChinese && hasEnglish);
-
-          if (isNonChinese) {
+          if (containsNonChineseText(msg.content)) {
             apiTranslate({
               text: msg.content,
               apiKey: settings.apiKey || "",
@@ -4345,7 +4983,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
   // Automated background proactive message generator for any character
   const triggerProactiveFor = async (relationId: string, customTaskText?: string, backdateTimestamp?: number) => {
-    if (isOfflineStoryActiveFor(relationId) || proactiveMessageInFlightRef.current.has(relationId)) return;
+    if (backgroundGenerationBlockedRef.current || isOfflineStoryActiveFor(relationId) || proactiveMessageInFlightRef.current.has(relationId)) return;
     const relationship = relationships.find((relation) => relation.id === relationId);
     const friend = relationship && characters.find((character) => character.id === relationship.characterId);
     if (!friend || friend.isGroupChat) return;
@@ -4363,6 +5001,26 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       }
 
       const charMsgs = messagesRef.current.filter((message) => message.relationId === relationId);
+      const proactiveOfflineEligibility = evaluateProactiveOfflineEligibility({
+        enabled: relationship.enableProactiveOffline === true,
+        scope: {
+          relationId: relationship.id,
+          characterId: relationship.characterId,
+          userIdentityId: relationship.userIdentityId,
+        },
+        appointments,
+        context: deriveProactiveOfflineContextEvidence({ messages: charMsgs, source: "proactive_contact" }),
+      });
+      const proactiveOfflineAllowedModes: AppointmentMode[] = proactiveOfflineEligibility.eligible
+        ? proactiveOfflineEligibility.allowedModes
+        : [];
+      if (proactiveOfflineAllowedModes.length > 0) {
+        instructionsPrompt += `\n\n${buildProactiveOfflineInvitationPrompt({
+          allowedModes: proactiveOfflineAllowedModes,
+          now: Date.now(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        })}`;
+      }
       const recentConversation = analyzeRecentConversation(charMsgs, friend.id);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
       const scanText = charMsgs.slice(-10).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: friend.name })).join("\n");
@@ -4396,7 +5054,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         memories: memories || [],
         events: listCharacterEventsByRelation(relationId),
         occurredAt: Date.now(),
-        routine: buildCharacterRoutine(friend.routine),
+        routine: resolveChatRoutine(
+          buildCharacterRoutine(friend.routine),
+          friend.enableTimeAwareness !== false,
+        ),
+        timeAwareness: friend.enableTimeAwareness !== false,
         topicHistory: loadProactiveTopicRecords().value,
       });
       const proactiveCharacterProjection = projectCharacterPrompt(friend, relationship.relationship);
@@ -4458,6 +5120,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         createId: (idx) => `${Date.now()}-friend-proactive-${idx}-${Math.random().toString(36).substr(2, 5)}`,
         currentTime: (idx) => backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
         cognitiveContext,
+        proactiveOfflineAllowedModes,
+        directiveNow: Date.now(),
         transformBubble: (bubbleText, idx) => {
           const isVoice = shouldConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText, proactiveReplyContext);
           if (!isVoice) return bubbleText;
@@ -4467,11 +5131,21 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       });
 
       if (proactiveResult.data && proactiveResult.data.text) {
-        proactiveResult.messages.forEach((message) => onSendMessage({
+        const scopedMessages = proactiveResult.messages.map((message) => ({
           ...message,
           relationId,
           conversationId: relationship.conversationId || getConversationId(relationId),
         }));
+        scopedMessages.forEach((message) => onSendMessage(message));
+        if (proactiveResult.proactiveOfflineDirective && scopedMessages[0]) {
+          const saved = persistProactiveOfflineInvitation({
+            relationship,
+            directive: proactiveResult.proactiveOfflineDirective,
+            sourceMessageId: scopedMessages[0].id,
+            now: scopedMessages[0].timestamp,
+          });
+          if (!saved) console.warn("Proactive offline invitation could not be persisted.");
+        }
         const topic = compactTopicHint(proactiveResult.messages.map((message) => message.content));
         const topicRecord = topic
           ? createProactiveTopicRecord({
@@ -4484,7 +5158,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           : undefined;
         if (topicRecord) appendProactiveTopicRecord(topicRecord);
       }
-    } catch (err) {
+    } catch (err: any) {
+      const errorText = err?.message ? String(err.message).toLowerCase() : String(err).toLowerCase();
+      if (errorText.includes("api key") || errorText.includes("api_key") || errorText.includes("authentication") || errorText.includes("401")) {
+        backgroundGenerationBlockedRef.current = true;
+      }
       console.error("Proactive message auto-trigger error:", err);
     } finally {
       proactiveMessageInFlightRef.current.delete(relationId);
@@ -4525,7 +5203,10 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       memories: [...confirmedClaimMemories, ...explicitManualMemories],
       events: listCharacterEventsByRelation(relationship.id),
       occurredAt,
-      routine: buildCharacterRoutine(character.routine),
+      routine: resolveChatRoutine(
+        buildCharacterRoutine(character.routine),
+        character.enableTimeAwareness !== false,
+      ),
     });
   };
 
@@ -4547,35 +5228,93 @@ Please read the feedback carefully and rewrite your response to perfectly match 
     ...context.recentEvents.map((event) => event.summary),
   ].filter(Boolean).join("\n");
 
+  const MOMENT_PHOTO_ANALYSIS_PROMPT = `请客观识别这张朋友圈照片。只返回 JSON，不要代码块：
+{"name":"不超过12个中文字符的画面主题","description":"不超过120个中文字符，说明主体、场景、可见文字、动作和关键细节；不要猜测图片外的信息"}`;
+
+  const analyzeMomentPhoto = async (image: string): Promise<string | undefined> => {
+    if (!image || !settings.apiKey) return undefined;
+    try {
+      const blob = await fetch(image).then((response) => {
+        if (!response.ok) throw new Error(`Image fetch failed (${response.status}).`);
+        return response.blob();
+      });
+      const analysis = await aiAnalyzeSticker(
+        blob,
+        settings.apiKey,
+        settings.selectedModel || "gemini-3.5-flash",
+        settings.apiEndpoint,
+        MOMENT_PHOTO_ANALYSIS_PROMPT,
+      );
+      return analysis.description.trim() || analysis.name.trim() || undefined;
+    } catch (error) {
+      console.warn("Moment photo analysis failed:", error);
+      return undefined;
+    }
+  };
+
+  const getMomentCommentTranslationKey = (momentId: string, commentId: string) =>
+    `${momentId}:${commentId}`;
+
+  const readMomentImageSize = (image: string): Promise<{ width: number; height: number } | undefined> =>
+    new Promise((resolve) => {
+      const preview = new Image();
+      preview.onload = () => resolve(preview.naturalWidth > 0 && preview.naturalHeight > 0
+        ? { width: preview.naturalWidth, height: preview.naturalHeight }
+        : undefined);
+      preview.onerror = () => resolve(undefined);
+      preview.src = image;
+    });
+
+  const getMomentTargetDescription = (moment: Moment): string => [
+    `正文：${renderMomentContent(moment.content) || "（无文字）"}`,
+    moment.imageDescription ? `配图识别：${moment.imageDescription}` : (moment.image ? "配图：有一张尚未识别内容的照片" : ""),
+  ].filter(Boolean).join("\n");
+
   const handleAutoCommentOnUserMoment = async (newMo: Moment) => {
     if (activeRelationships.length === 0) return;
 
-    let commentingRelationships = activeRelationships.filter(() => Math.random() < 0.6);
-    if (commentingRelationships.length === 0) {
-      commentingRelationships = [activeRelationships[Math.floor(Math.random() * activeRelationships.length)]];
-    }
-
-    commentingRelationships = commentingRelationships.slice(0, 3);
+    // Rotate through the least-recently represented friends. The previous
+    // random filter could repeatedly choose the same first two people forever.
+    const latestCommentAt = (relationship: CharacterRelationship): number => {
+      const character = findMomentRelationshipCharacter(characters, relationship);
+      if (!character) return 0;
+      const names = new Set([character.name, character.remark].filter(Boolean));
+      return moments
+        .filter((moment) => !moment.characterId && (moment.ownerIdentityId || "identity-1") === relationship.userIdentityId)
+        .flatMap((moment) => getMomentComments(moment))
+        .filter((comment) => comment.relationId === relationship.id
+          || comment.characterId === character.id
+          || (!comment.relationId && !comment.characterId && names.has(comment.authorName)))
+        .reduce((latest, comment) => Math.max(latest, comment.timestamp), 0);
+    };
+    const commentingRelationships = [...activeRelationships]
+      .filter((relationship) => {
+        const friend = findMomentRelationshipCharacter(characters, relationship);
+        return Boolean(friend && !friend.isGroupChat);
+      })
+      .sort((left, right) => latestCommentAt(left) - latestCommentAt(right))
+      .slice(0, Math.min(3, activeRelationships.length));
 
     for (const relationship of commentingRelationships) {
-      const friend = characters.find((character) => character.id === relationship.characterId);
+      const friend = findMomentRelationshipCharacter(characters, relationship);
       if (!friend || friend.isGroupChat) continue;
-      const delay = Math.random() * 8000 + 4000; // 4 to 12 seconds delay
-      setTimeout(async () => {
-        try {
-          const temporalContext = createMomentTemporalContext(new Date());
-          const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
-          const relationWorldKnowledge = buildMomentWorldKnowledge(
-            worldBookEntries || [], friend, relationship,
-            `${newMo.content}\n${momentSourceText(relationContext)}`,
-          );
-          const publicContext = buildPublicMomentContext({
-            character: friend,
-            moments: [newMo],
-            topicHistory: loadMomentTopicRecords().value,
-            routine: buildCharacterRoutine(friend.routine),
-            now: Date.now(),
-          });
+      try {
+        const temporalContext = createMomentTemporalContext(new Date());
+        const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
+        const relationWorldKnowledge = buildMomentWorldKnowledge(
+          worldBookEntries || [], friend, relationship,
+          `${getMomentTargetDescription(newMo)}\n${momentSourceText(relationContext)}`,
+        );
+        const publicContext = buildPublicMomentContext({
+          character: friend,
+          moments: [newMo],
+          topicHistory: loadMomentTopicRecords().value,
+          routine: resolveChatRoutine(
+            buildCharacterRoutine(friend.routine),
+            friend.enableTimeAwareness !== false,
+          ),
+          now: Date.now(),
+        });
 
           const systemInstruction = `Your task: Write a short, natural comment on the Moment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
@@ -4589,33 +5328,36 @@ ${CHARACTER_LANGUAGE_POLICY}
 ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 `;
 
-          const composedPrompt = PromptComposer.compose({
-            scenario: "moment-comment",
-            message: "请仅根据公开朋友圈内容和角色公开资料，写一条简短自然的微信评论：",
-            history: [],
-            systemInstruction,
-          });
-          const comment = await requestAutomaticMomentComment({
-            requestAi: apiChat,
-            request: {
+        const composedPrompt = PromptComposer.compose({
+          scenario: "moment-comment",
+          message: `[本次唯一评论目标]\n${getMomentTargetDescription(newMo)}\n\n只评论上面这条新动态。历史动态、历史评论和话题冷却仅用于避免重复措辞，禁止把其中的食物、物件或对话当成这条动态的内容。`,
+          history: [],
+          systemInstruction,
+        });
+        const comment = await requestAutomaticMomentComment({
+          requestAi: apiChat,
+          request: {
             ...composedPrompt,
             apiKey: settings.apiKey,
             model: settings.selectedModel || "gemini-3.5-flash",
             apiEndpoint: settings.apiEndpoint,
             apiTemperature: settings.apiTemperature,
-            },
-            character: friend,
-            cleanText: (text) => cleanOnlineMessage(text, true),
-            temporalContext,
-            publicContext,
-            relationContext,
-            relationWorldKnowledge,
-          });
-          if (comment) onAddCommentToMoment(newMo.id, comment);
-        } catch (err) {
-          console.error(`Failed to generate automatic comment for ${friend.name}:`, err);
-        }
-      }, delay);
+          },
+          character: friend,
+          cleanText: (text) => cleanOnlineMessage(text, true),
+          temporalContext,
+          publicContext,
+          relationContext,
+          relationWorldKnowledge,
+        });
+        if (comment) onAddCommentToMoment(newMo.id, {
+          ...comment,
+          characterId: friend.id,
+          relationId: relationship.id,
+        });
+      } catch (err) {
+        console.error(`Failed to generate automatic comment for ${friend.name}:`, err);
+      }
     }
   };
 
@@ -4626,7 +5368,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
     // Identify which character should reply
     let targetChar: Character | undefined;
-    if (replyingTo) {
+    if (replyingTo?.characterId) {
+      targetChar = characters.find((character) => character.id === replyingTo.characterId);
+    } else if (replyingTo) {
       // If user is replying to a specific character's comment, that character should reply!
       targetChar = characters.find(c => c.name === replyingTo.authorName || c.remark === replyingTo.authorName);
     }
@@ -4661,11 +5405,11 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
         const relationContext = buildRelationMomentContext(friend, relationship, temporalContext.generatedAt.getTime());
         const relationWorldKnowledge = buildMomentWorldKnowledge(
           worldBookEntries || [], friend, relationship,
-          `${targetMoment.content}\n${userCommentText}\n${momentSourceText(relationContext)}`,
+          `${getMomentTargetDescription(targetMoment)}\n${userCommentText}\n${momentSourceText(relationContext)}`,
         );
         const publicContext = buildPublicMomentContext({
           character: friend,
-          moments: [targetMoment],
+          moments: [{ ...targetMoment, comments: [] }],
           comments: [
             ...targetMoment.comments,
             {
@@ -4677,7 +5421,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
             },
           ],
           topicHistory: loadMomentTopicRecords().value,
-          routine: buildCharacterRoutine(friend.routine),
+          routine: resolveChatRoutine(
+            buildCharacterRoutine(friend.routine),
+            friend.enableTimeAwareness !== false,
+          ),
           now: Date.now(),
         });
 
@@ -4695,7 +5442,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
         const composedPrompt = PromptComposer.compose({
           scenario: "moment-reply",
-          message: `请仅针对这条公开朋友圈评论 "${userCommentText}"，写一条符合角色公开人设的简短微信回复：`,
+          message: `[本次唯一回复目标]\n动态：${getMomentTargetDescription(targetMoment)}\n${replyingTo ? `用户正在回复你的评论：${replyingTo.content}\n` : ""}用户刚写的内容：${userCommentText}\n\n只回复“用户刚写的内容”。禁止延续其他朋友圈、其他评论线程或历史话题中的关键词。`,
           history: [],
           systemInstruction,
         });
@@ -4716,16 +5463,20 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           relationContext,
           relationWorldKnowledge,
         });
-        if (reply) onAddCommentToMoment(momentId, reply);
+        if (reply) onAddCommentToMoment(momentId, {
+          ...reply,
+          characterId: friend.id,
+          relationId: relationship.id,
+        });
       } catch (err) {
         console.error(`Failed to generate reply to user comment for ${friend.name}:`, err);
       }
     }, delay);
   };
 
-  const generateCharacterMoment = async (relationship: CharacterRelationship, occurredAt: number) => {
-    const friend = characters.find((character) => character.id === relationship.characterId);
-    if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return;
+  const generateCharacterMoment = async (relationship: CharacterRelationship, occurredAt: number): Promise<boolean> => {
+    const friend = findMomentRelationshipCharacter(characters, relationship);
+    if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return false;
     try {
       const ownerMomentHistory = moments
         .filter((moment) => Boolean(moment.characterId))
@@ -4743,7 +5494,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
         character: friend,
         moments: ownerMomentHistory,
         topicHistory: loadMomentTopicRecords().value,
-        routine: buildCharacterRoutine(friend.routine),
+        routine: resolveChatRoutine(
+          buildCharacterRoutine(friend.routine),
+          friend.enableTimeAwareness !== false,
+        ),
         now: occurredAt,
       });
 
@@ -4793,7 +5547,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
         // Automatic Moments are optional background content. A provider safety
         // rejection should silently skip this post instead of asking the user
         // to rewrite the character or World Book for a non-essential feature.
-        return;
+        return false;
       }
       if (generated.moment) {
         onAddMoment(generated.moment);
@@ -4808,10 +5562,12 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           })
           : undefined;
         if (topicRecord) appendMomentTopicRecord(topicRecord);
+        return true;
       }
       // A public Moment is not a verified private relationship fact. Keep the
       // generator's legacy return value for compatibility, but do not write it
       // into relation-scoped Memory without an explicit user confirmation path.
+      return false;
     } catch (err: any) {
       console.error(`Failed to generate Moment for character ${friend.name}:`, err);
       const errMsgStr = err?.message || String(err);
@@ -4820,18 +5576,53 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           errMsgStr.toLowerCase().includes("key") ||
                           errMsgStr.toLowerCase().includes("invalid") ||
                           errMsgStr.toLowerCase().includes("authentication fails");
+      if (isAuthError) backgroundGenerationBlockedRef.current = true;
       if (isAuthError) {
         showToast(`⚠️ [动态生成失败] 「${friend.name}」发布朋友圈时 API 验证失败，请在设置中检查您的 API Key 是否正确。`);
       } else {
         showToast(`⚠️ [动态生成失败] 「${friend.name}」：${errMsgStr}`);
       }
+      return false;
     }
   };
 
-  const checkAndTriggerCharacterMoments = async () => {
-    if (activeRelationships.length === 0) return;
+  const enrichUserMomentAndComment = async (moment: Moment) => {
+    let enriched = moment;
+    if (moment.image) {
+      const [description, imageSize] = await Promise.all([
+        moment.imageDescription ? Promise.resolve(moment.imageDescription) : analyzeMomentPhoto(moment.image),
+        readMomentImageSize(moment.image),
+      ]);
+      enriched = {
+        ...moment,
+        imageDescription: description || moment.imageDescription,
+        imageWidth: imageSize?.width,
+        imageHeight: imageSize?.height,
+      };
+      if (description || imageSize) onAddMoment(enriched);
+      // A pure-photo post must not receive a blind, hallucinated comment. If
+      // visual analysis is unavailable, leave it published and let the user
+      // retry later rather than asking "what is this photo?".
+      if (!description && !renderMomentContent(moment.content)) return;
+    }
+    await handleAutoCommentOnUserMoment(enriched);
+  };
 
-    for (const relationship of activeRelationships) {
+  const checkAndTriggerCharacterMoments = async () => {
+    if (backgroundGenerationBlockedRef.current || activeRelationships.length === 0) return;
+
+    // Always evaluate the relationship that has waited longest first. The old
+    // fixed-order loop plus `break` starved later friends whenever an earlier
+    // relationship was also eligible.
+    const orderedRelationships = [...activeRelationships].sort((left, right) => {
+      const leftFriend = findMomentRelationshipCharacter(characters, left);
+      const rightFriend = findMomentRelationshipCharacter(characters, right);
+      const leftAt = leftFriend ? getRelationshipLastMomentTimestamp(moments, left, leftFriend.id) : Number.MAX_SAFE_INTEGER;
+      const rightAt = rightFriend ? getRelationshipLastMomentTimestamp(moments, right, rightFriend.id) : Number.MAX_SAFE_INTEGER;
+      return leftAt - rightAt;
+    });
+
+    for (const relationship of orderedRelationships) {
       const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relationship.characterId, characters));
       if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) continue;
       const now = Date.now();
@@ -4852,9 +5643,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
             .filter((moment) => (moment.ownerIdentityId || "identity-1") === relationship.userIdentityId)
             .map((moment) => moment.timestamp),
         });
-        await generateCharacterMoment(relationship, occurredAt);
-        // Break to avoid generating multiple moments simultaneously
-        break;
+        const generated = await generateCharacterMoment(relationship, occurredAt);
+        // Generate one per scheduler pass, then rotate to the next oldest
+        // eligible relationship on the following pass.
+        if (generated) break;
       }
     }
   };
@@ -4901,8 +5693,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
     setShowTextImageInput(false);
     setShowMomentPublisher(false);
 
-    // Auto-comment trigger
-    handleAutoCommentOnUserMoment(newMo);
+    // Publish first, then understand the image and generate grounded comments
+    // in the background. The visual API can be slow and must never block UI.
+    void enrichUserMomentAndComment(newMo);
   };
 
   const handleMomentsCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -4970,7 +5763,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
       return;
     }
     onAddMoment(newMo);
-    handleAutoCommentOnUserMoment(newMo);
+    void enrichUserMomentAndComment(newMo);
   };
 
   const publishMomentCommentFromFeature = (momentId: string, text: string, replyingTo?: MomentComment) => {
@@ -5189,6 +5982,28 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 overflow: visible;
               }
 
+              ${!hasUserCustomChatCss && activeBubbleTailEnabled ? `
+                #conv-screen .chat-bubble-other.msg-group-top::before,
+                #conv-screen .chat-bubble-self.msg-group-top::after {
+                  content: "";
+                  position: absolute;
+                  top: ${settings.bubbleTailVertical === "center" ? "50%" : settings.bubbleTailVertical === "bottom" ? "auto" : "14px"};
+                  ${settings.bubbleTailVertical === "center" ? "transform: translateY(-50%) rotate(45deg);" : settings.bubbleTailVertical === "bottom" ? "bottom: 14px; transform: rotate(45deg);" : "transform: rotate(45deg);"}
+                  width: 10px;
+                  height: 10px;
+                  z-index: 0;
+                  pointer-events: none;
+                }
+                #conv-screen .chat-bubble-other.msg-group-top::before {
+                  left: -5px;
+                  background: var(--chat-ai-bg);
+                }
+                #conv-screen .chat-bubble-self.msg-group-top::after {
+                  right: -5px;
+                  background: var(--chat-user-bg);
+                }
+              ` : ""}
+
               /*
                * Themeable chat composer surface.  The semantic variables are
                * intentionally defined at the chat root so a user's scoped CSS
@@ -5218,6 +6033,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 box-shadow: var(--chat-composer-shadow, none);
               }
               #conv-screen .chat-composer__input {
+                min-width: 0 !important;
+                width: 0 !important;
+                flex: 1 1 0% !important;
                 background: var(--chat-input-bg, var(--input-bg));
                 color: var(--chat-input-text, var(--text-primary));
                 border: var(--chat-input-border-width, 1px) solid var(--chat-input-border, var(--border));
@@ -5232,6 +6050,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 box-shadow: var(--chat-input-focus-shadow, 0 0 0 2px var(--focus-ring));
               }
               #conv-screen .chat-composer__button {
+                flex: 0 0 auto !important;
                 border: var(--chat-button-border-width, 1px) solid var(--chat-button-border, var(--border));
                 border-radius: var(--chat-button-radius, var(--radius-full));
                 box-shadow: var(--chat-button-shadow, none);
@@ -5361,24 +6180,47 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                     settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
                     settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
                   )
-                  : settings.selfBubbleBg
-                    ? getBubbleBackgroundStyle(settings.selfBubbleBg, settings.selfBubbleOpacity ?? 100)
-                    : "var(--button-primary-bg)"};
+                  : getBubbleBackgroundStyle(
+                    settings.selfBubbleBg || CLASSIC_SELF_BUBBLE_BACKGROUND,
+                    settings.selfBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY,
+                  )};
                 --chat-ai-bg: ${isLiquidGlass
                   ? getBubbleBackgroundStyle(
                     settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
                     settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
                   )
-                  : settings.otherBubbleBg
-                    ? getBubbleBackgroundStyle(settings.otherBubbleBg, settings.otherBubbleOpacity ?? 100)
-                    : "var(--surface-raised)"};
+                  : getBubbleBackgroundStyle(
+                    settings.otherBubbleBg || CLASSIC_OTHER_BUBBLE_BACKGROUND,
+                    settings.otherBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY,
+                  )};
                 --chat-user-text: ${isLiquidGlass
                   ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-                  : settings.selfBubbleColor || "var(--button-primary-text)"};
+                  : settings.selfBubbleColor || CLASSIC_SELF_BUBBLE_TEXT};
                 --chat-ai-text: ${isLiquidGlass
                   ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-                  : settings.otherBubbleColor || "var(--text-primary)"};
+                  : settings.otherBubbleColor || CLASSIC_OTHER_BUBBLE_TEXT};
               }
+
+              /* The classic default used to keep hard-coded green/white
+                 Tailwind backgrounds on the message nodes. That made the
+                 beauty preview (which uses the persisted classic defaults)
+                 disagree with the actual chat until another style setting
+                 happened to be touched. Make the classic chat use the same
+                 semantic variables from its first render. */
+              ${!isLiquidGlass && !isFloatingCute && !hasUserCustomChatCss ? `
+                #conv-screen .chat-bubble-self,
+                #conv-screen .voice-message-bar.chat-bubble-self {
+                  background-color: var(--chat-user-bg) !important;
+                  background-image: none !important;
+                  color: var(--chat-user-text) !important;
+                }
+                #conv-screen .chat-bubble-other,
+                #conv-screen .voice-message-bar.chat-bubble-other {
+                  background-color: var(--chat-ai-bg) !important;
+                  background-image: none !important;
+                  color: var(--chat-ai-text) !important;
+                }
+              ` : ""}
 
               ${!isLiquidGlass && settings.selfBubbleBg ? `
                 #conv-screen .chat-bubble-self,
@@ -5701,6 +6543,27 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                   margin: 0 !important;
                   box-sizing: border-box !important;
                 }
+                #conv-screen .chat-composer__form {
+                  width: 100% !important;
+                  max-width: 100% !important;
+                  min-width: 0 !important;
+                  box-sizing: border-box !important;
+                }
+                @media (max-width: 420px) {
+                  #conv-screen .chat-composer__form {
+                    gap: 6px !important;
+                    padding-left: 8px !important;
+                    padding-right: 8px !important;
+                  }
+                  #conv-screen .chat-composer__button {
+                    width: 36px !important;
+                    height: 36px !important;
+                  }
+                  #conv-screen .chat-composer__input {
+                    padding-left: 10px !important;
+                    padding-right: 10px !important;
+                  }
+                }
                 .cv-footer form {
                   background: transparent !important;
                   padding: 0 !important;
@@ -5865,7 +6728,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
               <button
                 onClick={() => {
-                  loadCharacterDraft(activeCharacter);
+                  loadCharacterDraft(activeCharacter, activeRelationship);
                   setAdvancedSettingsSection(null);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
@@ -6141,6 +7004,19 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       </div>
                       <SettingsSwitch checked={draftEnableAutoTranslate} onChange={setDraftEnableAutoTranslate} label="自动翻译" />
                     </div>
+
+                    {!activeCharacter.isGroupChat && activeRelationship && (
+                      <div className="flex h-[52px] px-4 items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-slate-800 font-medium text-[16px] block">主动发起线下</span>
+                        </div>
+                        <SettingsSwitch
+                          checked={draftEnableProactiveOffline}
+                          onChange={setDraftEnableProactiveOffline}
+                          label="主动发起线下"
+                        />
+                      </div>
+                    )}
 
                     {!activeCharacter.isGroupChat && <div className={draftEnableProactiveChat ? "min-h-[52px]" : "contents"}>
                       <div className="flex h-[52px] px-4 items-center justify-between gap-3">
@@ -6480,7 +7356,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                     onClick={() => setShowClearHistoryModal(true)}
                      className="w-full h-[52px] px-4 flex items-center justify-between text-[16px] font-medium text-[#FF3B30] transition-colors hover:bg-red-50 active:bg-red-100"
                   >
-                     <span>清空对话记录</span>
+                      <span>清空好友全部记忆</span>
                      <ChevronRight className="w-5 h-5 text-[#C7C7CC]" />
                   </button>
 
@@ -6518,46 +7394,34 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       </svg>
                     </div>
                     <div className="space-y-1">
-                      <h3 className="font-bold text-slate-800 text-sm">清空对话记录</h3>
-                      <p className="text-[11px] text-slate-500 leading-relaxed">
-                        请选择如何处理当前对话。提炼整理记忆可让角色长久记住你们的互动与好感。
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-2.5 pt-2">
-                      <button
-                        onClick={async () => {
-                          setShowClearHistoryModal(false);
-                          // Step 1: Extract memories to Memory Vault
-                          const count = await handleExtractMemories();
-                          // Step 2: Clear messages
-                          if (onClearMessages) {
-                            clearMessagesAndLinkedArtifacts(activeChatCharId, activeRelationship?.id);
-                          }
-                          // Reset greeting checked state so a new proactive greeting can be generated immediately
-                          setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
-                          setSentGreetings((prev) => prev.filter((id) => id !== activeChatCharId));
-                          alert(`成功提取并整理了 ${count} 条核心记忆存入“记忆书”，当前对话已安全清除！`);
-                        }}
-                        disabled={isCompressingMemory}
-                        className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm disabled:opacity-50"
-                      >
-                        {isCompressingMemory ? "正在提炼并清空..." : "💡 提炼记忆存入记忆书再清空"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (window.confirm("确定要直接清空所有对话记录吗？该操作不可撤销，且不会保存任何新记忆。")) {
-                            setShowClearHistoryModal(false);
-                            if (onClearMessages) {
-                              clearMessagesAndLinkedArtifacts(activeChatCharId, activeRelationship?.id);
-                            }
-                            // Reset greeting checked state so a new proactive greeting can be generated immediately
-                            setEmptyGreetingCheckedCharIds((prev) => prev.filter((id) => id !== activeChatCharId));
-                            setSentGreetings((prev) => prev.filter((id) => id !== activeChatCharId));
-                          }
-                        }}
-                        className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-xs transition-colors border border-red-200"
-                      >
-                        直接彻底清空
+                        <h3 className="font-bold text-slate-800 text-sm">清空好友全部记忆</h3>
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                         将清除与当前好友关系相关的聊天、朋友圈、记忆、线下剧本、日记及其他生成记录，但不会删除好友、人设或关系设置。
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2.5 pt-2">
+                       <button
+                         onClick={() => {
+                           if (!activeCharacter || activeCharacter.isGroupChat) return;
+                           const currentIdentityRelation = relationForCharacter(activeCharacter.id);
+                           const relationToClear = activeRelationship?.userIdentityId === activeIdentityId
+                             ? activeRelationship
+                             : currentIdentityRelation;
+                           const relationId = relationToClear?.id || activeChatRelationId;
+                           if (!relationId) {
+                             showToast("找不到当前好友关系，无法执行安全清理。");
+                             return;
+                           }
+                           if (!window.confirm("确定要清空该好友的全部记忆吗？聊天、朋友圈、记忆、线下剧本、日记及其他相关记录都会永久删除，好友和人设不会删除。")) return;
+                           clearFriendScopedMemory(activeCharacter.id, relationId);
+                           setShowClearHistoryModal(false);
+                           setEmptyGreetingCheckedCharIds((previous) => previous.filter((id) => id !== activeChatCharId));
+                           setSentGreetings((previous) => previous.filter((id) => id !== activeChatCharId));
+                           showToast("已清空好友全部记忆");
+                         }}
+                         className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-xs transition-colors border border-red-200"
+                       >
+                         直接彻底清空
                       </button>
                       <button
                         onClick={() => setShowClearHistoryModal(false)}
@@ -6752,8 +7616,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           {/* Active Chat Messages body */}
           <div className={`chat-content-scope chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} relative flex min-h-0 flex-1 flex-col`}>
           <MessageList
+            key={`${activeChatCharId ?? "none"}:${activeRelationship?.id ?? activeChatRelationId ?? "none"}:${isOfflineModeActive ? "offline" : "online"}`}
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
+            renderWindowSize={120}
             className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-4 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
@@ -7012,25 +7878,50 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       if (e.pointerType === "mouse" && e.button !== 0) return;
                       const clientX = e.clientX;
                       const clientY = e.clientY;
-                      const timer = setTimeout(() => {
-                        setActiveMenuMsg(msg);
-                        setMenuPosition({ x: clientX, y: clientY });
-                      }, 500);
-                      (e.currentTarget as any)._longPressTimer = timer;
+      const origin = { x: e.clientX, y: e.clientY };
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Pointer capture is unavailable in a few older mobile browsers.
+      }
+      const timer = setTimeout(() => {
+        setActiveMenuMsg(msg);
+        setMenuPosition({ x: clientX, y: clientY });
+      }, LONG_PRESS_DELAY);
+      (e.currentTarget as any)._longPressTimer = timer;
+      (e.currentTarget as any)._longPressOrigin = origin;
                     }}
                     onPointerUp={(e) => {
                       const timer = (e.currentTarget as any)._longPressTimer;
                       if (timer) clearTimeout(timer);
+                      (e.currentTarget as any)._longPressTimer = null;
+                      (e.currentTarget as any)._longPressOrigin = null;
                     }}
                     onPointerCancel={(e) => {
                       const timer = (e.currentTarget as any)._longPressTimer;
                       if (timer) clearTimeout(timer);
+                      (e.currentTarget as any)._longPressTimer = null;
+                      (e.currentTarget as any)._longPressOrigin = null;
                     }}
                     onPointerLeave={(e) => {
                       const timer = (e.currentTarget as any)._longPressTimer;
-                      if (timer) clearTimeout(timer);
+                      const origin = (e.currentTarget as any)._longPressOrigin as { x: number; y: number } | undefined;
+                      if (timer && origin && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
+                        clearTimeout(timer);
+                        (e.currentTarget as any)._longPressTimer = null;
+                        (e.currentTarget as any)._longPressOrigin = null;
+                      }
                     }}
-                    className="flex items-center gap-1 group relative cursor-pointer select-none"
+                    onPointerMove={(e) => {
+                      const timer = (e.currentTarget as any)._longPressTimer;
+                      const origin = (e.currentTarget as any)._longPressOrigin as { x: number; y: number } | undefined;
+                      if (timer && origin && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
+                        clearTimeout(timer);
+                        (e.currentTarget as any)._longPressTimer = null;
+                        (e.currentTarget as any)._longPressOrigin = null;
+                      }
+                    }}
+                    className="chat-long-press-target flex items-center gap-1 group relative cursor-pointer select-none"
                   >
                     {/* Actual chat bubble + user-controlled corner decoration slot */}
                     <div className={`bubble-deco-wrapper relative w-fit max-w-full overflow-visible ${messageGroupClass}`}>
@@ -7078,7 +7969,10 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       })() : msg.content.startsWith("[表情]|") ? (() => {
                         const [_, stickerName, stickerUrl] = msg.content.split("|");
                         // Resolve fresh hydrated URL from local sticker groups
-                        const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s => s.name === stickerName);
+                        const stickerId = stickerUrl?.startsWith("sticker://") ? stickerUrl.slice("sticker://".length) : "";
+                        const foundSticker = stickerGroups.flatMap(g => g.stickers).find(s =>
+                          (stickerId && s.id === stickerId) || s.name === stickerName
+                        );
                         const displayUrl = foundSticker ? foundSticker.url : stickerUrl;
                         return (
                           <div className="chat-message--sticker max-w-[130px] rounded-xl overflow-hidden relative select-none">
@@ -7112,7 +8006,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           </button>
                         );
                       })() : isRedPacketMarkup(msg.content) ? (() => {
-                        const [, amount, greeting] = msg.content.split("|");
+                        const [, amount, greeting] = normalizePaymentMarkup(msg.content).split("|");
                         const status = getRedPacketActualStatus(msg);
                         return <RedPacketCard amount={amount || "8.88"} greeting={greeting || "恭喜发财，万事如意"} status={status} isSelf={isSelf} onClick={() => {
                           const char = characters.find((character) => character.id === msg.characterId);
@@ -7126,6 +8020,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
                           setShowTransferDetailModal(true);
                         }} />;
+                      })() : msg.content.startsWith("[位置]") ? (() => {
+                        const location = msg.content.split("|").slice(1).join("|").trim() || msg.content.replace(/^\[位置\]/, "").trim();
+                        return <LocationCard location={location} />;
                       })() : msg.content.startsWith("[语音") ? (() => {
                         let content = msg.content;
                         let durationStr = "3";
@@ -7462,6 +8359,27 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
            <div ref={chatEndRef} />
           </MessageList>
 
+          {readyOfflineAppointment && !isMultiSelectDeleteMode && (
+            <div className="chat-appointment-entry mx-3 mb-2 flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 shadow-sm">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-bold text-[var(--text-primary)]">
+                  {getCurrentAppointmentProposal(readyOfflineAppointment)?.activity || readyOfflineAppointment.title}
+                </div>
+                <div className="mt-0.5 text-[10px] text-[var(--text-secondary)]">约定时间已到，可以进入线下见面</div>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded-xl bg-[var(--button-primary-bg)] px-3 py-2 text-[11px] font-bold text-[var(--button-primary-text)]"
+                onClick={() => {
+                  const sourceMessage = currentChatMessages[currentChatMessages.length - 1];
+                  if (sourceMessage) handleStartOfflineFromMsg(sourceMessage, readyOfflineAppointment);
+                }}
+              >
+                进入线下
+              </button>
+            </div>
+          )}
+
           {isMultiSelectDeleteMode && (
             <div className="chat-multi-select-toolbar absolute inset-x-0 bottom-0 z-[85] border-t border-stone-200/80 bg-white/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)] backdrop-blur-xl">
               <div className="mx-auto flex max-w-md items-center gap-3">
@@ -7487,7 +8405,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
             </div>
           )}
 
-          <BubbleTipPortalLayer enabled={!isShowingCardModal && activeBubbleTailEnabled} />
+          <BubbleTipPortalLayer enabled={!isShowingCardModal && hasUserCustomChatCss && activeBubbleTailEnabled} />
 
           {showImageGenerator && (
             <div className="absolute inset-0 z-[90] flex items-end bg-black/35 p-4" onClick={() => setShowImageGenerator(false)}>
@@ -7516,73 +8434,24 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 {imageGenerationError}
               </div>
             )}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendOnly(e);
+            <ChatInputBar
+              placeholder={
+                isOfflineModeActive
+                  ? (isInputNarration ? "输入旁白..." : "输入发言，继续剧本对话...")
+                  : `发送消息给 ${activeCharacter.name}...`
+              }
+              isTyping={isTyping}
+              isReplyInFlight={isReplyInFlight}
+              showAttachPanel={showAttachPanel}
+              onToggleAttach={() => {
+                setShowAttachPanel(!showAttachPanel);
+                setShowStickerSelector(false);
               }}
-              className="px-3 py-2 flex items-center gap-2 chat-composer__form"
-            >
-              {/* Plus (+) Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAttachPanel(!showAttachPanel);
-                  setShowStickerSelector(false);
-                }}
-                className={`w-10 h-10 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn chat-composer__button chat-composer__attach-button ${
-                  showAttachPanel
-                    ? "chat-composer__button--open rotate-45"
-                    : "chat-composer__button--idle"
-                }`}
-                title="附加菜单"
-              >
-                <span className="cv-plus-icon flex items-center justify-center w-full h-full">
-                  <ChatIcon src={getChatIcon("plus")} className="w-3.5 h-3.5"><Plus className="w-3.5 h-3.5" /></ChatIcon>
-                </span>
-              </button>
-
-              {/* Chat Input text box */}
-              <ChatTextInput
-                type="text"
-                value={chatInputText}
-                onChange={(e) => setChatInputText(e.target.value)}
-                placeholder={
-                  isOfflineModeActive
-                    ? (isInputNarration
-                        ? "输入旁白..."
-                        : "输入发言，继续剧本对话...")
-                    : `发送消息给 ${activeCharacter.name}...`
-                }
-                className="flex-1 h-10 px-4 text-xs chat-input chat-composer__input"
-              />
-
-              {/* Send Button 1 (User send only - gray background with white upward arrow) */}
-              <button
-                type="button"
-                onClick={(e) => handleSendOnly(e)}
-                disabled={!chatInputText.trim() || isTyping}
-                className="w-10 h-10 transition-all flex items-center justify-center shrink-0 cv-send-only-btn chat-composer__button chat-composer__send-only-button chat-composer__send-button"
-                title="仅发送消息 (不立即得到回复)"
-              >
-                <span className="cv-send-only-icon flex items-center justify-center w-full h-full">
-                  <ChatIcon src={getChatIcon("send")} className="w-4 h-4"><ArrowUp className="w-4 h-4 stroke-[2.5]" /></ChatIcon>
-                </span>
-              </button>
-
-              {/* Send Button 2 (Send and AI Reply - black background with white paper plane) */}
-              <button
-                type="button"
-                onClick={(e) => handleSendAndReply(e)}
-                disabled={isTyping}
-                className="w-10 h-10 transition-all flex items-center justify-center shrink-0 send-button chat-composer__button chat-composer__send-reply-button chat-composer__send-button"
-                title="发送消息并获取回复"
-              >
-                <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
-                  <ChatIcon src={getChatIcon("send")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>
-                </span>
-              </button>
-            </form>
+              onSendOnly={handleSendOnly}
+              onSendAndReply={handleSendAndReply}
+              onStopReply={stopReply}
+              getChatIcon={(key) => getChatIcon(key)}
+            />
 
             {/* Attach Panel */}
             {showAttachPanel && (
@@ -7737,7 +8606,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           <div
                             key={sticker.id}
                             onClick={() => {
-                              sendCustomMessage(`[表情]|${sticker.name}|${sticker.url}`, activeRuntimeContext, { triggerReply: false });
+                              void sendStickerMessage(sticker);
                               setShowStickerSelector(false);
                             }}
                             className="flex flex-col items-center bg-white border border-slate-200/40 hover:border-slate-300 rounded-xl p-1 shadow-sm hover:shadow active:scale-95 transition-all select-none relative"
@@ -8594,7 +9463,6 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
                     <textarea
                       rows={3}
-                      required
                       value={momentInputText}
                       onChange={(e) => setMomentInputText(e.target.value)}
                       placeholder="说点什么吧，可以配个好看的插图..."
@@ -8690,7 +9558,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
                           {/* Content text */}
                           <p 
-                            className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
+                            className="chat-long-press-target text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
                             title="长按/右键 弹出菜单"
                             onContextMenu={(e) => handleMomentTextContextMenu(
                               e,
@@ -8729,7 +9597,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           )}
 
                           {/* Attached Photo */}
-                          {textImageDescription && (
+                          {textImageDescription && !mom.image && (
                             <button
                               type="button"
                               onClick={() => setViewingImageDescription(textImageDescription)}
@@ -8741,8 +9609,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                             </button>
                           )}
                           {mom.image && (
-                            <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
-                              <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
+                            <div className="mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
+                              <img src={mom.image} alt={mom.imageDescription || "朋友圈配图"} width={mom.imageWidth} height={mom.imageHeight} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />
                             </div>
                           )}
 
@@ -8806,18 +9674,24 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                       <div
                                         key={comm.id}
                                         onClick={() => handleMomentCommentClick(mom.id, comm)}
-                                        onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
+                                        onPointerDown={(event) => handleMomentCommentPointerDown(event, mom.id, comm)}
                                         onPointerUp={clearMomentCommentLongPress}
                                         onPointerLeave={clearMomentCommentLongPress}
+                                        onPointerMove={handleMomentCommentPointerMove}
                                         onPointerCancel={clearMomentCommentLongPress}
                                         onContextMenu={(event) => event.preventDefault()}
-                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
-                                        title={`点击回复；长按删除评论`}
+                                        className="chat-long-press-target py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
+                                        title={`点击回复；长按翻译或删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">
                                           {commAuthorName}
                                         </span>
                                         <span className="text-slate-700">{comm.content}</span>
+                                        {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)] && (
+                                          <span className="mt-0.5 block whitespace-pre-wrap text-slate-500">
+                                            {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)]}
+                                          </span>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -9054,7 +9928,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                         </div>
                       ) : (
                         settings.identities?.map((idty) => {
-                          const isActive = idty.name === settings.name;
+                          const isActive = idty.id === activeIdentityId;
                           return (
                             <div
                               key={idty.id}
@@ -9063,7 +9937,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                 setEditMyAvatar(idty.avatar);
                                 setEditMySignature(idty.signature || "");
                                 setEditMyBio(idty.bio || "");
-                                onSaveSettings({
+                                if (onSwitchIdentity) onSwitchIdentity(idty.id);
+                                else onSaveSettings({
                                   ...settings,
                                   activeIdentityId: idty.id,
                                   name: idty.name,
@@ -9145,7 +10020,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                       {(() => {
                         const transactions = messages.flatMap((m) => {
                           if (m.content.startsWith("[红包]")) {
-                            const [_, amountStr, greetingStr] = m.content.split("|");
+                            const [_, amountStr, greetingStr] = normalizePaymentMarkup(m.content).split("|");
                             const amount = parseFloat(amountStr || "8.88");
                             const status = getRedPacketActualStatus(m);
                             const char = characters.find(c => c.id === m.characterId);
@@ -9601,7 +10476,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
                           {/* Content text */}
                           <p 
-                            className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
+                            className="chat-long-press-target text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative"
                             title="长按/右键 弹出菜单"
                             onContextMenu={(e) => handleMomentTextContextMenu(
                               e,
@@ -9640,7 +10515,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           )}
 
                           {/* Photo if attached */}
-                          {textImageDescription && (
+                          {textImageDescription && !mom.image && (
                             <button
                               type="button"
                               onClick={() => setViewingImageDescription(textImageDescription)}
@@ -9652,8 +10527,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                             </button>
                           )}
                           {mom.image && (
-                            <div className="mt-2.5 rounded-lg overflow-hidden border border-slate-100 max-w-[200px] max-h-52 flex justify-start bg-slate-50">
-                              <img src={mom.image} alt="" className="object-contain max-h-52 rounded-lg" />
+                            <div className="mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
+                              <img src={mom.image} alt={mom.imageDescription || "朋友圈配图"} width={mom.imageWidth} height={mom.imageHeight} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />
                             </div>
                           )}
 
@@ -9717,16 +10592,22 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                                       <div
                                         key={comm.id}
                                         onClick={() => handleMomentCommentClick(mom.id, comm)}
-                                        onPointerDown={() => handleMomentCommentPointerDown(mom.id, comm.id)}
+                                        onPointerDown={(event) => handleMomentCommentPointerDown(event, mom.id, comm)}
                                         onPointerUp={clearMomentCommentLongPress}
                                         onPointerLeave={clearMomentCommentLongPress}
+                                        onPointerMove={handleMomentCommentPointerMove}
                                         onPointerCancel={clearMomentCommentLongPress}
                                         onContextMenu={(event) => event.preventDefault()}
-                                        className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
-                                        title={`点击回复；长按删除评论`}
+                                        className="chat-long-press-target py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
+                                        title={`点击回复；长按翻译或删除评论`}
                                       >
                                         <span className="font-bold text-[#576b95] mr-1">{commAuthorName}</span>
                                         <span className="text-slate-700">{comm.content}</span>
+                                        {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)] && (
+                                          <span className="mt-0.5 block whitespace-pre-wrap text-slate-500">
+                                            {commentTranslations[getMomentCommentTranslationKey(mom.id, comm.id)]}
+                                          </span>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -9804,7 +10685,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                           setEditMySignature(idty.signature);
                           setEditMyBio(idty.bio);
                           
-                          onSaveSettings({
+                          if (onSwitchIdentity) onSwitchIdentity(idty.id);
+                          else onSaveSettings({
                             ...settings,
                             activeIdentityId: idty.id,
                             name: idty.name,
@@ -10531,6 +11413,46 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
         </div>
       )}
 
+      {commentContextMenu && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/10 flex items-center justify-center backdrop-blur-[1px]"
+          onClick={() => setCommentContextMenu(null)}
+          onContextMenu={(event) => { event.preventDefault(); setCommentContextMenu(null); }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[160px] text-stone-800 space-y-1"
+            style={{
+              position: "absolute",
+              top: Math.max(10, Math.min(window.innerHeight - 150, commentContextMenu.y - 10)),
+              left: Math.max(10, Math.min(window.innerWidth - 180, commentContextMenu.x - 80)),
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => handleTranslateMomentComment(commentContextMenu.momentId, commentContextMenu.commentId, commentContextMenu.text)}
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+            >
+              <Languages className="w-3.5 h-3.5 shrink-0 text-stone-500" />
+              <span>{commentTranslations[getMomentCommentTranslationKey(commentContextMenu.momentId, commentContextMenu.commentId)] ? "显示原文" : "AI 翻译"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCommentContextMenu(null);
+                setCommentDeleteTarget({ momentId: commentContextMenu.momentId, commentId: commentContextMenu.commentId });
+              }}
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-red-50 rounded-lg flex items-center gap-2 text-red-500 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5 shrink-0 text-red-400" />
+              <span>删除评论</span>
+            </button>
+          </motion.div>
+        </div>
+      )}
+
       {/* Moments Text Context Menu Overlay */}
       {momentContextMenu && (
         <div 
@@ -10541,19 +11463,19 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[140px] text-stone-800 space-y-1"
+            className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-stone-200/80 p-2.5 min-w-[160px] text-stone-800 space-y-1"
             style={{
               position: "absolute",
               top: Math.max(10, Math.min(window.innerHeight - 220, momentContextMenu.y - 10)),
-              left: Math.max(10, Math.min(window.innerWidth - 160, momentContextMenu.x - 70)),
+              left: Math.max(10, Math.min(window.innerWidth - 180, momentContextMenu.x - 80)),
             }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={() => handleCopyMomentText(momentContextMenu.text)}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
             >
-              <Copy className="w-3.5 h-3.5 text-stone-500" />
+              <Copy className="w-3.5 h-3.5 shrink-0 text-stone-500" />
               <span>复制文案</span>
             </button>
 
@@ -10565,9 +11487,9 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
                 momentContextMenu.authorAvatar,
                 momentContextMenu.timestamp
               )}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
             >
-              <Heart className={`w-3.5 h-3.5 ${momentFavorites.some(f => f.momentId === momentContextMenu.momentId && f.content === momentContextMenu.text) ? "fill-rose-500 text-rose-500" : "text-stone-400"}`} />
+              <Heart className={`w-3.5 h-3.5 shrink-0 ${momentFavorites.some(f => f.momentId === momentContextMenu.momentId && f.content === momentContextMenu.text) ? "fill-rose-500 text-rose-500" : "text-stone-400"}`} />
               <span>
                 {momentFavorites.some(f => f.momentId === momentContextMenu.momentId && f.content === momentContextMenu.text) ? "取消收藏" : "加入收藏"}
               </span>
@@ -10575,17 +11497,17 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, rela
 
             <button
               onClick={() => handleTranslateMoment(momentContextMenu.momentId, momentContextMenu.text)}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
             >
-              <Languages className="w-3.5 h-3.5 text-stone-500" />
+              <Languages className="w-3.5 h-3.5 shrink-0 text-stone-500" />
               <span>{momentTranslations[momentContextMenu.momentId] ? "显示原文" : "AI 翻译"}</span>
             </button>
 
             <button
               onClick={() => handleDeleteMomentClick(momentContextMenu.momentId)}
-              className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 text-red-500 hover:text-red-600 rounded-lg flex items-center gap-2 transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[12px] leading-5 font-bold hover:bg-stone-100 text-red-500 hover:text-red-600 rounded-lg flex items-center gap-2 transition-colors"
             >
-              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <Trash2 className="w-3.5 h-3.5 shrink-0 text-red-400" />
               <span>删除动态</span>
             </button>
           </motion.div>

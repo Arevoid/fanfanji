@@ -1,11 +1,11 @@
-const CACHE_NAME = "fanfan-phone-v5";
+const CACHE_NAME = "fanfan-phone-v11";
 const ASSETS_TO_CACHE = [
   "/",
   "/index.html",
-  "/manifest.json",
-  "/icon-180.png",
-  "/icon-192.png",
-  "/icon-512.png"
+  "/manifest.json?v=20260818",
+  "/icon-180.png?v=20260818",
+  "/icon-192.png?v=20260818",
+  "/icon-512.png?v=20260818"
 ];
 
 // Install Event - cache core static shell

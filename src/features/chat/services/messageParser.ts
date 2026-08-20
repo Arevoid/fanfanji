@@ -55,9 +55,96 @@ export const cleanAiReplyText = (text: string, disableBracketActions: boolean): 
   removeFakeImageNarration(cleanOnlineMessage(removeFakeImageNarration(text), disableBracketActions));
 export const splitAiReplyBubbles = splitIntoWeChatBubbles;
 
-export const normalizePaymentMarkup = (content: string): string => content
-  .replace(/^\[微信红包\]/, "[红包]")
-  .replace(/^\[微信转账\]/, "[转账]");
+/**
+ * Remove accidental same-turn re-statements before bubbles are persisted.
+ * Models sometimes answer an arrival/hand-off question twice using slightly
+ * different wording (for example “哥下来了” followed by “哥下楼了”).  These
+ * are one conversational move, not two messages.  Keep the first bubble and
+ * only collapse a narrowly-scoped arrival variant plus exact normalized
+ * duplicates so ordinary short replies remain untouched.
+ */
+export function removeRedundantCharacterBubbles(bubbles: readonly string[]): string[] {
+  const normalize = (value: string) => value
+    .replace(/^[嗯啊哦好行那就，,、\s]+/u, "")
+    .replace(/[\s\p{P}\p{S}]+/gu, "")
+    .toLowerCase();
+  const normalizeArrival = (value: string): string | null => {
+    if (!/(?:哥|哥哥|我)?(?:下来了|下楼了|下去接你了|在楼下|到楼下了|到门口了)/u.test(value)) return null;
+    return "arrival-handoff";
+  };
+  const result: string[] = [];
+  const seen = new Set<string>();
+  let arrivalSeen = false;
+  for (const bubble of bubbles) {
+    const normalized = normalize(bubble);
+    if (!normalized) continue;
+    const arrival = normalizeArrival(normalized);
+    if (arrival) {
+      if (arrivalSeen) continue;
+      arrivalSeen = true;
+    }
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(bubble);
+  }
+  return result;
+}
+
+/**
+ * A direct-chat completion is one character turn. If a model nevertheless
+ * writes a labelled user turn, stop before it so the client never persists an
+ * invented user reply and the character cannot answer that invented reply.
+ */
+export function stripSimulatedUserTurns(text: string, options: { userName?: string; characterName?: string } = {}): string {
+  const normalizeLabel = (value: string) => value.trim().replace(/^[\[【（(]|[\]】）)]$/g, "").toLowerCase();
+  const userLabels = new Set(["用户", "user", "{{user}}", "我（用户）", options.userName || ""].filter(Boolean).map(normalizeLabel));
+  const characterLabels = new Set(["角色", "assistant", "model", "{{char}}", options.characterName || ""].filter(Boolean).map(normalizeLabel));
+  const kept: string[] = [];
+
+  for (const originalLine of text.split(/\r?\n/)) {
+    const match = originalLine.match(/^\s*([^：:\n]{1,24})\s*[：:]\s*(.*)$/);
+    if (!match) {
+      kept.push(originalLine);
+      continue;
+    }
+    const label = normalizeLabel(match[1]);
+    if (userLabels.has(label)) break;
+    kept.push(characterLabels.has(label) ? match[2] : originalLine);
+  }
+  return kept.join("\n").trim();
+}
+
+const DEFAULT_RED_PACKET_AMOUNT = "8.88";
+const DEFAULT_RED_PACKET_GREETING = "恭喜发财，万事如意";
+const RED_PACKET_AMOUNT_PLACEHOLDER = /^(?:金额|红包金额|金额数字|数额|amount|money|待定|未知|未填写|请输入金额)$/iu;
+
+/**
+ * Models occasionally copy the format placeholder literally (for example
+ * `[红包]|金额|恭喜发财`). Keep the persisted markup renderable and stable by
+ * accepting currency suffixes, while replacing non-numeric placeholders with
+ * a safe fallback amount.
+ */
+export function normalizeRedPacketAmount(value: unknown, fallback = DEFAULT_RED_PACKET_AMOUNT): string {
+  const raw = String(value ?? "").trim().replace(/^[¥￥]\s*/u, "");
+  if (!raw || RED_PACKET_AMOUNT_PLACEHOLDER.test(raw)) return fallback;
+  const match = raw.match(/\d+(?:\.\d{1,2})?/u);
+  if (!match) return fallback;
+  const amount = Number(match[0]);
+  return Number.isFinite(amount) && amount > 0 ? amount.toFixed(2) : fallback;
+}
+
+/** Normalize both legacy aliases and malformed model-generated red packets. */
+export function normalizeRedPacketMarkup(content: string): string {
+  const normalized = content.replace(/^\[微信红包\]/u, "[红包]");
+  if (!normalized.startsWith("[红包]")) return normalized;
+  const parts = normalized.split("|");
+  const amount = normalizeRedPacketAmount(parts[1]);
+  const greeting = parts.slice(2).join("|").trim() || DEFAULT_RED_PACKET_GREETING;
+  return `[红包]|${amount}|${greeting}`;
+}
+
+export const normalizePaymentMarkup = (content: string): string => normalizeRedPacketMarkup(content)
+  .replace(/^\[微信转账\]/u, "[转账]");
 
 export const isRedPacketMarkup = (content: string): boolean => /^\[(?:红包|微信红包)\]/.test(content);
 export const isTransferMarkup = (content: string): boolean => /^\[(?:转账|微信转账)\]/.test(content);
