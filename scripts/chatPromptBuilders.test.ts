@@ -9,7 +9,9 @@ const group = buildGroupChatSystemInstruction({ userName: "用户", groupName: "
 assert.equal(group.includes("机主“用户”"), true);
 assert.equal(group.includes("群名为“群”"), true);
 assert.equal(group.includes("[SENDER_NAME: 角色名字]"), true);
-assert.equal(buildGroupChatTaskMessage("历史", true).includes("不返回任何回复"), true);
+assert.equal(group.includes("每个成员本轮可以发送 0 至 6 条独立消息"), true);
+assert.equal(group.includes("不设整轮总消息数上限"), true);
+assert.equal(buildGroupChatTaskMessage("历史", true).includes("不得返回空回复"), true);
 assert.equal(buildGroupChatTaskMessage("", false).includes("不要保持沉默"), true);
 
 const proactive = buildProactiveChatSystemInstruction({ characterName: "角色", description: "DESC_MARK", personality: "PERSONA_MARK", relationship: "RELATION_MARK", userName: "用户", userBio: "简介", worldBook: "世界书", timeContext: "时间", knowledgeBoundary: "边界", truthPrompt: "事实", conversationGuidance: "会话", taskPrompt: "任务", instructionsPrompt: "格式", expressionAnchor: "UNIQUE_ANCHOR", finalPersonaRules: ["PERSONA_RULE"], finalLanguageInstruction: "FINAL_LANG" });

@@ -3271,6 +3271,28 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 overflow-y: auto !important;
               }
 
+              /* Keep the built-in bubble shadow subtle and close to the
+                 bubble. User-authored chat CSS remains the visual authority. */
+              ${!hasUserCustomChatCss ? `
+                #conv-screen .chat-bubble-self,
+                #conv-screen .chat-bubble-other,
+                #conv-screen .message-bubble {
+                  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035) !important;
+                }
+              ` : ""}
+
+              /* The slider controls row spacing directly. The old list
+                 utility and row margins otherwise stack unpredictably. */
+              #conv-screen .chat-message-list-content {
+                --chat-bubble-spacing: ${Math.max(8, Math.min(56, settings.bubbleSpacing ?? 32))}px;
+              }
+              #conv-screen .chat-message-list-content .chat-row-gap-consecutive {
+                margin-top: var(--chat-bubble-spacing) !important;
+              }
+              #conv-screen .chat-message-list-content .chat-row-gap-separated {
+                margin-top: calc(var(--chat-bubble-spacing) + 8px) !important;
+              }
+
               /* Bubble tips live in a portal layer outside the scrolling list.
                  The layer only establishes a positioning environment; user CSS
                  owns the tip's shape, size, color, and visual placement. */
@@ -4942,13 +4964,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
             renderWindowSize={120}
-            className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-5 cv-messages-list chat-message-list"
+            className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-0 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
                 : undefined,
               WebkitOverflowScrolling: "touch",
             }}
+            contentClassName="chat-message-list-content"
             renderMessage={(msg, idx) => {
               const previousVisibleMessage = idx > 0 ? visibleChatMessages[idx - 1] : undefined;
               const interveningOfflineStories = getOfflineTimelineStoriesBetween(previousVisibleMessage?.timestamp, msg.timestamp);
@@ -5553,7 +5576,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     className={`w-full flex flex-col ${
                       isSelf ? "items-end" : "items-start"
                     } ${
-                      (isConsecutivePrev && shouldCollapse) ? "mt-3" : "mt-5"
+                      (isConsecutivePrev && shouldCollapse) ? "chat-row-gap-consecutive" : "chat-row-gap-separated"
                     } ${messageGroupClass} cv-msg-row message message-container`}
                   >
                     {/* Avatar + Meta Header */}
@@ -5598,7 +5621,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     className={`w-full flex gap-2.5 ${
                       isSelf ? "flex-row-reverse items-start justify-start" : "flex-row items-start justify-start"
                     } ${
-                      (isConsecutivePrev && shouldCollapse) ? "mt-3" : "mt-5"
+                      (isConsecutivePrev && shouldCollapse) ? "chat-row-gap-consecutive" : "chat-row-gap-separated"
                     } ${messageGroupClass} cv-msg-row message message-container`}
                   >
                     {/* Avatar */}
@@ -5654,7 +5677,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 const typingChar = typingCharacterOverride || activeCharacter;
                 const typingName = typingChar.remark || typingChar.name;
                 return (
-                  <div className={`w-full flex flex-col items-start ${isTypingConsecutive ? "mt-3" : "mt-5"} cv-msg-row message message-container`}>
+                  <div className={`w-full flex flex-col items-start ${isTypingConsecutive ? "chat-row-gap-consecutive" : "chat-row-gap-separated"} cv-msg-row message message-container`}>
                     {!settings.hideNicknames && (
                       <div className="flex items-center gap-2.5 mb-1.5 select-none">
                         <RenderAvatar 

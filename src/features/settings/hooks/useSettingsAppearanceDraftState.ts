@@ -66,6 +66,7 @@ export function useSettingsAppearanceDraftState(settings: UserSettings, effectiv
   const [bubblePosition, setBubblePosition] = useState<"side" | "above">(((isLiquidGlassChatStyle
     ? settings.liquidGlassBubblePosition
     : settings.bubblePosition) === "above") ? "above" : "side");
+  const [bubbleSpacing, setBubbleSpacing] = useState(settings.bubbleSpacing ?? 32);
   const [bubbleBorderEnabled, setBubbleBorderEnabled] = useState(isLiquidGlassChatStyle
     ? settings.liquidGlassBubbleBorderEnabled === true
     : !!settings.bubbleBorderEnabled);
@@ -95,6 +96,7 @@ export function useSettingsAppearanceDraftState(settings: UserSettings, effectiv
     setBubbleTailEnabled(isLiquidGlassChatStyle ? settings.liquidGlassBubbleTailEnabled === true : settings.bubbleTailEnabled === true);
     setBubbleTailVertical(isLiquidGlassChatStyle ? settings.liquidGlassBubbleTailVertical || "top" : settings.bubbleTailVertical || "top");
     setBubblePosition(((isLiquidGlassChatStyle ? settings.liquidGlassBubblePosition : settings.bubblePosition) === "above") ? "above" : "side");
+    setBubbleSpacing(settings.bubbleSpacing ?? 32);
     setBubbleBorderEnabled(isLiquidGlassChatStyle ? settings.liquidGlassBubbleBorderEnabled === true : settings.bubbleBorderEnabled === true);
     setBubbleBorderWidth(isLiquidGlassChatStyle ? settings.liquidGlassBubbleBorderWidth ?? 1 : settings.bubbleBorderWidth ?? 1);
     setOtherBubbleBorderColor(isLiquidGlassChatStyle ? settings.liquidGlassOtherBubbleBorderColor || "#ffffff" : settings.otherBubbleBorderColor || "#e4e4e7");
@@ -108,7 +110,7 @@ export function useSettingsAppearanceDraftState(settings: UserSettings, effectiv
     settings.otherBubbleBg, settings.otherBubbleColor, settings.otherBubbleOpacity, settings.otherBubbleRadius,
     settings.selfBubbleBg, settings.selfBubbleColor, settings.selfBubbleOpacity, settings.selfBubbleRadius,
     settings.bubbleTailEnabled, settings.bubbleTailVertical, settings.bubblePosition, settings.bubbleBorderEnabled,
-    settings.bubbleBorderWidth, settings.otherBubbleBorderColor, settings.selfBubbleBorderColor,
+    settings.bubbleBorderWidth, settings.otherBubbleBorderColor, settings.selfBubbleBorderColor, settings.bubbleSpacing,
   ]);
 
   return {
@@ -121,6 +123,7 @@ export function useSettingsAppearanceDraftState(settings: UserSettings, effectiv
     collapseConsecutiveAvatars, setCollapseConsecutiveAvatars, hideNicknames, setHideNicknames,
     dockBorderRadius, setDockBorderRadius, widgetBorderRadius, setWidgetBorderRadius, iconBorderEnabled, setIconBorderEnabled,
     bubbleTailEnabled, setBubbleTailEnabled, bubbleTailVertical, setBubbleTailVertical, bubblePosition, setBubblePosition,
+    bubbleSpacing, setBubbleSpacing,
     bubbleBorderEnabled, setBubbleBorderEnabled, bubbleBorderWidth, setBubbleBorderWidth, otherBubbleBorderColor, setOtherBubbleBorderColor,
     selfBubbleBorderColor, setSelfBubbleBorderColor, avatarBorderEnabled, setAvatarBorderEnabled, avatarBorderWidth, setAvatarBorderWidth,
     avatarBorderColor, setAvatarBorderColor, beautySubTab, setBeautySubTab, isLiquidGlassChatStyle,

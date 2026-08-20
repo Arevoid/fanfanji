@@ -315,6 +315,7 @@ export default function AppSettings({
     collapseConsecutiveAvatars, setCollapseConsecutiveAvatars, hideNicknames, setHideNicknames,
     dockBorderRadius, setDockBorderRadius, widgetBorderRadius, setWidgetBorderRadius, iconBorderEnabled, setIconBorderEnabled,
     bubbleTailEnabled, setBubbleTailEnabled, bubbleTailVertical, setBubbleTailVertical, bubblePosition, setBubblePosition,
+    bubbleSpacing, setBubbleSpacing,
     bubbleBorderEnabled, setBubbleBorderEnabled, bubbleBorderWidth, setBubbleBorderWidth, otherBubbleBorderColor, setOtherBubbleBorderColor,
     selfBubbleBorderColor, setSelfBubbleBorderColor, avatarBorderEnabled, setAvatarBorderEnabled, avatarBorderWidth, setAvatarBorderWidth,
     avatarBorderColor, setAvatarBorderColor, beautySubTab, setBeautySubTab, isLiquidGlassChatStyle,
@@ -1775,6 +1776,27 @@ export default function AppSettings({
                           className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                         />
                         <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{otherBubbleRadius}px</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 py-1">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">气泡上下间距</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="8"
+                          max="56"
+                          step="1"
+                          value={bubbleSpacing}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setBubbleSpacing(val);
+                            handleSave({ bubbleSpacing: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                          aria-label="气泡上下间距"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{bubbleSpacing}px</span>
                       </div>
                     </div>
 

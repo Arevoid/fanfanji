@@ -160,7 +160,7 @@ export async function generateIsolatedGroupChatReplies(input: {
   const result = await input.generateTurn({
     prompt: {
       scenario: "group-chat",
-      message: `${buildGroupChatTaskMessage(input.historyText, input.hasUserMessage)}\n\n【群聊本轮回复】请从群成员中选择 0—3 位自然会发言的人。直接输出正式回复；每条回复必须以 [SENDER_NAME: 角色原名] 开头。可以输出多位成员，也可以让某位成员输出多条短消息。不得替其他成员发言，不得输出群外角色。${INLINE_GROUP_INNER_VOICE_INSTRUCTION}${input.groupMembers.some((member) => member.enableAutoTranslate) ? "\n群内开启了全部翻译的成员必须同时提供 translation 字段，并保持对应回复的气泡结构。" : ""}`,
+      message: `${buildGroupChatTaskMessage(input.historyText, input.hasUserMessage)}\n\n【群聊本轮回复】本轮至少让 1 位成员实际发言；每位成员最多发送 6 条独立短消息，不限制整轮总消息数。请根据群成员各自的人设、关系、上下文剧情、时间状态和当前话题自然判断哪些成员发言、各发几条，不能固定为 3 人，也不能返回空回复。每条回复必须以 [SENDER_NAME: 角色原名] 开头；同一成员的每条消息都必须重复自己的发送者标签。不得替其他成员发言，不得输出群外角色。${INLINE_GROUP_INNER_VOICE_INSTRUCTION}${input.groupMembers.some((member) => member.enableAutoTranslate) ? "\n群内开启了全部翻译的成员必须同时提供 translation 字段，并保持对应回复的气泡结构。" : ""}`,
       history: [],
       systemInstruction: buildGroupChatSystemInstruction({
         userName: input.userName,

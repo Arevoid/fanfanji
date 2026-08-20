@@ -732,6 +732,8 @@ export interface UserSettings {
   bubbleTailEnabled?: boolean;
   bubbleTailVertical?: "top" | "center" | "bottom";
   bubblePosition?: "side" | "above" | "below";
+  /** Base vertical gap between rendered chat message rows, in pixels. */
+  bubbleSpacing?: number;
   hideNicknames?: boolean;
   bubbleBorderEnabled?: boolean;
   bubbleBorderWidth?: number;
