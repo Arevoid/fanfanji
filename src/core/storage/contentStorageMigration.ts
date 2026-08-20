@@ -16,6 +16,7 @@ import {
 import { loadStorageMigrationState, saveStorageMigrationState, type StorageMigrationState } from "./storageMigrationState";
 import { createStorageMigrationOwnerId, releaseStorageMigrationLock, tryAcquireStorageMigrationLock } from "./storageMigrationLock";
 import { runStoragePreflight, type StoragePreflightResult } from "./storagePreflight";
+import { beginContentStorageMigration } from "./contentStorageRuntimeLock";
 
 export const CONTENT_STORAGE_MIGRATION_ID = "content-entry-storage-v1";
 
@@ -54,7 +55,7 @@ async function loadLegacyOfflineStories(): Promise<OfflineStory[]> {
   const localStories = loadOfflineStories([]).value;
   let durableStories: OfflineStory[] = [];
   try {
-    durableStories = await offlineStoryDb.loadAll();
+    durableStories = await offlineStoryDb.loadLegacyCopy();
   } catch {
     // A missing/blocked legacy database does not prevent the LocalStorage
     // source from being migrated; the original value remains untouched.
@@ -124,7 +125,9 @@ export async function migrateContentStorage(
   const previousOfflineStoryEntryEnabled = isOfflineStoryEntryStoreEnabled();
   let previousMessages: Message[] | null = null;
   let previousOfflineStories: OfflineStory[] | null = null;
+  let releaseContentRuntimeLock: (() => void) | null = null;
   try {
+    releaseContentRuntimeLock = await beginContentStorageMigration();
     if (previousMessageEntryEnabled) previousMessages = await messageEntryDb.loadAll();
     if (previousOfflineStoryEntryEnabled) previousOfflineStories = await offlineStoryEntryDb.loadAll();
     const previousState = loadStorageMigrationState();
@@ -211,6 +214,7 @@ export async function migrateContentStorage(
     try { saveStateOrThrow(state); } catch (stateError) { console.error("[storage] Failed to save content migration failure state.", stateError); }
     throw error;
   } finally {
+    releaseContentRuntimeLock?.();
     releaseStorageMigrationLock(lock.lock.id, ownerId);
   }
 }

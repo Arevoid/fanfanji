@@ -1,6 +1,7 @@
 import type { OfflineStory } from "../../types";
 import { isOfflineStoryEntryStoreEnabled } from "./contentStorageFlags";
 import { offlineStoryEntryDb } from "./offlineStoryEntryDb";
+import { enterContentStorageOperation } from "./contentStorageRuntimeLock";
 
 class OfflineStoryDB {
   private readonly dbName = "FanfanjiOfflineStoryDB";
@@ -43,8 +44,7 @@ class OfflineStoryDB {
     });
   }
 
-  async loadAll(): Promise<OfflineStory[]> {
-    if (this.useEntryStore()) return offlineStoryEntryDb.loadAll();
+  private async loadLegacyAll(): Promise<OfflineStory[]> {
     const db = await this.init();
     return new Promise((resolve, reject) => {
       const request = db.transaction(this.storeName, "readonly").objectStore(this.storeName).getAll();
@@ -53,61 +53,101 @@ class OfflineStoryDB {
     });
   }
 
+  /** Used only by the migration after it has acquired the runtime lock. */
+  async loadLegacyCopy(): Promise<OfflineStory[]> {
+    return this.loadLegacyAll();
+  }
+
+  async loadAll(): Promise<OfflineStory[]> {
+    const release = await enterContentStorageOperation();
+    try {
+      if (this.useEntryStore()) return await offlineStoryEntryDb.loadAll();
+      return await this.loadLegacyAll();
+    } finally {
+      release();
+    }
+  }
+
   async save(story: OfflineStory): Promise<void> {
-    if (this.useEntryStore()) return offlineStoryEntryDb.save(story);
-    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, "readwrite");
-      transaction.objectStore(this.storeName).put(story);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    }));
+    const release = await enterContentStorageOperation();
+    try {
+      if (this.useEntryStore()) return await offlineStoryEntryDb.save(story);
+      await this.enqueueWrite((db) => new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.storeName, "readwrite");
+        transaction.objectStore(this.storeName).put(story);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      }));
+    } finally {
+      release();
+    }
   }
 
   async replaceAll(stories: readonly OfflineStory[]): Promise<void> {
-    if (this.useEntryStore()) return offlineStoryEntryDb.replaceAll(stories);
-    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, "readwrite");
-      const store = transaction.objectStore(this.storeName);
-      store.clear();
-      stories.forEach((story) => store.put(story));
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    }));
+    const release = await enterContentStorageOperation();
+    try {
+      if (this.useEntryStore()) return await offlineStoryEntryDb.replaceAll(stories);
+      await this.enqueueWrite((db) => new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.storeName, "readwrite");
+        const store = transaction.objectStore(this.storeName);
+        store.clear();
+        stories.forEach((story) => store.put(story));
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      }));
+    } finally {
+      release();
+    }
   }
 
   async delete(storyId: string): Promise<void> {
-    if (this.useEntryStore()) return offlineStoryEntryDb.delete(storyId);
-    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, "readwrite");
-      transaction.objectStore(this.storeName).delete(storyId);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    }));
+    const release = await enterContentStorageOperation();
+    try {
+      if (this.useEntryStore()) return await offlineStoryEntryDb.delete(storyId);
+      await this.enqueueWrite((db) => new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.storeName, "readwrite");
+        transaction.objectStore(this.storeName).delete(storyId);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      }));
+    } finally {
+      release();
+    }
   }
 
   async clearAll(): Promise<void> {
-    if (this.useEntryStore()) return offlineStoryEntryDb.clearAll();
-    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, "readwrite");
-      transaction.objectStore(this.storeName).clear();
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    }));
+    const release = await enterContentStorageOperation();
+    try {
+      if (this.useEntryStore()) return await offlineStoryEntryDb.clearAll();
+      await this.enqueueWrite((db) => new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.storeName, "readwrite");
+        transaction.objectStore(this.storeName).clear();
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      }));
+    } finally {
+      release();
+    }
   }
 
   /** Clears only the retained legacy copy; the migrated entry store is never touched. */
   async clearLegacyCopy(): Promise<void> {
-    return this.enqueueWrite((db) => new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, "readwrite");
-      transaction.objectStore(this.storeName).clear();
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    }));
+    const release = await enterContentStorageOperation();
+    try {
+      await this.enqueueWrite((db) => new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.storeName, "readwrite");
+        transaction.objectStore(this.storeName).clear();
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      }));
+    } finally {
+      release();
+    }
   }
 }
 

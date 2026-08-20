@@ -16,6 +16,7 @@ import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } fr
 import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
 import { offlineStoryDb } from "./core/storage/offlineStoryDb";
 import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./core/storage/contentStorageFlags";
+import { isContentStorageMigrationActive } from "./core/storage/contentStorageRuntimeLock";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, saveConversationSummaries, retractConversationSummariesBySourceMessageIds } from "./core/storage/repositories/conversationSummaryRepository";
@@ -594,15 +595,20 @@ export default function App() {
         durableStories.filter((story) => !deletedOfflineStoryIdsRef.current.has(story.id)),
       );
       offlineStoriesHydratedRef.current = true;
+      const durableInMergeOrder = [...durableStories].sort((left, right) => right.updatedAt - left.updatedAt);
+      const alreadySynchronized = JSON.stringify(durableInMergeOrder) === JSON.stringify(merged);
+      if (!alreadySynchronized) {
+        await offlineStoryDb.replaceAll(merged);
+      } else if (isContentStorageMigrationActive()) {
+        // A migration owns the storage boundary. Leave the fallback untouched
+        // until the migration either succeeds and reloads or fails safely.
+        return;
+      }
+      // Only remove the fallback after the durable write has succeeded. This
+      // protects LocalStorage when a migration or IndexedDB write fails.
+      removeStoredValue("phone_offline_stories");
       offlineStoriesRef.current = merged;
       setOfflineStories(merged);
-      // IndexedDB is authoritative for full offline-story payloads. Remove
-      // the legacy LocalStorage copy after the merge completes.
-      removeStoredValue("phone_offline_stories");
-      const durableInMergeOrder = [...durableStories].sort((left, right) => right.updatedAt - left.updatedAt);
-      if (JSON.stringify(durableInMergeOrder) !== JSON.stringify(merged)) {
-        await offlineStoryDb.replaceAll(merged);
-      }
     }).catch((error) => {
       offlineStoriesHydratedRef.current = true;
       console.warn("Unable to hydrate the durable offline-story store; using localStorage only.", error);
