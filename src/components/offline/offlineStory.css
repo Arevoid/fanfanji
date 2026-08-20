@@ -130,8 +130,10 @@
 .offline-story-author span { display: block; margin-top: 1px; color: var(--offline-text-tertiary); font-size: calc(10px * var(--app-font-scale, 1)); line-height: calc(14px * var(--app-font-scale, 1)); }
 .offline-story-card.is-user .offline-story-card-header { flex-direction: row-reverse; min-height: 31px; }
 .offline-story-card.is-user .offline-story-author { flex-direction: row-reverse; text-align: right; }
+.offline-story-card-footer { display: flex; margin-top: 8px; }
+.offline-story-card.is-character .offline-story-card-footer { justify-content: flex-end; }
+.offline-story-card.is-user .offline-story-card-footer { justify-content: flex-start; }
 .offline-node-menu-anchor { position: relative; }
-.offline-story-card.is-user .offline-node-menu-anchor { position: relative; top: auto; right: auto; }
 .offline-node-trigger { width: 30px; height: 30px; border-radius: 8px; background: transparent; color: #7a7a7e; }
 .offline-node-trigger:hover { background: #f4f4f3; color: #454549; }
 

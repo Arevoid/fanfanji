@@ -41,12 +41,14 @@ export function OfflineStoryCard({ message, character, settings, showAvatars, me
           {showAvatars && avatar ? <img src={avatar} alt="" referrerPolicy="no-referrer" /> : <span className="offline-author-placeholder" />}
           <div><strong>{authorName}</strong><span>{formatTime(message.timestamp)}</span></div>
         </div>
+      </header>
+      <p className="offline-raw-content"><HighlightedStoryText content={message.content} /></p>
+      <footer className="offline-story-card-footer">
         <div className="offline-node-menu-anchor">
           <button ref={menuTriggerRef} type="button" className="offline-node-trigger" onClick={onMenuToggle} aria-label="打开剧情节点菜单"><MoreHorizontal size={20} /></button>
           {menuOpen && <OfflineNodeMenu anchorRef={menuTriggerRef} onEdit={onEdit} onDelete={onDelete} onGuidance={onGuidance} onRegenerate={isUser ? undefined : onRegenerate} onClose={onMenuToggle} />}
         </div>
-      </header>
-      <p className="offline-raw-content"><HighlightedStoryText content={message.content} /></p>
+      </footer>
     </article>
   );
 }
