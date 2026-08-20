@@ -33,7 +33,7 @@ import { useChatProfileState } from "../features/chat/hooks/useChatProfileState"
 import { useChatGroupState } from "../features/chat/hooks/useChatGroupState";
 import type { VoiceCallStatus } from "../features/chat/services/messageTypes";
 import { shouldConvertBubbleToVoice } from "../features/chat/services/voiceBubbleEligibility";
-import { RED_PACKET_STATUSES_KEY, parseRedPacketPayload, removePaymentStatusesByRelation } from "../features/chat/services/paymentScope";
+import { RED_PACKET_STATUSES_KEY, getPaymentStatusKey, parseRedPacketPayload, removePaymentStatusesByRelation } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { isWorldBookEntryForAnyCharacter } from "../domain/worldbook/worldBookVisibility";
 import { aiAnalyzeRemoteSticker, aiAnalyzeSticker, loadStickerImageBlob, stickerDb } from "../utils/stickerDb";
@@ -792,6 +792,7 @@ export default function AppChat({
     updateRedPacketStatus,
     getRedPacketActualStatus,
     claimRedPacket,
+    redPacketClaims,
   } = useChatPaymentState({
     activeIdentityId,
     activeRelationships,
@@ -1342,16 +1343,19 @@ export default function AppChat({
         if (capturedRelationship && !relationships.some((relationship) => relationship.id === capturedRelationship.id
           && relationship.userIdentityId === capturedRelationship.userIdentityId
           && relationship.characterId === capturedRelationship.characterId)) return;
-        updateRedPacketStatus(capturedMessage, "claimed");
-        
-        const partnerName = capturedCharacter.remark || capturedCharacter.name;
+        const packet = parseRedPacketPayload(capturedMessage);
+        const claimantId = packet.recipientId
+          || (capturedRelationship ? capturedCharacter.id : capturedCharacter.memberIds?.[0]);
+        if (!claimantId || claimRedPacket(capturedMessage, claimantId) <= 0) return;
+        const claimant = characters.find((character) => character.id === claimantId);
+        const partnerName = claimant?.remark || claimant?.name || capturedCharacter.remark || capturedCharacter.name;
         const claimNotification = capturedRelationship
           ? createCharacterTextMessage({
               id: createId("claim-notification"),
               context: createChatRuntimeContext({ characterId: capturedRelationship.characterId, relationId: capturedRelationship.id, conversationId: capturedRelationship.conversationId || getConversationId(capturedRelationship.id), userIdentityId: capturedRelationship.userIdentityId }),
-              content: `${partnerName}已拆开并领受了你的红包`, timestamp: Date.now(), isNarration: true,
+              content: `${partnerName}领取了你的红包`, timestamp: Date.now(), isNarration: true,
             })
-          : createGroupCharacterMessage({ id: `claim-notification-${Date.now()}`, characterId: capturedCharacter.id, content: `${partnerName}已拆开并领受了你的红包`, timestamp: Date.now(), isNarration: true });
+          : createGroupCharacterMessage({ id: `claim-notification-${Date.now()}`, characterId: capturedCharacter.id, senderId: claimantId, content: `${partnerName}领取了你的红包`, timestamp: Date.now(), isNarration: true });
         onSendMessageRaw(claimNotification);
       }, 3000);
     }
@@ -6249,6 +6253,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           {showRedPacketOpenModal && openRedPacketDetail && (() => {
             const status = getRedPacketActualStatus(openRedPacketDetail.message);
             const isSelf = openRedPacketDetail.sender === "user";
+            const packetClaims = redPacketClaims[getPaymentStatusKey(openRedPacketDetail.message)] || [];
+            const claimedAmount = packetClaims.reduce((sum, claim) => sum + claim.amount, 0);
+            const getClaimantName = (claimantId: string) => claimantId.startsWith("user:")
+              ? settings.name || "我"
+              : (characters.find((character) => character.id === claimantId)?.remark
+                || characters.find((character) => character.id === claimantId)?.name
+                || claimantId);
 
             return (
               <div className="absolute inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 animate-fade-in text-slate-800 select-none">
@@ -6335,6 +6346,25 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       )}
                     </div>
 
+                    <div className="mt-5 rounded-2xl bg-black/10 border border-white/10 px-4 py-3 text-left">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-yellow-100">
+                        <span>领取情况</span>
+                        <span>{packetClaims.length}/{Math.max(1, openRedPacketDetail.count)} 份 · ¥{claimedAmount.toFixed(2)}</span>
+                      </div>
+                      {packetClaims.length > 0 ? (
+                        <div className="mt-2 space-y-1.5">
+                          {packetClaims.map((claim) => (
+                            <div key={`${claim.claimantId}-${claim.claimedAt}`} className="flex items-center justify-between text-[10px] text-white/80">
+                              <span>{getClaimantName(claim.claimantId)}</span>
+                              <span className="font-mono text-yellow-100">¥{claim.amount.toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-[10px] text-white/55">暂时还没有人领取</p>
+                      )}
+                    </div>
+
                     {/* Footer / Golden Open Button block */}
                     <div className="flex flex-col items-center justify-center shrink-0 mt-6 relative h-28">
                       {status === "unclaimed" && !isSelf && !openRedPacketDetail.recipientId ? (
@@ -6353,6 +6383,22 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                                   const next = prev + parsed;
                                   return next;
                                 });
+                                const claimNotification = activeCharacter.isGroupChat
+                                  ? createGroupCharacterMessage({
+                                      id: `claim-notification-${Date.now()}`,
+                                      characterId: activeCharacter.id,
+                                      content: `你领取了${openRedPacketDetail.senderName}的红包`,
+                                      timestamp: Date.now(),
+                                      isNarration: true,
+                                    })
+                                  : createCharacterTextMessage({
+                                      id: createId("claim-notification"),
+                                      context: activeRuntimeContext,
+                                      content: `你领取了${openRedPacketDetail.senderName}的红包`,
+                                      timestamp: Date.now(),
+                                      isNarration: true,
+                                    });
+                                onSendMessageRaw(claimNotification);
                               } else {
                                 showToast(openRedPacketDetail.recipientName
                                   ? `该红包仅限 ${openRedPacketDetail.recipientName} 领取`

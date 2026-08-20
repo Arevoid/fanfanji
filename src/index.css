@@ -11,6 +11,14 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @font-face {
+  font-family: "Aidian SignatureTi Marker pen -Medium";
+  src: url("./assets/fonts/Aidian-SignatureTi-Marker-pen-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
   font-family: "Athena Unicode";
   src: url("./assets/fonts/new-athena-unicode.woff") format("woff");
   font-style: normal;
