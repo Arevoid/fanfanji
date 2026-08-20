@@ -1359,10 +1359,13 @@ export default function AppSettings({
                     </div>
                     
                      <div
-                       className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 space-y-4 relative overflow-hidden"
-                       style={isLiquidGlassChatStyle ? {
-                         background: "linear-gradient(135deg, #dbeafe 0%, #fdf2f8 48%, #ecfeff 100%)",
-                       } : undefined}
+                       className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 flex flex-col relative overflow-hidden"
+                       style={{
+                         rowGap: `${Math.max(8, Math.min(56, bubbleSpacing))}px`,
+                         ...(isLiquidGlassChatStyle ? {
+                           background: "linear-gradient(135deg, #dbeafe 0%, #fdf2f8 48%, #ecfeff 100%)",
+                         } : {}),
+                       }}
                      >
                       {/* Message 1: Other Speaker (Always has avatar) */}
                       {bubblePosition === "above" ? (
@@ -1444,7 +1447,7 @@ export default function AppSettings({
                       {/* Message 2: Other Speaker (Consecutive message, avatar collapses based on state) */}
                       {bubblePosition === "above" ? (
                         /* Stacked layout for above */
-                        <div className="w-full flex flex-col items-start mt-1.5">
+                        <div className="w-full flex flex-col items-start">
                           {!collapseConsecutiveAvatars && (
                             <div className="flex items-center gap-2.5 mb-1 select-none flex-row">
                               <img
@@ -1485,7 +1488,7 @@ export default function AppSettings({
                         </div>
                       ) : (
                         /* Side by side layout for side */
-                        <div className="w-full flex flex-row items-start gap-2.5 mt-1.5">
+                        <div className="w-full flex flex-row items-start gap-2.5">
                           {!collapseConsecutiveAvatars ? (
                             <img
                               src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
