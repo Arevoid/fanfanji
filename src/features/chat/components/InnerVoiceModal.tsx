@@ -41,7 +41,6 @@ export function InnerVoiceModal({ character, mode, onModeChange, onClose, loadin
             <Card variant="secondary" padding="md" className="space-y-3">
               <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">此刻的心声</h3>
               <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-primary)]">{record.content}</p>
-              {record.translation && <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-secondary)]">{record.translation}</p>}
               <div className="border-t border-[var(--divider)]" />
               <div className="space-y-1">
                 <h4 className="text-xs font-semibold text-[var(--color-text-secondary)]">此刻情绪</h4>
@@ -62,7 +61,6 @@ export function InnerVoiceModal({ character, mode, onModeChange, onClose, loadin
                 </div>
                 <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">此刻的心声</h3>
                 <p className="whitespace-pre-wrap text-sm leading-6">{item.content}</p>
-                {item.translation && <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--color-text-secondary)]">{item.translation}</p>}
                 <div className="border-t border-[var(--divider)]" />
                 <div className="space-y-1">
                   <h4 className="text-xs font-semibold text-[var(--color-text-secondary)]">此刻情绪</h4>

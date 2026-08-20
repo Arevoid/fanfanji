@@ -2277,6 +2277,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const allMoments = (moments.length === 0 ? PRESEED_MOMENTS : moments)
     .filter((moment) => belongsToActiveIdentity(moment.ownerIdentityId));
 
+  const latestActiveMessageId = messages
+    .filter((message) => !message.isOffline && (activeRelationship
+      ? message.relationId === activeRelationship.id
+      : message.characterId === activeChatCharId && activeCharacter?.isGroupChat))
+    .at(-1)?.id || null;
+
   // Auto scroll in chats with smart detection
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -2319,9 +2325,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       };
       scrollAfterLayout();
       const timer = window.setTimeout(scrollAfterLayout, 80);
-      return () => window.clearTimeout(timer);
+      const lateTimer = window.setTimeout(scrollAfterLayout, 240);
+      return () => {
+        window.clearTimeout(timer);
+        window.clearTimeout(lateTimer);
+      };
     }
-  }, [messages.length, activeChatCharId, activeChatRelationId, isTyping]);
+  }, [messages.length, activeChatCharId, activeChatRelationId, latestActiveMessageId, isTyping]);
 
   // The root viewport controller owns sizing. Only keep the latest message visible
   // when the reader was already near the bottom; opening the keyboard must not pull
@@ -4931,7 +4941,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
             renderWindowSize={120}
-            className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-4 cv-messages-list chat-message-list"
+            className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-5 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
@@ -5507,7 +5517,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               </>
                             ) : <div className="text-left">{msg.content}</div>;
                           })()}
-                          {msg.translation && !collapsedTranslations.has(msg.id) && (
+                          {activeCharacter.enableAutoTranslate && containsNonChineseText(msg.content) && msg.translation && !collapsedTranslations.has(msg.id) && (
                             <>
                               <div className={`my-1.5 border-t border-dashed ${isSelf ? "border-white/20" : "border-stone-200"}`} />
                               <div className={`flex items-start gap-2 text-left text-[11px] leading-relaxed ${isSelf ? "text-white/90" : "text-stone-500"}`}>
@@ -5542,7 +5552,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     className={`w-full flex flex-col ${
                       isSelf ? "items-end" : "items-start"
                     } ${
-                      (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
+                      (isConsecutivePrev && shouldCollapse) ? "mt-3" : "mt-5"
                     } ${messageGroupClass} cv-msg-row message message-container`}
                   >
                     {/* Avatar + Meta Header */}
@@ -5587,7 +5597,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     className={`w-full flex gap-2.5 ${
                       isSelf ? "flex-row-reverse items-start justify-start" : "flex-row items-start justify-start"
                     } ${
-                      (isConsecutivePrev && shouldCollapse) ? "mt-1.5" : "mt-4.5"
+                      (isConsecutivePrev && shouldCollapse) ? "mt-3" : "mt-5"
                     } ${messageGroupClass} cv-msg-row message message-container`}
                   >
                     {/* Avatar */}
@@ -5643,7 +5653,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 const typingChar = typingCharacterOverride || activeCharacter;
                 const typingName = typingChar.remark || typingChar.name;
                 return (
-                  <div className={`w-full flex flex-col items-start ${isTypingConsecutive ? "mt-1.5" : "mt-4.5"} cv-msg-row message message-container`}>
+                  <div className={`w-full flex flex-col items-start ${isTypingConsecutive ? "mt-3" : "mt-5"} cv-msg-row message message-container`}>
                     {!settings.hideNicknames && (
                       <div className="flex items-center gap-2.5 mb-1.5 select-none">
                         <RenderAvatar 

@@ -48,7 +48,6 @@ export function createInlineInnerVoiceRecord(input: {
     emotionalState: input.payload.emotionalState,
     state: input.payload.emotionalState,
     content: input.payload.content,
-    translation: input.payload.translation,
     createdAt: Date.now(),
   };
 }

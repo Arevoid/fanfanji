@@ -1,7 +1,6 @@
 export interface InlineInnerVoicePayload {
   content: string;
   emotionalState: string;
-  translation?: string;
 }
 
 export interface ParsedChatTurnResponse {
@@ -30,7 +29,6 @@ const readVoice = (value: unknown): InlineInnerVoicePayload | undefined => {
   return {
     content: candidate.content.trim(),
     emotionalState: candidate.emotionalState.trim(),
-    ...(typeof candidate.translation === "string" && candidate.translation.trim() ? { translation: candidate.translation.trim() } : {}),
   };
 };
 

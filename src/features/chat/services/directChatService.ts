@@ -2,6 +2,7 @@ import { createCharacterTextMessage } from "./messageFactory";
 import { cleanAiReplyText, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripSimulatedUserTurns } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatServiceTypes";
+import { containsNonChineseText } from "../../../utils/textLanguage";
 
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(
@@ -24,7 +25,7 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
       characterId: context.characterId,
       context: context.context,
       content: context.transformBubble ? context.transformBubble(bubbleText, index) : bubbleText,
-      translation: translatedBubbles[index],
+      translation: containsNonChineseText(bubbleText) ? translatedBubbles[index] : undefined,
       timestamp: context.currentTime(index),
     })),
   };

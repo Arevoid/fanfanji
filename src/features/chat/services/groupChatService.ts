@@ -3,6 +3,7 @@ import type { Character, MemoryItem, Message, UserSettings, WorldBookEntry } fro
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { requestAiReply } from "./aiReplyService";
 import { createGroupCharacterMessage } from "./messageFactory";
+import { containsNonChineseText } from "../../../utils/textLanguage";
 import { cleanAiReplyText, normalizePaymentMarkup } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import { matchGroupReplyMembers, parseGroupReplies } from "./groupReplyParser";
@@ -208,7 +209,7 @@ export async function generateGroupReplyCandidates(input: {
     id: input.createId(item.index), characterId: input.groupId, senderId: item.member.id,
     conversationId: `group:${input.groupId}`,
     content: item.content, timestamp: input.currentTime(),
-    translation: item.structuredReply?.translation,
+    translation: containsNonChineseText(item.content) ? item.structuredReply?.translation : undefined,
   }));
   return {
     members: valid.map((item) => item.member),
