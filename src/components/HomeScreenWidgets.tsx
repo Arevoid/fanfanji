@@ -14,6 +14,11 @@ import { formatTimeWidgetDate } from "../features/home/timeWidgetDate";
 import { audioDb } from "../utils/audioDb";
 import { readString, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
+import { loadReadingStore } from "../core/storage/repositories/readingRepository";
+import { listReadingComments, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
+import type { ReadingBook } from "../domain/reading/types";
+import type { ReadingComment } from "../domain/reading/coReadingTypes";
+import ReadingBookCover from "./reading/ReadingBookCover";
 import {
   compressImagePreservingTransparency,
   isTransparencyPreservedImage,
@@ -32,6 +37,7 @@ import {
   Volume2,
   User,
   Clock,
+  BookOpenText,
 } from "lucide-react";
 
 // Pre-seeded high-quality images for the Album Widget to look gorgeous
@@ -108,6 +114,7 @@ interface WidgetProps {
   onRefreshRelationshipMusic?: (relationId: string) => void;
   musicRecommendationLoading?: boolean;
   musicError?: string | null;
+  onOpenReading?: (bookId: string, paragraphAnchorId?: string) => void;
 }
 
 export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBorderRadius }: WidgetProps) {
@@ -982,9 +989,82 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
   );
 }
 
+interface ReadingWidgetEntry {
+  book: ReadingBook;
+  comment: ReadingComment;
+  chapterTitle: string;
+}
+
+const readingWidgetDayKey = (): string => new Date().toISOString().slice(0, 10);
+
+const readingWidgetHash = (value: string): number => Array.from(value).reduce((hash, character) => ((hash * 31) + (character.codePointAt(0) || 0)) >>> 0, 7);
+
+function getReadingWidgetEntry(ownerIdentityId?: string): ReadingWidgetEntry | null {
+  if (!ownerIdentityId) return null;
+  const store = loadReadingStore().value;
+  const books = store.books.filter((book) => book.userIdentityId === ownerIdentityId && book.status === "ready");
+  const bookById = new Map(books.map((book) => [book.id, book]));
+  const chapterById = new Map(store.chapters.filter((chapter) => chapter.userIdentityId === ownerIdentityId).map((chapter) => [chapter.id, chapter]));
+  const entries = listReadingRooms(ownerIdentityId).flatMap((room) => listReadingComments(room)
+    .filter((comment) => comment.kind === "paragraph" && !comment.parentCommentId && comment.body.trim())
+    .map((comment) => {
+      const book = bookById.get(comment.bookId);
+      if (!book) return null;
+      return { book, comment, chapterTitle: chapterById.get(comment.targetChapterId || "")?.title || "未命名章节" };
+    })
+    .filter((entry): entry is ReadingWidgetEntry => Boolean(entry)));
+  if (!entries.length) return books[0] ? { book: books[0], comment: null as unknown as ReadingComment, chapterTitle: "暂无段评" } : null;
+  const sorted = entries.sort((left, right) => left.comment.createdAt - right.comment.createdAt);
+  return sorted[readingWidgetHash(`${ownerIdentityId}:${readingWidgetDayKey()}`) % sorted.length];
+}
+
+export function ReadingWidget({ isEditing, onRemove, activeIdentity, widgetBorderRadius, onOpenReading }: WidgetProps) {
+  const [entry, setEntry] = useState<ReadingWidgetEntry | null>(() => getReadingWidgetEntry(activeIdentity?.id));
+  const refresh = () => setEntry(getReadingWidgetEntry(activeIdentity?.id));
+  useEffect(() => {
+    refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [activeIdentity?.id]);
+
+  return (
+    <div
+      className="relative flex h-full w-full overflow-hidden border border-stone-200/60 bg-white/90 p-3 text-left shadow-sm backdrop-blur-sm"
+      style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}
+      onClick={() => entry && onOpenReading?.(entry.book.id, entry.comment?.targetParagraphAnchorId)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && entry) onOpenReading?.(entry.book.id, entry.comment?.targetParagraphAnchorId); }}
+      aria-label={entry ? `打开《${entry.book.title}》阅读原文` : "阅读小组件"}
+    >
+      {entry ? (
+        <>
+          <ReadingBookCover book={entry.book} className="h-full w-[28%] shrink-0 rounded-sm" />
+          <div className="flex min-w-0 flex-1 flex-col pl-3">
+            <h3 className="truncate text-sm font-black text-stone-900">{entry.book.title}</h3>
+            <p className="mt-1 truncate text-[10px] font-semibold text-stone-700">{entry.comment?.authorName || "阅读"}</p>
+            <p className="mt-1 line-clamp-4 min-h-0 flex-1 whitespace-pre-wrap text-[10px] leading-[1.55] text-stone-400">{entry.comment?.body || "这本书还没有段评，点击开始阅读。"}</p>
+            <div className="mt-1 flex items-center justify-between gap-2 border-t border-stone-300/70 pt-1 text-[9px] text-stone-700">
+              <span className="min-w-0 truncate">{entry.chapterTitle}</span>
+              <span className="shrink-0 font-semibold">查看原文 →</span>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-center text-xs font-semibold text-stone-400">添加书籍并写下第一条段评后，这里会显示每日阅读摘评</div>
+      )}
+      {isEditing && onRemove && <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>}
+    </div>
+  );
+}
+
 // Bottom sheet selector for preset widgets
 interface AddWidgetSheetProps {
-  onAdd: (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "welcome") => void;
+  onAdd: (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "reading" | "welcome") => void;
   onClose: () => void;
   settings?: UserSettings;
 }
@@ -1006,6 +1086,11 @@ export function AddWidgetSheet({ onAdd, onClose, settings }: AddWidgetSheetProps
       </div>
 
       <div className="grid grid-cols-2 gap-4">
+        <button onClick={() => onAdd("reading")} className="flex items-center gap-3 rounded-2xl border border-stone-200/60 bg-stone-50 p-3 text-left transition-all hover:scale-[1.02] hover:bg-stone-100 active:scale-95">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700"><BookOpenText className="h-5 w-5" /></div>
+          <div><h4 className="text-xs font-black text-stone-800">阅读摘评 (2×4)</h4><p className="mt-0.5 text-[10px] font-medium text-stone-400">每日随机显示共读段评</p></div>
+        </button>
+
         {/* Option 1: Album 2x2 */}
         <button
           onClick={() => onAdd("album")}

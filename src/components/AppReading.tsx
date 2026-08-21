@@ -277,6 +277,20 @@ export default function AppReading({
   }, [refreshLibrary, userIdentityId]);
 
   useEffect(() => {
+    const handleDesktopReadingOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ bookId?: unknown; paragraphAnchorId?: unknown }>).detail;
+      if (typeof detail?.bookId !== "string") return;
+      const book = books.find((candidate) => candidate.id === detail.bookId && candidate.userIdentityId === userIdentityId);
+      if (!book) return;
+      setReadingInitialAnchorId(typeof detail.paragraphAnchorId === "string" ? detail.paragraphAnchorId : undefined);
+      setReadingRoomReaderId(null);
+      setReadingBookId(book.id);
+    };
+    window.addEventListener("open-reading-book", handleDesktopReadingOpen);
+    return () => window.removeEventListener("open-reading-book", handleDesktopReadingOpen);
+  }, [books, userIdentityId]);
+
+  useEffect(() => {
     let active = true;
     const migrateEmbeddedCovers = async () => {
       await initializeReadingStore();

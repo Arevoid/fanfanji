@@ -66,6 +66,7 @@ import {
   DualMusicWidget,
   AnniversaryWidget, 
   TodoWidget, 
+  ReadingWidget,
   AddWidgetSheet 
 } from "./components/HomeScreenWidgets";
 import {
@@ -1795,7 +1796,7 @@ export default function App() {
     }
   };
 
-  const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "welcome") => {
+  const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "reading" | "welcome") => {
     if (widgetType === "welcome") {
       setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: false }));
       setIsShowingAddWidget(false);
@@ -1818,6 +1819,9 @@ export default function App() {
       } else if (widgetType === "dual_music") {
         size = "2x3";
         actualWidgetType = "dual-music";
+      } else if (widgetType === "reading") {
+        size = "2x4";
+        actualWidgetType = "reading";
       } else {
         size = "2x2";
         actualWidgetType = widgetType as any;
@@ -1858,6 +1862,7 @@ export default function App() {
       case "music": return MusicWidget;
       case "dual-music": return DualMusicWidget;
       case "anniversary": return AnniversaryWidget;
+      case "reading": return ReadingWidget;
       case "todo": default: return TodoWidget;
     }
   };
@@ -3551,6 +3556,10 @@ export default function App() {
                                             onRefreshRelationshipMusic={(relationId: string) => { void refreshRelationshipMusic(relationId); }}
                                             musicRecommendationLoading={musicRecommendationRelationId === dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)?.relationId}
                                             musicError={musicRecommendationError || musicPlaybackError}
+                                            onOpenReading={(bookId, paragraphAnchorId) => {
+                                              setActiveApp("reading");
+                                              window.setTimeout(() => window.dispatchEvent(new CustomEvent("open-reading-book", { detail: { bookId, paragraphAnchorId } })), 0);
+                                            }}
                                           />
                                         </div>
                                       </div>
