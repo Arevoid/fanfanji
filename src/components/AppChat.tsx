@@ -5761,7 +5761,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         />
                         <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header`}>
                           {!isSelf && !settings.hideNicknames && (
-                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
+                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider msg-meta-name">
                               <span>🖤</span>
                               <span>{msgName}</span>
                             </div>
@@ -5810,7 +5810,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       {showAvatar && !settings.hideNicknames && (
                         <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 mb-1 space-y-0.5 msg-meta-header`}>
                           {!isSelf && (
-                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider uppercase msg-meta-name">
+                            <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider msg-meta-name">
                               <span>🖤</span>
                               <span>{msgName}</span>
                             </div>
