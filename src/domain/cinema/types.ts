@@ -24,6 +24,7 @@ export interface CinemaMedia {
   subtitle?: CinemaAssetRef;
   subtitleFormat?: "srt" | "vtt";
   synopsis?: string;
+  auxiliaryInfo?: string;
   createdAt: number;
   updatedAt: number;
   lastPositionMs: number;
