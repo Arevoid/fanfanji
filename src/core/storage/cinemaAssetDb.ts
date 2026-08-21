@@ -13,6 +13,24 @@ interface StoredCinemaAsset {
   createdAt: number;
 }
 
+interface PersistedCinemaAsset extends Omit<StoredCinemaAsset, "blob"> {
+  // ArrayBuffer avoids Android/Kiwi IndexedDB implementations that fail when
+  // structured-cloning a Blob with "Failed to write blobs (IOError)".
+  data?: ArrayBuffer;
+  // Kept for compatibility with assets written by older versions.
+  blob?: Blob;
+}
+
+const getStorageError = (error: unknown, fallback: string) => {
+  const name = error instanceof DOMException ? error.name : "";
+  if (name === "QuotaExceededError") return "浏览器存储空间不足，无法保存影视文件";
+  if (name === "InvalidStateError") return "影视资源数据库已失效，请刷新页面后重试";
+  if (error instanceof Error && /failed to write blobs|ioerror/i.test(error.message)) {
+    return "当前浏览器不支持直接保存视频文件，请刷新页面或更换 Chrome/Edge 后重试";
+  }
+  return error instanceof Error && error.message ? error.message : fallback;
+};
+
 class CinemaAssetDB {
   private db: IDBDatabase | null = null;
 
@@ -51,21 +69,26 @@ class CinemaAssetDB {
   async save(input: { assetId: string; kind: CinemaAssetKind; blob: Blob }): Promise<void> {
     if (!input.assetId || !(input.blob instanceof Blob)) throw new Error("影视资源无效");
     const database = await this.init();
-    const record: StoredCinemaAsset = {
-      assetId: input.assetId,
-      kind: input.kind,
-      mimeType: input.blob.type || "application/octet-stream",
-      blob: input.blob,
-      byteLength: input.blob.size,
-      createdAt: Date.now(),
-    };
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(STORE_NAME, "readwrite");
-      transaction.objectStore(STORE_NAME).put(record);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error || new Error("影视资源写入失败"));
-      transaction.onabort = () => reject(transaction.error || new Error("影视资源写入中断"));
-    });
+    try {
+      const data = await input.blob.arrayBuffer();
+      const record: PersistedCinemaAsset = {
+        assetId: input.assetId,
+        kind: input.kind,
+        mimeType: input.blob.type || "application/octet-stream",
+        data,
+        byteLength: input.blob.size,
+        createdAt: Date.now(),
+      };
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction(STORE_NAME, "readwrite");
+        transaction.objectStore(STORE_NAME).put(record);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error || new Error("影视资源写入失败"));
+        transaction.onabort = () => reject(transaction.error || new Error("影视资源写入中断"));
+      });
+    } catch (error) {
+      throw new Error(getStorageError(error, "影视文件写入失败"));
+    }
   }
 
   async load(assetId: string): Promise<StoredCinemaAsset | null> {
@@ -73,8 +96,23 @@ class CinemaAssetDB {
     const database = await this.init();
     return new Promise((resolve, reject) => {
       const request = database.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(assetId);
-      request.onsuccess = () => resolve(request.result instanceof Object ? request.result as StoredCinemaAsset : null);
-      request.onerror = () => reject(request.error || new Error("影视资源读取失败"));
+      request.onsuccess = () => {
+        const record = request.result as PersistedCinemaAsset | undefined;
+        if (!record || typeof record !== "object") {
+          resolve(null);
+          return;
+        }
+        if (record.blob instanceof Blob) {
+          resolve(record as StoredCinemaAsset);
+          return;
+        }
+        if (record.data instanceof ArrayBuffer) {
+          resolve({ ...record, blob: new Blob([record.data], { type: record.mimeType }) } as StoredCinemaAsset);
+          return;
+        }
+        resolve(null);
+      };
+      request.onerror = () => reject(getStorageError(request.error, "影视资源读取失败"));
     });
   }
 

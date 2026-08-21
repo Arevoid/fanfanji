@@ -170,8 +170,17 @@ export default function AppCinema({
   const handleVideoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !file.type.startsWith("video/")) {
-      setNotice("请选择浏览器支持的视频文件");
+    const extension = file?.name.match(/\.([^.]+)$/)?.[1].toLowerCase();
+    const extensionMimeTypes: Record<string, string> = {
+      mp4: "video/mp4",
+      webm: "video/webm",
+      mov: "video/quicktime",
+      m4v: "video/mp4",
+      ogv: "video/ogg",
+    };
+    const mimeType = file?.type.startsWith("video/") ? file.type : (extension ? extensionMimeTypes[extension] : undefined);
+    if (!file || !mimeType) {
+      setNotice("无法识别该视频格式，请选择 MP4、WebM、MOV、M4V 或 OGV 文件");
       return;
     }
     const mediaId = createId("cinema-media");
@@ -182,9 +191,9 @@ export default function AppCinema({
         id: mediaId,
         ownerIdentityId: userIdentityId,
         title: file.name.replace(/\.[^.]+$/, "") || "未命名影视",
-        mimeType: file.type || "video/mp4",
+        mimeType: mimeType || "video/mp4",
         durationMs: 0,
-        video: { assetId, kind: "video", mimeType: file.type || "video/mp4", byteLength: file.size },
+        video: { assetId, kind: "video", mimeType: mimeType || "video/mp4", byteLength: file.size },
         createdAt: Date.now(),
         updatedAt: Date.now(),
         lastPositionMs: 0,
@@ -198,7 +207,7 @@ export default function AppCinema({
       }
     } catch (error) {
       await cinemaAssetDb.delete(assetId).catch(() => undefined);
-      setNotice(error instanceof Error ? error.message : "视频导入失败");
+      setNotice(error instanceof Error ? error.message : "视频导入失败，请稍后重试");
     }
   };
 
@@ -547,7 +556,7 @@ export default function AppCinema({
         <button type="button" onClick={() => setMediaSettingsOpen(true)} disabled={!selectedMedia} className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] disabled:opacity-40" aria-label="影视设置" title="影视设置">
           <SettingsIcon className="h-4 w-4" />
         </button>
-        <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleVideoUpload} />
+        <input ref={fileInputRef} type="file" accept="video/*,.mp4,.webm,.mov,.m4v,.ogv" className="hidden" onChange={handleVideoUpload} />
         <input ref={subtitleInputRef} type="file" accept=".srt,.vtt,text/vtt,application/x-subrip" className="hidden" onChange={handleSubtitleUpload} />
       </header>
 
