@@ -216,7 +216,7 @@ export default function AppOffline({
     pendingDeleteMessageId, setPendingDeleteMessageId,
     isGuidancePanelOpen, setIsGuidancePanelOpen,
     guidanceDraft, setGuidanceDraft,
-  } = useOfflineReadingState();
+  } = useOfflineReadingState(activeStory);
   const offlineStorySettings = useOfflineStorySettings({
     activeStory,
     characters,
@@ -379,6 +379,8 @@ export default function AppOffline({
     resolveCharacterId,
     saveActiveStorySnapshot,
     showToast,
+    guidanceDraft,
+    setGuidanceDraft,
   });
 
   const { handleRegenerateMessage } = useOfflineRegenerationActions({ setActiveNodeMenuId, handleSendMessage });
@@ -1064,9 +1066,19 @@ export default function AppOffline({
           initialOngoing={guidanceDraft.ongoing}
           onClose={() => setIsGuidancePanelOpen(false)}
           onSave={(oneTime, ongoing) => {
-            setGuidanceDraft({ oneTime, ongoing });
+            const nextGuidance = { oneTime: oneTime.trim(), ongoing: ongoing.trim() };
+            setGuidanceDraft(nextGuidance);
+            const story = activeStoryRef.current;
+            if (story) {
+              saveActiveStorySnapshot({
+                ...story,
+                oneTimeGuidance: nextGuidance.oneTime || undefined,
+                ongoingGuidance: nextGuidance.ongoing || undefined,
+                updatedAt: Date.now(),
+              });
+            }
             setIsGuidancePanelOpen(false);
-            showToast("场外指导已暂存（当前不会改变 AI 生成规则）");
+            showToast("场外指导已保存，将影响后续剧情生成");
           }}
         />
       )}

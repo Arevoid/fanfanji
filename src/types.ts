@@ -937,6 +937,10 @@ export interface OfflineStory {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** One-time director guidance, consumed after the next successful generation. */
+  oneTimeGuidance?: string;
+  /** Ongoing director guidance, applied to every future generation. */
+  ongoingGuidance?: string;
   mode: "director" | "continue" | "if";
   ifPrompt?: string;
   sourceChatId?: string; // Optional reference source

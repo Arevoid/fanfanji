@@ -1,5 +1,5 @@
-import type { Dispatch, SetStateAction } from "react";
 import type { Character, MemoryItem, Message, OfflineStory, UserSettings, WorldBookEntry } from "../../../types";
+import type { Dispatch, SetStateAction } from "react";
 import { apiChat } from "../../../utils/apiHelper";
 import { loadKnowledgeClaims } from "../../../core/storage/repositories/characterKnowledgeRepository";
 import { MemoryService } from "../../../domain/memory/MemoryService";
@@ -33,6 +33,8 @@ interface UseOfflineStoryGenerationActionsOptions {
   resolveCharacterId: (characterId: string) => string;
   saveActiveStorySnapshot: (story: OfflineStory) => void;
   showToast: (message: string) => void;
+  guidanceDraft: { oneTime: string; ongoing: string };
+  setGuidanceDraft: Dispatch<SetStateAction<{ oneTime: string; ongoing: string }>>;
 }
 
 export function useOfflineStoryGenerationActions({
@@ -53,6 +55,7 @@ export function useOfflineStoryGenerationActions({
   resolveCharacterId,
   saveActiveStorySnapshot,
   showToast,
+  setGuidanceDraft,
 }: UseOfflineStoryGenerationActionsOptions) {
   const handleSendMessage = async (
     textToSend?: string,
@@ -284,6 +287,16 @@ ${wbPrompts}\n`;
         sysPrompt += `\n【续写模式】：以现有的聊天/故事为草稿，根据设定和目前的逻辑走向，续写故事的精彩发展。`;
       }
 
+      const ongoingGuidance = updatedStory.ongoingGuidance?.trim();
+      const oneTimeGuidance = updatedStory.oneTimeGuidance?.trim();
+      if (ongoingGuidance || oneTimeGuidance) {
+        sysPrompt += `\n\n【场外指导】这是创作方向，不是已经发生的剧情事实。必须将其落实到后续剧情中，但不要直接复述指导文本。`;
+        if (ongoingGuidance) sysPrompt += `\n【长期指导】${ongoingGuidance}`;
+        if (oneTimeGuidance) {
+          sysPrompt += `\n【本次指导】${oneTimeGuidance}\n本次生成优先落实这条指导；成功生成后本次指导自动失效。`;
+        }
+      }
+
       // Only an explicitly imported online story may use its frozen snapshot.
       // Self-directed and IF stories stay fully isolated from the online vault.
       const allMemoriesParts: string[] = [];
@@ -415,10 +428,14 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
             : [...updatedStory.messages, ...newMsgs],
           archivedAt: undefined,
           memorySyncStatus: "pending" as const,
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
+          oneTimeGuidance: undefined,
         };
 
         saveActiveStorySnapshot(finalStory);
+        if (oneTimeGuidance) {
+          setGuidanceDraft((current) => ({ ...current, oneTime: "" }));
+        }
         if (regenerateTarget) showToast("当前剧情已重新生成");
       }
     } catch (err: any) {

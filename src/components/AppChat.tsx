@@ -1933,7 +1933,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             if (signal?.aborted) return;
             
             m.timestamp = Date.now();
-            onSendMessage(m);
+            // This reply carries the captured conversation scope. Do not pass
+            // it through the currently visible chat's delivery wrapper: the
+            // user may have opened another private conversation while the API
+            // request was in flight.
+            onSendMessageRaw(m);
             setIsTyping(false);
             
             if (idx < newMsgs.length - 1) {
@@ -1983,7 +1987,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             signal,
             shouldCancel: isCancelledCallTurn,
             onTyping: setIsTyping,
-            onSendMessage,
+            onSendMessage: onSendMessageRaw,
           });
           if (signal?.aborted) return;
 
@@ -2060,7 +2064,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           content: `⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`,
           timestamp: Date.now(),
         });
-        onSendMessage(errMsg);
+        onSendMessageRaw(errMsg);
       }
     } catch (err: any) {
       if (isCancelledCallTurn() || signal?.aborted) return;
@@ -2081,7 +2085,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`,
         timestamp: Date.now(),
       });
-      onSendMessage(errMsg);
+      onSendMessageRaw(errMsg);
     } finally {
       setIsTyping(false);
     }
@@ -2788,7 +2792,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           relationId,
           conversationId: relationship.conversationId || getConversationId(relationId),
         }));
-        scopedMessages.forEach((message) => onSendMessage(message));
+        // Proactive replies are already scoped to their own relationship. The
+        // active chat delivery wrapper would incorrectly rewrite every reply
+        // to whichever private chat is currently visible.
+        scopedMessages.forEach((message) => onSendMessageRaw(message));
         if (proactiveResult.proactiveOfflineDirective && scopedMessages[0]) {
           const saved = persistProactiveOfflineInvitation({
             relationship,

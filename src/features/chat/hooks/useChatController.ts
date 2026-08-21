@@ -56,15 +56,22 @@ export function useChatController({
   onReplyStopped,
 }: UseChatControllerOptions) {
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
-  const replyInFlightRef = useRef(false);
-  const replyAbortControllerRef = useRef<AbortController | null>(null);
+  // Reply generation belongs to a conversation scope, not to the chat page.
+  // Keeping one global lock meant opening B while A was waiting silently
+  // discarded B's request, and one global AbortController made stopping one
+  // chat cancel another chat's reply.
+  const replyInFlightRef = useRef<Set<string>>(new Set());
+  const replyAbortControllerRef = useRef<Map<string, AbortController>>(new Map());
   const [isReplyInFlight, setIsReplyInFlight] = useState(false);
 
   const scopeKey = runtimeContext.isGroup
     ? `group:${runtimeContext.groupId || runtimeContext.characterId || ""}:${runtimeContext.conversationId || ""}`
     : `direct:${runtimeContext.userIdentityId}:${runtimeContext.relationId || ""}:${runtimeContext.conversationId || ""}`;
+  const currentScopeKeyRef = useRef(scopeKey);
+  currentScopeKeyRef.current = scopeKey;
   useEffect(() => {
     setQuotedMessage(null);
+    setIsReplyInFlight(false);
     // Do not abort a reply when this controller unmounts. AppChat is a view
     // layer: navigating home, opening another app, or switching browser tabs
     // must not cancel the character's API request. The parent App and its
@@ -109,11 +116,11 @@ export function useChatController({
   // Handle Send Message and Trigger AI reply
   const handleSendAndReply = async (inputText: string, event?: FormEvent) => {
     if (event) event.preventDefault();
-    if (!activeChatCharId || !activeCharacter || replyInFlightRef.current) return;
-    replyInFlightRef.current = true;
+    if (!activeChatCharId || !activeCharacter || replyInFlightRef.current.has(scopeKey)) return;
+    replyInFlightRef.current.add(scopeKey);
     setIsReplyInFlight(true);
     const abortController = new AbortController();
-    replyAbortControllerRef.current = abortController;
+    replyAbortControllerRef.current.set(scopeKey, abortController);
 
     try {
       if (!inputText.trim()) {
@@ -160,18 +167,20 @@ export function useChatController({
         : [...currentChatMessages, userMessage];
       await generateResponseForUserMessage(userMessage, history, abortController.signal);
     } finally {
-      replyInFlightRef.current = false;
-      if (replyAbortControllerRef.current === abortController) replyAbortControllerRef.current = null;
-      setIsReplyInFlight(false);
+      replyInFlightRef.current.delete(scopeKey);
+      if (replyAbortControllerRef.current.get(scopeKey) === abortController) {
+        replyAbortControllerRef.current.delete(scopeKey);
+      }
+      setIsReplyInFlight(replyInFlightRef.current.has(currentScopeKeyRef.current));
     }
   };
 
   const stopReply = () => {
-    const controller = replyAbortControllerRef.current;
+    const controller = replyAbortControllerRef.current.get(scopeKey);
     if (!controller) return;
     controller.abort();
-    replyAbortControllerRef.current = null;
-    replyInFlightRef.current = false;
+    replyAbortControllerRef.current.delete(scopeKey);
+    replyInFlightRef.current.delete(scopeKey);
     setIsReplyInFlight(false);
     onReplyStopped?.();
   };
