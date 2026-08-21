@@ -1045,7 +1045,7 @@ export function ReadingWidget({ isEditing, onRemove, activeIdentity, widgetBorde
 
   return (
     <div
-      className="relative flex h-full w-full overflow-hidden border border-stone-200/60 bg-white/90 p-3 text-left shadow-sm backdrop-blur-sm"
+      className="relative flex h-full w-full overflow-visible border border-stone-200/60 bg-white/90 p-3 text-left shadow-sm backdrop-blur-sm"
       style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}
       onClick={() => entry && onOpenReading?.(entry.book.id, entry.comment?.targetParagraphAnchorId)}
       role="button"
@@ -1069,7 +1069,7 @@ export function ReadingWidget({ isEditing, onRemove, activeIdentity, widgetBorde
       ) : (
         <div className="flex h-full w-full items-center justify-center text-center text-xs font-semibold text-stone-400">添加书籍并写下第一条段评后，这里会显示每日阅读摘评</div>
       )}
-      {isEditing && onRemove && <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute right-2 top-2 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>}
+      {isEditing && onRemove && <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>}
     </div>
   );
 }
@@ -1173,7 +1173,7 @@ export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, character
   const latestText = data.latest ? `最晚${chatStatsFormatTime(data.latest.timestamp)}分，您还在与${latestName}畅聊` : "还没有聊天记录";
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden border border-stone-200/70 bg-white/90 px-3 py-2.5 text-stone-900 shadow-sm backdrop-blur-sm" style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}>
+    <div className="relative flex h-full w-full flex-col overflow-visible border border-stone-200/70 bg-white/90 px-3 py-2.5 text-stone-900 shadow-sm backdrop-blur-sm" style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}>
       <div className="flex items-start justify-between">
         <div>
           <h3 className="text-[12px] font-black leading-tight">连续聊天</h3>
@@ -1191,7 +1191,7 @@ export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, character
         </div>)}
       </div>
       <p className="mt-2 line-clamp-2 min-h-[22px] text-center text-[9px] font-medium leading-[1.25] text-stone-400">{data.latest ? <><span className="block">最晚{chatStatsFormatTime(data.latest.timestamp)}分</span><span className="block">您还在与{latestName}畅聊</span></> : latestText}</p>
-      {isEditing && onRemove && <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute right-2 top-2 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>}
+      {isEditing && onRemove && <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>}
     </div>
   );
 }
