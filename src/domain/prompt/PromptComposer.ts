@@ -40,6 +40,7 @@ export class PromptComposer {
       message: context.message,
       history: injected.history,
       systemInstruction: context.systemInstruction,
+      ...(context.imageDataUrl ? { imageDataUrl: context.imageDataUrl } : {}),
     };
     recordPromptDebugSnapshot({
       scenario: context.scenario,

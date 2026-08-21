@@ -45,6 +45,8 @@ export interface PromptContext {
    * World Book blocks, recalled memories and time-sensitive context.
    */
   systemInstruction: string;
+  /** Optional image attached to the current user turn. Kept outside text history. */
+  imageDataUrl?: string;
   historyInjections?: readonly PromptHistoryInjection[];
 }
 
@@ -52,4 +54,5 @@ export interface ComposedPrompt {
   message: string;
   history: PromptHistoryEntry[];
   systemInstruction: string;
+  imageDataUrl?: string;
 }

@@ -2106,8 +2106,9 @@ export default function App() {
     return persisted.success;
   };
 
-  const handleDeleteCharacter = (id: string, skipConfirm = false) => {
+  const handleDeleteCharacter = (id: string, skipConfirm = false, preserveGroupMemories = false) => {
     if (skipConfirm || confirm("确定要删除这名角色人设吗？删除后其相关聊天和动态也将被清空。")) {
+      const deletingGroup = characters.some((character) => character.id === id && character.isGroupChat);
       // A previous bad merge could leave a relationship pointing to a contact
       // copy. Delete that legacy reference together with its archive profile,
       // otherwise it remains visible in the address book after archive deletion.
@@ -2129,6 +2130,13 @@ export default function App() {
         id,
         deletedCharacterIds,
       );
+      // Group turns used to be written as per-member compatibility memories.
+      // They belong to the group lifecycle, not to the member relationships;
+      // remove them explicitly on either kind of group disband so “不保存记忆”
+      // cannot leave orphaned transcript records behind.
+      const cleanedMemories = deletingGroup && !preserveGroupMemories
+        ? cleaned.memories.filter((memory) => !memory.id.startsWith(`group-memory:${id}:`) && !memory.id.startsWith(`group-summary:${id}:`))
+        : cleaned.memories;
       try {
         const parsed = JSON.parse(readString(RED_PACKET_STATUSES_KEY).value || "{}") as RedPacketStatusMap;
         const removedMessages = messages.filter((message) => relationIds.includes(message.relationId || "") || characterIds.has(message.characterId));
@@ -2144,7 +2152,7 @@ export default function App() {
           : character));
       setRelationships(cleaned.relationships);
       setMessages(cleaned.messages);
-      setMemories(cleaned.memories);
+      setMemories(cleanedMemories);
       replaceOfflineStories(cleaned.offlineStories);
       const musicCleanup = removeMusicDataByRelations(dualMusicConfigs, relationshipMusicStates, relationIds);
       setDualMusicConfigs(musicCleanup.configs);

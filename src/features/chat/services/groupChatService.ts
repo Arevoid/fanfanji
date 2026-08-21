@@ -20,6 +20,7 @@ export type GroupChatTurnGenerator = (input: {
     message: string;
     history: [];
     systemInstruction: string;
+    imageDataUrl?: string;
     historyInjections: ReturnType<typeof buildWorldBookSystemBlocks>["at_depth"];
   };
   settings: UserSettings;
@@ -140,6 +141,7 @@ export async function generateIsolatedGroupChatReplies(input: {
   groupWorldBookBlocks: ReturnType<typeof buildWorldBookSystemBlocks>;
   groupWorldContext: string;
   historyText: string;
+  imageDataUrl?: string;
   hasUserMessage: boolean;
   groupAtDepthInjections: Map<string, ReturnType<typeof buildWorldBookSystemBlocks>["at_depth"][number]>;
   memberAtDepthInjections: Map<string, ReturnType<typeof buildWorldBookSystemBlocks>["at_depth"]>;
@@ -162,6 +164,7 @@ export async function generateIsolatedGroupChatReplies(input: {
       scenario: "group-chat",
       message: `${buildGroupChatTaskMessage(input.historyText, input.hasUserMessage)}\n\n【群聊本轮回复】本轮至少让 1 位成员实际发言；每位成员最多发送 6 条独立短消息，不限制整轮总消息数。请根据群成员各自的人设、关系、上下文剧情、时间状态和当前话题自然判断哪些成员发言、各发几条，不能固定为 3 人，也不能返回空回复。每条回复必须以 [SENDER_NAME: 角色原名] 开头；同一成员的每条消息都必须重复自己的发送者标签。不得替其他成员发言，不得输出群外角色。若上下文中存在红包，必须先为每个成员独立判断 redPacketAction，再决定是否生成可见发言：claim_and_reply=先领取并发言，claim_silent=先领取但潜水不发言，decline_and_reply=不领取但发言，silent=不领取且不发言。领取动作必须基于红包对象、专属限制、角色人设和当前剧情判断，不能因为“快点领/不许领/别领”等话术误触发。红包可以跨越多轮对话继续存在：如果历史中有尚未领取且仍未过期的红包，成员可以本轮先和其他人聊天后再领取，也可以隔几轮看到后再领取；不要因为中间出现了其他消息就忽略它。${INLINE_GROUP_INNER_VOICE_INSTRUCTION}${input.groupMembers.some((member) => member.enableAutoTranslate) ? "\n群内开启了全部翻译的成员必须同时提供 translation 字段，并保持对应回复的气泡结构。" : ""}`,
       history: [],
+      ...(input.imageDataUrl ? { imageDataUrl: input.imageDataUrl } : {}),
       systemInstruction: buildGroupChatSystemInstruction({
         userName: input.userName,
         userBio: input.userBio,

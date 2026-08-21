@@ -23,7 +23,7 @@ interface ChatInputBarProps {
   onSendOnly: (inputText: string, event?: FormEvent) => void | Promise<void>;
   onSendAndReply: (inputText: string, event?: FormEvent) => void | Promise<void>;
   onStopReply: () => void;
-  getChatIcon: (key: "plus" | "send" | "stop") => string | undefined;
+  getChatIcon: (key: "plus" | "sendOnly" | "sendReply" | "stop") => string | undefined;
 }
 
 /**
@@ -96,7 +96,7 @@ export function ChatInputBar({
         title="仅发送消息 (不立即得到回复)"
       >
         <span className="cv-send-only-icon flex items-center justify-center w-full h-full">
-          <ChatIcon src={getChatIcon("send")} className="w-4 h-4"><ArrowUp className="w-4 h-4 stroke-[2.5]" /></ChatIcon>
+          <ChatIcon src={getChatIcon("sendOnly")} className="w-4 h-4"><ArrowUp className="w-4 h-4 stroke-[2.5]" /></ChatIcon>
         </span>
       </button>
 
@@ -109,8 +109,8 @@ export function ChatInputBar({
       >
         <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
           {isReplyInFlight
-            ? <ChatIcon src={getChatIcon("stop")} className="w-3.5 h-3.5"><Square className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>
-            : <ChatIcon src={getChatIcon("send")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>}
+            ? <span className="cv-stop-icon flex items-center justify-center w-full h-full"><ChatIcon src={getChatIcon("stop")} className="w-3.5 h-3.5"><Square className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon></span>
+            : <ChatIcon src={getChatIcon("sendReply")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>}
         </span>
       </button>
     </form>

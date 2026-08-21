@@ -54,6 +54,8 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
   --chat-stop-text: var(--button-primary-text);
   --chat-stop-border: var(--button-primary-bg);
   --chat-stop-icon: none;
+  --chat-attachment-icon-size: 2.5rem;
+  --chat-attachment-glyph-size: 1rem;
   /* 顶部导航按钮 */
   --chat-header-control-bg: transparent;
   --chat-header-control-text: var(--chat-text);
@@ -242,11 +244,15 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 }
 .chat-attachment-item { color: var(--chat-text); }
 .chat-attachment-icon {
+  width: var(--chat-attachment-icon-size, 2.5rem);
+  height: var(--chat-attachment-icon-size, 2.5rem);
   background: var(--chat-attachment-icon-bg);
   color: var(--chat-attachment-icon-text);
   border-color: var(--chat-attachment-icon-border);
   border-radius: var(--chat-attachment-icon-radius);
 }
+.chat-attachment-icon > svg,
+.chat-attachment-icon > img { width: var(--chat-attachment-glyph-size, 1rem); height: var(--chat-attachment-glyph-size, 1rem); }
 .chat-attachment-label { display: var(--chat-attachment-label-display); color: var(--chat-attachment-label-text); }
 
 /* ==================== 底部输入栏 ==================== */
@@ -310,6 +316,6 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 .cv-plus-icon { background: url("加号按钮图片URL") center / contain no-repeat; }
 .cv-send-only-icon { background: url("仅发送按钮图片URL") center / contain no-repeat; }
 .cv-send-reply-icon { background: url("发送回复按钮图片URL") center / contain no-repeat; }
-.chat-composer__stop-reply-button .cv-send-reply-icon { background: url("停止按钮图片URL") center / contain no-repeat; }
+.cv-stop-icon { background: url("停止按钮图片URL") center / contain no-repeat; }
 */
 `;

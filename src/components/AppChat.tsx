@@ -17,7 +17,6 @@ import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
 import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseRedPacketClaimNotice, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
-import { createGroupTurnMemories } from "../features/chat/services/groupMemoryDistribution";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatReplyPipeline";
 import { scheduleGroupReplyDelivery } from "../features/chat/services/groupReplyDelivery";
@@ -270,7 +269,7 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "image", label: "图片" }, { key: "textImage", label: "文字图" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },
   { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" }, { key: "location", label: "位置" },
-  { key: "call", label: "通话" }, { key: "plus", label: "加号" }, { key: "send", label: "发送" }, { key: "stop", label: "停止" },
+  { key: "call", label: "通话" }, { key: "plus", label: "加号" }, { key: "sendOnly", label: "发送1（仅发送）" }, { key: "sendReply", label: "发送2（发送并回复）" }, { key: "stop", label: "停止" },
 ];
 
 interface AppChatProps {
@@ -310,7 +309,7 @@ interface AppChatProps {
   onSaveOfflineStory?: (story: OfflineStory) => boolean | void | Promise<boolean>;
   onOpenOfflineStory?: (storyId: string) => void;
   onDeleteOfflineStory?: (storyId: string) => void;
-  onDeleteCharacter?: (id: string, skipConfirm?: boolean) => void;
+  onDeleteCharacter?: (id: string, skipConfirm?: boolean, preserveGroupMemories?: boolean) => void;
   onDeleteRelationshipMusic?: (relationId: string) => void;
   musicTracks?: MusicTrack[];
   identityMusicStates?: IdentityMusicState[];
@@ -572,7 +571,9 @@ export default function AppChat({
     : settings.bubbleTailEnabled === true;
   const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
   const globalChatIcons = sanitizeChatIcons(settings.chatIcons);
-  const getChatIcon = (key: ChatIconKey): string | undefined => characterChatIcons[key] || globalChatIcons[key];
+  const getChatIcon = (key: ChatIconKey): string | undefined => characterChatIcons[key]
+    || globalChatIcons[key]
+    || ((key === "sendOnly" || key === "sendReply") ? characterChatIcons.send || globalChatIcons.send : undefined);
   const belongsToActiveIdentity = (ownerIdentityId?: string) =>
     (ownerIdentityId || "identity-1") === activeIdentityId;
 
@@ -1304,25 +1305,6 @@ export default function AppChat({
       });
       const groupResult = groupPipeline.result;
       if (!groupResult) return;
-      const persistPublicGroupTurn = (deliveredReplies: readonly Message[]) => {
-        const additions = createGroupTurnMemories({
-          group: activeCharacter,
-          members: groupMembers,
-          characters,
-          relationships,
-          activeIdentityId,
-          userName: settings.name,
-          userMessage: userMsg,
-          replies: deliveredReplies,
-          timestamp: Date.now(),
-        });
-        if (additions.length === 0) return;
-        const merged = MemoryService.mergeMemories(latestMemoriesRef.current, additions);
-        if (merged.length === latestMemoriesRef.current.length) return;
-        latestMemoriesRef.current = merged;
-        onSaveMemories(merged);
-      };
-
       if (groupResult.messages.length > 0) {
         const silentGroupReplies = groupResult.messages.filter((message) => message.redPacketAction === "claim_silent" || message.redPacketAction === "silent");
         silentGroupReplies.forEach((reply) => {
@@ -1372,11 +1354,10 @@ export default function AppChat({
               onSendMessage(reply);
               if (claimNotification) onSendMessage(claimNotification);
             },
-            onComplete: persistPublicGroupTurn,
+            onComplete: () => undefined,
           });
         }
       } else {
-        persistPublicGroupTurn([]);
       }
     } catch (err) {
       if (signal?.aborted) return;
@@ -1870,9 +1851,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           characterName: activeCharacter.name,
         })
         : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
+      const imageDataUrl = userMsg?.sender === "user"
+        && /^data:image\//i.test(userMsg.content.trim())
+        ? userMsg.content.trim()
+        : undefined;
+      const imageInstruction = imageDataUrl
+        ? "\n【当前用户消息包含真实图片】请先直接观察并识别图片中的主体、物品和场景，再回答；不要仅凭‘发送图片’这段文字猜测，也不要把包、袋子等物品擅自判断成衣服。"
+        : "";
 
       const data = await requestDirectChatTurn({
-        prompt: { scenario: "direct-chat", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
+        prompt: { scenario: "direct-chat", message: `${promptMessage}${imageInstruction}`, imageDataUrl, history, systemInstruction, historyInjections: wbBlocks.at_depth },
         settings,
         signal,
         includeInnerVoice: true,
@@ -2611,6 +2599,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     recallSettings,
     setIsCompressingMemory,
     onSaveMemories,
+    groupMembers: activeCharacter?.isGroupChat
+      ? (activeCharacter.memberIds || []).map((id) => characters.find((character) => character.id === id)).filter(Boolean) as Character[]
+      : [],
+    characters,
+    relationships,
+    activeIdentityId,
   });
   const { updateDraftChatIcon } = useChatDraftChatIcon(setDraftChatIcons);
   const { handleRegenerateResponse } = useChatRegenerationAction({
@@ -4157,9 +4151,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   height: 100% !important;
                 }
                 #conv-screen.style-liquid-glass .chat-composer__attachment-panel > * > div {
-                  width: 42px !important;
-                  height: 42px !important;
-                  flex: 0 0 42px !important;
+                  width: var(--chat-attachment-icon-size, 42px) !important;
+                  height: var(--chat-attachment-icon-size, 42px) !important;
+                  flex: 0 0 var(--chat-attachment-icon-size, 42px) !important;
                   border-radius: 50% !important;
                   background: rgba(255, 255, 255, 0.76) !important;
                   background-color: rgba(255, 255, 255, 0.76) !important;
@@ -4967,7 +4961,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           }
                           // Step 2: Delete character / disband group
                           if (onDeleteCharacter) {
-                            onDeleteCharacter(activeChatCharId!, true);
+                            onDeleteCharacter(activeChatCharId!, true, true);
                           }
                           setIsShowingCardModal(false);
                           setActiveChatCharId(null);
@@ -5979,7 +5973,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               }`}>
                 {/* 1. 相册 (Album) */}
                 <label className="chat-attachment-item chat-attachment-item--album flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
-                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("image")} className="w-4 h-4"><ImageIcon className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">相册</span>
@@ -6008,7 +6002,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 </label>
 
                 <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="chat-attachment-item chat-attachment-item--text-image flex-1 flex flex-col items-center justify-center group min-w-10" title="发送文字图">
-                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><ChatIcon src={getChatIcon("textImage")} className="w-4 h-4"><Camera className="w-4 h-4 text-slate-700" /></ChatIcon></div>
+                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><ChatIcon src={getChatIcon("textImage")} className="w-4 h-4"><Camera className="w-4 h-4 text-slate-700" /></ChatIcon></div>
                   <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">文字图</span>
                 </button>
 
@@ -6026,7 +6020,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   }}
                   className="chat-attachment-item chat-attachment-item--red-packet flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("redPacket")} className="w-4 h-4"><Gift className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
@@ -6042,7 +6036,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   }}
                   className="chat-attachment-item chat-attachment-item--voice flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("voice")} className="w-4 h-4"><Mic className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
@@ -6056,7 +6050,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   }}
                   className="chat-attachment-item chat-attachment-item--call flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("call")} className="w-4 h-4"><Phone className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
@@ -6071,7 +6065,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   }}
                   className="chat-attachment-item chat-attachment-item--location flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("location")} className="w-4 h-4"><MapPin className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
@@ -6086,7 +6080,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   }}
                   className="chat-attachment-item chat-attachment-item--sticker flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("sticker")} className="w-4 h-4"><Smile className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
                   <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>

@@ -14,7 +14,7 @@ import { CHAT_DEGENERATE_RETRY_INSTRUCTION, isDegenerateDirectReply, removeDegen
 import { parseChatTurnResponse } from "../services/chatTurnResponseProtocol";
 import type { ParsedAiChatResponse } from "../services/chatServiceTypes";
 
-type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "historyInjections">;
+type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "imageDataUrl" | "historyInjections">;
 type RequestAi = typeof apiChat;
 
 export function buildComposedAiChatRequest(prompt: PromptInput, settings: UserSettings): AiChatRequest {

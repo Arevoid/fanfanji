@@ -6,7 +6,7 @@ export interface CharacterReference {
   content: string;
 }
 
-export const CHAT_ICON_KEYS = ["image", "textImage", "voice", "sticker", "redPacket", "transfer", "location", "call", "plus", "send", "stop"] as const;
+export const CHAT_ICON_KEYS = ["image", "textImage", "voice", "sticker", "redPacket", "transfer", "location", "call", "plus", "send", "sendOnly", "sendReply", "stop"] as const;
 export type ChatIconKey = typeof CHAT_ICON_KEYS[number];
 export type ChatIconOverrides = Partial<Record<ChatIconKey, string>>;
 

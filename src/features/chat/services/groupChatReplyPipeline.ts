@@ -91,6 +91,9 @@ export async function runGroupChatReplyPipeline(input: GroupChatReplyPipelineInp
     groupWorldContext,
     historyText,
     hasUserMessage: Boolean(input.userMessage),
+    imageDataUrl: input.userMessage?.sender === "user" && /^data:image\//i.test(input.userMessage.content.trim())
+      ? input.userMessage.content.trim()
+      : undefined,
     ...memberContexts,
     publicMemberDefinitions: memberContexts.publicMemberDefinitions,
     disableBracketActions: input.disableBracketActions,

@@ -110,7 +110,7 @@ const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "image", label: "图片" }, { key: "textImage", label: "文字图" }, { key: "voice", label: "语音" },
   { key: "sticker", label: "表情" }, { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" },
   { key: "location", label: "位置" }, { key: "call", label: "通话" }, { key: "plus", label: "加号" },
-  { key: "send", label: "发送" }, { key: "stop", label: "停止" },
+  { key: "sendOnly", label: "发送1（仅发送）" }, { key: "sendReply", label: "发送2（发送并回复）" }, { key: "stop", label: "停止" },
 ];
 
 const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置页和其他应用不会应用本样式。 */
@@ -136,6 +136,9 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
   --chat-stop-text: var(--button-primary-text);
   --chat-stop-border: var(--button-primary-bg);
   --chat-stop-icon: none;
+  /* 底部展开功能栏图标大小，可改为 2rem、3rem 等。 */
+  --chat-attachment-icon-size: 2.5rem;
+  --chat-attachment-glyph-size: 1rem;
   --chat-attachment-panel-display: flex;
   --chat-attachment-label-display: block;
 }
@@ -165,7 +168,10 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
 .send-button { background: var(--chat-send-bg); color: var(--chat-send-text); }
 .chat-composer__stop-reply-button { background: var(--chat-stop-bg, var(--chat-send-bg)); color: var(--chat-stop-text, var(--chat-send-text)); border-color: var(--chat-stop-border, var(--chat-send-border)); }
 .chat-composer__stop-reply-button .cv-send-reply-icon svg { display: none; }
-.chat-composer__stop-reply-button .cv-send-reply-icon { background: var(--chat-stop-icon, none) center / contain no-repeat; }
+.cv-stop-icon { background: var(--chat-stop-icon, none) center / contain no-repeat; }
+.chat-attachment-icon { width: var(--chat-attachment-icon-size, 2.5rem); height: var(--chat-attachment-icon-size, 2.5rem); }
+.chat-attachment-icon > svg,
+.chat-attachment-icon > img { width: var(--chat-attachment-glyph-size, 1rem); height: var(--chat-attachment-glyph-size, 1rem); }
 .chat-composer__attachment-panel { display: var(--chat-attachment-panel-display, flex); }
 .chat-attachment-label { display: var(--chat-attachment-label-display, block); }
 `;
