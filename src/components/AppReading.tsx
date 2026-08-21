@@ -555,6 +555,8 @@ export default function AppReading({
       void clearBookCover(book);
     } else if (action === "co_read") {
       setInviteBookId(book.id);
+    } else if (action === "delete") {
+      void deleteBook(book);
     } else {
       setStorySetupBookId(book.id);
     }
@@ -956,20 +958,21 @@ export default function AppReading({
     }
   };
 
-  const handleDelete = async () => {
-    if (!selectedBook || isWorking) return;
+  const deleteBook = async (book: ReadingBook) => {
+    if (isWorking) return;
     if (
       !window.confirm(
-        `确定永久删除《${selectedBook.title}》吗？本地正文、进度和标注都会被移除。`,
+        `确定永久删除《${book.title}》吗？本地正文、进度和标注都会被移除。`,
       )
     )
       return;
     setIsWorking(true);
     try {
-      const result = await deleteReadingBook(userIdentityId, selectedBook.id);
-      await readingAssetDb.deleteCover(selectedBook.id).catch(() => undefined);
+      const result = await deleteReadingBook(userIdentityId, book.id);
+      await readingAssetDb.deleteCover(book.id).catch(() => undefined);
       refreshLibrary();
-      setSelectedBookId(null);
+      if (selectedBookId === book.id) setSelectedBookId(null);
+      setActionBookId(null);
       setNotice(
         result.status === "deleted"
           ? { tone: "success", text: "书籍及本地正文已删除。" }
@@ -983,6 +986,10 @@ export default function AppReading({
     } finally {
       setIsWorking(false);
     }
+  };
+
+  const handleDelete = () => {
+    if (selectedBook) void deleteBook(selectedBook);
   };
 
   const handleExportArchive = async () => {
