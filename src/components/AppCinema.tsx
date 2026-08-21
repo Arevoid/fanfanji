@@ -253,7 +253,8 @@ export default function AppCinema({
     }
     setReplyLoading(true);
     try {
-      const prompt = `你正在和用户一起观看影视《${selectedMedia.title}》。你扮演${selectedCharacter.name}，只能知道用户已经看到的内容。\n当前播放时间：${formatSubtitleTime(positionMs)}。\n当前字幕：${currentSubtitle || "暂无字幕"}\n${frameDataUrl ? "当前画面已附加，请结合画面判断，但不要凭空猜测后续剧情。" : "当前没有画面截图。"}\n${automatic ? "这是一次低频观影反应，请只用一句自然、符合角色性格的短回应，不要抢夺用户注意力。" : `用户说：${userText.trim()}`}\n请直接以角色口吻回复，不要解释你是 AI。`;
+      const effectiveFrameDataUrl = frameDataUrl || captureFrame();
+      const prompt = `你正在和用户一起观看影视《${selectedMedia.title}》。你扮演${selectedCharacter.name}，只能知道用户已经看到的内容。\n当前播放时间：${formatSubtitleTime(positionMs)}。\n当前字幕：${currentSubtitle || "暂无字幕"}\n${effectiveFrameDataUrl ? "当前视频画面已附加，请优先识别画面中的主体、动作、场景和可见文字，只讨论当前画面，不要凭空猜测后续剧情。" : "当前没有画面截图，请只根据用户文字回答。"}\n${automatic ? "这是一次低频观影反应，请只用一句自然、符合角色性格的短回应，不要抢夺用户注意力。" : `用户说：${userText.trim()}`}\n请直接以角色口吻回复，不要解释你是 AI。`;
       const response = await apiChat({
         message: prompt,
         history: selectedDiscussions.slice(-8).flatMap((discussion) => [
@@ -266,7 +267,7 @@ export default function AppCinema({
         apiEndpoint: settings.apiEndpoint,
         apiTemperature: settings.apiTemperature,
         streamCompatible: settings.streamCompatible,
-        imageDataUrl: frameDataUrl || undefined,
+        imageDataUrl: effectiveFrameDataUrl || undefined,
       });
       const discussion: CinemaDiscussion = {
         id: createId("cinema-discussion"),
@@ -286,7 +287,7 @@ export default function AppCinema({
       setDiscussionDraft("");
       setFrameDataUrl(null);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "观影讨论生成失败");
+      setNotice(error instanceof Error ? `画面理解失败：${error.message}` : "观影讨论生成失败");
     } finally {
       setReplyLoading(false);
     }
@@ -386,8 +387,8 @@ export default function AppCinema({
         ) : (
           <section className="mx-auto max-w-2xl space-y-4">
             <div className="flex items-center justify-between gap-3"><div className="min-w-0"><input value={mediaTitleDraft} onChange={(event) => setMediaTitleDraft(event.target.value)} onBlur={() => { if (mediaTitleDraft.trim() && selectedMedia) persistStore(mergeStore(storeRef.current, { media: storeRef.current.media.map((item) => item.id === selectedMedia.id ? { ...item, title: mediaTitleDraft.trim(), updatedAt: Date.now() } : item) })); }} className="w-full truncate bg-transparent text-lg font-black outline-none" /><p className="mt-1 text-[10px] text-[var(--text-muted)]">{selectedRoom ? `与${selectedCharacter?.name || "角色"}一起看` : "还没有观影房间"}</p></div><button type="button" onClick={() => { setSelectedMediaId(null); setSelectedRoomId(null); }} className="rounded-full border border-[var(--border)] px-3 py-1 text-[10px] font-bold">返回影视库</button></div>
-            <div className="overflow-hidden rounded-3xl bg-black shadow-xl">
-              {videoUrl ? <div className="relative"><video ref={videoRef} src={videoUrl} controls className="max-h-[52vh] w-full" onLoadedMetadata={handleLoadedMetadata} onTimeUpdate={() => { const current = Math.round((videoRef.current?.currentTime || 0) * 1000); setPositionMs(current); }} onPause={() => persistPosition(positionMs)} onEnded={() => persistPosition(positionMs)} /><div className="pointer-events-none absolute inset-x-3 bottom-14 text-center text-sm font-semibold text-white drop-shadow-lg">{currentSubtitle.split("\n").slice(-1)[0] || ""}</div></div> : <div className="flex aspect-video items-center justify-center text-xs text-white/70">正在加载视频…</div>}
+            <div className="aspect-video overflow-hidden rounded-3xl bg-black shadow-xl">
+              {videoUrl ? <div className="relative h-full w-full"><video ref={videoRef} src={videoUrl} controls className="h-full w-full object-contain" onLoadedMetadata={handleLoadedMetadata} onTimeUpdate={() => { const current = Math.round((videoRef.current?.currentTime || 0) * 1000); setPositionMs(current); }} onPause={() => persistPosition(positionMs)} onEnded={() => persistPosition(positionMs)} /><div className="pointer-events-none absolute inset-x-3 bottom-14 text-center text-sm font-semibold text-white drop-shadow-lg">{currentSubtitle.split("\n").slice(-1)[0] || ""}</div></div> : <div className="flex h-full items-center justify-center text-xs text-white/70">正在加载视频…</div>}
             </div>
             <canvas ref={frameRef} className="hidden" />
             <div className="flex flex-wrap gap-2"><button type="button" onClick={() => subtitleInputRef.current?.click()} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-[10px] font-bold"><Subtitles className="h-4 w-4" />{selectedMedia.subtitle ? "更换字幕" : "导入 SRT/VTT"}</button><button type="button" onClick={() => { if (selectedRoom) setAutoReactionEnabled((value) => { const next = !value; persistStore(mergeStore(storeRef.current, { rooms: storeRef.current.rooms.map((room) => room.id === selectedRoom.id ? { ...room, autoReactionEnabled: next, updatedAt: Date.now() } : room) })); return next; }); }} disabled={!selectedRoom} className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[10px] font-bold ${autoReactionEnabled ? "border-emerald-300 text-emerald-600" : "border-[var(--border)] text-[var(--text-muted)]"}`}><MessageCircle className="h-4 w-4" />自动低频反应：{autoReactionEnabled ? "开" : "关"}</button>{!selectedRoom && <button type="button" onClick={() => setRoomPickerOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--button-primary-bg)] px-3 text-[10px] font-bold text-[var(--button-primary-text)]"><Users className="h-4 w-4" />邀请角色一起看</button>}</div>
@@ -397,8 +398,8 @@ export default function AppCinema({
           </section>
         )}
       </main>
-      {notice && <button type="button" onClick={() => setNotice(null)} className="absolute bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-full bg-[var(--surface-inverse)] px-4 py-2 text-[10px] font-bold text-[var(--text-inverse)] shadow-xl">{notice}</button>}
-      {roomPickerOpen && selectedMedia && <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setRoomPickerOpen(false)}><div className="w-full max-w-md rounded-3xl bg-[var(--surface)] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex items-center justify-between"><h2 className="text-sm font-black">邀请角色一起看《{selectedMedia.title}》</h2><button type="button" onClick={() => setRoomPickerOpen(false)}><X className="h-4 w-4" /></button></div><div className="mt-4 space-y-2">{scopedRelations.map((relation) => { const character = characters.find((item) => item.id === relation.characterId); return <button key={relation.id} type="button" onClick={() => createRoom(relation)} className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] p-3 text-left"><div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-[var(--surface-raised)]">{character?.avatar ? <img src={character.avatar} alt="" className="h-full w-full object-cover" /> : <Users className="h-4 w-4" />}</div><div><p className="text-xs font-bold">{character?.name || "未知角色"}</p><p className="text-[10px] text-[var(--text-muted)]">关系：{relation.relationship}</p></div></button>; })}</div>{scopedRelations.length === 0 && <p className="mt-4 text-xs text-[var(--text-muted)]">当前身份还没有可用的角色关系。</p>}</div></div>}
+      {notice && <button type="button" onClick={() => setNotice(null)} className="absolute bottom-5 left-1/2 z-50 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-2xl bg-slate-900 px-4 py-3 text-center text-xs font-bold leading-5 text-white shadow-xl">{notice}</button>}
+      {roomPickerOpen && selectedMedia && <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setRoomPickerOpen(false)}><div className="flex max-h-[min(80vh,560px)] w-full max-w-md flex-col rounded-3xl bg-[var(--surface)] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex shrink-0 items-center justify-between"><h2 className="text-sm font-black">邀请角色一起看《{selectedMedia.title}》</h2><button type="button" onClick={() => setRoomPickerOpen(false)}><X className="h-4 w-4" /></button></div><div className="mt-4 min-h-0 space-y-2 overflow-y-auto overscroll-contain pr-1">{scopedRelations.map((relation) => { const character = characters.find((item) => item.id === relation.characterId); return <button key={relation.id} type="button" onClick={() => createRoom(relation)} className="flex w-full shrink-0 items-center gap-3 rounded-2xl border border-[var(--border)] p-3 text-left"><div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-[var(--surface-raised)]">{character?.avatar ? <img src={character.avatar} alt="" className="h-full w-full object-cover" /> : <Users className="h-4 w-4" />}</div><div><p className="text-xs font-bold">{character?.name || "未知角色"}</p><p className="text-[10px] text-[var(--text-muted)]">关系：{relation.relationship}</p></div></button>; })}</div>{scopedRelations.length === 0 && <p className="mt-4 text-xs text-[var(--text-muted)]">当前身份还没有可用的角色关系。</p>}</div></div>}
     </div>
   );
 }
