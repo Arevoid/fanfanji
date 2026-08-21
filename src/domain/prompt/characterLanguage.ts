@@ -75,11 +75,11 @@ Infer the character's natural reply language from the complete character profile
 Do not default to Simplified Chinese merely because the user, UI, task instructions, or conversation history are Chinese.
 If the profile implies a non-Chinese native language, write every character-authored chat bubble, voice transcript, Moment post, and Moment comment in that language only.
 Only when the complete character material truly contains no language or nationality clue may you use Simplified Chinese.
-Do not append a translation or bilingual duplicate unless the user explicitly asks for translation in the current message.`;
+Do not append a translation or bilingual duplicate to the visible reply unless the user explicitly asks for translation in the current message. If the system separately requires a structured translation field for automatic translation, provide that field without adding it to the visible reply.`;
   }
   return `[FINAL OUTPUT LANGUAGE — HIGHEST PRIORITY]
 The character's visible reply language for this turn is: ${language}.
 Write every character-authored chat bubble, voice transcript, Moment post, and Moment comment in ${language} only.
 The user's language, Chinese UI text, Chinese task instructions, and prior Chinese conversation history must never change this output language.
-Do not append a translation or bilingual duplicate unless the user explicitly asks for translation in the current message.`;
+Do not append a translation or bilingual duplicate to the visible reply unless the user explicitly asks for translation in the current message. If the system separately requires a structured translation field for automatic translation, provide that field without adding it to the visible reply.`;
 }
