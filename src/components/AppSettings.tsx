@@ -136,8 +136,9 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
   --chat-stop-text: var(--button-primary-text);
   --chat-stop-border: var(--button-primary-bg);
   --chat-stop-icon: none;
-  /* 底部展开功能栏图标大小，可改为 2rem、3rem 等。 */
+  /* 底部展开功能栏的外框大小；只影响圆形/方形按钮框。 */
   --chat-attachment-icon-size: 2.5rem;
+  /* 底部展开功能栏内部图片/默认图形大小；不改变按钮框。 */
   --chat-attachment-glyph-size: 1rem;
   --chat-attachment-panel-display: flex;
   --chat-attachment-label-display: block;
@@ -2134,7 +2135,7 @@ export default function AppSettings({
                   </div>
 
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <div><span className="text-xs font-bold text-slate-700">聊天功能图标</span><p className="text-[10px] text-slate-400 leading-relaxed mt-1">填写图片 URL 后替换默认图标；角色覆盖优先于这里的全局配置。</p></div>
+                    <div><span className="text-xs font-bold text-slate-700">聊天功能图标</span><p className="text-[10px] text-slate-400 leading-relaxed mt-1">填写图片 URL 后替换默认图标；角色覆盖优先于这里的全局配置。底部工具栏可在 CSS 中分别调整外框大小（--chat-attachment-icon-size）和内部图片大小（--chat-attachment-glyph-size）。</p></div>
                     <div className="grid grid-cols-2 gap-2">
                       {CHAT_ICON_FIELDS.map(({ key, label }) => <label key={key} className="space-y-1"><span className="text-[10px] font-semibold text-slate-500">{label}图标</span><input value={chatIcons[key] || ""} onChange={(e) => updateChatIcon(key, e.target.value)} placeholder="图片 URL（留空用默认）" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" /></label>)}
                     </div>

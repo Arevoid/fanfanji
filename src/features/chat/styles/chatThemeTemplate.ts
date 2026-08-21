@@ -54,7 +54,9 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
   --chat-stop-text: var(--button-primary-text);
   --chat-stop-border: var(--button-primary-bg);
   --chat-stop-icon: none;
+  /* 外框大小：不影响内部上传图片。 */
   --chat-attachment-icon-size: 2.5rem;
+  /* 内部图片/默认图形大小：不影响外框。 */
   --chat-attachment-glyph-size: 1rem;
   /* 顶部导航按钮 */
   --chat-header-control-bg: transparent;

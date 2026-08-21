@@ -4160,6 +4160,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   border: 1px solid rgba(255, 255, 255, 0.7) !important;
                   box-shadow: 0 4px 14px rgba(34, 46, 66, 0.08) !important;
                 }
+                #conv-screen.style-liquid-glass .chat-composer__attachment-panel .chat-attachment-icon > .chat-configured-icon,
+                #conv-screen.style-liquid-glass .chat-composer__attachment-panel .chat-attachment-icon > svg {
+                  width: var(--chat-attachment-glyph-size, 1rem) !important;
+                  height: var(--chat-attachment-glyph-size, 1rem) !important;
+                }
                 #conv-screen.style-liquid-glass .chat-composer__attachment-panel > * > span {
                   color: #334155 !important;
                   font-size: calc(10px * var(--app-font-scale, 1)) !important;

@@ -9,5 +9,5 @@ interface ChatIconProps {
 /** Renders a configured icon resource, or preserves the supplied default icon. */
 export default function ChatIcon({ src, className = "", children }: ChatIconProps) {
   if (!src?.trim()) return <>{children}</>;
-  return <img src={src} alt="" className={`object-contain ${className}`} />;
+  return <img src={src} alt="" className={`chat-configured-icon object-contain ${className}`} />;
 }
