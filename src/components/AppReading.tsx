@@ -39,7 +39,8 @@ import type {
 } from "../domain/reading/types";
 import type { Character, UserSettings, WorldBookEntry } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
-import type { ReadingRoom } from "../domain/reading/coReadingTypes";
+import type { ReadingComment, ReadingRoom } from "../domain/reading/coReadingTypes";
+import { loadMemories, saveMemories } from "../core/storage/repositories/memoryRepository";
 import {
   importReadingFile,
   ReadingImportError,
@@ -71,6 +72,7 @@ import {
   getReadingRoomProgress,
   initializeCoReadingStore,
   listReadingRooms,
+  deleteReadingComment,
 } from "../core/storage/repositories/readingCoReadingRepository";
 import {
   advanceAiReadingToParagraph,
@@ -207,6 +209,7 @@ export default function AppReading({
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [inviteBookId, setInviteBookId] = useState<string | null>(null);
   const [roomCommentDraft, setRoomCommentDraft] = useState("");
+  const [commentDeleteTarget, setCommentDeleteTarget] = useState<ReadingComment | null>(null);
   const [section, setSection] = useState<"library" | "archived">("library");
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [readingBookId, setReadingBookId] = useState<string | null>(null);
@@ -1095,6 +1098,40 @@ export default function AppReading({
     }
   };
 
+  const deleteRoomComment = (comment: ReadingComment, preserveMemory: boolean) => {
+    try {
+      const memories = loadMemories([]).value;
+      const nextMemories = memories.filter((memory) => memory.sourceReadingCommentId !== comment.id);
+      if (preserveMemory) {
+        nextMemories.push({
+          id: createId("reading-memory"),
+          characterId: comment.characterId,
+          relationId: comment.relationId,
+          content: "共读记录：" + comment.authorName + "：" + comment.body + (comment.textSnapshot ? "（原文片段：" + comment.textSnapshot.slice(0, 300) + "）" : ""),
+          timestamp: comment.createdAt,
+          importance: 5,
+          isManual: true,
+          sourceReadingRoomId: comment.readingRoomId,
+          sourceReadingCommentId: comment.id,
+          sourceReadingEvidence: {
+            bookId: comment.bookId,
+            ...(comment.targetChapterId ? { chapterId: comment.targetChapterId } : {}),
+            ...(comment.targetParagraphAnchorId ? { paragraphAnchorId: comment.targetParagraphAnchorId } : {}),
+          },
+        });
+      }
+      const memoryResult = saveMemories(nextMemories);
+      if (!memoryResult.success) throw new Error("共读记忆保存失败");
+      const result = deleteReadingComment(comment, comment.id);
+      if (!result.success) throw new Error("共读卡片删除失败");
+      setCommentDeleteTarget(null);
+      refreshLibrary();
+      setNotice({ tone: "success", text: preserveMemory ? "已保存共读记忆并删除卡片。" : "已彻底删除卡片及其记忆。" });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "删除共读卡片失败" });
+    }
+  };
+
   const openWorldSetup = () => {
     if (!availableFriends.length) {
       setNotice({
@@ -1256,9 +1293,7 @@ export default function AppReading({
           <h1 className="absolute left-1/2 max-w-[65%] -translate-x-1/2 truncate text-base font-bold">
             共读房间
           </h1>
-          <span className="rounded-full border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--text-muted)]">
-            AI 好友
-          </span>
+          <span className="w-8" aria-hidden="true" />
         </header>
         <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
           <div className="mx-auto w-full max-w-md space-y-4">
@@ -1317,7 +1352,7 @@ export default function AppReading({
             </section>
             <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold">AI 阅读状态</h2>
+                <h2 className="text-sm font-bold">阅读状态</h2>
                 <span className="text-[10px] text-[var(--text-muted)]">
                   独立保存
                 </span>
@@ -1373,17 +1408,13 @@ export default function AppReading({
               {roomComments.length > 0 ? (
                 <div className="mt-3 space-y-2">
                   {roomComments.slice(-4).map((comment) => (
-                    <button
-                      type="button"
+                    <div
                       key={comment.id}
-                      disabled={!comment.targetParagraphAnchorId && !comment.targetChapterId}
-                      onClick={() => openCommentAtSource(comment)}
-                      className="w-full rounded-2xl bg-[var(--surface-raised)] p-3 text-left disabled:cursor-default"
+                      className="w-full rounded-2xl bg-[var(--surface-raised)] p-3 text-left"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-[10px] font-bold">
                           {comment.authorName}
-                          {comment.author === "ai" ? " · AI" : ""}
                         </span>
                         <span className="text-[10px] text-[var(--text-muted)]">
                           {comment.kind === "book"
@@ -1393,7 +1424,8 @@ export default function AppReading({
                               : "段评"}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                      <button type="button" onClick={() => openCommentAtSource(comment)} disabled={!comment.targetParagraphAnchorId && !comment.targetChapterId} className="mt-1 block w-full text-left disabled:cursor-default">
+                      <p className="text-xs leading-5 text-[var(--text-secondary)]">
                         {comment.body}
                       </p>
                       {(comment.targetParagraphAnchorId || comment.targetChapterId) && (
@@ -1405,7 +1437,9 @@ export default function AppReading({
                           <span className="shrink-0 font-bold">查看原文 →</span>
                         </p>
                       )}
-                    </button>
+                      </button>
+                      <button type="button" onClick={() => setCommentDeleteTarget(comment)} className="mt-2 flex h-7 w-full items-center justify-center rounded-lg border border-rose-200/60 text-[10px] font-bold text-rose-500">删除这张卡片</button>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -2404,6 +2438,19 @@ export default function AppReading({
           </button>
         ))}
       </nav>
+      {commentDeleteTarget && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/45 p-3 sm:items-center" role="dialog" aria-modal="true" aria-label="删除共读卡片">
+          <div className="w-full max-w-sm rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl">
+            <h2 className="text-base font-black">删除共读卡片</h2>
+            <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">请选择删除方式。保存删除会把这条共读记录写入当前关系记忆；彻底删除不会保留这条卡片或对应记忆。</p>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => deleteRoomComment(commentDeleteTarget, false)} className="h-10 rounded-xl border border-rose-200 text-xs font-bold text-rose-500">彻底删除</button>
+              <button type="button" onClick={() => deleteRoomComment(commentDeleteTarget, true)} className="h-10 rounded-xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)]">保存删除</button>
+            </div>
+            <button type="button" onClick={() => setCommentDeleteTarget(null)} className="mt-2 h-9 w-full rounded-xl border border-[var(--border)] text-xs font-bold">取消</button>
+          </div>
+        </div>
+      )}
       {actionBook && (
         <ReadingBookActionSheet
           book={actionBook}

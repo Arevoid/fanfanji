@@ -164,6 +164,17 @@ export function createReadingComment(comment: ReadingComment): StorageWriteResul
   return saveCoReadingStore({ ...store, comments: [...store.comments, comment] });
 }
 
+export function deleteReadingComment(scope: ReadingRoomScope, commentId: string): StorageWriteResult {
+  if (!isValidReadingRoomScope(scope) || !commentId) return { success: false, error: "validation" };
+  const store = loadCoReadingStore().value;
+  const exists = store.comments.some((comment) => isSameReadingRoomScope(comment, scope) && comment.id === commentId);
+  if (!exists) return { success: false, error: "missing" };
+  return saveCoReadingStore({
+    ...store,
+    comments: store.comments.filter((comment) => !(isSameReadingRoomScope(comment, scope) && comment.id === commentId)),
+  });
+}
+
 export function listReadingDiscussions(scope: ReadingRoomScope): ReadingDiscussion[] {
   if (!isValidReadingRoomScope(scope)) return [];
   return loadCoReadingStore().value.discussions.filter((discussion) => isSameReadingRoomScope(discussion, scope)).sort((left, right) => right.updatedAt - left.updatedAt);
