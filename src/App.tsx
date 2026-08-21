@@ -2919,6 +2919,12 @@ export default function App() {
         .phone-screen-container [data-reading-book-card] {
           border-radius: 12px !important;
         }
+        .phone-screen-container [data-reading-delete] {
+          border-radius: 12px !important;
+        }
+        .phone-screen-container [data-reading-search] {
+          background-color: transparent !important;
+        }
 
         /* 3. Strict 16px Padding & Gap of 12px */
         .phone-screen-container .p-3,

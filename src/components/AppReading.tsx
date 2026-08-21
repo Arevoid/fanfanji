@@ -39,7 +39,7 @@ import type {
 } from "../domain/reading/types";
 import type { Character, UserSettings, WorldBookEntry } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
-import type { ReadingComment, ReadingRoom } from "../domain/reading/coReadingTypes";
+import type { ReadingRoom } from "../domain/reading/coReadingTypes";
 import { loadMemories, saveMemories } from "../core/storage/repositories/memoryRepository";
 import {
   importReadingFile,
@@ -72,7 +72,7 @@ import {
   getReadingRoomProgress,
   initializeCoReadingStore,
   listReadingRooms,
-  deleteReadingComment,
+  deleteReadingRoom,
 } from "../core/storage/repositories/readingCoReadingRepository";
 import {
   advanceAiReadingToParagraph,
@@ -209,7 +209,7 @@ export default function AppReading({
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [inviteBookId, setInviteBookId] = useState<string | null>(null);
   const [roomCommentDraft, setRoomCommentDraft] = useState("");
-  const [commentDeleteTarget, setCommentDeleteTarget] = useState<ReadingComment | null>(null);
+  const [roomDeleteTarget, setRoomDeleteTarget] = useState<ReadingRoom | null>(null);
   const [section, setSection] = useState<"library" | "archived">("library");
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [readingBookId, setReadingBookId] = useState<string | null>(null);
@@ -1098,35 +1098,36 @@ export default function AppReading({
     }
   };
 
-  const deleteRoomComment = (comment: ReadingComment, preserveMemory: boolean) => {
+  const deleteRoom = (room: ReadingRoom, preserveMemory: boolean) => {
     try {
-      const memories = loadMemories([]).value;
-      const nextMemories = memories.filter((memory) => memory.sourceReadingCommentId !== comment.id);
-      if (preserveMemory) {
-        nextMemories.push({
-          id: createId("reading-memory"),
-          characterId: comment.characterId,
-          relationId: comment.relationId,
-          content: "共读记录：" + comment.authorName + "：" + comment.body + (comment.textSnapshot ? "（原文片段：" + comment.textSnapshot.slice(0, 300) + "）" : ""),
-          timestamp: comment.createdAt,
-          importance: 5,
-          isManual: true,
-          sourceReadingRoomId: comment.readingRoomId,
-          sourceReadingCommentId: comment.id,
-          sourceReadingEvidence: {
-            bookId: comment.bookId,
-            ...(comment.targetChapterId ? { chapterId: comment.targetChapterId } : {}),
-            ...(comment.targetParagraphAnchorId ? { paragraphAnchorId: comment.targetParagraphAnchorId } : {}),
-          },
-        });
-      }
+      const roomComments = listReadingComments(room);
+      const memories = loadMemories([]).value.filter((memory) => memory.sourceReadingRoomId !== room.readingRoomId);
+      const nextMemories = preserveMemory
+        ? memories.concat(roomComments.map((comment) => ({
+            id: createId("reading-memory"),
+            characterId: comment.characterId,
+            relationId: comment.relationId,
+            content: "共读记录：" + comment.authorName + "：" + comment.body + (comment.textSnapshot ? "（原文片段：" + comment.textSnapshot.slice(0, 300) + "）" : ""),
+            timestamp: comment.createdAt,
+            importance: 5,
+            isManual: true,
+            sourceReadingRoomId: room.readingRoomId,
+            sourceReadingCommentId: comment.id,
+            sourceReadingEvidence: {
+              bookId: comment.bookId,
+              ...(comment.targetChapterId ? { chapterId: comment.targetChapterId } : {}),
+              ...(comment.targetParagraphAnchorId ? { paragraphAnchorId: comment.targetParagraphAnchorId } : {}),
+            },
+          })))
+        : memories;
       const memoryResult = saveMemories(nextMemories);
       if (!memoryResult.success) throw new Error("共读记忆保存失败");
-      const result = deleteReadingComment(comment, comment.id);
-      if (!result.success) throw new Error("共读卡片删除失败");
-      setCommentDeleteTarget(null);
+      const result = deleteReadingRoom(room);
+      if (!result.success) throw new Error("共读房间删除失败");
+      setRoomDeleteTarget(null);
+      if (selectedRoomId === room.readingRoomId) setSelectedRoomId(null);
       refreshLibrary();
-      setNotice({ tone: "success", text: preserveMemory ? "已保存共读记忆并删除卡片。" : "已彻底删除卡片及其记忆。" });
+      setNotice({ tone: "success", text: preserveMemory ? "已保存共读记录并删除共读卡片。" : "已彻底删除共读卡片及其记录。" });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "删除共读卡片失败" });
     }
@@ -1438,7 +1439,6 @@ export default function AppReading({
                         </p>
                       )}
                       </button>
-                      <button type="button" onClick={() => setCommentDeleteTarget(comment)} className="mt-2 flex h-7 w-full items-center justify-center rounded-lg border border-rose-200/60 text-[10px] font-bold text-rose-500">删除这张卡片</button>
                     </div>
                   ))}
                 </div>
@@ -2039,6 +2039,7 @@ export default function AppReading({
                 <label className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3">
                   <Search className="h-4 w-4 text-[var(--text-muted)]" />
                   <input
+                    data-reading-search
                     value={shelfQuery}
                     onChange={(event) => setShelfQuery(event.target.value)}
                     placeholder={`搜索 ${books.length} 本书`}
@@ -2287,6 +2288,14 @@ export default function AppReading({
                           书房
                         </button>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setRoomDeleteTarget(room || null)}
+                        disabled={!room}
+                        className="mt-2 h-8 w-full rounded-xl border border-rose-200/70 text-[10px] font-bold text-rose-500 disabled:opacity-40"
+                      >
+                        删除共读卡片
+                      </button>
                     </div>
                   );
                 })
@@ -2438,16 +2447,16 @@ export default function AppReading({
           </button>
         ))}
       </nav>
-      {commentDeleteTarget && (
+      {roomDeleteTarget && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/45 p-3 sm:items-center" role="dialog" aria-modal="true" aria-label="删除共读卡片">
           <div className="w-full max-w-sm rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl">
             <h2 className="text-base font-black">删除共读卡片</h2>
-            <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">请选择删除方式。保存删除会把这条共读记录写入当前关系记忆；彻底删除不会保留这条卡片或对应记忆。</p>
+            <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">请选择删除方式。保存删除会把这个共读房间中的评价记录写入当前关系记忆；彻底删除会移除房间、进度、评价和讨论记录。</p>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => deleteRoomComment(commentDeleteTarget, false)} className="h-10 rounded-xl border border-rose-200 text-xs font-bold text-rose-500">彻底删除</button>
-              <button type="button" onClick={() => deleteRoomComment(commentDeleteTarget, true)} className="h-10 rounded-xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)]">保存删除</button>
+              <button type="button" onClick={() => deleteRoom(roomDeleteTarget, false)} className="h-10 rounded-xl border border-rose-200 text-xs font-bold text-rose-500">彻底删除</button>
+              <button type="button" onClick={() => deleteRoom(roomDeleteTarget, true)} className="h-10 rounded-xl bg-[var(--button-primary-bg)] text-xs font-bold text-[var(--button-primary-text)]">保存删除</button>
             </div>
-            <button type="button" onClick={() => setCommentDeleteTarget(null)} className="mt-2 h-9 w-full rounded-xl border border-[var(--border)] text-xs font-bold">取消</button>
+            <button type="button" onClick={() => setRoomDeleteTarget(null)} className="mt-2 h-9 w-full rounded-xl border border-[var(--border)] text-xs font-bold">取消</button>
           </div>
         </div>
       )}

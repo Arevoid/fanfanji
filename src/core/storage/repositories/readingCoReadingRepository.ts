@@ -164,14 +164,18 @@ export function createReadingComment(comment: ReadingComment): StorageWriteResul
   return saveCoReadingStore({ ...store, comments: [...store.comments, comment] });
 }
 
-export function deleteReadingComment(scope: ReadingRoomScope, commentId: string): StorageWriteResult {
-  if (!isValidReadingRoomScope(scope) || !commentId) return { success: false, error: "validation" };
+export function deleteReadingRoom(scope: ReadingRoomScope): StorageWriteResult {
+  if (!isValidReadingRoomScope(scope)) return { success: false, error: "validation" };
   const store = loadCoReadingStore().value;
-  const exists = store.comments.some((comment) => isSameReadingRoomScope(comment, scope) && comment.id === commentId);
-  if (!exists) return { success: false, error: "missing" };
+  if (!store.rooms.some((room) => isSameReadingRoomScope(room, scope))) return { success: false, error: "missing" };
   return saveCoReadingStore({
     ...store,
-    comments: store.comments.filter((comment) => !(isSameReadingRoomScope(comment, scope) && comment.id === commentId)),
+    rooms: store.rooms.filter((room) => !isSameReadingRoomScope(room, scope)),
+    aiReadingStates: store.aiReadingStates.filter((state) => !isSameReadingRoomScope(state, scope)),
+    comments: store.comments.filter((comment) => !isSameReadingRoomScope(comment, scope)),
+    discussions: store.discussions.filter((discussion) => !isSameReadingRoomScope(discussion, scope)),
+    discussionMessages: store.discussionMessages.filter((message) => !isSameReadingRoomScope(message, scope)),
+    roomProgress: store.roomProgress.filter((progress) => !isSameReadingRoomScope(progress, scope)),
   });
 }
 
