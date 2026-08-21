@@ -14,8 +14,8 @@ import { formatTimeWidgetDate } from "../features/home/timeWidgetDate";
 import { audioDb } from "../utils/audioDb";
 import { readString, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
-import { loadReadingStore } from "../core/storage/repositories/readingRepository";
-import { listReadingComments, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
+import { initializeReadingStore, loadReadingStore } from "../core/storage/repositories/readingRepository";
+import { initializeCoReadingStore, listReadingComments, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
 import type { ReadingBook } from "../domain/reading/types";
 import type { ReadingComment } from "../domain/reading/coReadingTypes";
 import ReadingBookCover from "./reading/ReadingBookCover";
@@ -1025,10 +1025,19 @@ export function ReadingWidget({ isEditing, onRemove, activeIdentity, widgetBorde
   const [entry, setEntry] = useState<ReadingWidgetEntry | null>(() => getReadingWidgetEntry(activeIdentity?.id));
   const refresh = () => setEntry(getReadingWidgetEntry(activeIdentity?.id));
   useEffect(() => {
+    let active = true;
     refresh();
+    Promise.all([initializeReadingStore(), initializeCoReadingStore()]).then(() => {
+      if (active) refresh();
+    }).catch(() => {
+      if (active) refresh();
+    });
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
+    const retryTimer = window.setTimeout(refresh, 1200);
     return () => {
+      active = false;
+      window.clearTimeout(retryTimer);
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
@@ -1178,7 +1187,7 @@ export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, character
           })}
         </div>)}
       </div>
-      <p className="mt-2 truncate text-center text-[9px] font-medium text-stone-400">{latestText}</p>
+      <p className="mt-2 line-clamp-2 min-h-[22px] text-center text-[9px] font-medium leading-[1.25] text-stone-400">{data.latest ? <><span className="block">最晚{chatStatsFormatTime(data.latest.timestamp)}分</span><span className="block">您还在与{latestName}畅聊</span></> : latestText}</p>
       {isEditing && onRemove && <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>}
     </div>
   );
