@@ -68,9 +68,12 @@ class CinemaAssetDB {
 
   async save(input: { assetId: string; kind: CinemaAssetKind; blob: Blob }): Promise<void> {
     if (!input.assetId || !(input.blob instanceof Blob)) throw new Error("影视资源无效");
-    const database = await this.init();
     try {
+      // Android document providers may grant a short-lived read permission.
+      // Materialize the File before waiting for IndexedDB to open, otherwise
+      // the provider can revoke access and arrayBuffer() reports NotReadableError.
       const data = await input.blob.arrayBuffer();
+      const database = await this.init();
       const record: PersistedCinemaAsset = {
         assetId: input.assetId,
         kind: input.kind,
