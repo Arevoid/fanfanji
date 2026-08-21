@@ -10,7 +10,17 @@ const packageVersion = (JSON.parse(readFileSync(path.join(projectDirectory, 'pac
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'dev-csp-for-vite-react-preamble',
+        apply: 'serve',
+        transformIndexHtml(html: string) {
+          return html.replace("script-src 'self';", "script-src 'self' 'unsafe-inline';");
+        },
+      },
+    ],
     define: {
       __APP_VERSION__: JSON.stringify(packageVersion),
     },

@@ -1,5 +1,6 @@
 import express from "express";
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
@@ -11,24 +12,169 @@ import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslan
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./src/utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "./src/core/security/contentSecurityPolicy";
 import { assertImageGenerationTrigger } from "./src/features/chat/services/imageGenerationIntent";
+import { createNeteaseMusicAdapter, NeteaseMusicApiError } from "./src/server/neteaseMusicAdapter";
+import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "./src/server/neteaseMusicSession";
 
 dotenv.config();
 
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
+  const responseContentSecurityPolicy = process.env.NODE_ENV === "production"
+    ? CONTENT_SECURITY_POLICY
+    : CONTENT_SECURITY_POLICY.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'");
 
   // Use JSON parsing with size limits for custom base64 wallpapers or customized avatars
   app.use(express.json({ limit: "15mb" }));
   app.use((req, res, next) => {
     const requestId = req.header("x-request-id")?.trim() || randomUUID();
     res.setHeader("x-request-id", requestId);
-    res.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+    res.setHeader("Content-Security-Policy", responseContentSecurityPolicy);
     res.locals.requestId = requestId;
     next();
   });
   app.get("/healthz", (_req, res) => {
     res.json({ status: "ok", service: "fanfanji", version: process.env.npm_package_version || "0.0.0" });
+  });
+
+  const neteaseSecureCookies = process.env.NODE_ENV === "production" || process.env.COOKIE_SECURE === "true";
+  const getNeteaseAdapter = (req: express.Request) => {
+    const baseUrl = process.env.NETEASE_API_BASE_URL?.trim();
+    if (!baseUrl) return null;
+    return createNeteaseMusicAdapter({ baseUrl, cookie: getNeteaseUpstreamCookie(req.headers.cookie) });
+  };
+  const neteaseError = (res: express.Response, error: unknown, fallback = "网易云服务暂时不可用。") => {
+    const typed = error instanceof NeteaseMusicApiError ? error : null;
+    const status = typed?.status && typed.status >= 400 && typed.status < 600 ? typed.status : 502;
+    return res.status(status).json({ success: false, code: typed?.code || "netease-provider", error: error instanceof Error ? error.message : fallback });
+  };
+  const requireNeteaseAdapter = (req: express.Request, res: express.Response) => {
+    const adapter = getNeteaseAdapter(req);
+    if (!adapter) {
+      res.status(503).json({ success: false, code: "netease_provider_not_configured", error: "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL（网易云兼容 API 地址）后才能扫码登录和读取云端内容。" });
+      return null;
+    }
+    if (!getNeteaseUpstreamCookie(req.headers.cookie)) {
+      res.status(401).json({ success: false, code: "netease_not_authenticated", error: "请先连接网易云账号。" });
+      return null;
+    }
+    return adapter;
+  };
+
+  app.post("/api/music/netease/qr/create", async (_req, res) => {
+    try {
+      const baseUrl = process.env.NETEASE_API_BASE_URL?.trim();
+      if (!baseUrl) return res.status(503).json({ success: false, code: "netease_provider_not_configured", error: "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL（网易云兼容 API 地址）后才能扫码登录和读取云端内容。" });
+      const session = await createNeteaseMusicAdapter({ baseUrl }).createQrSession();
+      return res.json({ success: true, key: session.key, qrUrl: session.qrUrl, qrImage: session.qrImage, status: session.status });
+    } catch (error) { return neteaseError(res, error, "网易云二维码创建失败。"); }
+  });
+
+  app.post("/api/music/netease/qr/check", async (req, res) => {
+    try {
+      const baseUrl = process.env.NETEASE_API_BASE_URL?.trim();
+      const key = typeof req.body?.key === "string" ? req.body.key.trim() : "";
+      if (!baseUrl) return res.status(503).json({ success: false, code: "netease_provider_not_configured", error: "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL（网易云兼容 API 地址）后才能扫码登录和读取云端内容。" });
+      if (!key) return res.status(400).json({ success: false, code: "invalid_qr_key", error: "二维码 key 不能为空。" });
+      const session = await createNeteaseMusicAdapter({ baseUrl }).checkQrSession(key);
+      if (session.status === "authorized" && session.sessionCookie) {
+        const cookie = buildNeteaseSessionCookie(session.sessionCookie, neteaseSecureCookies);
+        if (cookie) res.setHeader("Set-Cookie", cookie);
+      }
+      return res.json({ success: true, key: session.key, status: session.status });
+    } catch (error) { return neteaseError(res, error, "网易云二维码状态查询失败。"); }
+  });
+
+  app.post("/api/music/netease/logout", (_req, res) => {
+    res.setHeader("Set-Cookie", clearNeteaseSessionCookie(neteaseSecureCookies));
+    return res.json({ success: true });
+  });
+
+  app.get("/api/music/netease/account", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      return res.json({ success: true, account: await adapter.getAccount() });
+    } catch (error) { return neteaseError(res, error, "网易云账号信息读取失败。"); }
+  });
+
+  app.get("/api/music/netease/playlists", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      const account = await adapter.getAccount();
+      return res.json({ success: true, account, playlists: await adapter.getPlaylists(account.userId) });
+    } catch (error) { return neteaseError(res, error, "网易云歌单读取失败。"); }
+  });
+
+  app.get("/api/music/netease/playlists/:playlistId/tracks", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      return res.json({ success: true, tracks: await adapter.getPlaylistTracks(req.params.playlistId) });
+    } catch (error) { return neteaseError(res, error, "网易云歌单歌曲读取失败。"); }
+  });
+
+  app.get("/api/music/netease/search", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      const keywords = typeof req.query.keywords === "string" ? req.query.keywords.trim() : "";
+      if (!keywords) return res.status(400).json({ success: false, code: "invalid_keywords", error: "搜索关键词不能为空。" });
+      return res.json({ success: true, tracks: await adapter.searchTracks(keywords) });
+    } catch (error) { return neteaseError(res, error, "网易云搜索失败。"); }
+  });
+
+  app.get("/api/music/netease/recommendations/daily", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      return res.json({ success: true, tracks: await adapter.getDailyRecommendations() });
+    } catch (error) { return neteaseError(res, error, "网易云每日推荐读取失败。"); }
+  });
+
+  app.post("/api/music/netease/tracks/:trackId/url", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      const level = req.body?.level === "higher" || req.body?.level === "exhigh" ? req.body.level : "standard";
+      return res.json({ success: true, track: await adapter.getPlayableUrl(req.params.trackId, level) });
+    } catch (error) { return neteaseError(res, error, "网易云歌曲播放地址获取失败。"); }
+  });
+
+  app.get("/api/music/netease/tracks/:trackId/stream", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      const level = req.query.level === "higher" || req.query.level === "exhigh" ? req.query.level : "standard";
+      const playable = await adapter.getPlayableUrl(req.params.trackId, level);
+      const upstream = await fetch(playable.url, {
+        headers: {
+          Referer: "https://music.163.com/",
+          "User-Agent": "Mozilla/5.0",
+          ...(typeof req.headers.range === "string" ? { Range: req.headers.range } : {}),
+        },
+      });
+      if (!upstream.ok && upstream.status !== 206) {
+        return res.status(502).json({ success: false, code: "netease_stream_failed", error: `网易云音频流请求失败（${upstream.status}）。` });
+      }
+      res.status(upstream.status);
+      for (const header of ["content-type", "content-length", "content-range", "accept-ranges", "cache-control"]) {
+        const value = upstream.headers.get(header);
+        if (value) res.setHeader(header, value);
+      }
+      if (!res.getHeader("content-type")) res.setHeader("content-type", "audio/mpeg");
+      if (!upstream.body) return res.end();
+      return Readable.fromWeb(upstream.body as never).pipe(res);
+    } catch (error) { return neteaseError(res, error, "网易云音频流读取失败。"); }
+  });
+
+  app.get("/api/music/netease/tracks/:trackId/lyrics", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      return res.json({ success: true, lyrics: await adapter.getLyrics(req.params.trackId) });
+    } catch (error) { return neteaseError(res, error, "网易云歌词读取失败。"); }
   });
 
   const explicitImageRequest = (text: string) => {

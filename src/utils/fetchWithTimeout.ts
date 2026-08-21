@@ -40,6 +40,7 @@ export async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit = {},
   timeoutMs: number = API_REQUEST_TIMEOUTS.textGeneration,
+  fetchImplementation: typeof fetch = fetch,
 ): Promise<Response> {
   const controller = new AbortController();
   const callerSignal = init.signal;
@@ -60,7 +61,7 @@ export async function fetchWithTimeout(
   }, Math.max(1, timeoutMs));
 
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    return await fetchImplementation(input, { ...init, signal: controller.signal });
   } catch (error) {
     if (timedOut) {
       throw new ApiRequestError("timeout", `Request timed out after ${timeoutMs}ms.`, { timeoutMs, cause: error });

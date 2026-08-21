@@ -87,6 +87,11 @@ import {
   swapOneByOneItems,
 } from "./features/home/homeGrid";
 import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./features/music/services/dualMusicRecommendationService";
+import { isNeteaseMusicTrack, normalizeMusicTrack } from "./features/music/services/musicTrackModel";
+import { getNeteaseTrackStreamUrl } from "./features/music/services/neteaseMusicApi";
+import { loadMusicPlaybackHistory, recordMusicPlayback } from "./core/storage/repositories/musicPlaybackHistoryRepository";
+import type { MusicPlaybackHistoryItem } from "./types";
+import type { NeteaseMusicQuality } from "./features/music/neteaseTypes";
 import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./features/music/services/musicPlayback";
 import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
@@ -502,7 +507,7 @@ export default function App() {
 
   const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
 
-  const [tracks, setTracks] = useState<MusicTrack[]>(() => readArray<MusicTrack>("phone_music_tracks", []).value);
+  const [tracks, setTracks] = useState<MusicTrack[]>(() => readArray<MusicTrack>("phone_music_tracks", []).value.map(normalizeMusicTrack));
   const tracksRef = useRef<MusicTrack[]>(tracks);
   const [dualMusicConfigs, setDualMusicConfigs] = useState<DualMusicWidgetConfig[]>(() => loadDualMusicWidgetConfigs());
   const [identityMusicStates, setIdentityMusicStates] = useState<IdentityMusicState[]>(() => loadIdentityMusicStates());
@@ -731,7 +736,7 @@ export default function App() {
       const raw = readString("phone_music_tracks").value;
       if (!raw) return;
       try {
-        const parsedTracks = JSON.parse(raw) as MusicTrack[];
+        const parsedTracks = (JSON.parse(raw) as MusicTrack[]).map(normalizeMusicTrack);
         const localTracks = parsedTracks.filter((t) => t.isLocal);
         if (localTracks.length === 0) return;
 
@@ -858,6 +863,9 @@ export default function App() {
 
   // Global Music Player State
   const [currentTrack, setCurrentTrack] = useState<MusicTrack | null>(null);
+  const [runtimeQueueTracks, setRuntimeQueueTracks] = useState<MusicTrack[]>([]);
+  const [neteaseQuality, setNeteaseQuality] = useState<NeteaseMusicQuality>("standard");
+  const [musicPlaybackHistory, setMusicPlaybackHistory] = useState<MusicPlaybackHistoryItem[]>(() => loadMusicPlaybackHistory(settings.activeIdentityId || DEFAULT_IDENTITY_ID));
   const [isPlaying, setIsPlaying] = useState(false);
   const [playMode, setPlayMode] = useState<"single" | "list" | "random">("list");
   const [volume, setVolume] = useState(0.8);
@@ -865,8 +873,17 @@ export default function App() {
 
   const PRESEED_MUSIC_TRACKS: MusicTrack[] = [];
 
+  useEffect(() => {
+    setMusicPlaybackHistory(loadMusicPlaybackHistory(settings.activeIdentityId || DEFAULT_IDENTITY_ID));
+  }, [settings.activeIdentityId]);
+  const getMusicQueue = () => [
+    ...PRESEED_MUSIC_TRACKS,
+    ...tracks,
+    ...runtimeQueueTracks.filter((track) => !tracks.some((localTrack) => localTrack.id === track.id)),
+  ];
+
   const handleNextTrack = () => {
-    const allTracks = [...PRESEED_MUSIC_TRACKS, ...tracks];
+    const allTracks = getMusicQueue();
     if (allTracks.length === 0) return;
     
     if (playMode === "single") {
@@ -896,7 +913,7 @@ export default function App() {
   };
 
   const handlePrevTrack = () => {
-    const allTracks = [...PRESEED_MUSIC_TRACKS, ...tracks];
+    const allTracks = getMusicQueue();
     if (allTracks.length === 0) return;
     const currentIndex = allTracks.findIndex((t) => t.id === currentTrack?.id);
     const prevIndex = (currentIndex - 1 + allTracks.length) % allTracks.length;
@@ -965,7 +982,7 @@ export default function App() {
       setMusicPlaybackError("本地音频文件缺失，请重新导入这首歌。");
       return;
     }
-    if (!track.isLocal && !/^https?:\/\//i.test(track.url)) {
+    if (!track.isLocal && !/^https?:\/\//i.test(track.url) && !track.url.startsWith("/")) {
       setMusicPlaybackError("歌曲链接无效，请在音乐库中更新。");
       return;
     }
@@ -2483,7 +2500,7 @@ export default function App() {
 
   // Music Handlers
   const handleAddMusicTrack = (track: MusicTrack) => {
-    setTracks((prev) => [...prev, track]);
+    setTracks((prev) => [...prev, normalizeMusicTrack(track)]);
   };
 
   const handleDeleteMusicTrack = (id: string) => {
@@ -2723,6 +2740,27 @@ export default function App() {
     if (!saved.success) {
       alert("身份已切换，但当前浏览器存储空间不足，刷新页面后可能无法保留本次切换。请先清理存储空间。");
     }
+  };
+
+  const handlePlayMusicTrack = async (track: MusicTrack) => {
+    if (!isNeteaseMusicTrack(track)) {
+      toggleTrack(track.id, "music-library", true, track);
+      setMusicPlaybackHistory(recordMusicPlayback(track, settings.activeIdentityId || DEFAULT_IDENTITY_ID));
+      return;
+    }
+    if (!track.providerTrackId) {
+      setMusicPlaybackError("网易云歌曲缺少歌曲 ID，请重新打开歌单。");
+      return;
+    }
+    const playableTrack = {
+      ...track,
+      // Resolve the expiring NetEase URL on the same-origin server stream so
+      // playback can begin from this user gesture without a second client request.
+      url: getNeteaseTrackStreamUrl(track.providerTrackId, neteaseQuality),
+    };
+      setRuntimeQueueTracks((previous) => previous.some((item) => item.id === track.id) ? previous.map((item) => item.id === track.id ? playableTrack : item) : [...previous, playableTrack]);
+      toggleTrack(track.id, "music-library", true, playableTrack);
+      setMusicPlaybackHistory(recordMusicPlayback(playableTrack, settings.activeIdentityId || DEFAULT_IDENTITY_ID));
   };
   // Keep forum activity processing alive while the user navigates between apps.
   // The engine still respects document visibility and persists all pending work.
@@ -3847,6 +3885,11 @@ export default function App() {
                     onDeletePlaylist={handleDeleteMusicPlaylist}
                     onClose={() => setActiveApp(null)}
                     currentTrack={currentTrack}
+                    queueTracks={runtimeQueueTracks}
+                    playbackHistory={musicPlaybackHistory}
+                    activeIdentityId={activeIdentityId}
+                    neteaseQuality={neteaseQuality}
+                    setNeteaseQuality={setNeteaseQuality}
                     setCurrentTrack={setCurrentTrack}
                     isPlaying={isPlaying}
                     setIsPlaying={setIsPlaying}
@@ -3855,7 +3898,7 @@ export default function App() {
                     setPlayMode={setPlayMode}
                     volume={volume}
                     setVolume={setVolume}
-                    onPlayTrack={(track) => toggleTrack(track.id, "music-library", true, track)}
+                    onPlayTrack={handlePlayMusicTrack}
                     />
                   </LazyAppBoundary>
                 )}

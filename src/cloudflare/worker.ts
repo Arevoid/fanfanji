@@ -5,13 +5,20 @@ import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput 
 import { buildTranslationPrompt, callTextProvider, fetchTextModels, TextApiError } from "../server/textProtocolAdapters";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy";
+import { createNeteaseMusicAdapter, NeteaseMusicApiError } from "../server/neteaseMusicAdapter";
+import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "../server/neteaseMusicSession";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
+  NETEASE_API_BASE_URL?: string;
 }
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store", "Content-Security-Policy": CONTENT_SECURITY_POLICY } });
+}
+
+function jsonWithHeaders(body: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
+  return Response.json(body, { status, headers: { "Cache-Control": "no-store", "Content-Security-Policy": CONTENT_SECURITY_POLICY, ...extraHeaders } });
 }
 
 function withSecurityHeaders(response: Response): Response {
@@ -41,6 +48,12 @@ function errorResponse(error: unknown, fallbackCode: string, fallbackMessage: st
 function textErrorResponse(error: unknown, fallbackMessage: string) {
   const status = error instanceof TextApiError ? error.status : 500;
   return json({ success: false, error: error instanceof Error ? error.message : fallbackMessage }, status);
+}
+
+function neteaseErrorResponse(error: unknown, fallbackMessage: string) {
+  const typed = error instanceof NeteaseMusicApiError ? error : null;
+  const status = typed?.status && typed.status >= 400 && typed.status < 600 ? typed.status : 502;
+  return json({ success: false, code: typed?.code || "netease-provider", error: error instanceof Error ? error.message : fallbackMessage }, status);
 }
 
 const textInput = (body: Record<string, unknown>, message: string, systemInstruction?: string, temperature?: number) => ({
@@ -94,8 +107,88 @@ export default {
     const isMosslandRoute = url.pathname === "/api/mossland-tts";
     const isTextRoute = ["/api/chat", "/api/translate", "/api/test-key", "/api/models", "/api/extract-memories", "/api/summarize-personality"].includes(url.pathname);
     const isMinimaxRoute = url.pathname === "/api/minimax-tts";
-    if (!isImageRoute && !isMosslandRoute && !isTextRoute && !isMinimaxRoute) return withSecurityHeaders(await env.ASSETS.fetch(request));
-    if (request.method !== "POST") return json({ success: false, error: "代理接口只接受 POST 请求。" }, 405);
+    const isNeteaseRoute = url.pathname.startsWith("/api/music/netease/");
+    if (!isImageRoute && !isMosslandRoute && !isTextRoute && !isMinimaxRoute && !isNeteaseRoute) return withSecurityHeaders(await env.ASSETS.fetch(request));
+    if (!isNeteaseRoute && request.method !== "POST") return json({ success: false, error: "代理接口只接受 POST 请求。" }, 405);
+
+    if (isNeteaseRoute) {
+      const baseUrl = env.NETEASE_API_BASE_URL?.trim();
+      if (!baseUrl) return json({ success: false, code: "netease_provider_not_configured", error: "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL（网易云兼容 API 地址）后才能扫码登录和读取云端内容。" }, 503);
+      const secureCookies = url.protocol === "https:";
+      const upstreamCookie = getNeteaseUpstreamCookie(request.headers.get("Cookie"));
+      try {
+        if (url.pathname === "/api/music/netease/qr/create" && request.method === "POST") {
+          const session = await createNeteaseMusicAdapter({ baseUrl }).createQrSession();
+          return json({ success: true, key: session.key, qrUrl: session.qrUrl, qrImage: session.qrImage, status: session.status });
+        }
+        if (url.pathname === "/api/music/netease/qr/check" && request.method === "POST") {
+          const body = await requestBody(request);
+          const key = typeof body?.key === "string" ? body.key.trim() : "";
+          if (!key) return json({ success: false, code: "invalid_qr_key", error: "二维码 key 不能为空。" }, 400);
+          const session = await createNeteaseMusicAdapter({ baseUrl }).checkQrSession(key);
+          const cookie = session.status === "authorized" ? buildNeteaseSessionCookie(session.sessionCookie, secureCookies) : undefined;
+          return jsonWithHeaders({ success: true, key: session.key, status: session.status }, 200, cookie ? { "Set-Cookie": cookie } : {});
+        }
+        if (url.pathname === "/api/music/netease/logout" && request.method === "POST") {
+          return jsonWithHeaders({ success: true }, 200, { "Set-Cookie": clearNeteaseSessionCookie(secureCookies) });
+        }
+        if (!upstreamCookie) return json({ success: false, code: "netease_not_authenticated", error: "请先连接网易云账号。" }, 401);
+        const adapter = createNeteaseMusicAdapter({ baseUrl, cookie: upstreamCookie });
+        if (url.pathname === "/api/music/netease/account" && request.method === "GET") {
+          return json({ success: true, account: await adapter.getAccount() });
+        }
+        if (url.pathname === "/api/music/netease/playlists" && request.method === "GET") {
+          const account = await adapter.getAccount();
+          return json({ success: true, account, playlists: await adapter.getPlaylists(account.userId) });
+        }
+        const playlistMatch = url.pathname.match(/^\/api\/music\/netease\/playlists\/([^/]+)\/tracks$/);
+        if (playlistMatch && request.method === "GET") {
+          return json({ success: true, tracks: await adapter.getPlaylistTracks(decodeURIComponent(playlistMatch[1])) });
+        }
+        if (url.pathname === "/api/music/netease/search" && request.method === "GET") {
+          const keywords = url.searchParams.get("keywords")?.trim() || "";
+          if (!keywords) return json({ success: false, code: "invalid_keywords", error: "搜索关键词不能为空。" }, 400);
+          return json({ success: true, tracks: await adapter.searchTracks(keywords) });
+        }
+        if (url.pathname === "/api/music/netease/recommendations/daily" && request.method === "GET") {
+          return json({ success: true, tracks: await adapter.getDailyRecommendations() });
+        }
+        const trackMatch = url.pathname.match(/^\/api\/music\/netease\/tracks\/([^/]+)\/url$/);
+        if (trackMatch && request.method === "POST") {
+          const body = await requestBody(request);
+          const level = body?.level === "higher" || body?.level === "exhigh" ? body.level : "standard";
+          return json({ success: true, track: await adapter.getPlayableUrl(decodeURIComponent(trackMatch[1]), level) });
+        }
+        const streamMatch = url.pathname.match(/^\/api\/music\/netease\/tracks\/([^/]+)\/stream$/);
+        if (streamMatch && request.method === "GET") {
+          const requestedLevel = url.searchParams.get("level");
+          const level: "standard" | "higher" | "exhigh" = requestedLevel === "higher" || requestedLevel === "exhigh" ? requestedLevel : "standard";
+          const playable = await adapter.getPlayableUrl(decodeURIComponent(streamMatch[1]), level);
+          const upstream = await fetch(playable.url, {
+            headers: {
+              Referer: "https://music.163.com/",
+              "User-Agent": "Mozilla/5.0",
+              ...(request.headers.get("Range") ? { Range: request.headers.get("Range") as string } : {}),
+            },
+          });
+          if (!upstream.ok && upstream.status !== 206) return json({ success: false, code: "netease_stream_failed", error: `网易云音频流请求失败（${upstream.status}）。` }, 502);
+          const headers = new Headers({ "Content-Security-Policy": CONTENT_SECURITY_POLICY, "Cache-Control": "no-store" });
+          for (const header of ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]) {
+            const value = upstream.headers.get(header);
+            if (value) headers.set(header, value);
+          }
+          if (!headers.has("Content-Type")) headers.set("Content-Type", "audio/mpeg");
+          return new Response(upstream.body, { status: upstream.status, headers });
+        }
+        const lyricsMatch = url.pathname.match(/^\/api\/music\/netease\/tracks\/([^/]+)\/lyrics$/);
+        if (lyricsMatch && request.method === "GET") {
+          return json({ success: true, lyrics: await adapter.getLyrics(decodeURIComponent(lyricsMatch[1])) });
+        }
+        return json({ success: false, code: "netease_route_not_found", error: "未知网易云代理路径。" }, 404);
+      } catch (error) {
+        return neteaseErrorResponse(error, "网易云服务暂时不可用。");
+      }
+    }
 
     const body = await requestBody(request);
     if (!body) return json({ success: false, error: "代理请求格式无效。" }, 400);

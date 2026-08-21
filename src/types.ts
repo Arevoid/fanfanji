@@ -579,6 +579,8 @@ export interface ForumTranslation {
   lastAccessedAt: number;
 }
 
+export type MusicTrackSource = "local" | "network-link" | "netease";
+
 export interface MusicTrack {
   id: string;
   title: string;
@@ -586,6 +588,14 @@ export interface MusicTrack {
   /** Runtime ObjectURL for a local file, or the persisted URL for a network track. */
   url: string;
   isLocal: boolean;
+  /** Explicit provider identity; missing values are inferred for legacy tracks. */
+  source?: MusicTrackSource;
+  /** Provider-native ID for remote tracks; never used as a local IndexedDB key. */
+  providerTrackId?: string;
+  /** Account scope for remote provider records, when a provider account is involved. */
+  providerAccountId?: string;
+  /** Runtime-only expiry hint for a provider playback URL. */
+  remoteUrlExpiresAt?: number;
   duration?: string;
   /** Local audio blobs live in MusicAppDB. Old tracks use id as the asset key. */
   audioAssetId?: string;
@@ -857,6 +867,30 @@ export interface MemoryItem {
     chapterId?: string;
     paragraphAnchorId?: string;
   };
+}
+
+export interface MusicPlaybackHistoryItem {
+  id: string;
+  ownerIdentityId: string;
+  trackId: string;
+  title: string;
+  artist: string;
+  source?: MusicTrackSource;
+  providerTrackId?: string;
+  providerAccountId?: string;
+  playedAt: number;
+}
+
+export interface MusicRemoteLibraryItem {
+  id: string;
+  ownerIdentityId: string;
+  provider: "netease";
+  providerAccountId: string;
+  providerTrackId: string;
+  title: string;
+  artist: string;
+  coverUrl?: string;
+  savedAt: number;
 }
 
 export type RedPacketMode = "lucky" | "exclusive";
