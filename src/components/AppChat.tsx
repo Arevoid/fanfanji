@@ -268,9 +268,9 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
 }
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
-  { key: "image", label: "图片" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },
-  { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
-  { key: "location", label: "位置" }, { key: "call", label: "通话" }, { key: "plus", label: "加号" }, { key: "send", label: "发送" },
+  { key: "image", label: "图片" }, { key: "textImage", label: "文字图" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },
+  { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" }, { key: "location", label: "位置" },
+  { key: "call", label: "通话" }, { key: "plus", label: "加号" }, { key: "send", label: "发送" }, { key: "stop", label: "停止" },
 ];
 
 interface AppChatProps {
@@ -6008,7 +6008,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 </label>
 
                 <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="chat-attachment-item chat-attachment-item--text-image flex-1 flex flex-col items-center justify-center group min-w-10" title="发送文字图">
-                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><Camera className="w-4 h-4 text-slate-700" /></div>
+                  <div className="chat-attachment-icon w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><ChatIcon src={getChatIcon("textImage")} className="w-4 h-4"><Camera className="w-4 h-4 text-slate-700" /></ChatIcon></div>
                   <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">文字图</span>
                 </button>
 

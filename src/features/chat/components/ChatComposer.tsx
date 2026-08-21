@@ -23,7 +23,7 @@ interface ChatInputBarProps {
   onSendOnly: (inputText: string, event?: FormEvent) => void | Promise<void>;
   onSendAndReply: (inputText: string, event?: FormEvent) => void | Promise<void>;
   onStopReply: () => void;
-  getChatIcon: (key: "plus" | "send") => string | undefined;
+  getChatIcon: (key: "plus" | "send" | "stop") => string | undefined;
 }
 
 /**
@@ -109,7 +109,7 @@ export function ChatInputBar({
       >
         <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
           {isReplyInFlight
-            ? <Square className="w-3.5 h-3.5 fill-current text-current" />
+            ? <ChatIcon src={getChatIcon("stop")} className="w-3.5 h-3.5"><Square className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>
             : <ChatIcon src={getChatIcon("send")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>}
         </span>
       </button>

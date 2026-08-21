@@ -107,11 +107,10 @@ const DEFAULT_PRESETS: StylePreset[] = [
 ];
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
-  { key: "image", label: "图片" }, { key: "voice", label: "语音" },
-  { key: "sticker", label: "表情" }, { key: "redPacket", label: "红包" },
-  { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
-  { key: "location", label: "位置" }, { key: "call", label: "通话" },
-  { key: "plus", label: "加号" }, { key: "send", label: "发送" },
+  { key: "image", label: "图片" }, { key: "textImage", label: "文字图" }, { key: "voice", label: "语音" },
+  { key: "sticker", label: "表情" }, { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" },
+  { key: "location", label: "位置" }, { key: "call", label: "通话" }, { key: "plus", label: "加号" },
+  { key: "send", label: "发送" }, { key: "stop", label: "停止" },
 ];
 
 const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置页和其他应用不会应用本样式。 */
@@ -125,9 +124,20 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
   --chat-ai-text: var(--text-primary);
   --chat-bubble-border: var(--border);
   --chat-composer-bg: var(--surface);
+  --chat-composer-border: var(--border);
+  --chat-composer-border-width: 1px;
+  --chat-composer-radius: 0px;
+  --chat-composer-shadow: none;
   --chat-input-bg: var(--input-bg);
   --chat-send-bg: var(--button-primary-bg);
   --chat-send-text: var(--button-primary-text);
+  --chat-send-border: var(--button-primary-bg);
+  --chat-stop-bg: var(--button-primary-bg);
+  --chat-stop-text: var(--button-primary-text);
+  --chat-stop-border: var(--button-primary-bg);
+  --chat-stop-icon: none;
+  --chat-attachment-panel-display: flex;
+  --chat-attachment-label-display: block;
 }
 
 .chat-page {
@@ -145,9 +155,19 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
 .chat-message--call-duration { color: currentColor; }
 .chat-composer--default,
 .chat-composer--floating,
-.chat-composer--liquid { background: var(--chat-composer-bg); }
+.chat-composer--liquid {
+  background: var(--chat-composer-bg);
+  border: var(--chat-composer-border-width) solid var(--chat-composer-border);
+  border-radius: var(--chat-composer-radius);
+  box-shadow: var(--chat-composer-shadow);
+}
 .chat-input { background: var(--chat-input-bg); }
 .send-button { background: var(--chat-send-bg); color: var(--chat-send-text); }
+.chat-composer__stop-reply-button { background: var(--chat-stop-bg, var(--chat-send-bg)); color: var(--chat-stop-text, var(--chat-send-text)); border-color: var(--chat-stop-border, var(--chat-send-border)); }
+.chat-composer__stop-reply-button .cv-send-reply-icon svg { display: none; }
+.chat-composer__stop-reply-button .cv-send-reply-icon { background: var(--chat-stop-icon, none) center / contain no-repeat; }
+.chat-composer__attachment-panel { display: var(--chat-attachment-panel-display, flex); }
+.chat-attachment-label { display: var(--chat-attachment-label-display, block); }
 `;
 
 const BACKUP_KEYS = [

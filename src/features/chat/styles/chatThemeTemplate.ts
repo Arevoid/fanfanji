@@ -50,6 +50,10 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
   --chat-send-hover-bg: var(--button-primary-hover-bg);
   --chat-send-hover-text: var(--button-primary-text);
   --chat-send-hover-border: var(--button-primary-hover-bg);
+  --chat-stop-bg: var(--button-primary-bg);
+  --chat-stop-text: var(--button-primary-text);
+  --chat-stop-border: var(--button-primary-bg);
+  --chat-stop-icon: none;
   /* 顶部导航按钮 */
   --chat-header-control-bg: transparent;
   --chat-header-control-text: var(--chat-text);
@@ -65,6 +69,8 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
   --chat-attachment-icon-border: var(--border);
   --chat-attachment-icon-radius: var(--radius-xl);
   --chat-attachment-label-text: var(--text-secondary);
+  --chat-attachment-panel-display: flex;
+  --chat-attachment-label-display: block;
 }
 
 /* ==================== 页面与壁纸 ==================== */
@@ -229,6 +235,7 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 
 /* ==================== 展开工具栏 ==================== */
 .chat-composer__attachment-panel {
+  display: var(--chat-attachment-panel-display);
   background: var(--chat-attachment-panel-bg);
   border-color: var(--chat-attachment-panel-border);
   border-radius: var(--chat-attachment-panel-radius);
@@ -240,7 +247,7 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
   border-color: var(--chat-attachment-icon-border);
   border-radius: var(--chat-attachment-icon-radius);
 }
-.chat-attachment-label { color: var(--chat-attachment-label-text); }
+.chat-attachment-label { display: var(--chat-attachment-label-display); color: var(--chat-attachment-label-text); }
 
 /* ==================== 底部输入栏 ==================== */
 .cv-footer,
@@ -286,6 +293,9 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 .chat-composer__send-only-button:hover:not(:disabled) { background: var(--chat-send-only-hover-bg); color: var(--chat-send-only-hover-text); }
 .chat-composer__send-reply-button,
 .send-button { background: var(--chat-send-bg); color: var(--chat-send-text); border-color: var(--chat-send-border); }
+.chat-composer__stop-reply-button { background: var(--chat-stop-bg); color: var(--chat-stop-text); border-color: var(--chat-stop-border); }
+.chat-composer__stop-reply-button .cv-send-reply-icon svg { display: none; }
+.chat-composer__stop-reply-button .cv-send-reply-icon { background: var(--chat-stop-icon) center / contain no-repeat; }
 .chat-composer__send-reply-button:hover:not(:disabled),
 .send-button:hover:not(:disabled) { background: var(--chat-send-hover-bg); color: var(--chat-send-hover-text); border-color: var(--chat-send-hover-border); }
 .chat-composer__button:disabled { background: var(--button-disabled-bg); color: var(--button-disabled-text); opacity: 0.4; }
@@ -300,5 +310,6 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 .cv-plus-icon { background: url("加号按钮图片URL") center / contain no-repeat; }
 .cv-send-only-icon { background: url("仅发送按钮图片URL") center / contain no-repeat; }
 .cv-send-reply-icon { background: url("发送回复按钮图片URL") center / contain no-repeat; }
+.chat-composer__stop-reply-button .cv-send-reply-icon { background: url("停止按钮图片URL") center / contain no-repeat; }
 */
 `;
