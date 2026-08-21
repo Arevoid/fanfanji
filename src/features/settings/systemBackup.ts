@@ -193,6 +193,7 @@ export function parseSystemBackup(value: unknown): {
   localStorage: SystemBackupLocalStorage;
   indexedDb: SystemBackupIndexedDb;
   legacy: boolean;
+  integrityWarning?: string;
 } {
   if (!isRecord(value)) throw new Error("无效的备份文件格式！");
 
@@ -204,6 +205,7 @@ export function parseSystemBackup(value: unknown): {
       if (entry !== null && typeof entry !== "string") throw new Error("系统备份中的本地数据格式无效！");
       return [key, entry];
     })) as SystemBackupLocalStorage;
+    let integrityWarning: string | undefined;
     if (value.checksum !== undefined) {
       if (typeof value.checksum !== "string" || value.checksum !== checksumPayload({
         format: SYSTEM_BACKUP_FORMAT,
@@ -212,13 +214,17 @@ export function parseSystemBackup(value: unknown): {
         localStorage,
         indexedDb: value.indexedDb,
       })) {
-        throw new Error("备份校验失败，文件可能已损坏或被修改！");
+        // Older v3 exports signed the payload before the final sanitization and
+        // offline-story merge. Keep the data recoverable, but make the caller
+        // obtain an explicit confirmation before restoring an unverified file.
+        integrityWarning = "备份校验值不一致，文件可能来自旧版导出或曾被修改。";
       }
     }
     return {
       localStorage,
       indexedDb: cloneJson(value.indexedDb),
       legacy: false,
+      integrityWarning,
     };
   }
 

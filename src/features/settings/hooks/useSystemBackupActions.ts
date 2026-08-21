@@ -107,7 +107,10 @@ export function useSystemBackupActions({ backupKeys, fullBackupKeys, lightBackup
         if (entries.length === 0 || entries.some(([key, value]) => !backupKeys.has(key) || (value !== null && typeof value !== "string"))) {
           throw new Error("非有效的小手机备份文件！");
         }
-        if (!confirm("确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置 and 世界书数据且不可撤销！")) return;
+        const confirmationMessage = parsedBackup.integrityWarning
+          ? `${parsedBackup.integrityWarning}\n\n文件结构仍然完整，但无法证明内容未被修改。确定仍要尝试恢复吗？这将覆盖当前所有对话、人设、设置和世界书数据，且不可撤销！`
+          : "确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置和世界书数据且不可撤销！";
+        if (!confirm(confirmationMessage)) return;
         const entriesToWrite = filterSystemBackupLocalStorageForRestore(entries, parsedBackup.indexedDb);
         await assertBackupStorageCapacity(entriesToWrite);
         const snapshot = snapshotLocalStorage();
