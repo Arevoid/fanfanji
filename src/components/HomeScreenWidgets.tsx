@@ -1086,9 +1086,12 @@ const chatStatsDateFromKey = (key: string): Date => {
   return new Date(year, month - 1, day);
 };
 
+/** Widget timestamps are intentionally fixed to local 24-hour HH:mm output. */
 const chatStatsFormatTime = (timestamp: number): string => {
   const date = new Date(timestamp);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
 };
 
 function countChatStreak(days: Set<string>, today: Date): number {
