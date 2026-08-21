@@ -168,8 +168,8 @@ export default function AppCinema({
   };
 
   const handleVideoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
     const file = event.target.files?.[0];
-    event.target.value = "";
     const extension = file?.name.match(/\.([^.]+)$/)?.[1].toLowerCase();
     const extensionMimeTypes: Record<string, string> = {
       mp4: "video/mp4",
@@ -180,6 +180,7 @@ export default function AppCinema({
     };
     const mimeType = file?.type.startsWith("video/") ? file.type : (extension ? extensionMimeTypes[extension] : undefined);
     if (!file || !mimeType) {
+      input.value = "";
       setNotice("无法识别该视频格式，请选择 MP4、WebM、MOV、M4V 或 OGV 文件");
       return;
     }
@@ -208,6 +209,10 @@ export default function AppCinema({
     } catch (error) {
       await cinemaAssetDb.delete(assetId).catch(() => undefined);
       setNotice(error instanceof Error ? error.message : "视频导入失败，请稍后重试");
+    } finally {
+      // Android browsers may revoke the File reference if the input is cleared
+      // before the asynchronous IndexedDB read has finished.
+      input.value = "";
     }
   };
 
@@ -232,11 +237,15 @@ export default function AppCinema({
   };
 
   const handleSubtitleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
     const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file || !selectedMedia) return;
+    if (!file || !selectedMedia) {
+      input.value = "";
+      return;
+    }
     const format = /\.vtt$/i.test(file.name) ? "vtt" : /\.srt$/i.test(file.name) ? "srt" : null;
     if (!format) {
+      input.value = "";
       setNotice("字幕仅支持 .srt 或 .vtt 文件");
       return;
     }
@@ -251,6 +260,8 @@ export default function AppCinema({
     } catch (error) {
       await cinemaAssetDb.delete(assetId).catch(() => undefined);
       setNotice(error instanceof Error ? error.message : "字幕导入失败");
+    } finally {
+      input.value = "";
     }
   };
 
