@@ -67,6 +67,7 @@ import {
   AnniversaryWidget, 
   TodoWidget, 
   ReadingWidget,
+  ChatStatsWidget,
   AddWidgetSheet 
 } from "./components/HomeScreenWidgets";
 import {
@@ -1796,7 +1797,7 @@ export default function App() {
     }
   };
 
-  const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "reading" | "welcome") => {
+  const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "reading" | "chat-stats" | "welcome") => {
     if (widgetType === "welcome") {
       setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: false }));
       setIsShowingAddWidget(false);
@@ -1822,6 +1823,9 @@ export default function App() {
       } else if (widgetType === "reading") {
         size = "2x4";
         actualWidgetType = "reading";
+      } else if (widgetType === "chat-stats") {
+        size = "2x2";
+        actualWidgetType = "chat-stats";
       } else {
         size = "2x2";
         actualWidgetType = widgetType as any;
@@ -1863,6 +1867,7 @@ export default function App() {
       case "dual-music": return DualMusicWidget;
       case "anniversary": return AnniversaryWidget;
       case "reading": return ReadingWidget;
+      case "chat-stats": return ChatStatsWidget;
       case "todo": default: return TodoWidget;
     }
   };
@@ -3538,6 +3543,8 @@ export default function App() {
                                             onNext={handleNextTrack}
                                             currentTrack={currentTrack || null}
                                             characters={characters}
+                                            messages={messages}
+                                            relationships={relationships}
                                             onOpenApp={setActiveApp}
                                             installedAppIds={installedAppIds}
                                             widgetOpacity={settings.widgetOpacity}
@@ -4070,6 +4077,8 @@ export default function App() {
                   isPlaying,
                   currentTrack: currentTrack || null,
                   characters,
+                  messages,
+                  relationships,
                   installedAppIds,
                   widgetOpacity: settings.widgetOpacity,
                   widgetBorderRadius: settings.widgetBorderRadius,
