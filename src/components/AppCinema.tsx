@@ -111,6 +111,7 @@ export default function AppCinema({
   const [discussionDraft, setDiscussionDraft] = useState("");
   const [replyLoading, setReplyLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [videoProcessing, setVideoProcessing] = useState(false);
   const [frameDataUrl, setFrameDataUrl] = useState<string | null>(null);
   const [roomPickerOpen, setRoomPickerOpen] = useState(false);
   const [mediaSettingsOpen, setMediaSettingsOpen] = useState(false);
@@ -157,10 +158,10 @@ export default function AppCinema({
   }, [selectedRoom?.id, selectedRoom?.autoReactionEnabled, selectedRoom?.plotContinuityEnabled]);
 
   useEffect(() => {
-    if (!notice) return;
+    if (!notice || videoProcessing) return;
     const timer = window.setTimeout(() => setNotice(null), 2_000);
     return () => window.clearTimeout(timer);
-  }, [notice]);
+  }, [notice, videoProcessing]);
 
   useEffect(() => {
     setMediaTitleDraft(selectedMedia?.title || "");
@@ -237,6 +238,8 @@ export default function AppCinema({
     }
     const mediaId = createId("cinema-media");
     const assetId = createId("cinema-video");
+    setVideoProcessing(true);
+    setNotice("正在处理视频，请稍候…");
     try {
       const durationMs = await validateVideoPlayback(file);
       await cinemaAssetDb.save({ assetId, kind: "video", blob: file });
@@ -262,6 +265,7 @@ export default function AppCinema({
       await cinemaAssetDb.delete(assetId).catch(() => undefined);
       setNotice(error instanceof Error ? error.message : "视频导入失败，请稍后重试");
     } finally {
+      setVideoProcessing(false);
       // Android browsers may revoke the File reference if the input is cleared
       // before the asynchronous IndexedDB read has finished.
       input.value = "";
