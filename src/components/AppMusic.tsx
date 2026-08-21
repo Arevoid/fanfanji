@@ -62,6 +62,25 @@ const WAVE_BARS = [
   14, 12, 10, 14, 18, 24, 22, 16, 12, 10, 8, 8, 6, 6, 4, 4, 4, 4, 4, 4, 4, 4
 ];
 
+interface LyricLine {
+  time: number;
+  text: string;
+}
+
+const parseLyrics = (value: string): LyricLine[] => {
+  const lines: LyricLine[] = [];
+  value.split(/\r?\n/).forEach((line) => {
+    const matches = [...line.matchAll(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g)];
+    const text = line.replace(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g, "").trim();
+    if (!text) return;
+    matches.forEach((match) => {
+      const fraction = match[3] ? Number("0." + match[3]) : 0;
+      lines.push({ time: Number(match[1]) * 60 + Number(match[2]) + fraction, text });
+    });
+  });
+  return lines.sort((a, b) => a.time - b.time);
+};
+
 export default function AppMusic({
   tracks,
   onAddTrack,
@@ -98,6 +117,7 @@ export default function AppMusic({
   const [lyrics, setLyrics] = useState<NeteaseLyrics | null>(null);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [lyricsError, setLyricsError] = useState<string | null>(null);
+  const lyricLineRefs = React.useRef<Array<HTMLParagraphElement | null>>([]);
 
   const allTracks = [...PRESEED_TRACKS, ...tracks, ...queueTracks.filter((track) => !tracks.some((item) => item.id === track.id))];
 
@@ -144,9 +164,25 @@ export default function AppMusic({
   }, [volume]);
 
   useEffect(() => {
+    let cancelled = false;
     setLyrics(null);
     setLyricsError(null);
-  }, [currentTrack?.id]);
+    lyricLineRefs.current = [];
+    if (!currentTrack || !isNeteaseMusicTrack(currentTrack) || !currentTrack.providerTrackId) return;
+
+    setLyricsLoading(true);
+    void getNeteaseLyrics(currentTrack.providerTrackId)
+      .then((result) => {
+        if (!cancelled) setLyrics(result);
+      })
+      .catch((error) => {
+        if (!cancelled) setLyricsError(error instanceof Error ? error.message : "歌词读取失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLyricsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [currentTrack?.id, currentTrack?.providerTrackId]);
 
   const handleLoadLyrics = async () => {
     if (!currentTrack || !isNeteaseMusicTrack(currentTrack) || !currentTrack.providerTrackId) return;
@@ -160,6 +196,17 @@ export default function AppMusic({
       setLyricsLoading(false);
     }
   };
+
+  const lyricText = lyrics?.lyric || lyrics?.translatedLyric || "";
+  const lyricLines = parseLyrics(lyricText);
+  const activeLyricIndex = lyricLines.reduce((activeIndex, line, index) => (
+    line.time <= currentTime ? index : activeIndex
+  ), -1);
+
+  useEffect(() => {
+    if (activeLyricIndex < 0) return;
+    lyricLineRefs.current[activeLyricIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeLyricIndex, currentTrack?.id]);
 
   const handlePlayPause = () => {
     if (currentTrack) onPlayTrack(currentTrack);
@@ -313,7 +360,7 @@ export default function AppMusic({
           </div>
           <div className="mt-5 text-center"><h2 className="truncate text-xl font-extrabold text-slate-800">{currentTrack.title}</h2><p className="mt-1 truncate text-sm text-slate-600">{currentTrack.artist || "未知艺术家"}</p></div>
           <div className="mt-14 flex min-h-[76px] flex-1 items-center justify-center text-center">
-            {lyrics ? <div className="max-h-28 w-full overflow-y-auto whitespace-pre-wrap text-[12px] leading-6 text-slate-600">{lyrics.lyric || lyrics.translatedLyric}</div> : <div><p className="text-xs text-slate-500">找不到歌词</p>{isNeteaseMusicTrack(currentTrack) && <button type="button" onClick={() => void handleLoadLyrics()} className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/80 px-3 py-1.5 text-[10px] font-bold text-slate-600 shadow-sm">{lyricsLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />} 加载歌词</button>}</div>}
+            {lyricText ? <div className="max-h-28 w-full overflow-y-auto px-2 text-center text-[12px] leading-7 text-slate-600">{lyricLines.length > 0 ? lyricLines.map((line, index) => <p key={line.time + "-" + index} ref={(node) => { lyricLineRefs.current[index] = node; }} className={index === activeLyricIndex ? "scale-105 font-bold text-sky-800 transition-all duration-300" : "opacity-60 transition-all duration-300"}>{line.text}</p>) : <p className="whitespace-pre-wrap">{lyricText}</p>}</div> : <div><p className="text-xs text-slate-500">{lyricsLoading ? "正在加载歌词…" : "找不到歌词"}</p>{isNeteaseMusicTrack(currentTrack) && <button type="button" onClick={() => void handleLoadLyrics()} className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/80 px-3 py-1.5 text-[10px] font-bold text-slate-600 shadow-sm">{lyricsLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />} 重新加载歌词</button>}</div>}
           </div>
           {lyricsError && <p className="mt-2 text-center text-[10px] text-red-500">{lyricsError}</p>}
           <div className="mt-5"><input type="range" min="0" max={duration || 100} value={currentTime} onChange={handleSeek} className="h-1.5 w-full cursor-pointer accent-sky-700" /><div className="mt-2 flex justify-between text-[10px] font-medium text-slate-500"><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div></div>
