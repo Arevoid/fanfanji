@@ -163,11 +163,23 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   reading: loadAppReading,
 };
 
-// Warm only the most frequently opened app after the first paint. Other app
-// chunks are still prefetched on pointer-down and loaded on demand, avoiding
-// a large post-startup memory spike on long-running mobile sessions.
+// Preload app modules after the first paint. This only downloads JavaScript;
+// it does not mount an app or run its effects, so switching apps can use the
+// browser module cache without making the initial render heavier.
 const IDLE_PRELOAD_APP_IDS = [
   "chat",
+  "archives",
+  "worldbook",
+  "music",
+  "forum",
+  "notes",
+  "diary",
+  "store",
+  "settings",
+  "memory",
+  "offline",
+  "schedule",
+  "reading",
 ] as const;
 
 const preloadApp = (appId: string) => {
@@ -189,18 +201,27 @@ const AppOffline = React.lazy(loadAppOffline);
 const AppSchedule = React.lazy(loadAppSchedule);
 const AppReading = React.lazy(loadAppReading);
 
-function LazyAppBoundary({ children }: React.PropsWithChildren) {
+function LazyAppBoundary({
+  children,
+  visible = true,
+}: React.PropsWithChildren<{ visible?: boolean }>) {
   return (
-    <React.Suspense
+    <div
+      className="absolute inset-0 h-full w-full"
+      style={{ display: visible ? "block" : "none" }}
+      aria-hidden={!visible}
+    >
+      <React.Suspense
       fallback={(
         <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] text-[var(--text-secondary)]" role="status" aria-live="polite">
           <span className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" aria-hidden="true" />
           <span className="text-xs font-semibold">正在打开…</span>
         </div>
       )}
-    >
-      {children}
-    </React.Suspense>
+      >
+        {children}
+      </React.Suspense>
+    </div>
   );
 }
 
@@ -380,7 +401,16 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const preloadIdleApps = () => IDLE_PRELOAD_APP_IDS.forEach(preloadApp);
+    const preloadIdleApps = () => {
+      const connection = (navigator as Navigator & {
+        connection?: { saveData?: boolean; effectiveType?: string };
+      }).connection;
+      const isConstrainedNetwork = connection?.saveData
+        || connection?.effectiveType === "slow-2g"
+        || connection?.effectiveType === "2g";
+      const appIds = isConstrainedNetwork ? ["chat"] : IDLE_PRELOAD_APP_IDS;
+      appIds.forEach(preloadApp);
+    };
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
@@ -507,6 +537,14 @@ export default function App() {
 
   // Navigation State
   const [activeApp, setActiveApp] = useState<string | null>(null);
+  const [mountedAppIds, setMountedAppIds] = useState<Set<string>>(() => new Set());
+  const isAppMounted = (appId: string) => activeApp === appId || mountedAppIds.has(appId);
+  useEffect(() => {
+    if (!activeApp) return;
+    setMountedAppIds((current) => current.has(activeApp)
+      ? current
+      : new Set([...current, activeApp]));
+  }, [activeApp]);
   const [chatModuleActivated, setChatModuleActivated] = useState(false);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
@@ -3753,8 +3791,8 @@ export default function App() {
                   </div>
                 )}
 
-                {activeApp === "archives" && (
-                  <LazyAppBoundary>
+                {isAppMounted("archives") && (
+                  <LazyAppBoundary visible={activeApp === "archives"}>
                     <AppArchives
                       characters={characters}
                       worldBookEntries={worldBookEntries}
@@ -3766,8 +3804,8 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "worldbook" && (
-                  <LazyAppBoundary>
+                {isAppMounted("worldbook") && (
+                  <LazyAppBoundary visible={activeApp === "worldbook"}>
                     <AppWorldBook
                       entries={worldBookEntries}
                       characters={characters}
@@ -3779,8 +3817,8 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "music" && (
-                  <LazyAppBoundary>
+                {isAppMounted("music") && (
+                  <LazyAppBoundary visible={activeApp === "music"}>
                     <AppMusic
                     tracks={tracks}
                     playlists={playlists}
@@ -3803,8 +3841,8 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "forum" && (
-                  <LazyAppBoundary>
+                {isAppMounted("forum") && (
+                  <LazyAppBoundary visible={activeApp === "forum"}>
                     <AppForum
                       activeIdentity={activeIdentity}
                       characters={characters}
@@ -3826,16 +3864,16 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "notes" && (
-                  <LazyAppBoundary>
+                {isAppMounted("notes") && (
+                  <LazyAppBoundary visible={activeApp === "notes"}>
                     <AppNotes
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "schedule" && (
-                  <LazyAppBoundary>
+                {isAppMounted("schedule") && (
+                  <LazyAppBoundary visible={activeApp === "schedule"}>
                     <AppSchedule
                       entries={scheduleEntries}
                       appointments={scheduleStore.appointments}
@@ -3850,8 +3888,8 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "reading" && (
-                  <LazyAppBoundary>
+                {isAppMounted("reading") && (
+                  <LazyAppBoundary visible={activeApp === "reading"}>
                     <AppReading
                       userIdentityId={activeIdentityId}
                       settings={settings}
@@ -3863,8 +3901,8 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "diary" && (
-                  <LazyAppBoundary>
+                {isAppMounted("diary") && (
+                  <LazyAppBoundary visible={activeApp === "diary"}>
                     <AppDiary
                     activeIdentity={activeIdentity}
                     characters={characters}
@@ -3884,8 +3922,8 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "store" && (
-                  <LazyAppBoundary>
+                {isAppMounted("store") && (
+                  <LazyAppBoundary visible={activeApp === "store"}>
                     <AppStore
                     installedAppIds={installedAppIds}
                     onInstallApp={handleInstallApp}
@@ -3903,8 +3941,8 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "settings" && (
-                  <LazyAppBoundary>
+                {isAppMounted("settings") && (
+                  <LazyAppBoundary visible={activeApp === "settings"}>
                     <AppSettings
                       settings={settings}
                       bubbleStylePreset={resolveActiveChatStylePreset(
@@ -3921,8 +3959,8 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "memory" && (
-                  <LazyAppBoundary>
+                {isAppMounted("memory") && (
+                  <LazyAppBoundary visible={activeApp === "memory"}>
                     <AppMemory
                     characters={characters}
                     relationships={relationships}
@@ -3941,8 +3979,8 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "offline" && (
-                  <LazyAppBoundary>
+                {isAppMounted("offline") && (
+                  <LazyAppBoundary visible={activeApp === "offline"}>
                     <AppOffline
                       characters={characters}
                       relationships={relationships}
