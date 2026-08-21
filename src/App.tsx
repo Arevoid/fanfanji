@@ -117,6 +117,7 @@ import {
   CalendarDays,
   Cloud,
   ContactRound,
+  Film,
   Images,
   Layers3,
   MessageCircle,
@@ -146,6 +147,7 @@ const loadAppMemory = () => import("./components/AppMemory");
 const loadAppOffline = () => import("./components/AppOffline");
 const loadAppSchedule = () => import("./components/AppSchedule");
 const loadAppReading = () => import("./components/AppReading");
+const loadAppCinema = () => import("./components/AppCinema");
 
 const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   chat: loadAppChat,
@@ -161,6 +163,7 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   offline: loadAppOffline,
   schedule: loadAppSchedule,
   reading: loadAppReading,
+  cinema: loadAppCinema,
 };
 
 // Preload app modules after the first paint. This only downloads JavaScript;
@@ -180,6 +183,7 @@ const IDLE_PRELOAD_APP_IDS = [
   "offline",
   "schedule",
   "reading",
+  "cinema",
 ] as const;
 
 const preloadApp = (appId: string) => {
@@ -200,6 +204,7 @@ const AppMemory = React.lazy(loadAppMemory);
 const AppOffline = React.lazy(loadAppOffline);
 const AppSchedule = React.lazy(loadAppSchedule);
 const AppReading = React.lazy(loadAppReading);
+const AppCinema = React.lazy(loadAppCinema);
 
 function LazyAppBoundary({
   children,
@@ -239,6 +244,7 @@ const AppIcons = {
   forum: (className = "w-6 h-6") => <Images className={className} strokeWidth={1.8} />,
   schedule: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
   reading: (className = "w-6 h-6") => <BookOpenText className={className} strokeWidth={1.8} />,
+  cinema: (className = "w-6 h-6") => <Film className={className} strokeWidth={1.8} />,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.8} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.8} />,
@@ -2672,6 +2678,11 @@ export default function App() {
       icon: AppIcons.reading(),
     },
     {
+      id: "cinema",
+      name: "影视",
+      icon: AppIcons.cinema(),
+    },
+    {
       id: "settings",
       name: "设置",
       icon: AppIcons.settings(),
@@ -3896,6 +3907,20 @@ export default function App() {
                       characters={characters}
                       relationships={relationships}
                       worldBookEntries={worldBookEntries}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("cinema") && (
+                  <LazyAppBoundary visible={activeApp === "cinema"}>
+                    <AppCinema
+                      userIdentityId={activeIdentityId}
+                      settings={settings}
+                      characters={characters}
+                      relationships={relationships}
+                      memories={memories}
+                      onSaveMemories={setMemories}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

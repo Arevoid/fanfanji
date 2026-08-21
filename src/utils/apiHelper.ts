@@ -75,9 +75,10 @@ async function directClientChat(params: {
   apiEndpoint?: string;
   apiTemperature?: number;
   streamCompatible?: boolean;
+  imageDataUrl?: string;
   signal?: AbortSignal;
 }): Promise<{ text: string }> {
-  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible, signal } = params;
+  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible, imageDataUrl, signal } = params;
 
   if (apiEndpoint && apiEndpoint.trim()) {
     // Custom OpenAI compatible API
@@ -99,7 +100,9 @@ async function directClientChat(params: {
     if (openAiPrompt.finalSystemInstruction) {
       messagesPayload.push({ role: "system", content: openAiPrompt.finalSystemInstruction });
     }
-    messagesPayload.push({ role: "user", content: message });
+    messagesPayload.push({ role: "user", content: imageDataUrl
+      ? [{ type: "text", text: message }, { type: "image_url", image_url: { url: imageDataUrl } }]
+      : message });
 
     const responseFetch = await fetchWithTimeout(endpointUrl, {
       method: "POST",
@@ -186,13 +189,20 @@ async function directClientChat(params: {
 
     // Add current user message
     const cleanMsg = (message || "").trim();
-    if (cleanMsg) {
+    if (cleanMsg || imageDataUrl) {
+      const currentParts: any[] = [];
+      if (cleanMsg) currentParts.push({ text: cleanMsg });
+      if (imageDataUrl) {
+        const match = imageDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) currentParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+      }
       if (contents.length > 0 && contents[contents.length - 1].role === "user") {
-        contents[contents.length - 1].parts[0].text += "\n" + cleanMsg;
+        if (cleanMsg) contents[contents.length - 1].parts.push({ text: cleanMsg });
+        if (currentParts.some((part) => part.inlineData)) contents[contents.length - 1].parts.push(...currentParts.filter((part) => part.inlineData));
       } else {
         contents.push({
           role: "user",
-          parts: [{ text: cleanMsg }]
+          parts: currentParts.length ? currentParts : [{ text: " " }]
         });
       }
     }
@@ -280,6 +290,7 @@ async function apiChatImpl(params: {
   apiEndpoint?: string;
   apiTemperature?: number;
   streamCompatible?: boolean;
+  imageDataUrl?: string;
   signal?: AbortSignal;
 }): Promise<{ text: string }> {
   const { signal, ...requestBody } = params;

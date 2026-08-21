@@ -82,6 +82,7 @@ async function startServer() {
         apiEndpoint,
         apiTemperature,
         streamCompatible
+        ,imageDataUrl
       } = req.body;
 
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
@@ -116,7 +117,9 @@ async function startServer() {
         if (openAiPrompt.finalSystemInstruction) {
           messagesPayload.push({ role: "system", content: openAiPrompt.finalSystemInstruction });
         }
-        messagesPayload.push({ role: "user", content: message });
+        messagesPayload.push({ role: "user", content: typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:image/")
+          ? [{ type: "text", text: message || "请结合这张画面回答。" }, { type: "image_url", image_url: { url: imageDataUrl } }]
+          : message });
 
         const bodyPayload = {
           model: model || "deepseek-v4-flash",
@@ -207,13 +210,17 @@ async function startServer() {
 
       // Add current message
       const cleanMsg = (message || "").trim();
-      if (cleanMsg) {
+      if (cleanMsg || (typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:image/"))) {
+        const parts: any[] = cleanMsg ? [{ text: cleanMsg }] : [];
+        const imageMatch = typeof imageDataUrl === "string" ? imageDataUrl.match(/^data:(image\/[\w.+-]+);base64,(.+)$/) : null;
+        if (imageMatch) parts.push({ inlineData: { mimeType: imageMatch[1], data: imageMatch[2] } });
         if (contents.length > 0 && contents[contents.length - 1].role === "user") {
-          contents[contents.length - 1].parts[0].text += "\n" + cleanMsg;
+          if (cleanMsg) contents[contents.length - 1].parts.push({ text: cleanMsg });
+          if (imageMatch) contents[contents.length - 1].parts.push({ inlineData: { mimeType: imageMatch[1], data: imageMatch[2] } });
         } else {
           contents.push({
             role: "user",
-            parts: [{ text: cleanMsg }],
+            parts,
           });
         }
       }

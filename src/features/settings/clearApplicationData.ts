@@ -4,6 +4,7 @@ import { stickerDb } from "../../utils/stickerDb";
 import { offlineStoryDb } from "../../core/storage/offlineStoryDb";
 import { fontAssetDb } from "../../utils/fontAssetDb";
 import { readingAssetDb } from "../../core/storage/readingAssetDb";
+import { cinemaAssetDb } from "../../core/storage/cinemaAssetDb";
 import { messageEntryDb } from "../../core/storage/messageEntryDb";
 import { isMessageEntryStoreEnabled } from "../../core/storage/contentStorageFlags";
 
@@ -30,6 +31,7 @@ function getDefaultDependencies(): ClearApplicationDataDependencies {
       () => offlineStoryDb.clearAll(),
       () => fontAssetDb.clearAll(),
       () => readingAssetDb.clearAll(),
+      () => cinemaAssetDb.clearAll(),
     ],
   };
 }

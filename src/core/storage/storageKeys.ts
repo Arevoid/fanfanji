@@ -54,6 +54,7 @@ export const storageKeys = {
   readingAnalysisStore: "phone_reading_analysis_store_v1",
   readingStoryStore: "phone_reading_story_store_v1",
   readingCoStoryStore: "phone_reading_co_story_store_v1",
+  cinemaStore: "phone_cinema_store_v1",
   presets: "phone_presets",
   dataSchemaVersion: "phone_data_schema_version",
   migrationState: "phone_storage_migration_state",

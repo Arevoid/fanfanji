@@ -228,6 +228,7 @@ const BACKUP_KEYS = [
   "phone_reading_analysis_store_v1",
   "phone_reading_story_store_v1",
   "phone_reading_co_story_store_v1",
+  "phone_cinema_store_v1",
   "phone_presets",
   "phone_settings",
   "phone_appearance_settings",
@@ -271,6 +272,7 @@ const LIGHT_BACKUP_KEYS = [
   "phone_reading_analysis_store_v1",
   "phone_reading_story_store_v1",
   "phone_reading_co_story_store_v1",
+  "phone_cinema_store_v1",
 ] as const;
 
 export default function AppSettings({
@@ -487,6 +489,7 @@ export default function AppSettings({
     { key: "music", label: "音乐" },
     { key: "schedule", label: "日程" },
     { key: "reading", label: "阅读" },
+    { key: "cinema", label: "影视" },
     { key: "forum", label: "论坛" },
     { key: "notes", label: "备忘录" },
     { key: "memory", label: "记忆书" },
@@ -508,6 +511,7 @@ export default function AppSettings({
     { key: "offline", label: "线下" },
     { key: "schedule", label: "日程" },
     { key: "reading", label: "阅读" },
+    { key: "cinema", label: "影视" },
     { key: "settings", label: "设置" },
   ];
 

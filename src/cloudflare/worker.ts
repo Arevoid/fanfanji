@@ -52,6 +52,7 @@ const textInput = (body: Record<string, unknown>, message: string, systemInstruc
   apiEndpoint: typeof body.apiEndpoint === "string" ? body.apiEndpoint : undefined,
   temperature,
   streamCompatible: body.streamCompatible === true,
+  imageDataUrl: typeof body.imageDataUrl === "string" && body.imageDataUrl.startsWith("data:image/") ? body.imageDataUrl : undefined,
 });
 
 async function synthesizeMinimax(body: Record<string, unknown>): Promise<Response> {

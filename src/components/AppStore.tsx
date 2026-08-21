@@ -103,6 +103,17 @@ const APPS_LIST: AppItem[] = [
     description: "将 TXT 或 Markdown 小说保存在本地，后续可邀请一位 AI 好友共读、评论和讨论，并开启独立记忆的穿书故事。"
   },
   {
+    id: "cinema",
+    name: "影视",
+    category: "本地观影与 AI 好友共看",
+    icon: "🎬",
+    iconBg: "bg-slate-800",
+    rating: 5.0,
+    reviews: "全新",
+    size: "5.8 MB",
+    description: "上传本地视频，与指定 AI 好友在同一页面边看边讨论；支持 SRT/VTT 字幕、低频主动反应和手动保存观影记忆。"
+  },
+  {
     id: "diary",
     name: "日记",
     category: "生活记录与私密书写",

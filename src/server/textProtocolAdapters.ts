@@ -23,6 +23,7 @@ export interface TextProviderInput {
   apiEndpoint?: string;
   temperature?: number;
   streamCompatible?: boolean;
+  imageDataUrl?: string;
 }
 
 const errorText = (raw: string): string => {
@@ -86,11 +87,13 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
 
   if (input.apiEndpoint?.trim()) {
     const prompt = prepareOpenAiPromptTransport(input.history, input.systemInstruction);
-    const messages: ReturnType<typeof toOpenAiHistoryEntry>[] = [];
+    const messages: any[] = [];
     if (prompt.systemInstruction) messages.push({ role: "system", content: prompt.systemInstruction });
     messages.push(...prompt.history.map(toOpenAiHistoryEntry));
     if (prompt.finalSystemInstruction) messages.push({ role: "system", content: prompt.finalSystemInstruction });
-    messages.push({ role: "user", content: input.message });
+    messages.push({ role: "user", content: input.imageDataUrl
+      ? [{ type: "text", text: input.message || "请结合这张画面回答。" }, { type: "image_url", image_url: { url: input.imageDataUrl } }]
+      : input.message });
     const response = await fetchWithTimeout(openAiEndpoint(input.apiEndpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -116,8 +119,13 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
     if (contents.at(-1)?.role === normalized.role) contents.at(-1)!.parts[0].text += `\n${normalized.text}`;
     else contents.push({ role: normalized.role, parts: [{ text: normalized.text }] });
   }
-  if (contents.at(-1)?.role === "user") contents.at(-1)!.parts[0].text += `\n${input.message}`;
-  else contents.push({ role: "user", parts: [{ text: input.message || " " }] });
+  const imageMatch = input.imageDataUrl?.match(/^data:(image\/[\w.+-]+);base64,(.+)$/);
+  if (contents.at(-1)?.role === "user") {
+    if (input.message) contents.at(-1)!.parts.push({ text: input.message });
+    if (imageMatch) contents.at(-1)!.parts.push({ inlineData: { mimeType: imageMatch[1], data: imageMatch[2] } } as any);
+  } else {
+    contents.push({ role: "user", parts: [{ text: input.message || " " }, ...(imageMatch ? [{ inlineData: { mimeType: imageMatch[1], data: imageMatch[2] } } as any] : [])] });
+  }
   const cleanModel = model.replace(/^models\//, "");
   const response = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
     method: "POST",
