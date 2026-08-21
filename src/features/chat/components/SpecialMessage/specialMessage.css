@@ -115,7 +115,12 @@
   border-radius: 3px;
   background: var(--redpacket-status-bg);
   color: var(--redpacket-status-text);
+  /* The phone shell applies its global font with !important. Protect the
+   * red-packet action label so it keeps the dedicated card font. Characters
+   * missing from that font still fall back normally and remain readable. */
+  font-family: "RedPacketPayFont", "Aidian SignatureTi Marker pen -Medium", "Segoe Script", "Bradley Hand", cursive !important;
   font-size: 0.46rem;
+  font-weight: 400;
   line-height: 1;
   white-space: nowrap;
 }
@@ -147,7 +152,7 @@
   right: 9px;
   bottom: auto;
   color: #c7d0cf;
-  font-family: "RedPacketPayFont", "Aidian SignatureTi Marker pen -Medium", "Segoe Script", "Bradley Hand", cursive;
+  font-family: "RedPacketPayFont", "Aidian SignatureTi Marker pen -Medium", "Segoe Script", "Bradley Hand", cursive !important;
   font-size: 1.75rem;
   font-weight: 400;
   letter-spacing: 0;

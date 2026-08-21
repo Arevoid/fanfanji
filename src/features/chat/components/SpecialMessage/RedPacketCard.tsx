@@ -25,7 +25,6 @@ export function RedPacketCard({ amount, greeting, status, isSelf, onClick }: Red
       <div className="special-payment-card__note">{greeting}</div>
       <span
         className="special-payment-card__brand redpacket-card__brand"
-        style={{ fontFamily: '"RedPacketPayFont", "Aidian SignatureTi Marker pen -Medium", "Segoe Script", "Bradley Hand", cursive' }}
       >
         Pay
       </span>
