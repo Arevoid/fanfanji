@@ -29,6 +29,76 @@ const cleanJsonCandidate = (text: string) => text.trim()
   .replace(/\s*```$/, "")
   .trim();
 
+/**
+ * Some providers emit the JSON object's line breaks as literal `\\n` tokens.
+ * Those tokens are valid inside a JSON string, but invalid between object
+ * fields. Repair only the latter so bubble separators inside reply text keep
+ * their normal JSON escaping.
+ */
+const repairLiteralEscapedWhitespace = (text: string): string => {
+  let inString = false;
+  let escaped = false;
+  let repaired = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      repaired += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      repaired += character;
+      continue;
+    }
+    if (character === "\\" && index + 1 < text.length) {
+      const next = text[index + 1];
+      if (next === "n" || next === "r" || next === "t") {
+        repaired += next === "t" ? "\t" : "\n";
+        index += 1;
+        continue;
+      }
+    }
+    repaired += character;
+  }
+  return repaired;
+};
+
+const parseJsonRecord = (text: string): Record<string, unknown> | undefined => {
+  const sources = [text, repairLiteralEscapedWhitespace(text)];
+  for (const source of sources) {
+    const candidates = [source];
+    const start = source.indexOf("{");
+    const end = source.lastIndexOf("}");
+    if (start >= 0 && end > start) candidates.push(source.slice(start, end + 1));
+    for (const candidate of candidates) {
+      try {
+        let value: unknown = JSON.parse(candidate);
+        // A few providers wrap the complete JSON object in a JSON string.
+        if (typeof value === "string") {
+          const nestedSources = [value, repairLiteralEscapedWhitespace(value)];
+          for (const nested of nestedSources) {
+            try {
+              value = JSON.parse(nested);
+              break;
+            } catch {
+              // Try the next compatible representation.
+            }
+          }
+        }
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          return value as Record<string, unknown>;
+        }
+      } catch {
+        // Try the repaired or extracted representation.
+      }
+    }
+  }
+  return undefined;
+};
+
 const readVoice = (value: unknown): InlineInnerVoicePayload | undefined => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
@@ -43,37 +113,25 @@ const readVoice = (value: unknown): InlineInnerVoicePayload | undefined => {
 /** Parses the optional one-request envelope without breaking plain-text model replies. */
 export function parseChatTurnResponse(text: string): ParsedChatTurnResponse {
   const candidate = cleanJsonCandidate(text);
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    try {
-      const value = JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>;
-      if (typeof value.reply === "string" && value.reply.trim()) {
-        return {
-          reply: value.reply.trim(),
-          ...(typeof value.translation === "string" && value.translation.trim() ? { translation: value.translation.trim() } : {}),
-          innerVoice: readVoice(value.innerVoice),
-        };
-      }
-      const replies = Array.isArray(value.replies) ? value.replies : undefined;
-      if (replies) {
-        return { reply: JSON.stringify({ replies }), innerVoice: undefined };
-      }
-    } catch {
-      // The provider returned ordinary prose or malformed JSON; use it unchanged.
-    }
+  const value = parseJsonRecord(candidate);
+  if (value && typeof value.reply === "string" && value.reply.trim()) {
+    return {
+      reply: value.reply.trim(),
+      ...(typeof value.translation === "string" && value.translation.trim() ? { translation: value.translation.trim() } : {}),
+      innerVoice: readVoice(value.innerVoice),
+    };
+  }
+  if (value && Array.isArray(value.replies)) {
+    return { reply: JSON.stringify({ replies: value.replies }), innerVoice: undefined };
   }
   return { reply: text };
 }
 
 export function parseGroupTurnResponse(text: string): ParsedGroupTurnReply[] | null {
   const candidate = cleanJsonCandidate(text);
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
+  const value = parseJsonRecord(candidate);
+  if (!value || !Array.isArray(value.replies)) return null;
   try {
-    const value = JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>;
-    if (!Array.isArray(value.replies)) return null;
     return value.replies.flatMap((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const entry = item as Record<string, unknown>;
