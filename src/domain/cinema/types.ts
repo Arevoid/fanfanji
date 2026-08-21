@@ -42,6 +42,9 @@ export interface CinemaWatchRoom {
   positionMs: number;
   watchedUntilMs: number;
   autoReactionEnabled: boolean;
+  plotContinuityEnabled?: boolean;
+  plotSummary?: string;
+  lastPlotSummaryAt?: number;
   lastAutoReactionAt?: number;
 }
 

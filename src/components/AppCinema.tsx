@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Film, ImagePlus, MessageCircle, Play, Plus, Save, Subtitles, Trash2, Upload, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, Film, MessageCircle, Plus, Save, Send, Subtitles, Trash2, Upload, Users, X } from "lucide-react";
 import { createId } from "../core/id/createId";
 import { cinemaAssetDb } from "../core/storage/cinemaAssetDb";
 import { initializeCinemaStore, loadCinemaStore, saveCinemaStore } from "../core/storage/repositories/cinemaRepository";
@@ -22,6 +22,15 @@ interface AppCinemaProps {
 }
 
 const AUTO_REACTION_INTERVAL_MS = 15 * 60_000;
+const LONG_VIDEO_PLOT_SUMMARY_INTERVAL_MS = 30 * 60_000;
+
+function cleanCharacterReply(text: string): string {
+  return text
+    .replace(/[（(][^）)]*[）)]/g, "")
+    .replace(/[【\[][^】\]]*[】\]]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
 
 function relationCharacter(relations: CharacterRelationship[], characters: Character[], relationId: string): Character | undefined {
   const relation = relations.find((item) => item.id === relationId);
@@ -54,6 +63,8 @@ export default function AppCinema({
   const [roomPickerOpen, setRoomPickerOpen] = useState(false);
   const [mediaTitleDraft, setMediaTitleDraft] = useState("");
   const [autoReactionEnabled, setAutoReactionEnabled] = useState(true);
+  const [plotContinuityEnabled, setPlotContinuityEnabled] = useState(false);
+  const [plotSummaryLoading, setPlotSummaryLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const subtitleInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -79,6 +90,16 @@ export default function AppCinema({
     : [];
   const scopedRelations = relationships.filter((relation) => relation.userIdentityId === userIdentityId);
   const currentSubtitle = getSubtitleContext(subtitleCues, positionMs, 1);
+  const watchedSubtitleContext = subtitleCues
+    .filter((cue) => cue.endMs <= positionMs)
+    .slice(-30)
+    .map((cue) => cue.text)
+    .join("\n");
+
+  useEffect(() => {
+    setAutoReactionEnabled(selectedRoom?.autoReactionEnabled ?? true);
+    setPlotContinuityEnabled(selectedRoom?.plotContinuityEnabled ?? false);
+  }, [selectedRoom?.id, selectedRoom?.autoReactionEnabled, selectedRoom?.plotContinuityEnabled]);
 
   useEffect(() => {
     const loaded = loadCinemaStore();
@@ -222,6 +243,7 @@ export default function AppCinema({
       positionMs: selectedMedia.lastPositionMs,
       watchedUntilMs: selectedMedia.watchedUntilMs,
       autoReactionEnabled: true,
+      plotContinuityEnabled: false,
     };
     if (persistStore(mergeStore(storeRef.current, { rooms: [room, ...storeRef.current.rooms] }))) {
       setSelectedRoomId(room.id);
@@ -245,15 +267,59 @@ export default function AppCinema({
     return dataUrl;
   };
 
-  const generateReply = async (userText: string, automatic = false) => {
-    if (!selectedRoom || !selectedMedia || !selectedCharacter || !settings?.apiKey) {
+  const generatePlotSummary = async () => {
+    if (!selectedRoom || !selectedMedia || !selectedCharacter || !settings?.apiKey || plotSummaryLoading) return;
+    setPlotSummaryLoading(true);
+    try {
+      const frame = currentSubtitle ? undefined : captureFrame();
+      const response = await apiChat({
+        message: `请只根据用户已经播放到的内容，更新一份不超过120字的剧情摘要。不要猜测未播放内容，不要写角色动作括号。\n影视：${selectedMedia.title}\n播放到：${formatSubtitleTime(positionMs)}\n已有摘要：${selectedRoom.plotSummary || "无"}\n最近字幕：${watchedSubtitleContext || "无字幕"}\n最近讨论：${selectedDiscussions.slice(-4).map((item) => `${item.userText} / ${item.characterText || ""}`).join("\n") || "无"}`,
+        history: [],
+        systemInstruction: "你是观影进度摘要器，只整理已播放内容，输出简短纯文本摘要。",
+        apiKey: settings.apiKey,
+        model: settings.selectedModel,
+        apiEndpoint: settings.apiEndpoint,
+        apiTemperature: 0.2,
+        imageDataUrl: frame || undefined,
+      });
+      const nextSummary = cleanCharacterReply(response.text);
+      persistStore(mergeStore(storeRef.current, { rooms: storeRef.current.rooms.map((room) => room.id === selectedRoom.id ? { ...room, plotSummary: nextSummary, lastPlotSummaryAt: positionMs, updatedAt: Date.now() } : room) }));
+    } catch (error) {
+      setNotice(error instanceof Error ? `剧情摘要失败：${error.message}` : "剧情摘要失败");
+    } finally {
+      setPlotSummaryLoading(false);
+    }
+  };
+
+  const generateReply = async (userText: string, automatic = false, requestReply = true) => {
+    if (!selectedRoom || !selectedMedia || !selectedCharacter || (requestReply && !settings?.apiKey)) {
       if (!settings?.apiKey) setNotice("请先在设置中配置 API Key");
       return;
     }
+    const trimmedUserText = userText.trim();
+    if (!automatic && !trimmedUserText) return;
+    const discussionId = createId("cinema-discussion");
+    const initialDiscussion: CinemaDiscussion = {
+      id: discussionId,
+      roomId: selectedRoom.id,
+      mediaId: selectedMedia.id,
+      userIdentityId,
+      relationId: selectedRoom.relationId,
+      characterId: selectedRoom.characterId,
+      conversationId: selectedRoom.conversationId,
+      positionMs,
+      userText: automatic ? "（角色主动反应）" : trimmedUserText,
+      subtitleContext: currentSubtitle || undefined,
+      createdAt: Date.now(),
+    };
+    if (!persistStore(mergeStore(storeRef.current, { discussions: [...storeRef.current.discussions, initialDiscussion] }))) return;
+    setDiscussionDraft("");
+    if (automatic) lastAutoReactionPositionRef.current = positionMs;
+    if (!requestReply) return;
     setReplyLoading(true);
     try {
-      const effectiveFrameDataUrl = frameDataUrl || captureFrame();
-      const prompt = `你正在和用户一起观看影视《${selectedMedia.title}》。你扮演${selectedCharacter.name}，只能知道用户已经看到的内容。\n当前播放时间：${formatSubtitleTime(positionMs)}。\n当前字幕：${currentSubtitle || "暂无字幕"}\n${effectiveFrameDataUrl ? "当前视频画面已附加，请优先识别画面中的主体、动作、场景和可见文字，只讨论当前画面，不要凭空猜测后续剧情。" : "当前没有画面截图，请只根据用户文字回答。"}\n${automatic ? "这是一次低频观影反应，请只用一句自然、符合角色性格的短回应，不要抢夺用户注意力。" : `用户说：${userText.trim()}`}\n请直接以角色口吻回复，不要解释你是 AI。`;
+      const effectiveFrameDataUrl = frameDataUrl || (!currentSubtitle ? captureFrame() : undefined);
+      const prompt = `你正在和用户一起观看影视《${selectedMedia.title}》。你扮演${selectedCharacter.name}，只能知道用户已经看到的内容。\n当前播放时间：${formatSubtitleTime(positionMs)}。\n当前字幕：${currentSubtitle || "暂无字幕"}\n已播放剧情摘要：${selectedRoom.plotSummary || "未开启剧情摘要"}\n${effectiveFrameDataUrl ? "当前视频画面已附加，请优先识别画面中的主体、动作、场景和可见文字，只讨论当前画面，不要凭空猜测后续剧情。" : "当前使用字幕和观影摘要，不发送视频画面。"}\n${automatic ? "这是一次低频观影反应，请只用一句自然、符合角色性格的短回应，不要抢夺用户注意力。" : `用户说：${userText.trim()}`}\n只输出角色实际说的话，不要括号动作、舞台说明或旁白。`;
       const response = await apiChat({
         message: prompt,
         history: selectedDiscussions.slice(-8).flatMap((discussion) => [
@@ -268,22 +334,8 @@ export default function AppCinema({
         streamCompatible: settings.streamCompatible,
         imageDataUrl: effectiveFrameDataUrl || undefined,
       });
-      const discussion: CinemaDiscussion = {
-        id: createId("cinema-discussion"),
-        roomId: selectedRoom.id,
-        mediaId: selectedMedia.id,
-        userIdentityId,
-        relationId: selectedRoom.relationId,
-        characterId: selectedRoom.characterId,
-        conversationId: selectedRoom.conversationId,
-        positionMs,
-        userText: automatic ? "（角色主动反应）" : userText.trim(),
-        characterText: response.text.trim(),
-        subtitleContext: currentSubtitle || undefined,
-        createdAt: Date.now(),
-      };
-      persistStore(mergeStore(storeRef.current, { discussions: [...storeRef.current.discussions, discussion] }));
-      setDiscussionDraft("");
+      const characterText = cleanCharacterReply(response.text);
+      persistStore(mergeStore(storeRef.current, { discussions: storeRef.current.discussions.map((discussion) => discussion.id === discussionId ? { ...discussion, characterText } : discussion) }));
       setFrameDataUrl(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "观影讨论生成失败";
@@ -293,6 +345,11 @@ export default function AppCinema({
     } finally {
       setReplyLoading(false);
     }
+  };
+
+  const sendDiscussionOnly = () => {
+    if (!discussionDraft.trim() || replyLoading) return;
+    void generateReply(discussionDraft, false, false);
   };
 
   generateReplyRef.current = generateReply;
@@ -309,6 +366,22 @@ export default function AppCinema({
     }, 15_000);
     return () => window.clearInterval(timer);
   }, [selectedRoom?.id, selectedMedia?.id, autoReactionEnabled]);
+
+  useEffect(() => {
+    if (!selectedRoom || !selectedMedia || !plotContinuityEnabled || !videoRef.current) return;
+    const timer = window.setInterval(() => {
+      const video = videoRef.current;
+      if (!video || video.paused || plotSummaryLoading || !selectedRoom || !Number.isFinite(video.duration)) return;
+      const current = Math.round(video.currentTime * 1000);
+      const duration = Math.round(video.duration * 1000);
+      const lastSummaryAt = selectedRoom.lastPlotSummaryAt || 0;
+      const nextCheckpoint = duration <= LONG_VIDEO_PLOT_SUMMARY_INTERVAL_MS
+        ? [duration / 3, duration * 2 / 3, duration * 0.9].find((checkpoint) => checkpoint > lastSummaryAt)
+        : Math.max(LONG_VIDEO_PLOT_SUMMARY_INTERVAL_MS, (Math.floor(lastSummaryAt / LONG_VIDEO_PLOT_SUMMARY_INTERVAL_MS) + 1) * LONG_VIDEO_PLOT_SUMMARY_INTERVAL_MS);
+      if (nextCheckpoint !== undefined && nextCheckpoint < duration && current >= nextCheckpoint) void generatePlotSummary();
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [selectedRoom?.id, selectedMedia?.id, plotContinuityEnabled, selectedRoom?.lastPlotSummaryAt, plotSummaryLoading]);
 
   const saveDiscussionToMemory = (discussion: CinemaDiscussion) => {
     const relation = scopedRelations.find((item) => item.id === discussion.relationId);
@@ -392,8 +465,8 @@ export default function AppCinema({
               {videoUrl ? <div className="relative h-full w-full"><video ref={videoRef} src={videoUrl} controls className="h-full w-full object-contain" onLoadedMetadata={handleLoadedMetadata} onTimeUpdate={() => { const current = Math.round((videoRef.current?.currentTime || 0) * 1000); setPositionMs(current); }} onPause={() => persistPosition(positionMs)} onEnded={() => persistPosition(positionMs)} /><div className="pointer-events-none absolute inset-x-3 bottom-14 text-center text-sm font-semibold text-white drop-shadow-lg">{currentSubtitle.split("\n").slice(-1)[0] || ""}</div></div> : <div className="flex h-full items-center justify-center text-xs text-white/70">正在加载视频…</div>}
             </div>
             <canvas ref={frameRef} className="hidden" />
-            <div className="flex flex-wrap gap-2"><button type="button" onClick={() => subtitleInputRef.current?.click()} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-[10px] font-bold"><Subtitles className="h-4 w-4" />{selectedMedia.subtitle ? "更换字幕" : "导入 SRT/VTT"}</button><button type="button" onClick={() => { if (selectedRoom) setAutoReactionEnabled((value) => { const next = !value; persistStore(mergeStore(storeRef.current, { rooms: storeRef.current.rooms.map((room) => room.id === selectedRoom.id ? { ...room, autoReactionEnabled: next, updatedAt: Date.now() } : room) })); return next; }); }} disabled={!selectedRoom} className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[10px] font-bold ${autoReactionEnabled ? "border-emerald-300 text-emerald-600" : "border-[var(--border)] text-[var(--text-muted)]"}`}><MessageCircle className="h-4 w-4" />自动低频反应：{autoReactionEnabled ? "开" : "关"}</button><button type="button" onClick={() => { if (window.confirm(`确定删除《${selectedMedia.title}》及其本地视频、字幕和讨论记录吗？`)) void removeMedia(selectedMedia); }} className="flex h-9 w-9 items-center justify-center rounded-full border border-rose-200 text-rose-500" aria-label="删除这部影视" title="删除这部影视"><Trash2 className="h-4 w-4" /></button>{!selectedRoom && <button type="button" onClick={() => setRoomPickerOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--button-primary-bg)] px-3 text-[10px] font-bold text-[var(--button-primary-text)]"><Users className="h-4 w-4" />邀请角色一起看</button>}</div>
-            {selectedRoom && <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 overscroll-contain"><div className="mb-2 flex shrink-0 items-center justify-between"><p className="text-xs font-black">观影讨论 · {selectedCharacter?.name || "角色"}</p><span className="text-[10px] text-[var(--text-muted)]">{formatSubtitleTime(positionMs)}</span></div>{selectedDiscussions.length === 0 ? <p className="text-[11px] text-[var(--text-secondary)]">播放到想讨论的地方，输入一句话开始。角色只会看到你已经看过的内容。</p> : <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">{selectedDiscussions.map((discussion) => <div key={discussion.id} className="space-y-1.5"><p className="text-center text-[9px] text-[var(--text-muted)]">{formatSubtitleTime(discussion.positionMs)}</p>{discussion.userText && discussion.userText !== "（角色主动反应）" && <div className="flex justify-end"><div className="max-w-[82%] rounded-2xl rounded-br-md bg-[var(--button-primary-bg)] px-3 py-2 text-xs leading-5 text-[var(--button-primary-text)]">{discussion.userText}</div></div>}<div className="flex justify-start"><div className="max-w-[86%] rounded-2xl rounded-bl-md bg-[var(--surface-raised)] px-3 py-2 text-xs leading-5 text-[var(--text-primary)]">{discussion.characterText}</div></div><button type="button" disabled={discussion.savedToMemory} onClick={() => saveDiscussionToMemory(discussion)} className="ml-1 inline-flex items-center gap-1 text-[10px] font-bold text-[var(--text-secondary)] disabled:opacity-50"><Save className="h-3 w-3" />{discussion.savedToMemory ? "已保存观影记忆" : "保存为观影记忆"}</button></div>)}</div>}<div className="mt-auto flex shrink-0 gap-2 bg-[var(--surface)] pt-2 pb-[env(safe-area-inset-bottom)]"><button type="button" onClick={() => captureFrame()} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${frameDataUrl ? "border-sky-400 text-sky-500" : "border-[var(--border)]"}`} aria-label="附加当前画面" title="附加当前画面：把当前视频帧发送给支持视觉输入的模型"><ImagePlus className="h-4 w-4" /></button><input value={discussionDraft} onChange={(event) => setDiscussionDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void generateReply(discussionDraft); } }} placeholder="讨论当前这一段…" className="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-xs outline-none" /><button type="button" disabled={!discussionDraft.trim() || replyLoading} onClick={() => void generateReply(discussionDraft)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] disabled:opacity-40"><Play className="h-4 w-4" /></button></div></div>}
+            <div className="flex flex-wrap gap-2"><button type="button" onClick={() => subtitleInputRef.current?.click()} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 text-[10px] font-bold"><Subtitles className="h-4 w-4" />{selectedMedia.subtitle ? "更换字幕" : "导入 SRT/VTT"}</button><button type="button" onClick={() => { if (selectedRoom) setAutoReactionEnabled((value) => { const next = !value; persistStore(mergeStore(storeRef.current, { rooms: storeRef.current.rooms.map((room) => room.id === selectedRoom.id ? { ...room, autoReactionEnabled: next, updatedAt: Date.now() } : room) })); return next; }); }} disabled={!selectedRoom} className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[10px] font-bold ${autoReactionEnabled ? "border-emerald-300 text-emerald-600" : "border-[var(--border)] text-[var(--text-muted)]"}`}><MessageCircle className="h-4 w-4" />自动低频反应：{autoReactionEnabled ? "开" : "关"}</button><button type="button" onClick={() => { if (selectedRoom) setPlotContinuityEnabled((value) => { const next = !value; persistStore(mergeStore(storeRef.current, { rooms: storeRef.current.rooms.map((room) => room.id === selectedRoom.id ? { ...room, plotContinuityEnabled: next, updatedAt: Date.now() } : room) })); return next; }); }} disabled={!selectedRoom} className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[10px] font-bold ${plotContinuityEnabled ? "border-sky-300 text-sky-600" : "border-[var(--border)] text-[var(--text-muted)]"}`}>理解已播放剧情：{plotContinuityEnabled ? "开" : "关"}</button>{!selectedRoom && <button type="button" onClick={() => setRoomPickerOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--button-primary-bg)] px-3 text-[10px] font-bold text-[var(--button-primary-text)]"><Users className="h-4 w-4" />邀请角色一起看</button>}<button type="button" onClick={() => { if (window.confirm(`确定删除《${selectedMedia.title}》及其本地视频、字幕和讨论记录吗？`)) void removeMedia(selectedMedia); }} className="ml-auto flex h-9 w-9 items-center justify-center rounded-full border border-rose-200 text-rose-500" aria-label="删除这部影视" title="删除这部影视"><Trash2 className="h-4 w-4" /></button></div>
+            {selectedRoom && <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 overscroll-contain"><div className="mb-2 flex shrink-0 items-center justify-between"><p className="text-xs font-black">观影讨论 · {selectedCharacter?.name || "角色"}</p><span className="text-[10px] text-[var(--text-muted)]">{formatSubtitleTime(positionMs)}</span></div>{selectedDiscussions.length === 0 ? <p className="text-[11px] text-[var(--text-secondary)]">播放到想讨论的地方，输入一句话开始。角色只会看到你已经看过的内容。</p> : <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">{selectedDiscussions.map((discussion) => <div key={discussion.id} className="space-y-1.5"><p className="text-center text-[9px] text-[var(--text-muted)]">{formatSubtitleTime(discussion.positionMs)}</p>{discussion.userText && discussion.userText !== "（角色主动反应）" && <div className="flex justify-end"><div className="max-w-[82%] rounded-2xl rounded-br-md bg-[var(--button-primary-bg)] px-3 py-2 text-xs leading-5 text-[var(--button-primary-text)]">{discussion.userText}</div></div>}{discussion.characterText && <div className="flex justify-start"><div className="max-w-[86%] rounded-2xl rounded-bl-md bg-[var(--surface-raised)] px-3 py-2 text-xs leading-5 text-[var(--text-primary)]">{discussion.characterText}</div></div>}{discussion.characterText && <button type="button" disabled={discussion.savedToMemory} onClick={() => saveDiscussionToMemory(discussion)} className="ml-1 inline-flex items-center gap-1 text-[10px] font-bold text-[var(--text-secondary)] disabled:opacity-50"><Save className="h-3 w-3" />{discussion.savedToMemory ? "已保存观影记忆" : "保存为观影记忆"}</button>}</div>)}{replyLoading && <div className="flex justify-start"><div className="rounded-2xl rounded-bl-md bg-[var(--surface-raised)] px-3 py-2 text-sm tracking-[0.25em] text-[var(--text-secondary)]"><span className="animate-pulse">•••</span></div></div>}</div>}<div className="mt-auto flex shrink-0 gap-2 bg-[var(--surface)] pt-2 pb-[env(safe-area-inset-bottom)]"><input value={discussionDraft} onChange={(event) => setDiscussionDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendDiscussionOnly(); } }} placeholder="讨论当前这一段…" className="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-xs outline-none" /><button type="button" onClick={sendDiscussionOnly} disabled={!discussionDraft.trim() || replyLoading} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--text-secondary)] disabled:opacity-40" aria-label="仅发送"><ArrowUp className="h-4 w-4" /></button><button type="button" onClick={() => void generateReply(discussionDraft)} disabled={!discussionDraft.trim() || replyLoading} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] disabled:opacity-40" aria-label="发送并获取回复"><Send className="h-4 w-4" /></button></div></div>}
             {!selectedRoom && <div className="rounded-2xl border border-dashed border-[var(--border)] p-5 text-center text-xs text-[var(--text-secondary)]">邀请一个角色后，才能开始关系隔离的观影讨论。</div>}
           </section>
         )}
