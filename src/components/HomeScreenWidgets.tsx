@@ -1173,13 +1173,13 @@ export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, character
     <div className="relative flex h-full w-full flex-col overflow-hidden border border-stone-200/70 bg-white/90 px-3 py-2.5 text-stone-900 shadow-sm backdrop-blur-sm" style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}>
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="text-[14px] font-black leading-tight">连续聊天</h3>
-          <p className="mt-0.5 text-[9px] font-medium text-stone-400">最长连续{data.longestStreak}天</p>
+          <h3 className="text-[12px] font-black leading-tight">连续聊天</h3>
+          <p className="mt-0.5 text-[8px] font-medium text-stone-400">最长连续{data.longestStreak}天</p>
         </div>
-        <div className="flex items-baseline gap-1 leading-none"><span className="text-[38px] font-black tracking-tight">{data.currentStreak}</span><span className="text-[14px] font-bold">天</span></div>
+        <div className="flex items-baseline gap-0.5 leading-none"><span className="text-[31px] font-black tracking-tight">{data.currentStreak}</span><span className="text-[12px] font-bold">天</span></div>
       </div>
       <div className="mt-2 flex min-h-0 flex-1 justify-between gap-[3px] px-0.5" aria-label="近十二周聊天活跃度">
-        {weeks.map((week, weekIndex) => <div key={weekIndex} className="grid min-w-0 flex-1 grid-rows-7 gap-[2px]">
+        {weeks.map((week, weekIndex) => <div key={weekIndex} className="grid min-w-0 flex-1 grid-rows-7 gap-x-[2px] gap-y-[3px]">
           {week.map((date) => {
             const count = data.counts.get(chatStatsDayKey(date.getTime())) || 0;
             const tone = count === 0 ? "bg-stone-100" : count <= 3 ? "bg-sky-200" : count <= 10 ? "bg-sky-300" : count <= 25 ? "bg-sky-400" : "bg-sky-500";
