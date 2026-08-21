@@ -25,6 +25,57 @@ interface AppCinemaProps {
 const AUTO_REACTION_INTERVAL_MS = 15 * 60_000;
 const LONG_VIDEO_PLOT_SUMMARY_INTERVAL_MS = 30 * 60_000;
 
+function getVideoPlaybackError(video: HTMLVideoElement): string {
+  switch (video.error?.code) {
+    case MediaError.MEDIA_ERR_ABORTED:
+      return "视频读取被中断，请重新选择文件";
+    case MediaError.MEDIA_ERR_NETWORK:
+      return "视频读取失败，请检查文件是否完整";
+    case MediaError.MEDIA_ERR_DECODE:
+      return "视频编码无法播放，请转换为 H.264 MP4 后重试";
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return "视频格式或编码不受当前浏览器支持，请转换为 H.264 MP4 后重试";
+    default:
+      return "视频无法播放，请确认文件完整且编码受浏览器支持";
+  }
+}
+
+function validateVideoPlayback(file: Blob): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    let settled = false;
+    const cleanup = () => {
+      video.removeAttribute("src");
+      video.load();
+      URL.revokeObjectURL(objectUrl);
+    };
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      cleanup();
+      callback();
+    };
+    const timeout = window.setTimeout(() => {
+      finish(() => reject(new Error("视频读取超时，请确认文件完整后重试")));
+    }, 15_000);
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      if (!Number.isFinite(video.duration) || video.duration <= 0) {
+        finish(() => reject(new Error("视频没有可识别的播放时长，请转换为兼容格式后重试")));
+        return;
+      }
+      finish(() => resolve(Math.round(video.duration * 1000)));
+    };
+    video.onerror = () => {
+      finish(() => reject(new Error(getVideoPlaybackError(video))));
+    };
+    video.src = objectUrl;
+    video.load();
+  });
+}
+
 function cleanCharacterReply(text: string): string {
   return text
     .replace(/[（(][^）)]*[）)]/g, "")
@@ -187,13 +238,14 @@ export default function AppCinema({
     const mediaId = createId("cinema-media");
     const assetId = createId("cinema-video");
     try {
+      const durationMs = await validateVideoPlayback(file);
       await cinemaAssetDb.save({ assetId, kind: "video", blob: file });
       const media: CinemaMedia = {
         id: mediaId,
         ownerIdentityId: userIdentityId,
         title: file.name.replace(/\.[^.]+$/, "") || "未命名影视",
         mimeType: mimeType || "video/mp4",
-        durationMs: 0,
+        durationMs,
         video: { assetId, kind: "video", mimeType: mimeType || "video/mp4", byteLength: file.size },
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -585,7 +637,7 @@ export default function AppCinema({
         ) : (
           <section className="mx-auto flex h-full min-h-0 max-w-2xl flex-col gap-4">
             <div className="aspect-video overflow-hidden rounded-3xl bg-black shadow-xl">
-              {videoUrl ? <div className="relative h-full w-full"><video ref={videoRef} src={videoUrl} controls className="h-full w-full object-contain" onLoadedMetadata={handleLoadedMetadata} onTimeUpdate={() => { const current = Math.round((videoRef.current?.currentTime || 0) * 1000); setPositionMs(current); }} onPause={() => persistPosition(positionMs)} onEnded={() => persistPosition(positionMs)} /><div className="pointer-events-none absolute inset-x-3 bottom-14 text-center text-sm font-semibold text-white drop-shadow-lg">{currentSubtitle.split("\n").slice(-1)[0] || ""}</div></div> : <div className="flex h-full items-center justify-center text-xs text-white/70">正在加载视频…</div>}
+              {videoUrl ? <div className="relative h-full w-full"><video ref={videoRef} src={videoUrl} controls className="h-full w-full object-contain" onLoadedMetadata={handleLoadedMetadata} onError={() => setNotice(getVideoPlaybackError(videoRef.current || document.createElement("video")))} onTimeUpdate={() => { const current = Math.round((videoRef.current?.currentTime || 0) * 1000); setPositionMs(current); }} onPause={() => persistPosition(positionMs)} onEnded={() => persistPosition(positionMs)} /><div className="pointer-events-none absolute inset-x-3 bottom-14 text-center text-sm font-semibold text-white drop-shadow-lg">{currentSubtitle.split("\n").slice(-1)[0] || ""}</div></div> : <div className="flex h-full items-center justify-center text-xs text-white/70">正在加载视频…</div>}
             </div>
             <canvas ref={frameRef} className="hidden" />
             <div className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto pb-1"><button type="button" onClick={() => subtitleInputRef.current?.click()} className="inline-flex h-9 shrink-0 items-center rounded-full border border-[var(--border)] px-3 text-[10px] font-bold" title={selectedMedia.subtitle ? "更换字幕" : "导入字幕"}>字幕</button><button type="button" onClick={() => { if (selectedRoom) setAutoReactionEnabled((value) => { const next = !value; persistStore(mergeStore(storeRef.current, { rooms: storeRef.current.rooms.map((room) => room.id === selectedRoom.id ? { ...room, autoReactionEnabled: next, updatedAt: Date.now() } : room) })); return next; }); }} disabled={!selectedRoom} className={`inline-flex h-9 shrink-0 items-center rounded-full border px-3 text-[10px] font-bold ${autoReactionEnabled ? "border-emerald-300 text-emerald-600" : "border-[var(--border)] text-[var(--text-muted)]"}`}>主动发言：{autoReactionEnabled ? "开" : "关"}</button><button type="button" onClick={() => { if (selectedRoom) setPlotContinuityEnabled((value) => { const next = !value; persistStore(mergeStore(storeRef.current, { rooms: storeRef.current.rooms.map((room) => room.id === selectedRoom.id ? { ...room, plotContinuityEnabled: next, updatedAt: Date.now() } : room) })); return next; }); }} disabled={!selectedRoom} className={`inline-flex h-9 shrink-0 items-center rounded-full border px-3 text-[10px] font-bold ${plotContinuityEnabled ? "border-sky-300 text-sky-600" : "border-[var(--border)] text-[var(--text-muted)]"}`}>理解剧情：{plotContinuityEnabled ? "开" : "关"}</button><button type="button" onClick={() => setRoomPickerOpen(true)} className="inline-flex h-9 shrink-0 items-center rounded-full bg-[var(--button-primary-bg)] px-3 text-[10px] font-bold text-[var(--button-primary-text)]">邀请</button><button type="button" onClick={() => void removeMedia(selectedMedia)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-rose-200 bg-[var(--surface)] text-rose-500" aria-label="删除这部影视" title="删除这部影视"><Trash2 className="h-4 w-4" /></button></div>
