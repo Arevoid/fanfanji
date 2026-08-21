@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { inspectSystemBackup, type SystemBackupEnvelope } from "../src/features/settings/systemBackup";
+import { checksumPayload, inspectSystemBackup, parseSystemBackup, type SystemBackupEnvelope } from "../src/features/settings/systemBackup";
 
 const valid: SystemBackupEnvelope = {
   format: "fanfanji-system-backup",
@@ -18,10 +18,18 @@ assert.deepEqual(report.modules.map((module) => [module.key, module.kind, module
   ["character-archive-v4", "object", undefined],
 ]);
 
+const sanitizedExport = {
+  ...valid,
+  localStorage: { "phone_settings": '{"sanitized":true}' },
+};
+const signedSanitizedExport = { ...sanitizedExport, checksum: checksumPayload(sanitizedExport) };
+assert.deepEqual(parseSystemBackup(signedSanitizedExport).localStorage, sanitizedExport.localStorage);
+
 const invalid = inspectSystemBackup({ format: "fanfanji-system-backup", version: 999, localStorage: {}, indexedDb: {} });
 assert.equal(invalid.valid, false);
 assert.match(invalid.error || "", /不支持/);
 const backupActionsSource = readFileSync(new URL("../src/features/settings/hooks/useSystemBackupActions.ts", import.meta.url), "utf8");
 assert.match(backupActionsSource, /只读恢复模式不会修改当前数据/);
 assert.match(backupActionsSource, /downloadOriginalBackupFile\(file\)/);
+assert.match(backupActionsSource, /checksumPayload\(backupData\)/);
 console.log("PASS system backup read-only inspection does not mutate restore state");

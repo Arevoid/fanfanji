@@ -4,7 +4,7 @@ import { notifyForumStateChanged } from "../../../core/storage/repositories/foru
 import { notifyAppearanceSettingsChanged } from "../../theme/appearanceRepository";
 import { offlineStoryDb } from "../../../core/storage/offlineStoryDb";
 import { mergeOfflineStoryCollections } from "../../../core/storage/repositories/offlineRepository";
-import { buildSystemBackup, filterSystemBackupLocalStorageForRestore, inspectSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb, snapshotSystemBackupIndexedDb, splitSystemBackupJson } from "../systemBackup";
+import { buildSystemBackup, checksumPayload, filterSystemBackupLocalStorageForRestore, inspectSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb, snapshotSystemBackupIndexedDb, splitSystemBackupJson } from "../systemBackup";
 import { readString, remove as removeStoredValue, writeString } from "../../../core/storage/storageAdapter";
 import { storageKeys } from "../../../core/storage/storageKeys";
 
@@ -74,7 +74,11 @@ export function useSystemBackupActions({ backupKeys, fullBackupKeys, lightBackup
         console.warn("Unable to include the durable offline-story copy in this backup.", error);
       }
     }
-    const blob = new Blob(splitSystemBackupJson(JSON.stringify(backupData, null, 2)), { type: "application/json" });
+    // Sanitization can change the exported localStorage payload. Re-sign the
+    // final bytes so an exported backup can pass checksum verification when it
+    // is imported again.
+    const signedBackupData = { ...backupData, checksum: checksumPayload(backupData) };
+    const blob = new Blob(splitSystemBackupJson(JSON.stringify(signedBackupData, null, 2)), { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
