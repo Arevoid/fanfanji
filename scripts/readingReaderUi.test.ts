@@ -47,6 +47,8 @@ assert.match(reader, /placeholder="讨论当前内容…" rows=\{1\}/);
 assert.match(reader, /onPointerDown=\{\(event\) => event\.preventDefault\(\)\}/);
 assert.match(reader, /event\.key === "Enter" && !event\.shiftKey/);
 assert.match(reader, /setDiscussionMessages\(listDiscussionMessages\(room, activeDiscussionId\)\)/);
+assert.match(reader, /discussionThreads\.map\(\(\{ discussion, messages \}\)/);
+assert.match(reader, /getDiscussionChapterTitle\(discussion\.targetChapterId\)/);
 assert.match(appReading, /getReadingRoomProgress\(room\)\?\.percent/);
 assert.match(appReading, /setReadingInitialAnchorId\(targetAnchorId\)/);
 assert.match(appReading, /openCommentAtSource/);
