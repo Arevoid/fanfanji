@@ -267,6 +267,13 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
   const hasQuotes = /[“「『”」』]/.test(processedText);
   
   if (hasQuotes) {
+    if (!disableBracketActions) {
+      // When filtering is off, preserve concise parenthesized actions that sit
+      // outside quoted dialogue (for example: （轻笑）“你来了”). The old
+      // quoted-text branch kept only dialogue and silently discarded them.
+      const tokens = processedText.match(/\([^)]*\)|（[^）]*）|\*[^*]+\*|[“「『][^”」』]+[”」』]/g);
+      if (tokens && tokens.length > 0) return tokens.join("\n").trim();
+    }
     // If there are quotes, we ONLY extract the content inside quotes as the dialogue,
     // and completely discard all narration/scenery/parentheses outside the quotes!
     const regex = /[“「『]([^”」』]+)[”」』]/g;

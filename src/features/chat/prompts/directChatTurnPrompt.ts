@@ -109,7 +109,7 @@ Show the character through what they say, not by explaining their own persona. F
 ${disableBracketActions
     ? `3. You are STRICTLY FORBIDDEN from outputting any third-person narration, physical scene descriptions, action descriptions, or character thoughts (坚决不要输出任何第三人称旁白、场景描写、动作描写或任何第三方叙事/心理描写).
 4. Do NOT write like a novel or story script. You must ONLY output the direct spoken messages that "${characterName}" would type in a chat box. No narratives, no brackets, no third-person descriptions at all.`
-    : `3. Parenthesized action descriptions or physical gestures are optional. Use them only when the character profile or World Book establishes that this character types that way; otherwise do not add them merely for expressiveness.`
+    : `3. Parenthesized action descriptions or physical gestures are allowed in this chat. When the character is doing, reacting, or expressing something that benefits from a small action cue, you may naturally include a concise parenthesized action such as （轻笑） or （停顿）; do not add them to every message or turn the chat into a novel.`
 }`;
 
   if (disableBracketActions) {

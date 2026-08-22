@@ -27,7 +27,7 @@ export function InnerVoiceModal({ character, mode, onModeChange, onClose, loadin
           {mode === "current" && (
             <button
               type="button"
-              className="rounded-full p-1.5 text-[var(--color-text-secondary)] transition hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-[var(--control-height-md)] w-[var(--control-height-md)] items-center justify-center rounded-full p-0 text-[var(--color-text-secondary)] transition hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void onRefresh()}
               disabled={loading}
               aria-label="刷新心声"

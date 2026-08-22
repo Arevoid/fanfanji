@@ -76,7 +76,7 @@ export function Modal({
             onMouseDown={(event) => event.stopPropagation()}
           >
             {(title || description || showCloseButton) && (
-              <header className="flex shrink-0 items-start gap-[var(--space-3)] px-[var(--space-5)] pt-[var(--space-5)]">
+              <header className="flex shrink-0 items-center gap-[var(--space-3)] px-[var(--space-5)] pt-[var(--space-5)]">
                 <div className="min-w-0 flex-1">
                   {title && <h2 id={titleId} className="text-[17px] font-semibold leading-6">{title}</h2>}
                   {description && <p id={descriptionId} className="mt-1 text-[13px] leading-[18px] text-[var(--color-text-secondary)]">{description}</p>}

@@ -1999,16 +1999,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           if (signal?.aborted) return;
 
           if (createdMessages.length > 0) {
-            if (data.innerVoice && activeRelationship) {
+            if (data.innerVoice && turnRelationship) {
               const triggerMessage = createdMessages[createdMessages.length - 1];
               const latest = loadInnerVoiceRecords([]).value;
-              const scope = { kind: "direct" as const, relationId: activeRelationship.id, messageId: triggerMessage.id };
+              const scope = { kind: "direct" as const, relationId: turnRelationship.id, messageId: triggerMessage.id };
               if (!findInnerVoiceByMessage(latest, scope)) {
                 const record = createInlineInnerVoiceRecord({
-                  character: activeCharacter,
+                  character: turnCharacter,
                   triggerMessage,
-                  relationId: activeRelationship.id,
-                  conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
+                  relationId: turnRelationship.id,
+                  conversationId: turnRelationship.conversationId || getConversationId(turnRelationship.id),
                   payload: data.innerVoice,
                   settings,
                 });
