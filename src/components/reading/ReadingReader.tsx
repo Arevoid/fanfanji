@@ -88,6 +88,9 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
   const [discussionMessages, setDiscussionMessages] = useState<ReadingDiscussionMessage[]>([]);
   const [discussionDraft, setDiscussionDraft] = useState("");
   const [isAiResponding, setIsAiResponding] = useState(false);
+  const [isImmersiveMode, setIsImmersiveMode] = useState(false);
+  const [discussionBallPosition, setDiscussionBallPosition] = useState({ left: 86, top: 48 });
+  const discussionBallDragRef = useRef<{ pointerId: number; moved: boolean } | null>(null);
 
   const refreshRoomComments = useCallback(() => setRoomComments(room ? listReadingComments(room) : []), [room]);
 
@@ -565,11 +568,35 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
   };
 
   const handleReaderEdgeClick = (event: React.MouseEvent<HTMLElement>) => {
-    if (preferences.pageMode !== "horizontal" || !window.getSelection()?.isCollapsed) return;
+    if (!window.getSelection()?.isCollapsed) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = (event.clientX - rect.left) / Math.max(rect.width, 1);
-    if (ratio <= 0.24) turnHorizontalPage(-1);
-    else if (ratio >= 0.76) turnHorizontalPage(1);
+    if (ratio <= 0.24 && preferences.pageMode === "horizontal") turnHorizontalPage(-1);
+    else if (ratio >= 0.76 && preferences.pageMode === "horizontal") turnHorizontalPage(1);
+    else if (ratio > 0.24 && ratio < 0.76) setIsImmersiveMode((value) => !value);
+  };
+
+  const handleDiscussionBallPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    discussionBallDragRef.current = { pointerId: event.pointerId, moved: false };
+  };
+
+  const handleDiscussionBallPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = discussionBallDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!bounds) return;
+    drag.moved = true;
+    setDiscussionBallPosition({
+      left: Math.min(94, Math.max(6, ((event.clientX - bounds.left) / bounds.width) * 100)),
+      top: Math.min(94, Math.max(6, ((event.clientY - bounds.top) / bounds.height) * 100)),
+    });
+  };
+
+  const handleDiscussionBallPointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    window.setTimeout(() => { discussionBallDragRef.current = null; }, 0);
   };
 
   const clearTextSelection = useCallback(() => {
@@ -684,20 +711,20 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
 
   return (
     <div data-theme-page="reading-reader" className="relative flex h-full flex-col overflow-hidden" style={{ background: preferences.background, color: preferences.textColor, fontFamily: customFontFamily }}>
-      <header className="relative z-20 flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)]/95 px-4 py-2 backdrop-blur">
+      {!isImmersiveMode && <header className="relative z-20 flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)]/95 px-4 py-2 backdrop-blur">
         <button type="button" onClick={closeReader} aria-label="返回书籍详情" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><ChevronLeft className="h-4 w-4" /></button>
         <div className="min-w-0 px-3 text-center"><h1 className="max-w-56 truncate text-sm font-bold">{content?.book.title || "阅读"}</h1><p className="mt-0.5 max-w-56 truncate text-[10px] text-[var(--text-muted)]">{room ? `与 ${room.characterSnapshot.name} 共读 · ` : ""}{content?.chapters[currentChapterIndex]?.chapter.title || "正在打开正文"}</p></div>
         <button type="button" onClick={() => setIsTocOpen(true)} aria-label="打开目录" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><List className="h-4 w-4" /></button>
-      </header>
+      </header>}
 
       {isLoading ? (
         <div className="flex flex-1 items-center justify-center gap-2 text-sm text-[var(--text-muted)]"><LoaderCircle className="h-5 w-5 animate-spin" />正在加载正文</div>
       ) : error ? (
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center"><BookOpenText className="h-8 w-8 text-[var(--text-muted)]" /><p className="mt-4 text-sm font-bold">无法打开这本书</p><p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">{error}</p></div>
       ) : (
-        <main ref={scrollRef} onScroll={handleScroll} onClick={handleReaderEdgeClick} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
+        <main ref={scrollRef} onScroll={handleScroll} onClick={handleReaderEdgeClick} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : isImmersiveMode ? "overflow-y-auto" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
           <article
-            className={preferences.pageMode === "horizontal" ? "h-full py-8" : "mx-auto max-w-[42rem]"}
+            className={preferences.pageMode === "horizontal" ? `h-full ${isImmersiveMode ? "py-2" : "py-8"}` : "mx-auto max-w-[42rem]"}
             style={preferences.pageMode === "horizontal" ? {
               columnWidth: `calc(100vw - ${(preferences.pageMargin || 24) * 2}px)`,
               columnGap: `${(preferences.pageMargin || 24) * 2}px`,
@@ -745,7 +772,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
         </main>
       )}
 
-      {!isLoading && !error && (
+      {!isImmersiveMode && !isLoading && !error && (
         <footer className="absolute inset-x-3 bottom-3 z-20 flex h-12 items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 px-1 shadow-lg backdrop-blur text-[var(--text-primary)]">
           <button type="button" disabled={currentChapterIndex <= 0} onClick={() => jumpToChapter(currentChapterIndex - 1)} className="flex h-8 items-center gap-1 rounded-xl px-2 text-xs font-bold disabled:opacity-30"><ChevronLeft className="h-4 w-4" />上一章</button>
           <button type="button" onClick={() => setIsSearchOpen(true)} aria-label="搜索正文" className="flex h-8 w-8 items-center justify-center rounded-xl"><Search className="h-4 w-4" /></button>
@@ -753,6 +780,24 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
           <button type="button" onClick={() => setIsSettingsOpen(true)} aria-label="阅读设置" className="flex h-8 w-8 items-center justify-center rounded-xl"><SlidersHorizontal className="h-4 w-4" /></button>
           <button type="button" disabled={!content || currentChapterIndex >= content.chapters.length - 1} onClick={() => jumpToChapter(currentChapterIndex + 1)} className="flex h-8 items-center gap-1 rounded-xl px-2 text-xs font-bold disabled:opacity-30">下一章<ChevronRight className="h-4 w-4" /></button>
         </footer>
+      )}
+
+      {isImmersiveMode && room && !isDiscussionOpen && (
+        <button
+          type="button"
+          aria-label={`召唤 ${room.characterSnapshot.name} 讨论当前内容`}
+          onPointerDown={handleDiscussionBallPointerDown}
+          onPointerMove={handleDiscussionBallPointerMove}
+          onPointerUp={handleDiscussionBallPointerUp}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (!discussionBallDragRef.current?.moved) openRoomDiscussion();
+          }}
+          className="absolute z-30 flex h-12 w-12 touch-none items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]/45 text-[var(--text-primary)] opacity-60 shadow-lg backdrop-blur"
+          style={{ left: `${discussionBallPosition.left}%`, top: `${discussionBallPosition.top}%`, transform: "translate(-50%, -50%)" }}
+        >
+          {room.characterSnapshot.avatar ? <img src={room.characterSnapshot.avatar} alt="" className="h-8 w-8 rounded-full object-cover opacity-80" /> : <MessageCircle className="h-5 w-5" />}
+        </button>
       )}
 
       {activeParagraph && selectionToolbarPosition && !isTocOpen && !isSearchOpen && !isSettingsOpen && (

@@ -37,6 +37,10 @@ assert.match(reader, /左右翻页/);
 assert.match(reader, /复制[\s\S]*高亮[\s\S]*段评[\s\S]*书签[\s\S]*编辑/);
 assert.doesNotMatch(reader, />分享<|navigator\.share/);
 assert.match(reader, /handleReaderEdgeClick/);
+assert.match(reader, /setIsImmersiveMode\(\(value\) => !value\)/);
+assert.match(reader, /aria-label=\{`召唤 \$\{room\.characterSnapshot\.name\} 讨论当前内容`\}/);
+assert.match(reader, /handleDiscussionBallPointerMove/);
+assert.match(reader, /!isImmersiveMode && !isLoading && !error/);
 assert.match(reader, /和 \$\{room\.characterSnapshot\.name\} 讨论当前内容/);
 
 assert.match(reader, /filter\(\(item\) => item\.targetParagraphAnchorId === context\.paragraph\.anchor\.id\)[\s\S]*sort\(byLatestUpdate\)\[0\]/);
