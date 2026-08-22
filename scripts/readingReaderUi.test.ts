@@ -51,9 +51,11 @@ assert.match(reader, /和 \$\{room\.characterSnapshot\.name\} 讨论当前内容
 assert.match(reader, /filter\(\(item\) => item\.targetParagraphAnchorId === context\.paragraph\.anchor\.id\)[\s\S]*sort\(byLatestUpdate\)\[0\]/);
 assert.doesNotMatch(reader, /\|\| \[\.\.\.openDiscussions\]\.sort\(byLatestUpdate\)\[0\]/);
 assert.match(reader, /ref=\{discussionScrollRef\}/);
+assert.match(reader, /min-h-0 flex-1 space-y-4 overflow-y-auto/);
+assert.match(reader, /role="status"/);
 assert.match(reader, /container\.scrollTop = container\.scrollHeight/);
 assert.match(reader, /placeholder="讨论当前内容…" rows=\{1\}/);
-assert.match(reader, /onPointerDown=\{\(event\) => event\.preventDefault\(\)\}/);
+assert.doesNotMatch(reader, /onPointerDown=\{\(event\) => event\.preventDefault\(\)\} onClick=\{\(\) => void sendDiscussionMessage\(\)\}/);
 assert.match(reader, /event\.key === "Enter" && !event\.shiftKey/);
 assert.match(reader, /setDiscussionMessages\(listDiscussionMessages\(room, activeDiscussionId\)\)/);
 assert.match(reader, /discussionThreads\.map\(\(\{ discussion, messages \}\)/);

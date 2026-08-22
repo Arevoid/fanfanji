@@ -496,6 +496,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
     setDiscussionId(existing?.id || null);
     setDiscussionMessages(existing ? listDiscussionMessages(room, existing.id) : []);
     setDiscussionDraft("");
+    setToolMessage(null);
     setIsDiscussionOpen(true);
   };
 
@@ -858,12 +859,13 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
               <div className="flex min-w-0 items-center gap-3">{room.characterSnapshot.avatar ? <img src={room.characterSnapshot.avatar} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" /> : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-raised)]">{room.characterSnapshot.name.slice(0,1)}</span>}<div className="min-w-0"><h2 className="truncate text-base font-bold">和 {room.characterSnapshot.name} 聊当前内容</h2><p className="mt-0.5 text-[10px] text-[var(--text-muted)]">TA 只会读取当前已读范围与本次讨论</p></div></div>
               <button type="button" onClick={() => setIsDiscussionOpen(false)} aria-label="关闭实时讨论" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><X className="h-4 w-4" /></button>
             </div>
-            <div ref={discussionScrollRef} className="min-h-[12rem] flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            <div ref={discussionScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
               {discussionThreads.map(({ discussion, messages }) => <section key={discussion.id} className="space-y-3"><div className="sticky top-0 z-10 rounded-xl bg-[var(--surface)]/95 px-2 py-1 text-[10px] font-bold text-[var(--text-muted)] backdrop-blur">{getDiscussionChapterTitle(discussion.targetChapterId)}</div>{messages.map((message) => <div key={message.id} className={`max-w-[84%] rounded-2xl px-3 py-2 text-sm leading-6 ${message.author === "user" ? "ml-auto bg-[var(--text-primary)] text-[var(--surface)]" : "mr-auto bg-[var(--surface-raised)]"}`}><p className="mb-0.5 text-[9px] opacity-60">{message.authorName}</p><p className="whitespace-pre-wrap">{message.body}</p></div>)}</section>)}
               {discussionMessages.length === 0 && <div className="rounded-2xl bg-[var(--surface-raised)] p-4 text-xs leading-5 text-[var(--text-muted)]">可以直接问 TA 对当前情节、人物或细节的看法。当前片段会被冻结在这个共读房间，不会串到其他好友。</div>}
               {isAiResponding && <div className="mr-auto flex items-center gap-2 rounded-2xl bg-[var(--surface-raised)] px-3 py-2 text-xs text-[var(--text-muted)]"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />{room.characterSnapshot.name} 正在回应…</div>}
+              {toolMessage && <div role="status" className="rounded-xl bg-rose-500/10 px-3 py-2 text-xs leading-5 text-rose-600">{toolMessage}</div>}
             </div>
-            <div className="flex gap-2 border-t border-[var(--border)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><textarea value={discussionDraft} onChange={(event) => setDiscussionDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendDiscussionMessage(); } }} placeholder="讨论当前内容…" rows={1} className="h-10 min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm leading-5 outline-none" /><button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => void sendDiscussionMessage()} disabled={!discussionDraft.trim() || isAiResponding} className="flex h-10 w-10 items-center justify-center self-end rounded-xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
+            <div className="flex gap-2 border-t border-[var(--border)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><textarea value={discussionDraft} onChange={(event) => { setDiscussionDraft(event.target.value); setToolMessage(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendDiscussionMessage(); } }} placeholder="讨论当前内容…" rows={1} className="h-10 min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm leading-5 outline-none" /><button type="button" onClick={() => void sendDiscussionMessage()} disabled={!discussionDraft.trim() || isAiResponding} className="flex h-10 w-10 items-center justify-center self-end rounded-xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
           </div>
         </div>
       )}
