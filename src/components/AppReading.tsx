@@ -2469,14 +2469,14 @@ export default function AppReading({
       )}
       {quickEditBook && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain bg-black/50 p-3"
+          className="absolute inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/50 p-3"
           role="dialog"
           aria-modal="true"
           aria-label={`编辑${quickEditBook.title}`}
           onClick={() => setQuickEditBookId(null)}
         >
           <div
-            className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-md space-y-3 overflow-y-auto overscroll-contain rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
+            className="my-3 max-h-[calc(100%-1.5rem)] w-full max-w-md space-y-3 overflow-y-auto overscroll-contain rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div>

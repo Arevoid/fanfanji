@@ -7,7 +7,7 @@ const source = readFileSync(
 );
 
 assert.match(source, /aria-label=\{`编辑\$\{quickEditBook\.title\}`\}/);
-assert.match(source, /fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain/);
-assert.match(source, /max-h-\[calc\(100dvh-1\.5rem\)\].*overflow-y-auto overscroll-contain/);
+assert.match(source, /absolute inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain/);
+assert.match(source, /max-h-\[calc\(100%-1\.5rem\)\].*overflow-y-auto overscroll-contain/);
 
 console.log("reading book edit UI checks passed");
