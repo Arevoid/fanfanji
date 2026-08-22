@@ -472,10 +472,12 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
     if (!context) return;
     const openDiscussions = listReadingDiscussions(room).filter((item) => item.status !== "closed");
     const byLatestUpdate = (left: typeof openDiscussions[number], right: typeof openDiscussions[number]) => right.updatedAt - left.updatedAt;
+    // A discussion is anchored to the paragraph where it was started. Do not
+    // reuse an unrelated open discussion when the reader has moved on: that
+    // would keep sending the AI the old discussion's frozen context.
     const existing = openDiscussions
       .filter((item) => item.targetParagraphAnchorId === context.paragraph.anchor.id)
-      .sort(byLatestUpdate)[0]
-      || [...openDiscussions].sort(byLatestUpdate)[0];
+      .sort(byLatestUpdate)[0];
     setDiscussionId(existing?.id || null);
     setDiscussionMessages(existing ? listDiscussionMessages(room, existing.id) : []);
     setDiscussionDraft("");
