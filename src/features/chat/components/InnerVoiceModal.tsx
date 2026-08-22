@@ -1,6 +1,7 @@
 import type { Character, InnerVoiceRecord } from "../../../types";
 import { Button, Card, Modal } from "../../../components/ui";
 import { ChatAvatar as RenderAvatar } from "./ChatAvatar";
+import { RefreshCw } from "lucide-react";
 
 interface InnerVoiceModalProps {
   character: Character | null;
@@ -12,14 +13,31 @@ interface InnerVoiceModalProps {
   record: InnerVoiceRecord | null;
   history: InnerVoiceRecord[];
   getEmotion: (record: InnerVoiceRecord) => string;
+  onRefresh: () => void | Promise<void>;
 }
 
-export function InnerVoiceModal({ character, mode, onModeChange, onClose, loading, error, record, history, getEmotion }: InnerVoiceModalProps) {
+export function InnerVoiceModal({ character, mode, onModeChange, onClose, loading, error, record, history, getEmotion, onRefresh }: InnerVoiceModalProps) {
   return (
     <Modal
       open={Boolean(character)}
       onClose={onClose}
-      title={mode === "history" ? "历史心声" : "角色心声"}
+      title={
+        <span className="flex items-center justify-between gap-3">
+          <span>{mode === "history" ? "历史心声" : "角色心声"}</span>
+          {mode === "current" && (
+            <button
+              type="button"
+              className="rounded-full p-1.5 text-[var(--color-text-secondary)] transition hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void onRefresh()}
+              disabled={loading}
+              aria-label="刷新心声"
+              title="重新生成心声"
+            >
+              <RefreshCw size={18} className={loading ? "animate-spin" : undefined} />
+            </button>
+          )}
+        </span>
+      }
       description={character ? (
         <span className="flex items-center gap-2">
           <RenderAvatar src={character.avatar} alt="" name={character.name} className="h-7 w-7 rounded-full object-cover" />

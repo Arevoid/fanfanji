@@ -26,11 +26,12 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
   // Retained as a compatibility marker for older callers; new turns are
   // persisted during reply delivery and never start a second request here.
   const requestsRef = useRef(new Set<string>());
+  const lastOpenRef = useRef<{ targetCharacterId: string; triggerMessage: Message } | null>(null);
 
   const close = () => { setRecord(null); setCharacter(null); setMode("current"); setError(null); };
   const getEmotion = (value: InnerVoiceRecord) => value.emotionalState?.trim() || `当前情绪：${value.state || "难以言说的心绪"}`;
 
-  const open = async (targetCharacterId: string, triggerMessage: Message) => {
+  const open = async (targetCharacterId: string, triggerMessage: Message, force = false) => {
     const canonicalCharacterId = resolveCanonicalCharacterId(targetCharacterId, characters);
     const targetCharacter = characters.find((item) => item.id === canonicalCharacterId);
     if (!targetCharacter) return;
@@ -38,26 +39,38 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
     const conversationId = relationId ? activeRelationship?.conversationId : triggerMessage.conversationId || groupId;
     if (!conversationId || (!relationId && !groupId)) return;
+    // Keep direct-chat context strict. A stale message from another contact
+    // must never be used to generate this character's private reflection.
+    if (relationId && triggerMessage.relationId && triggerMessage.relationId !== relationId) return;
     const scope: InnerVoiceScope = relationId
       ? { kind: "direct", relationId, messageId: triggerMessage.id }
       : { kind: "group", groupId: groupId!, conversationId, characterId: canonicalCharacterId, messageId: triggerMessage.id };
     const listHistory = (records: readonly InnerVoiceRecord[]) => relationId ? listInnerVoicesByRelation(records, relationId) : listInnerVoicesByGroup(records, groupId!, conversationId, canonicalCharacterId);
+    lastOpenRef.current = { targetCharacterId: canonicalCharacterId, triggerMessage };
     setCharacter(targetCharacter); setMode("current"); setError(null);
     const stored = loadInnerVoiceRecords([]).value;
     const existing = findInnerVoiceByMessage(stored, scope);
     setHistory(listHistory(stored));
-    if (existing) { setRecord(existing); setLoading(false); return; }
+    if (existing && !force) { setRecord(existing); setLoading(false); return; }
     const requestKey = `${scope.kind}:${scope.kind === "direct" ? scope.relationId : `${scope.groupId}:${scope.conversationId}:${scope.characterId}`}:${scope.messageId}`;
     if (requestsRef.current.has(requestKey)) return;
     requestsRef.current.add(requestKey);
     setRecord(null);
     setLoading(true);
     try {
+      const scopedMessages = messages.filter((message) => relationId
+        ? message.relationId === relationId
+          && (!conversationId || !message.conversationId || message.conversationId === conversationId)
+        : message.conversationId === conversationId
+          || message.id === triggerMessage.id);
+      const recentMessages = scopedMessages.some((message) => message.id === triggerMessage.id)
+        ? scopedMessages
+        : [...scopedMessages, triggerMessage];
       const generated = await generateInnerVoice({
         character: targetCharacter,
         relationship: relationId ? activeRelationship || undefined : undefined,
         triggerMessage,
-        recentMessages: messages,
+        recentMessages,
         conversationId,
         relationId,
         groupId,
@@ -81,5 +94,11 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     }
   };
 
-  return { record, character, mode, setMode, loading, error, history, open, close, getEmotion };
+  const refresh = async () => {
+    const lastOpen = lastOpenRef.current;
+    if (!lastOpen) return;
+    await open(lastOpen.targetCharacterId, lastOpen.triggerMessage, true);
+  };
+
+  return { record, character, mode, setMode, loading, error, history, open, refresh, close, getEmotion };
 }

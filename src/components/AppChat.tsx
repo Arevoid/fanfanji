@@ -3401,6 +3401,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         record={innerVoiceController.record}
         history={innerVoiceController.history}
         getEmotion={innerVoiceController.getEmotion}
+        onRefresh={innerVoiceController.refresh}
       />
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter && isActiveChatScopeValid ? (
