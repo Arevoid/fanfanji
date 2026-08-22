@@ -724,7 +724,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
       ) : (
         <main ref={scrollRef} onScroll={handleScroll} onClick={handleReaderEdgeClick} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
           <article
-            className={preferences.pageMode === "horizontal" ? `h-full ${isImmersiveMode ? "py-2" : "py-8"}` : "mx-auto max-w-[42rem]"}
+            className={preferences.pageMode === "horizontal" ? "h-full py-8" : "mx-auto max-w-[42rem]"}
             style={preferences.pageMode === "horizontal" ? {
               columnWidth: `calc(100vw - ${(preferences.pageMargin || 24) * 2}px)`,
               columnGap: `${(preferences.pageMargin || 24) * 2}px`,
@@ -780,6 +780,13 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
           <button type="button" onClick={() => setIsSettingsOpen(true)} aria-label="阅读设置" className="flex h-8 w-8 items-center justify-center rounded-xl"><SlidersHorizontal className="h-4 w-4" /></button>
           <button type="button" disabled={!content || currentChapterIndex >= content.chapters.length - 1} onClick={() => jumpToChapter(currentChapterIndex + 1)} className="flex h-8 items-center gap-1 rounded-xl px-2 text-xs font-bold disabled:opacity-30">下一章<ChevronRight className="h-4 w-4" /></button>
         </footer>
+      )}
+
+      {isImmersiveMode && !isLoading && !error && (
+        <div className="pointer-events-none absolute inset-x-4 bottom-3 z-20 flex items-end justify-between text-[10px] text-[var(--text-muted)] drop-shadow-sm">
+          <span className="max-w-[45%] truncate">{content?.chapters[currentChapterIndex]?.chapter.title || "阅读中"}</span>
+          <span className="tabular-nums">总进度 {percent.toFixed(1)}%</span>
+        </div>
       )}
 
       {isImmersiveMode && room && !isDiscussionOpen && (

@@ -44,6 +44,8 @@ assert.doesNotMatch(reader, /overflow-y-auto pb-28 pt-8/);
 assert.match(reader, /aria-label=\{`召唤 \$\{room\.characterSnapshot\.name\} 讨论当前内容`\}/);
 assert.match(reader, /handleDiscussionBallPointerMove/);
 assert.match(reader, /!isImmersiveMode && !isLoading && !error/);
+assert.match(reader, /总进度 \{percent\.toFixed\(1\)\}%/);
+assert.match(reader, /content\?\.chapters\[currentChapterIndex\]\?\.chapter\.title/);
 assert.match(reader, /和 \$\{room\.characterSnapshot\.name\} 讨论当前内容/);
 
 assert.match(reader, /filter\(\(item\) => item\.targetParagraphAnchorId === context\.paragraph\.anchor\.id\)[\s\S]*sort\(byLatestUpdate\)\[0\]/);
