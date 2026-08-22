@@ -153,7 +153,7 @@ assert.match(chatRuntimeSource, /getOfflineContinuityContext/);
 assert.match(innerVoiceHookSource, /getOfflineContinuityContext/);
 assert.doesNotMatch(chatRuntimeSource, /!relevantMemories\.some\(\(memory\) => memory\.id === latestOfflineContinuationMemory\.id\)/, "structured memory selection cannot suppress the dedicated handoff block");
 assert.match(chatRuntimeSource, /history\.push\(\{ role: "user", text: pendingOfflineHistoryAnchor \}\)/, "the offline segment is inserted next to the current online message as hidden history");
-assert.doesNotMatch(innerVoiceHookSource, /generateInnerVoice|apiTranslate/, "opening a bubble must not start another inner voice API request");
+assert.match(innerVoiceHookSource, /generateInnerVoice/, "opening a bubble can generate a missing inner voice on demand");
 assert.match(chatSource, /createInlineInnerVoiceRecord/, "the reply pipeline persists inline inner voice records");
 assert.match(chatRuntimeSource, /createdMessages\.length > 0[\s\S]*recordPendingOfflineHandoffDelivery/, "normal chat records delivery only after creating a reply");
 assert.match(handoffRecoveryServiceSource, /recentUntrackedStory[\s\S]*createPendingOfflineHandoff/, "recent pre-schema stories can repair a missed first online handoff");

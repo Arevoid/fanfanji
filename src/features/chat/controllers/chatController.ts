@@ -7,10 +7,11 @@ export function formatQuotedChatInput(
   inputText: string,
   quotedMessage: Message,
   activeCharacter: Character,
+  quotedSenderName?: string,
 ): string {
   const senderName = quotedMessage.sender === "user"
     ? "我"
-    : (activeCharacter.remark || activeCharacter.name);
+    : (quotedSenderName || (activeCharacter.isGroupChat ? activeCharacter.name : (activeCharacter.remark || activeCharacter.name)));
   let shortContent = quotedMessage.content;
   if (shortContent.startsWith("[文件]")) {
     const parts = shortContent.split("|");

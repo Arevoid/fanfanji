@@ -6,7 +6,7 @@ import { ConversationList } from "../src/features/chat/components/ConversationLi
 import type { Character, Message } from "../src/types";
 
 const direct: Character = { id: "a", name: "同名", avatar: "a.png", personality: "", backstory: "" };
-const group: Character = { id: "g", name: "同名", avatar: "g.png", personality: "", backstory: "", isGroupChat: true, memberIds: ["a"] };
+const group: Character = { id: "g", name: "群聊名称", remark: "错误的好友名", avatar: "g.png", personality: "", backstory: "", isGroupChat: true, memberIds: ["a"] };
 const message: Message = { id: "m", characterId: "a", sender: "character", content: "最近摘要", timestamp: new Date("2026-07-22T21:48:00").getTime() };
 let selected: string | undefined;
 const header = <ChatTopBar title="标题" leftAction={<button title="返回主页">返回</button>} rightAction={<button title="操作">操作</button>} />;
@@ -19,6 +19,7 @@ const checks: Array<[string, boolean]> = [
   ["B top bar controls retain titles", list.includes('title="返回主页"') && list.includes('title="操作"')],
   ["C direct conversation renders", list.includes("最近摘要")],
   ["D group conversation renders", list.includes("成员: 最近摘要")],
+  ["D2 group title uses group name", list.includes("群聊名称") && !list.includes("错误的好友名")],
   ["E pinned marker renders", list.includes("rotate-45")],
   ["F unread count renders", list.includes(">2</span>")],
   ["G conversation time renders", list.includes("21:48")],

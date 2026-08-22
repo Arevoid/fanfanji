@@ -434,6 +434,11 @@ export default function AppChat({
   // Navigation State
   const activeRelationship = activeChatRelationId ? relationships.find((relation) => relation.id === activeChatRelationId) : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
+  const activeCharacterDisplayName = activeCharacter
+    ? activeCharacter.isGroupChat
+      ? activeCharacter.name
+      : (activeCharacter.remark || activeCharacter.name)
+    : "";
   const readyOfflineAppointment = useChatAppointment({ activeRelationship, appointments });
   const characterCustomChatCss = activeCharacter?.customChatCSS || activeCharacter?.customCss || "";
   // bubbleCss remains a scoped legacy compatibility source.
@@ -2324,6 +2329,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   } = useChatController({
     activeChatCharId,
     activeCharacter,
+    getQuotedSenderName: (message) => message.sender === "character"
+      ? characters.find((character) => character.id === message.senderId)?.remark
+        || characters.find((character) => character.id === message.senderId)?.name
+      : undefined,
     currentChatMessages,
     onSendMessage,
     generateResponseForUserMessage,
@@ -4225,7 +4234,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   />
                 )}
                 <h2 className="text-[13px] font-bold text-slate-800 tracking-tight truncate header-title-name chat-header__name">
-                  {activeCharacter.remark || activeCharacter.name}
+                  {activeCharacterDisplayName}
                   {activeCharacter.isGroupChat && (
                     <span className="text-slate-400 font-normal ml-0.5">
                       ({1 + (activeCharacter.memberIds?.length || 0)})
@@ -5379,7 +5388,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 ? (characters.find(c => c.id === msg.senderId) || characters.find(c => c.name === msg.senderId))
                 : null;
               const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? settings.avatar : activeCharacter.avatar);
-              const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : (activeCharacter.remark || activeCharacter.name);
+              const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : activeCharacterDisplayName;
               const renderBubbleInner = () => {
                 return (
                   <div 
@@ -5704,9 +5713,21 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         } ${messageGroupClass}`}>
                           {(() => {
                             const quoteReply = parseQuoteReply(msg.content);
+                            const quoteAuthor = quoteReply && activeCharacter.isGroupChat
+                              ? (() => {
+                                const quotedSource = currentChatMessages.find((candidate) =>
+                                  candidate.sender === "character"
+                                  && candidate.content === quoteReply.content,
+                                );
+                                const quotedMember = quotedSource?.senderId
+                                  ? characters.find((character) => character.id === quotedSource.senderId)
+                                  : undefined;
+                                return quotedMember?.remark || quotedMember?.name || quoteReply.author;
+                              })()
+                              : quoteReply?.author;
                             return quoteReply ? (
                               <>
-                                <div className="message-quote__header">↩ {isSelf ? "你回复了" : "回复了"} {quoteReply.author}</div>
+                                <div className="message-quote__header">↩ {isSelf ? "你回复了" : "回复了"} {quoteAuthor}</div>
                                 <div className="message-quote text-left text-[11px]">
                                   <div className="message-quote__content px-3 py-2">{quoteReply.content}</div>
                                 </div>
@@ -5846,7 +5867,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               isOfflineModeActive ? (
                 <div className="flex items-center gap-2 text-xs text-indigo-600 font-bold italic px-1 py-2 my-2 animate-pulse">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>{activeCharacter.remark || activeCharacter.name} 正在编织剧情走向...</span>
+                  <span>{activeCharacterDisplayName} 正在编织剧情走向...</span>
                 </div>
               ) : (() => {
                 const lastMsg = currentChatMessages.length > 0 ? currentChatMessages[currentChatMessages.length - 1] : null;
@@ -5951,7 +5972,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                : activeStylePreset === "liquid-glass"
                  ? "mx-3.5 mb-3.5 mt-1 overflow-visible shrink-0 flex flex-col cv-footer chat-input-area chat-composer--liquid"
                  : "shrink-0 flex flex-col cv-footer chat-input-area chat-composer--default"
-           }`} quotePreview={quotedMessage && <QuotedMessagePreview message={quotedMessage} senderName={activeCharacter.remark || activeCharacter.name} onClear={() => setQuotedMessage(null)} closeIcon={<X className="w-3.5 h-3.5" />} />}>
+           }`} quotePreview={quotedMessage && <QuotedMessagePreview message={quotedMessage} senderName={quotedMessage.sender === "character" ? (characters.find((character) => character.id === quotedMessage.senderId)?.remark || characters.find((character) => character.id === quotedMessage.senderId)?.name || activeCharacterDisplayName) : activeCharacterDisplayName} onClear={() => setQuotedMessage(null)} closeIcon={<X className="w-3.5 h-3.5" />} />}>
             
 
 

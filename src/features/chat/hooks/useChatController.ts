@@ -22,6 +22,7 @@ export type CharacterImageHandler = (
 export interface UseChatControllerOptions {
   activeChatCharId: string | null;
   activeCharacter: Character | undefined;
+  getQuotedSenderName?: (message: Message) => string | undefined;
   currentChatMessages: Message[];
   onSendMessage: (message: Message) => void;
   generateResponseForUserMessage: ChatResponseHandler;
@@ -43,6 +44,7 @@ export interface UseChatControllerOptions {
 export function useChatController({
   activeChatCharId,
   activeCharacter,
+  getQuotedSenderName,
   currentChatMessages,
   onSendMessage,
   generateResponseForUserMessage,
@@ -93,7 +95,7 @@ export function useChatController({
 
     const safeQuotedMessage = quotedMessage && quoteBelongsToRuntime(quotedMessage) ? quotedMessage : null;
     const userMsgText = safeQuotedMessage && activeCharacter
-      ? formatQuotedChatInput(inputText.trim(), safeQuotedMessage, activeCharacter)
+      ? formatQuotedChatInput(inputText.trim(), safeQuotedMessage, activeCharacter, getQuotedSenderName?.(safeQuotedMessage))
       : inputText.trim();
     if (quotedMessage) setQuotedMessage(null);
 
@@ -136,7 +138,7 @@ export function useChatController({
       const shouldGenerateExplicitImage = Boolean(pendingImageRequest);
       const safeQuotedMessage = quotedMessage && quoteBelongsToRuntime(quotedMessage) ? quotedMessage : null;
       const userMsgText = safeQuotedMessage && activeCharacter
-        ? formatQuotedChatInput(rawUserRequest, safeQuotedMessage, activeCharacter)
+        ? formatQuotedChatInput(rawUserRequest, safeQuotedMessage, activeCharacter, getQuotedSenderName?.(safeQuotedMessage))
         : rawUserRequest;
       if (quotedMessage) setQuotedMessage(null);
 

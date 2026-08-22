@@ -67,7 +67,7 @@ export function ConversationList({
               <div className="flex-1 min-w-0 pr-4">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-[var(--text-primary)] truncate">
-                    {character.remark || character.name}
+                    {character.isGroupChat ? character.name : (character.remark || character.name)}
                     {subtitle && <span className="text-[var(--text-tertiary)] font-normal ml-1">· {subtitle}</span>}
                     {character.isGroupChat && <span className="text-[var(--text-tertiary)] font-normal ml-1">({1 + (character.memberIds?.length || 0)})</span>}
                   </h4>

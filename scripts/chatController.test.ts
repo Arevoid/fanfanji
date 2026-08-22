@@ -16,6 +16,11 @@ assert.equal(
   formatQuotedChatInput("请看看", quotedMessage, character),
   "「引用 狸花：[文件] 备忘录」\n请看看",
 );
+const groupCharacter = { id: "group-1", name: "不请自来的某两人", isGroupChat: true } as Character;
+assert.equal(
+  formatQuotedChatInput("好的", { ...quotedMessage, senderId: "member-1" }, groupCharacter, "书容"),
+  "「引用 书容：[文件] 备忘录」\n好的",
+);
 
 const context = createChatContext({
   characterId: "char-1",

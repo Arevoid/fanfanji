@@ -3,6 +3,7 @@ import type { Character, InnerVoiceRecord, MemoryItem, Message, UserSettings, Wo
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
 import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, saveInnerVoiceRecords, type InnerVoiceScope } from "../../../core/storage/repositories/innerVoiceRepository";
+import { generateInnerVoice } from "../services/innerVoiceService";
 
 interface UseInnerVoiceOptions {
   characters: Character[];
@@ -46,9 +47,38 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const existing = findInnerVoiceByMessage(stored, scope);
     setHistory(listHistory(stored));
     if (existing) { setRecord(existing); setLoading(false); return; }
+    const requestKey = `${scope.kind}:${scope.kind === "direct" ? scope.relationId : `${scope.groupId}:${scope.conversationId}:${scope.characterId}`}:${scope.messageId}`;
+    if (requestsRef.current.has(requestKey)) return;
+    requestsRef.current.add(requestKey);
     setRecord(null);
-    setLoading(false);
-    setError("这条消息没有预生成心声；新消息会在回复时随同一轮请求生成。");
+    setLoading(true);
+    try {
+      const generated = await generateInnerVoice({
+        character: targetCharacter,
+        relationship: relationId ? activeRelationship || undefined : undefined,
+        triggerMessage,
+        recentMessages: messages,
+        conversationId,
+        relationId,
+        groupId,
+        settings,
+        offlineContinuityContext: getOfflineContinuityContext(triggerMessage),
+        worldBookEntries,
+      });
+      if (!generated) {
+        setError("心声生成失败，请检查模型设置后重试。");
+        return;
+      }
+      const latest = loadInnerVoiceRecords([]).value;
+      saveInnerVoiceRecords([...latest.filter((item) => item.id !== generated.id), generated]);
+      setRecord(generated);
+      setHistory(listHistory([...latest, generated]));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "心声生成失败，请检查模型设置后重试。");
+    } finally {
+      requestsRef.current.delete(requestKey);
+      setLoading(false);
+    }
   };
 
   return { record, character, mode, setMode, loading, error, history, open, close, getEmotion };
