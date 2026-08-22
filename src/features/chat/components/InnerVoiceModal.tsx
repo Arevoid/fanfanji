@@ -21,23 +21,19 @@ export function InnerVoiceModal({ character, mode, onModeChange, onClose, loadin
     <Modal
       open={Boolean(character)}
       onClose={onClose}
-      title={
-        <span className="flex items-center justify-between gap-3">
-          <span>{mode === "history" ? "历史心声" : "角色心声"}</span>
-          {mode === "current" && (
-            <button
-              type="button"
-              className="inline-flex h-[var(--control-height-md)] w-[var(--control-height-md)] items-center justify-center rounded-full p-0 text-[var(--color-text-secondary)] transition hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={() => void onRefresh()}
-              disabled={loading}
-              aria-label="刷新心声"
-              title="重新生成心声"
-            >
-              <RefreshCw size={18} className={loading ? "animate-spin" : undefined} />
-            </button>
-          )}
-        </span>
-      }
+      title={mode === "history" ? "历史心声" : "角色心声"}
+      headerActions={mode === "current" ? (
+        <button
+          type="button"
+          className="inline-flex h-[var(--control-height-md)] w-[var(--control-height-md)] items-center justify-center rounded-full p-0 text-[var(--color-text-secondary)] transition hover:bg-[var(--color-surface-secondary)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => void onRefresh()}
+          disabled={loading}
+          aria-label="刷新心声"
+          title="重新生成心声"
+        >
+          <RefreshCw size={18} className={loading ? "animate-spin" : undefined} />
+        </button>
+      ) : undefined}
       description={character ? (
         <span className="flex items-center gap-2">
           <RenderAvatar src={character.avatar} alt="" name={character.name} className="h-7 w-7 rounded-full object-cover" />

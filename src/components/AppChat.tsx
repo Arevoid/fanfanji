@@ -1831,7 +1831,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         }));
       }
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
-      const systemInstruction = finalizeCharacterChatSystemInstruction({
+      const systemInstruction = `${finalizeCharacterChatSystemInstruction({
         instructions: assembledInstructions,
         characterProjection,
         characterDescriptionText,
@@ -1848,7 +1848,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             relationId: activeRelationship?.id,
           }).map((entry) => `${entry.title}\n${entry.content}`),
         )),
-      });
+      })}
+
+${INLINE_INNER_VOICE_INSTRUCTION}`;
 
       // Custom tool/attachment format descriptions for character context
       const promptMessage = userMsg
@@ -1999,16 +2001,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           if (signal?.aborted) return;
 
           if (createdMessages.length > 0) {
-            if (data.innerVoice && turnRelationship) {
+            const inlineRelationship = turnRelationship
+              || (replyContext.relationId ? relationships.find((relation) => relation.id === replyContext.relationId) : undefined);
+            if (data.innerVoice && inlineRelationship) {
               const triggerMessage = createdMessages[createdMessages.length - 1];
               const latest = loadInnerVoiceRecords([]).value;
-              const scope = { kind: "direct" as const, relationId: turnRelationship.id, messageId: triggerMessage.id };
+              const scope = { kind: "direct" as const, relationId: inlineRelationship.id, messageId: triggerMessage.id };
               if (!findInnerVoiceByMessage(latest, scope)) {
                 const record = createInlineInnerVoiceRecord({
                   character: turnCharacter,
                   triggerMessage,
-                  relationId: turnRelationship.id,
-                  conversationId: turnRelationship.conversationId || getConversationId(turnRelationship.id),
+                  relationId: inlineRelationship.id,
+                  conversationId: inlineRelationship.conversationId || getConversationId(inlineRelationship.id),
                   payload: data.innerVoice,
                   settings,
                 });
