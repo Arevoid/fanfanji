@@ -88,7 +88,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
   const [discussionMessages, setDiscussionMessages] = useState<ReadingDiscussionMessage[]>([]);
   const [discussionDraft, setDiscussionDraft] = useState("");
   const [isAiResponding, setIsAiResponding] = useState(false);
-  const [isImmersiveMode, setIsImmersiveMode] = useState(false);
+  const [isImmersiveMode, setIsImmersiveMode] = useState(true);
   const [discussionBallPosition, setDiscussionBallPosition] = useState({ left: 86, top: 48 });
   const discussionBallDragRef = useRef<{ pointerId: number; moved: boolean } | null>(null);
 
@@ -711,7 +711,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
 
   return (
     <div data-theme-page="reading-reader" className="relative flex h-full flex-col overflow-hidden" style={{ background: preferences.background, color: preferences.textColor, fontFamily: customFontFamily }}>
-      {!isImmersiveMode && <header className="relative z-20 flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)]/95 px-4 py-2 backdrop-blur">
+      {!isImmersiveMode && <header className="absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)]/95 px-4 py-2 backdrop-blur">
         <button type="button" onClick={closeReader} aria-label="返回书籍详情" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><ChevronLeft className="h-4 w-4" /></button>
         <div className="min-w-0 px-3 text-center"><h1 className="max-w-56 truncate text-sm font-bold">{content?.book.title || "阅读"}</h1><p className="mt-0.5 max-w-56 truncate text-[10px] text-[var(--text-muted)]">{room ? `与 ${room.characterSnapshot.name} 共读 · ` : ""}{content?.chapters[currentChapterIndex]?.chapter.title || "正在打开正文"}</p></div>
         <button type="button" onClick={() => setIsTocOpen(true)} aria-label="打开目录" className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"><List className="h-4 w-4" /></button>
@@ -722,7 +722,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
       ) : error ? (
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center"><BookOpenText className="h-8 w-8 text-[var(--text-muted)]" /><p className="mt-4 text-sm font-bold">无法打开这本书</p><p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">{error}</p></div>
       ) : (
-        <main ref={scrollRef} onScroll={handleScroll} onClick={handleReaderEdgeClick} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : isImmersiveMode ? "overflow-y-auto" : "overflow-y-auto pb-28 pt-8"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
+        <main ref={scrollRef} onScroll={handleScroll} onClick={handleReaderEdgeClick} onPointerUp={() => { if (preferences.pageMode === "horizontal") window.setTimeout(() => snapToHorizontalPage(), 20); }} aria-label="小说正文" className={`flex-1 ${preferences.pageMode === "horizontal" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto"}`} style={{ paddingLeft: preferences.pageMargin, paddingRight: preferences.pageMargin, scrollSnapType: preferences.pageMode === "horizontal" ? "x mandatory" : undefined, overscrollBehaviorX: preferences.pageMode === "horizontal" ? "contain" : undefined }}>
           <article
             className={preferences.pageMode === "horizontal" ? `h-full ${isImmersiveMode ? "py-2" : "py-8"}` : "mx-auto max-w-[42rem]"}
             style={preferences.pageMode === "horizontal" ? {

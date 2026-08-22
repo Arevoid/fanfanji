@@ -38,6 +38,9 @@ assert.match(reader, /复制[\s\S]*高亮[\s\S]*段评[\s\S]*书签[\s\S]*编辑
 assert.doesNotMatch(reader, />分享<|navigator\.share/);
 assert.match(reader, /handleReaderEdgeClick/);
 assert.match(reader, /setIsImmersiveMode\(\(value\) => !value\)/);
+assert.match(reader, /useState\(true\)/);
+assert.match(reader, /absolute inset-x-0 top-0 z-20 flex h-14/);
+assert.doesNotMatch(reader, /overflow-y-auto pb-28 pt-8/);
 assert.match(reader, /aria-label=\{`召唤 \$\{room\.characterSnapshot\.name\} 讨论当前内容`\}/);
 assert.match(reader, /handleDiscussionBallPointerMove/);
 assert.match(reader, /!isImmersiveMode && !isLoading && !error/);
