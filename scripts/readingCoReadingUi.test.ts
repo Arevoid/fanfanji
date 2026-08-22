@@ -26,6 +26,8 @@ assert.match(
 assert.match(appReading, /共读评价/);
 assert.doesNotMatch(appReading, /召唤 TA 讨论/);
 assert.match(appReading, /仅当前房间可见/);
+assert.match(appReading, /aria-label="删除共读房间"/);
+assert.doesNotMatch(appReading, /删除共读卡片\s*<\/button>/);
 assert.match(
   app,
   /<AppReading[\s\S]*?characters=\{characters\}[\s\S]*?relationships=\{relationships\}/,

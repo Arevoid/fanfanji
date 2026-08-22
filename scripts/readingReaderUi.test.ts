@@ -19,6 +19,8 @@ assert.match(
   /继续阅读 · \$\{selectedProgress\.percent\.toFixed\(1\)\}%/,
 );
 assert.match(reader, /aria-label="小说正文"[\s\S]*overflow-y-auto/);
+assert.doesNotMatch(reader, /contentVisibility:\s*["']auto["']/);
+assert.doesNotMatch(reader, /containIntrinsicSize:/);
 assert.match(reader, /data-anchor-id=\{paragraph\.anchor\.id\}/);
 assert.match(reader, /characterOffset: Math\.round/);
 assert.match(

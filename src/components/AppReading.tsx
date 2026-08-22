@@ -1294,7 +1294,14 @@ export default function AppReading({
           <h1 className="absolute left-1/2 max-w-[65%] -translate-x-1/2 truncate text-base font-bold">
             共读房间
           </h1>
-          <span className="w-8" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={() => setRoomDeleteTarget(selectedRoom)}
+            aria-label="删除共读房间"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-rose-200/70 text-rose-500"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
         </header>
         <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
           <div className="mx-auto w-full max-w-md space-y-4">
@@ -2288,14 +2295,6 @@ export default function AppReading({
                           书房
                         </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setRoomDeleteTarget(room || null)}
-                        disabled={!room}
-                        className="mt-2 h-8 w-full rounded-xl border border-rose-200/70 text-[10px] font-bold text-rose-500 disabled:opacity-40"
-                      >
-                        删除共读卡片
-                      </button>
                     </div>
                   );
                 })
@@ -2470,14 +2469,14 @@ export default function AppReading({
       )}
       {quickEditBook && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain bg-black/50 p-3"
           role="dialog"
           aria-modal="true"
           aria-label={`编辑${quickEditBook.title}`}
           onClick={() => setQuickEditBookId(null)}
         >
           <div
-            className="w-full max-w-md space-y-3 rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
+            className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-md space-y-3 overflow-y-auto overscroll-contain rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div>

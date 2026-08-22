@@ -708,8 +708,6 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
                       onContextMenu={(event) => { if (!window.getSelection()?.isCollapsed) event.preventDefault(); }}
                       className={`relative select-text rounded-md transition-colors ${annotations.some((item) => item.paragraphAnchorId === paragraph.anchor.id && item.kind === "note") ? "border-b border-dashed border-current" : ""}`}
                       style={{
-                        contentVisibility: "auto",
-                        containIntrinsicSize: "0 96px",
                         userSelect: "text",
                         WebkitUserSelect: "text",
                         fontSize: preferences.fontSize,

@@ -22,7 +22,7 @@ export function useChatReadState({ activeChatCharId, activeChatRelationId, messa
   }, [initiatedChatIds]);
 
   useEffect(() => {
-    const chatKey = activeChatRelationId || activeChatCharId;
+    const chatKey = activeChatCharId ? (activeChatRelationId || activeChatCharId) : null;
     if (chatKey && !initiatedChatIds.includes(chatKey)) setInitiatedChatIds((previous) => markChatInitiated(previous, chatKey));
   }, [activeChatCharId, activeChatRelationId, initiatedChatIds]);
 
@@ -31,12 +31,13 @@ export function useChatReadState({ activeChatCharId, activeChatRelationId, messa
   }, [lastReadTimestamps]);
 
   useEffect(() => {
-    const chatKey = activeChatRelationId || activeChatCharId;
+    const chatKey = activeChatCharId ? (activeChatRelationId || activeChatCharId) : null;
     if (chatKey) setLastReadTimestamps((previous) => markChatRead(previous, chatKey, Date.now()));
   }, [activeChatCharId, activeChatRelationId, messages.length]);
 
   const getUnreadCount = (chatKey: string) => {
-    if (activeChatRelationId === chatKey || (!activeChatRelationId && activeChatCharId === chatKey)) return 0;
+    const activeChatKey = activeChatCharId ? (activeChatRelationId || activeChatCharId) : null;
+    if (activeChatKey === chatKey) return 0;
     const lastRead = lastReadTimestamps[chatKey] || 0;
     return messages.filter((message) =>
       (message.relationId === chatKey || (!message.relationId && message.characterId === chatKey))

@@ -625,6 +625,7 @@ export default function AppChat({
     if (!activeCharacter) {
       if (pendingGroupWelcomeIdRef.current === activeChatCharId) return;
       setActiveChatCharId(null);
+      setActiveChatRelationId(null);
       return;
     }
     if (activeCharacter.isContactInstance) {
@@ -634,6 +635,7 @@ export default function AppChat({
         return;
       }
       setActiveChatCharId(null);
+      setActiveChatRelationId(null);
     }
   }, [activeChatCharId, activeCharacter, characters, setActiveChatCharId]);
 
@@ -4199,6 +4201,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               <button
                 onClick={() => {
                   setActiveChatCharId(null);
+                  setActiveChatRelationId(null);
                   setIsShowingCardModal(false);
                   setAdvancedSettingsSection(null);
                 }}
