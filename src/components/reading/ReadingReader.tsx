@@ -54,6 +54,7 @@ interface VisiblePosition {
 export default function ReadingReader({ userIdentityId, bookId, room, settings, character, relationship, worldBookContext, initialAnchorId, onClose }: ReadingReaderProps) {
   const scrollRef = useRef<HTMLElement>(null);
   const discussionScrollRef = useRef<HTMLDivElement>(null);
+  const discussionInputRef = useRef<HTMLTextAreaElement>(null);
   const paragraphRefs = useRef(new Map<string, HTMLParagraphElement>());
   const progressTimerRef = useRef<number | null>(null);
   const horizontalSnapTimerRef = useRef<number | null>(null);
@@ -546,6 +547,12 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
     }
   };
 
+  const sendDiscussionFromButton = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    discussionInputRef.current?.blur();
+    void sendDiscussionMessage();
+  };
+
   const submitCommentReply = () => {
     if (!room || !replyToComment || !commentReplyDraft.trim()) return;
     const paragraph = flatParagraphs.find((item) => item.paragraph.anchor.id === replyToComment.targetParagraphAnchorId);
@@ -865,7 +872,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
               {isAiResponding && <div className="mr-auto flex items-center gap-2 rounded-2xl bg-[var(--surface-raised)] px-3 py-2 text-xs text-[var(--text-muted)]"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />{room.characterSnapshot.name} 正在回应…</div>}
               {toolMessage && <div role="status" className="rounded-xl bg-rose-500/10 px-3 py-2 text-xs leading-5 text-rose-600">{toolMessage}</div>}
             </div>
-            <div className="flex gap-2 border-t border-[var(--border)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><textarea value={discussionDraft} onChange={(event) => { setDiscussionDraft(event.target.value); setToolMessage(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendDiscussionMessage(); } }} placeholder="讨论当前内容…" rows={1} className="h-10 min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm leading-5 outline-none" /><button type="button" onClick={() => void sendDiscussionMessage()} disabled={!discussionDraft.trim() || isAiResponding} className="flex h-10 w-10 items-center justify-center self-end rounded-xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
+            <div className="flex gap-2 border-t border-[var(--border)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><textarea ref={discussionInputRef} value={discussionDraft} onChange={(event) => { setDiscussionDraft(event.target.value); setToolMessage(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendDiscussionMessage(); } }} placeholder="讨论当前内容…" rows={1} className="h-10 min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm leading-5 outline-none" /><button type="button" onPointerDown={sendDiscussionFromButton} disabled={!discussionDraft.trim() || isAiResponding} className="flex h-10 w-10 items-center justify-center self-end rounded-xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
           </div>
         </div>
       )}
