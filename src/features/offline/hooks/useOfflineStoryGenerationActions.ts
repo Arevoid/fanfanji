@@ -277,6 +277,18 @@ ${wbPrompts}\n`;
 
 【当前创作模式】：`;
 
+      const storyClock = new Date(updatedStory.messages[updatedStory.messages.length - 1]?.timestamp || Date.now()).toLocaleString("zh-CN", {
+        year: "numeric", month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+      });
+      sysPrompt += `\n\n【场景状态栏协议｜必须执行】
+本次回复必须先输出一个独立状态栏，再输出剧情正文。状态栏不是正文，必须使用以下标记包裹：
+[状态栏]
+📆 ${storyClock}  ☁️ 温度℃
+📍 当前主要地点（不超过20字）
+📽️ 第一视角·角色名
+[/状态栏]
+规则：日期、星期和时间以当前线下故事时间为准；天气使用一个 emoji，温度使用摄氏度；地点只能依据当前剧情和已知事实；多人场景可额外添加“👥 同场人物：……”。状态栏只写状态信息，不写心理、动作或剧情正文。除状态栏外不要输出 Markdown、<details> 或解释文字。`;
+
       if (updatedStory.mode === "director") {
         sysPrompt += `\n【导演模式】：用户是编剧/导演，给你发出控制剧本走向的指令。你要自行把控边界，像写小说一样输出完整文段。${updatedStory.allowCharacterToSpeakForUser === false ? "只续写对方角色，不替用户补写台词、决定或新动作。" : "可以包含角色和用户的完整对话、动作与旁白。"}`;
       } else if (updatedStory.mode === "if") {
@@ -289,14 +301,6 @@ ${wbPrompts}\n`;
 
       const ongoingGuidance = updatedStory.ongoingGuidance?.trim();
       const oneTimeGuidance = updatedStory.oneTimeGuidance?.trim();
-      if (ongoingGuidance || oneTimeGuidance) {
-        sysPrompt += `\n\n【场外指导】这是创作方向，不是已经发生的剧情事实。必须将其落实到后续剧情中，但不要直接复述指导文本。`;
-        if (ongoingGuidance) sysPrompt += `\n【长期指导】${ongoingGuidance}`;
-        if (oneTimeGuidance) {
-          sysPrompt += `\n【本次指导】${oneTimeGuidance}\n本次生成优先落实这条指导；成功生成后本次指导自动失效。`;
-        }
-      }
-
       // Only an explicitly imported online story may use its frozen snapshot.
       // Self-directed and IF stories stay fully isolated from the online vault.
       const allMemoriesParts: string[] = [];
@@ -381,6 +385,19 @@ Story-time starting point: ${handoffClock}. Advance from this point only through
         });
         sysPrompt += `\n\n【TIME AWARENESS — REQUIRED】
 This non-imported story starts at the current real-world time: ${currentClock}. Treat it as the story's initial clock, then advance time only through the events and elapsed time established inside this story.`;
+      }
+
+      if (ongoingGuidance || oneTimeGuidance) {
+        sysPrompt += `\n\n【场外指导｜最终执行指令】
+这是用户对后续剧情的创作指导，不是已经发生的剧情事实。它的优先级高于普通的自由发挥，但不能违反用户最新明确输入、已发生剧情事实、人物身份关系或用户角色控制权。
+必须把指导转化为本次回复中真实发生的具体剧情变化，不要只在旁白中提到“收到指导”，也不要解释指导规则，更不要原样复述指导文本。`;
+        if (ongoingGuidance) {
+          sysPrompt += `\n【长期指导｜持续参考】${ongoingGuidance}\n只要不与更高优先级事实冲突，之后每次生成都要继续遵守。`;
+        }
+        if (oneTimeGuidance) {
+          sysPrompt += `\n【本次指导｜本次回复必须落实】${oneTimeGuidance}
+本次回复必须让这条指导在剧情中产生可观察的结果；如果指导是“希望发生某事”，就让该事件在本次回复中发生；如果指导是“保持某种风格/限制”，就让整段回复遵守它。不要把它当成供参考的建议。`;
+        }
       }
 
       const composedPrompt = PromptComposer.compose({
