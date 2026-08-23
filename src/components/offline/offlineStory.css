@@ -158,7 +158,7 @@
 
 .offline-composer-wrap { flex: 0 0 auto; padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--offline-border); background: rgba(255, 255, 255, .94); }
 .offline-composer { max-width: 760px; gap: var(--space-2); margin: 0 auto; padding: 5px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-sm); }
-.offline-composer-input-field { min-width: 0; flex: 1; height: 42px; padding: 0 10px; border: 0; border-radius: 0; outline: 0; background: transparent; box-shadow: none; color: var(--text-primary); font-size: calc(14px * var(--app-font-scale, 1)); }
+.offline-composer-input-field { min-width: 0; flex: 1; height: 42px; min-height: 42px; max-height: 120px; padding: 10px; border: 0; border-radius: 0; outline: 0; background: transparent; box-shadow: none; color: var(--text-primary); font-size: calc(14px * var(--app-font-scale, 1)); line-height: 1.5; resize: none; overflow-y: auto; }
 .offline-composer-input-field:focus { border: 0; outline: 0; box-shadow: none; }
 .offline-composer-input-field::placeholder { color: var(--input-placeholder); }
 .offline-composer-submit { width: 36px; height: 36px; border-radius: var(--radius-md); background: var(--color-text-primary); color: var(--color-surface); }

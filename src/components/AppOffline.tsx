@@ -1035,12 +1035,12 @@ export default function AppOffline({
 
             <div className="offline-composer-wrap">
               <form onSubmit={(event) => { event.preventDefault(); handleSendMessage(undefined, !inputText.trim()); }} className="offline-composer">
-                <input
-                  type="text"
+                <textarea
                   value={inputText}
                   onChange={(event) => setInputText(event.target.value)}
                   placeholder={activeStory.mode === "director" ? "继续写下去，或留下这一幕的方向…" : "继续写下去…"}
                   className="offline-composer-input-field"
+                  rows={1}
                   disabled={isGenerating}
                 />
                 <IconButton type="submit" disabled={isGenerating} aria-label="发送并继续剧情" icon={<Send size={17} />} className="offline-composer-submit" />

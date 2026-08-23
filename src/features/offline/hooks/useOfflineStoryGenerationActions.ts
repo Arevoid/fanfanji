@@ -277,18 +277,6 @@ ${wbPrompts}\n`;
 
 【当前创作模式】：`;
 
-      const storyClock = new Date(updatedStory.messages[updatedStory.messages.length - 1]?.timestamp || Date.now()).toLocaleString("zh-CN", {
-        year: "numeric", month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false,
-      });
-      sysPrompt += `\n\n【场景状态栏协议｜必须执行】
-本次回复必须先输出一个独立状态栏，再输出剧情正文。状态栏不是正文，必须使用以下标记包裹：
-[状态栏]
-📆 ${storyClock}  ☁️ 温度℃
-📍 当前主要地点（不超过20字）
-📽️ 第一视角·角色名
-[/状态栏]
-规则：日期、星期和时间以当前线下故事时间为准；天气使用一个 emoji，温度使用摄氏度；地点只能依据当前剧情和已知事实；多人场景可额外添加“👥 同场人物：……”。状态栏只写状态信息，不写心理、动作或剧情正文。除状态栏外不要输出 Markdown、<details> 或解释文字。`;
-
       if (updatedStory.mode === "director") {
         sysPrompt += `\n【导演模式】：用户是编剧/导演，给你发出控制剧本走向的指令。你要自行把控边界，像写小说一样输出完整文段。${updatedStory.allowCharacterToSpeakForUser === false ? "只续写对方角色，不替用户补写台词、决定或新动作。" : "可以包含角色和用户的完整对话、动作与旁白。"}`;
       } else if (updatedStory.mode === "if") {
@@ -400,9 +388,15 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
         }
       }
 
+      const guidanceForThisTurn = [ongoingGuidance ? `【长期场外指导】${ongoingGuidance}` : "", oneTimeGuidance ? `【本次必须落实的场外指导】${oneTimeGuidance}` : ""]
+        .filter(Boolean).join("\n");
+      const finalGenerationMessage = guidanceForThisTurn
+        ? `${lastUserMsgText}\n\n${guidanceForThisTurn}\n请直接把指导落实到本次剧情中，不要解释指导本身。`
+        : lastUserMsgText;
+
       const composedPrompt = PromptComposer.compose({
         scenario: "offline-story",
-        message: lastUserMsgText,
+        message: finalGenerationMessage,
         history: historyContext,
         systemInstruction: sysPrompt,
         historyInjections: [...atDepthWorldBook.values()],
