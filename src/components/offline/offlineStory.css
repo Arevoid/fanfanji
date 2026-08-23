@@ -141,6 +141,9 @@
 .offline-raw-content { text-align: left; }
 .offline-story-card.is-user .offline-raw-content { align-self: stretch; text-align: left; }
 .offline-dialogue-highlight { color: var(--offline-text); font-weight: 600; }
+.offline-story-details { margin: 0 0 14px; border: 1px solid var(--offline-border); border-radius: 12px; background: var(--color-surface-secondary); color: var(--offline-text); }
+.offline-story-details summary { padding: 9px 12px; cursor: pointer; font-weight: 650; }
+.offline-story-details-content { border-top: 1px solid var(--offline-border); padding: 10px 12px; white-space: pre-wrap; }
 
 .offline-node-menu { width: 168px; }
 .offline-node-menu > button { display: flex; width: 100%; min-height: var(--control-height-md); align-items: center; gap: var(--space-2); border: 0; padding: 0 var(--space-3); background: var(--color-surface); color: var(--color-text-primary); font-size: calc(12px * var(--app-font-scale, 1)); text-align: left; cursor: pointer; }
