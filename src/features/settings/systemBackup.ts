@@ -239,6 +239,7 @@ export function parseSystemBackup(value: unknown): {
   const legacyMappings: Array<[string, string, string]> = [
     ["phone_characters_v3", "phone_characters", "character-archive-v4"],
     ["phone_moments_v3", "phone_moments_v3", "moments-v4"],
+    ["phone_messages_v3", "phone_messages", "message-entry-v1"],
   ];
   for (const [preferredKey, fallbackKey, metadataKey] of legacyMappings) {
     const raw = localStorage[preferredKey] ?? localStorage[fallbackKey];

@@ -84,9 +84,19 @@ assert.throws(() => splitSystemBackupJson(serializedBackup, 0), /分块大小无
 const legacy = parseSystemBackup({
   phone_worldbook_entries: JSON.stringify([{ id: "legacy-world" }]),
   phone_characters_v3: JSON.stringify([{ id: "legacy-character" }]),
+  phone_messages_v3: JSON.stringify([{ id: "legacy-message", content: "旧版聊天" }]),
 });
 assert.equal(legacy.legacy, true);
 assert.deepEqual(legacy.indexedDb["character-archive-v4"], [{ id: "legacy-character" }]);
+assert.deepEqual(legacy.indexedDb["message-entry-v1"], [{ id: "legacy-message", content: "旧版聊天" }]);
+assert.deepEqual(
+  filterSystemBackupLocalStorageForRestore(Object.entries(legacy.localStorage), legacy.indexedDb),
+  [
+    ["phone_worldbook_entries", JSON.stringify([{ id: "legacy-world" }])],
+    ["phone_characters_v3", JSON.stringify([{ id: "legacy-character" }])],
+  ],
+  "legacy chat is restored to the durable entry store instead of remaining only in LocalStorage",
+);
 
 await restoreSystemBackupIndexedDb({ "character-archive-v4": [{ id: "restored-character" }] });
 assert.deepEqual(await readingAssetDb.loadMetadataValue("character-archive-v4"), [{ id: "restored-character" }]);
