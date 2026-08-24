@@ -49,11 +49,14 @@ export function useOfflineStoryManagementActions({
       showToast("故事名称不能为空");
       return;
     }
+    const nextIfPrompt = editingStory.mode === "if" ? editingStoryIfPrompt.trim() || undefined : editingStory.ifPrompt;
+    const contentChanged = editingStory.mode === "if" && nextIfPrompt !== editingStory.ifPrompt;
     const updatedStory: OfflineStory = {
       ...editingStory,
       title,
-      ...(editingStory.mode === "if" ? { ifPrompt: editingStoryIfPrompt.trim() || undefined } : {}),
-      updatedAt: Date.now(),
+      ...(editingStory.mode === "if" ? { ifPrompt: nextIfPrompt } : {}),
+      // Renaming is metadata-only: keep the story's last activity timestamp.
+      updatedAt: contentChanged ? Date.now() : editingStory.updatedAt,
     };
     if (activeStoryRef.current?.id === updatedStory.id) saveActiveStorySnapshot(updatedStory);
     else onSaveOfflineStory(updatedStory);

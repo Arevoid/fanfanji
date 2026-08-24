@@ -12,6 +12,8 @@ assert.match(creationHook, /getOfflineModeStorageKey\(relationship\.id\)/);
 assert.match(creationHook, /getOfflineGroupModeStorageKey\(selectedCharacter\.id\)/);
 assert.match(creationHook, /buildOfflineHandoffFacts\(relationMessages\)/);
 assert.match(creationHook, /loadKnowledgeClaims\(\)\.value/);
+assert.match(creationHook, /buildOfflineMemberKnowledgeSnapshots/);
+assert.match(creationHook, /memberKnowledgeSnapshots/);
 assert.match(creationHook, /onSaveStorySnapshot\(newStory\)/);
 
 console.log("PASS offline story creation is isolated behind a relation/group-scoped action hook");

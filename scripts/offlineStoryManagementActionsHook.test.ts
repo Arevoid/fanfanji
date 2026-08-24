@@ -7,7 +7,8 @@ const appOffline = readFileSync(new URL("../src/components/AppOffline.tsx", impo
 assert.match(hook, /clearOfflineSession/);
 assert.match(hook, /onDeleteOfflineStory/);
 assert.match(hook, /故事名称不能为空/);
-assert.match(hook, /ifPrompt: editingStoryIfPrompt\.trim\(\)/);
+assert.match(hook, /const nextIfPrompt = editingStory\.mode === "if"/);
+assert.match(hook, /updatedAt: contentChanged \? Date\.now\(\) : editingStory\.updatedAt/);
 assert.match(appOffline, /useOfflineStoryManagementActions/);
 assert.doesNotMatch(appOffline, /const handleDeleteStory =/);
 assert.doesNotMatch(appOffline, /const handleSaveStoryEdit =/);

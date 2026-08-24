@@ -28,11 +28,11 @@ export function useOfflineStoryCreationState({
 
   useEffect(() => {
     if (!showCreateModal) return;
-    const selectedCharacter = selectableCharacters.find((character) => character.id === selectedCharId);
+    const selectedCharacter = characters.find((character) => character.id === selectedCharId);
     setSelectedCharIds(selectedCharacter?.isGroupChat
       ? (selectedCharacter.memberIds || []).filter((id) => characters.some((character) => character.id === id))
       : [selectedCharId]);
-  }, [showCreateModal, selectedCharId, selectableCharacters, characters]);
+  }, [showCreateModal, selectedCharId, characters]);
 
   return {
     showCreateModal,

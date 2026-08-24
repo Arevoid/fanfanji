@@ -196,6 +196,35 @@
 .offline-guidance-content em { border-radius: 999px; padding: 2px 6px; background: #f3f3f1; color: #8a8a8d; font-size: calc(10px * var(--app-font-scale, 1)); font-style: normal; font-weight: 500; }
 .offline-guidance-content textarea { min-height: 94px; font-size: calc(13px * var(--app-font-scale, 1)); }
 .offline-guidance-note { margin: 2px 0 14px; color: #98989d; font-size: calc(11px * var(--app-font-scale, 1)); line-height: 1.6; }
+.offline-create-overlay { overflow-y: auto; overscroll-behavior: contain; align-items: center; }
+.offline-create-card { max-height: min(92vh, calc(var(--app-viewport-height, 100dvh) - 24px)); border: 1px solid #f0f0f0; border-radius: 16px; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, .06); }
+.offline-create-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #f0f0f0; }
+.offline-create-cancel { border: 0; background: transparent; color: #8e8e93; font-size: 13px; font-weight: 600; }
+.offline-create-form { display: flex; flex-direction: column; gap: 12px; }
+.offline-create-field, .offline-create-title-field { display: flex; flex-direction: column; gap: 6px; }
+.offline-create-label { display: block; color: #999; font-size: 12px; font-weight: 600; line-height: 16px; }
+.offline-create-title-row { display: flex; align-items: center; gap: 8px; }
+.offline-create-input { box-sizing: border-box; min-height: 40px; width: 100%; border: 1px solid #e3e3e8; border-radius: 12px; background: #f7f7f9; padding: 9px 12px; color: #111; font-size: 13px; outline: none; }
+.offline-create-input:focus { border-color: #c7c7cc; box-shadow: 0 0 0 2px rgba(17, 17, 17, .06); }
+.offline-create-input:is(select) { color: #111; font: inherit; }
+.offline-create-input:is(select) option { color: #111; }
+.offline-create-scope-switch { display: inline-flex; flex: 0 0 auto; gap: 4px; }
+.offline-create-scope-switch button { display: inline-flex; width: 38px; height: 38px; align-items: center; justify-content: center; border: 1px solid #e3e3e8; border-radius: 8px; background: #f7f7f9; color: #8e8e93; }
+.offline-create-scope-switch button.is-active { border-color: #111; background: #111; color: #fff; }
+.offline-create-scope-switch button:disabled { cursor: not-allowed; opacity: .35; }
+.offline-create-two-column { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.offline-create-participants { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; border: 1px solid #f0f0f0; border-radius: 12px; background: #f7f7f9; padding: 8px; }
+.offline-create-participant { display: flex; min-width: 0; align-items: center; gap: 6px; border-radius: 8px; background: #fff; padding: 7px 8px; color: #333; }
+.offline-create-participant span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.offline-create-helper { color: #8e8e93; font-size: 10px; }
+.offline-create-mode-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.offline-create-mode-button { display: flex; min-height: 54px; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; border: 1px solid var(--border); padding: 7px 4px; text-align: center; transition: background-color .15s, border-color .15s, color .15s; }
+.offline-create-notice { border: 1px solid #f3df8b; border-radius: 12px; background: #fffbeb; padding: 9px 11px; color: #b45309; font-size: 11px; line-height: 1.5; text-align: center; }
+.offline-create-if-input { min-height: 82px; line-height: 1.6; }
+.offline-create-toggle-card { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #f0f0f0; border-radius: 16px; background: #fff; padding: 0 14px; }
+.offline-create-toggle-card input { width: 20px; height: 20px; accent-color: #111; }
+.offline-create-actions { margin-top: 12px; }
+.offline-create-actions .settings-wide-action { min-height: 44px; border-radius: 12px; }
 .offline-editor-modal {
   /* The default modal is intentionally compact. Story editing needs enough
      room for a scene, while still staying inside the keyboard-adjusted

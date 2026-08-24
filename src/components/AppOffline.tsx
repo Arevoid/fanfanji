@@ -1,7 +1,7 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { 
   ArrowLeft, Plus, Trash2, Pencil, Send, Sparkles, BookOpen,
-  Link2, Calendar, MessageSquare, ChevronRight,
+  Link2, Calendar, MessageSquare, ChevronRight, UserRound, Users,
   RefreshCw, Layers
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -139,6 +139,10 @@ export default function AppOffline({
     showToast,
   });
   const creationCharacters = selectableCharacters.filter((character) => !character.isGroupChat);
+  const creationGroups = selectableCharacters.filter((character) => character.isGroupChat);
+  const [creationScope, setCreationScope] = useState<"single" | "multi">(
+    selectableCharacters.find((character) => character.id === selectedCharId)?.isGroupChat ? "multi" : "single",
+  );
   
   const {
     showCreateModal, setShowCreateModal,
@@ -183,6 +187,7 @@ export default function AppOffline({
     selectedCharIds,
     selectedRelationId,
     relationChoices,
+    isMultiMode: creationScope === "multi",
     newTitle,
     newMode,
     newIfPrompt,
@@ -367,6 +372,7 @@ export default function AppOffline({
     characters,
     selectableCharacters,
     relationships,
+    activeIdentityId,
     memories,
     settings,
     worldBookEntries: worldBookEntries || [],
@@ -436,7 +442,11 @@ export default function AppOffline({
               </div>
 
               <button 
-                onClick={() => selectedChar && setShowCreateModal(true)}
+                onClick={() => {
+                  if (!selectedChar) return;
+                  setCreationScope(selectedChar.isGroupChat ? "multi" : "single");
+                  setShowCreateModal(true);
+                }}
                 disabled={!selectedChar}
                 className="w-8 h-8 rounded-full bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
                 title={selectedChar ? (selectedChar.isGroupChat ? "新建多人故事" : "新建故事") : "请先在档案馆创建角色"}
@@ -1157,53 +1167,106 @@ export default function AppOffline({
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>
         {showCreateModal && selectedChar && (
-          <div className="app-viewport-overlay fixed inset-x-0 top-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="app-viewport-overlay offline-create-overlay fixed inset-x-0 top-0 z-50 bg-black/40 backdrop-blur-sm flex items-start justify-center p-3">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="settings-panel-card max-h-full w-full max-w-sm overflow-y-auto p-5 text-slate-800 space-y-4"
+              className="settings-panel-card offline-create-card w-full max-w-md overflow-y-auto p-4 text-slate-800"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse" />
+              <div className="offline-create-header">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
                   <span>新建线下剧本故事</span>
                 </h3>
                 <button 
+                  type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+                  className="offline-create-cancel"
                 >
                   取消
                 </button>
               </div>
 
-                <div className="space-y-3.5 text-xs">
-                <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">故事类型</label>
-                  <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-[10px] font-bold text-indigo-700">
-                    {selectedChar.isGroupChat ? `多人线下 · ${selectedChar.remark || selectedChar.name}` : "单人线下"}
+              <div className="offline-create-form text-xs">
+                <div className="offline-create-title-field">
+                  <label className="offline-create-label">故事名称</label>
+                  <div className="offline-create-title-row">
+                    <input
+                      type="text"
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      placeholder="例如：废土末日平行线 / 暴雨中的午后"
+                      className="offline-create-input min-w-0 flex-1"
+                    />
+                    <div className="offline-create-scope-switch" aria-label="选择单人或多人故事">
+                      <button
+                        type="button"
+                        aria-label="单人线下"
+                        aria-pressed={creationScope === "single"}
+                        onClick={() => {
+                          const next = creationCharacters.find((character) => character.id === selectedCharId) || creationCharacters[0];
+                          setCreationScope("single");
+                          if (next) setSelectedCharId(next.id);
+                        }}
+                        className={creationScope === "single" ? "is-active" : ""}
+                      >
+                        <UserRound size={17} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="多人线下"
+                        aria-pressed={creationScope === "multi"}
+                        onClick={() => {
+                          const next = creationGroups[0] || creationCharacters[0];
+                          setCreationScope("multi");
+                          if (next && !next.isGroupChat) setSelectedCharIds((current) => current.length > 1 ? current : creationCharacters.slice(0, 2).map((character) => character.id));
+                          if (next) setSelectedCharId(next.id);
+                        }}
+                        className={creationScope === "multi" ? "is-active" : ""}
+                      >
+                        <Users size={17} />
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {!selectedChar.isGroupChat ? <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">角色</label>
+                {creationScope === "single" ? <div className="offline-create-two-column">
+                  <label className="offline-create-field">
+                    <span className="offline-create-label">选择角色</span>
                   <select
                     value={selectedCharId}
                     onChange={(event) => setSelectedCharId(event.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                    className="offline-create-input"
                   >
                     {creationCharacters.map((character) => <option key={character.id} value={character.id}>{character.remark || character.name}</option>)}
                   </select>
+                  </label>
+                  <label className="offline-create-field">
+                    <span className="offline-create-label">我的身份</span>
+                    <select
+                      value={selectedRelationId}
+                      onChange={(event) => setSelectedRelationId(event.target.value)}
+                      className="offline-create-input"
+                    >
+                      <option value="">选择身份</option>
+                      {relationChoices.map((relation) => {
+                        const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
+                        return <option key={relation.id} value={relation.id}>{identity?.name || relation.userIdentityId}</option>;
+                      })}
+                    </select>
+                  </label>
                 </div> : (
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">参与角色</label>
-                    <div className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2">
-                      {(selectedChar.memberIds || []).map((memberId) => {
-                        const member = characters.find((character) => character.id === memberId);
+                  <div className="offline-create-field">
+                    <span className="offline-create-label">参与角色</span>
+                    <div className="offline-create-participants">
+                      {(selectedChar.isGroupChat
+                        ? (selectedChar.memberIds || []).map((memberId) => characters.find((character) => character.id === memberId)).filter(Boolean)
+                        : creationCharacters
+                      ).map((member) => {
                         if (!member) return null;
                         const checked = selectedCharIds.includes(member.id);
-                        return <label key={member.id} className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5">
+                        return <label key={member.id} className="offline-create-participant">
                           <input
                             type="checkbox"
                             checked={checked}
@@ -1217,51 +1280,24 @@ export default function AppOffline({
                         </label>;
                       })}
                     </div>
-                    <p className="text-[9px] text-slate-400">已选择 {selectedCharIds.length} 名参与角色，至少需要 2 名。</p>
+                    <span className="offline-create-helper">已选择 {selectedCharIds.length} 名，至少需要 2 名</span>
                   </div>
                 )}
 
-                {!selectedChar.isGroupChat && <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">当前身份关系</label>
-                  <select
-                    value={selectedRelationId}
-                    onChange={(event) => setSelectedRelationId(event.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="">选择关系</option>
-                    {relationChoices.map((relation) => {
-                      const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
-                      return <option key={relation.id} value={relation.id}>{identity?.name || relation.userIdentityId}</option>;
-                    })}
-                  </select>
-                </div>}
-
-                {/* Title input */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">故事名称 (选填)</label>
-                  <input
-                    type="text"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="例如: 废土末日平行线 / 暴雨中的午后 / 导演控制篇..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
                 {/* Mode Selector */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">剧本模式设定</label>
-                  <div className="grid grid-cols-3 gap-2">
+                <div className="offline-create-field">
+                  <label className="offline-create-label">剧本模式设定</label>
+                  <div className="offline-create-mode-grid">
                     {[
-                      { id: "director", label: "导演导演", desc: "指令驱动" },
-                      { id: "continue", label: "续写续写", desc: "顺应逻辑" },
+                      { id: "director", label: "导演模式", desc: "指令驱动" },
+                      { id: "continue", label: "续写模式", desc: "顺应逻辑" },
                       { id: "if", label: "IF线", desc: "设定颠覆" }
                     ].map(m => (
                       <button
                         key={m.id}
                         type="button"
                         onClick={() => setNewMode(m.id as any)}
-                        className={`p-2.5 rounded-xl border flex flex-col items-center text-center transition-all ${
+                        className={`offline-create-mode-button ${
                           newMode === m.id 
                             ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] font-bold"
                             : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
@@ -1275,49 +1311,38 @@ export default function AppOffline({
                 </div>
 
                 {(newMode === "director" || newMode === "if") && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-relaxed text-amber-700">
-                    当前模式结束时不会自动总结或同步记忆。如需让线上角色记住本剧情，请进入“剧本设置”并手动同步。
+                  <div className="offline-create-notice">
+                    当前模式不主动同步记忆，请在设置中手动同步
                   </div>
                 )}
 
                 {/* IF premise prompt field */}
                 {newMode === "if" && (
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-amber-600 font-bold uppercase tracking-wider block">假想平行宇宙设定</label>
+                  <div className="offline-create-field">
+                    <label className="offline-create-label text-amber-600">IF 线设定</label>
                     <textarea
                       value={newIfPrompt}
                       onChange={(e) => setNewIfPrompt(e.target.value)}
                       placeholder="例：如果我们在一个赛博朋克霓虹街头第一次相遇，你是一个身负重伤的骇客，而我是一个义体医生..."
                       rows={3}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                      className="offline-create-input offline-create-if-input w-full resize-none"
                     />
                   </div>
                 )}
 
                 {/* Import history switch */}
-                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                  <div>
-                    <span className="text-[11px] font-bold text-slate-700 block">引用线上聊天切入故事</span>
-                    <span className="text-[8px] text-slate-400">自动同步该角色最后的 15 条聊天历史作为上下文</span>
-                  </div>
+                <label className="offline-create-toggle-card">
+                  <span className="text-[11px] font-bold text-slate-700">引用线上聊天切入故事</span>
                   <input
                     type="checkbox"
                     checked={newStartFromChat}
                     onChange={(e) => setNewStartFromChat(e.target.checked)}
                     className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-slate-50 cursor-pointer"
                   />
-                </div>
+                </label>
 
-                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                  <div>
-                    <span className="text-[11px] font-bold text-slate-700 block">时间感知</span>
-                    <span className="text-[8px] text-slate-400">
-                      {newStartFromChat
-                        ? "线上转线下时自动继承该角色线上聊天的时间感知设置"
-                        : "自导自演 / IF 线独立使用当前真实时间"
-                      }
-                    </span>
-                  </div>
+                <label className="offline-create-toggle-card">
+                  <span className="text-[11px] font-bold text-slate-700">时间感知</span>
                   <input
                     type="checkbox"
                     checked={newStartFromChat
@@ -1327,10 +1352,10 @@ export default function AppOffline({
                     onChange={(e) => setNewTimeAwareness(e.target.checked)}
                     className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-slate-50 cursor-pointer disabled:opacity-50"
                   />
-                </div>
+                </label>
               </div>
 
-              <div className="settings-wide-action-group">
+              <div className="offline-create-actions">
                 <button
                   onClick={handleCreateStory}
                   className="settings-wide-action settings-wide-action-primary"

@@ -38,10 +38,11 @@ export function canAccessOfflineStoryFromCurrentRelation({
   const belongsToActiveIdentity = (ownerIdentityId?: string) =>
     (ownerIdentityId || "identity-1") === activeIdentityId;
 
-  // Group stories are owned by the group container and intentionally have no
-  // direct relationship. They still must belong to the active identity.
+  // Group stories are owned by a group container or a multi-character story
+  // created directly from the character picker. They intentionally have no
+  // direct relationship, but still belong to the active identity.
   if (isGroupOfflineStory(story, characters)) {
-    return Boolean(storyCharacter?.isGroupChat && belongsToActiveIdentity(storyCharacter.ownerIdentityId));
+    return Boolean(storyCharacter && belongsToActiveIdentity(storyCharacter.ownerIdentityId));
   }
 
   // Every direct story must be owned by the selected current relation. A

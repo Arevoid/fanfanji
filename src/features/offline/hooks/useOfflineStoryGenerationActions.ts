@@ -21,6 +21,7 @@ interface UseOfflineStoryGenerationActionsOptions {
   characters: readonly Character[];
   selectableCharacters: readonly Character[];
   relationships: readonly CharacterRelationship[];
+  activeIdentityId: string;
   memories: readonly MemoryItem[];
   settings: UserSettings;
   worldBookEntries: WorldBookEntry[];
@@ -43,6 +44,7 @@ export function useOfflineStoryGenerationActions({
   characters,
   selectableCharacters,
   relationships,
+  activeIdentityId,
   memories,
   settings,
   worldBookEntries,
@@ -147,7 +149,8 @@ export function useOfflineStoryGenerationActions({
         ? selectableCharacters.filter(c => resolveOfflineStoryCharacterIds(updatedStory, characters).includes(c.id))
         : [selectedChar];
       const sourceChat = characters.find(c => c.id === (updatedStory.sourceChatId ? resolveCharacterId(updatedStory.sourceChatId) : undefined));
-      const isImportedGroupStory = Boolean(sourceChat?.isGroupChat);
+      const isGroupStory = Boolean((updatedStory.characterIds?.length || 0) > 1 && !updatedStory.relationId);
+      const isImportedGroupStory = isGroupStory || Boolean(sourceChat?.isGroupChat);
 
       const worldBookScanText = [
         text || "",
@@ -198,12 +201,19 @@ export function useOfflineStoryGenerationActions({
           compressedMemory: undefined,
         }))
         .forEach((char, idx) => {
+        const memberRelationship = relationships.find((relation) =>
+          relation.characterId === char.id && relation.userIdentityId === activeIdentityId,
+        );
+        const relationSummary = updatedStory.relationId
+          ? relationships.find((relation) => relation.id === updatedStory.relationId)?.compressedMemory
+          : memberRelationship?.compressedMemory;
         sysPrompt += `[角色 ${idx + 1}: ${char.name}]
 - 姓名：${char.name}
 - 年龄：${char.age || "未知"}
 - 语气/性格特点：${char.personality}
 - 背景设定：${char.backstory}
-- 当前关系摘要：${(updatedStory.relationId ? relationships.find((relation) => relation.id === updatedStory.relationId)?.compressedMemory : char.compressedMemory) || "暂无"}
+- 当前关系：${memberRelationship?.relationship || "未知"}
+- 当前关系摘要：${relationSummary || "暂无"}
 \n`;
         });
 
@@ -292,7 +302,7 @@ ${wbPrompts}\n`;
       // Only an explicitly imported online story may use its frozen snapshot.
       // Self-directed and IF stories stay fully isolated from the online vault.
       const allMemoriesParts: string[] = [];
-      const memberKnowledgeSnapshots = updatedStory.importedContext?.memberMemories;
+      const memberKnowledgeSnapshots = updatedStory.memberKnowledgeSnapshots || updatedStory.importedContext?.memberMemories;
       storyCharsList.forEach(char => {
         // New group stories use per-member snapshots. Legacy group stories
         // with one flattened list omit it instead of leaking it to all.

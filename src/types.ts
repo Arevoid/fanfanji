@@ -966,6 +966,8 @@ export interface OfflineStory {
   worldBookSnapshot?: WorldBookEntry[];
   /** Confirmed Truth/manual-memory snapshot captured for this isolated story. */
   knowledgeSnapshot?: string[];
+  /** Per-participant memory snapshot for multi-character stories. */
+  memberKnowledgeSnapshots?: Record<string, string[]>;
   /** Frozen at the moment an online chat is explicitly imported into this story. */
   importedContext?: {
     messages: Message[];

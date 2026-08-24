@@ -9,6 +9,7 @@ import { writeString } from "../../../core/storage/storageAdapter";
 import { getLatestWorldBookEntries } from "../../../utils/worldBook";
 import { isWorldBookEntryForAnyCharacter, isWorldBookEntryForCharacter } from "../../../domain/worldbook/worldBookVisibility";
 import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../../../domain/offlineStory/offlineHandoffContext";
+import { buildOfflineMemberKnowledgeSnapshots } from "../services/offlineMemberMemorySnapshot";
 
 type StoryCreationMode = "director" | "continue" | "if";
 
@@ -23,6 +24,7 @@ interface UseOfflineStoryCreationActionsOptions {
   selectedCharIds: readonly string[];
   selectedRelationId: string | null;
   relationChoices: readonly CharacterRelationship[];
+  isMultiMode: boolean;
   newTitle: string;
   newMode: StoryCreationMode;
   newIfPrompt: string;
@@ -50,6 +52,7 @@ export function useOfflineStoryCreationActions({
   selectedCharIds,
   selectedRelationId,
   relationChoices,
+  isMultiMode,
   newTitle,
   newMode,
   newIfPrompt,
@@ -67,7 +70,7 @@ export function useOfflineStoryCreationActions({
   const handleCreateStory = useCallback(() => {
     const selectedCharacter = characters.find((character) => character.id === selectedCharId);
     if (!selectedCharId || !selectedCharacter) { showToast("请先选择一个角色！"); return; }
-    const isGroupStory = Boolean(selectedCharacter.isGroupChat);
+    const isGroupStory = isMultiMode || Boolean(selectedCharacter.isGroupChat);
     const participantIds = isGroupStory ? [...selectedCharIds] : [selectedCharId];
     if (isGroupStory && participantIds.length < 2) { showToast("多人线下至少需要选择两名参与角色。"); return; }
     const relationship = isGroupStory ? undefined : relationChoices.find((relation) => relation.id === selectedRelationId);
@@ -77,6 +80,16 @@ export function useOfflineStoryCreationActions({
     const charsLabel = storyCharsList.map((character) => character.remark || character.name).join("、");
     const modeLabel = newMode === "director" ? "导演剧本" : newMode === "if" ? "IF假想线" : "续写故事";
     const titleToUse = newTitle.trim() || `「${charsLabel}」的${modeLabel} - ${new Date().toLocaleDateString()}`;
+    const memberMemories = isGroupStory
+      ? buildOfflineMemberKnowledgeSnapshots({
+          memberIds: participantIds,
+          characters,
+          relationships,
+          activeIdentityId,
+          memories,
+          claims: loadKnowledgeClaims().value,
+        })
+      : undefined;
     let importedContext: OfflineStory["importedContext"];
 
     if (newStartFromChat) {
@@ -96,6 +109,7 @@ export function useOfflineStoryCreationActions({
             memories: isGroupStory
               ? memories.filter((memory) => participantIds.some((participantId) => relationships.some((relation) => relation.id === memory.relationId && relation.characterId === participantId && relation.userIdentityId === activeIdentityId))).map((memory) => memory.content)
               : memories.filter((memory) => memory.relationId === selectedRelationId).map((memory) => memory.content),
+            ...(memberMemories ? { memberMemories } : {}),
             handoffFacts: buildOfflineHandoffFacts(relationMessages),
             worldBook: getLatestWorldBookEntries([...worldBookEntries])
               .filter((entry) => isGroupStory ? isWorldBookEntryForAnyCharacter(entry, new Set(participantIds)) : isWorldBookEntryForCharacter(entry, selectedCharId))
@@ -127,6 +141,7 @@ export function useOfflineStoryCreationActions({
           ? participantIds.some((participantId) => relationships.some((relation) => relation.id === memory.relationId && relation.characterId === participantId && relation.userIdentityId === activeIdentityId))
           : memory.relationId === relationship!.id)).map((memory) => memory.content),
       ])),
+      ...(memberMemories && Object.keys(memberMemories).length > 0 ? { memberKnowledgeSnapshots: memberMemories } : {}),
       ifPrompt: newMode === "if" ? newIfPrompt : undefined,
       sourceChatId: newStartFromChat ? selectedCharId : undefined,
       sourceChatMsgCount: newStartFromChat ? importedContext?.messages.length : undefined,
@@ -151,7 +166,7 @@ export function useOfflineStoryCreationActions({
     setNewIfPrompt("");
     setNewStartFromChat(false);
     setNewTimeAwareness(false);
-  }, [activeIdentityId, characters, memories, messages, newIfPrompt, newMode, newStartFromChat, newTimeAwareness, newTitle, onSaveStorySnapshot, relationChoices, relationships, selectedCharId, selectedCharIds, selectedRelationId, setNewIfPrompt, setNewMode, setNewStartFromChat, setNewTimeAwareness, setNewTitle, setShowCreateModal, showToast, worldBookEntries]);
+  }, [activeIdentityId, characters, isMultiMode, memories, messages, newIfPrompt, newMode, newStartFromChat, newTimeAwareness, newTitle, onSaveStorySnapshot, relationChoices, relationships, selectedCharId, selectedCharIds, selectedRelationId, setNewIfPrompt, setNewMode, setNewStartFromChat, setNewTimeAwareness, setNewTitle, setShowCreateModal, showToast, worldBookEntries]);
 
   return { handleCreateStory };
 }

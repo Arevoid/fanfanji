@@ -91,7 +91,10 @@ export function useOfflineStoryMemorySyncActions({
       showToast("当前线下故事没有可同步的角色资料");
       return story;
     }
-    const isGroupStory = Boolean(character.isGroupChat && participantCharacters.length > 0);
+    const isGroupStory = Boolean(
+      (participantCharacters.length > 1 && !story.relationId)
+      || (character.isGroupChat && participantCharacters.length > 0),
+    );
     const now = Date.now();
     const syncMarker = getOfflineStorySummaryMarker(story);
     const markSynced = (memoryIds: string[] = []): OfflineStory => ({
