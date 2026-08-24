@@ -1111,14 +1111,14 @@ export default function AppOffline({
       <AnimatePresence>
         {editingStory && (
           <div
-            className="app-viewport-overlay fixed inset-x-0 top-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            className="app-viewport-overlay offline-story-edit-overlay fixed inset-x-0 top-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
             onClick={() => setEditingStory(null)}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="settings-panel-card w-full max-w-sm space-y-4 p-5 text-slate-800"
+              className="settings-panel-card offline-story-edit-card w-full max-w-sm space-y-4 p-5 text-slate-800"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -1142,7 +1142,7 @@ export default function AppOffline({
                     onChange={(event) => setEditingStoryIfPrompt(event.target.value)}
                     rows={4}
                     placeholder="填写或修改这条 IF 线的设定…"
-                    className="w-full resize-none rounded-[8px] border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500"
+                    className="offline-story-if-prompt w-full resize-none rounded-[8px] border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500"
                   />
                 </label>
               )}

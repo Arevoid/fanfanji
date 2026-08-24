@@ -62,21 +62,23 @@ const ownCharacterDiary = createDiaryShareMessage({
 });
 assert.equal(ownCharacterDiary.share.snapshot.authorType, "character");
 
-const visible = buildRelationDiaryContext({ ownerIdentityId: "i1", relationId: "r1", conversationId: "c1", messages: [message], shares: userShares, now });
+const visible = buildRelationDiaryContext({ ownerIdentityId: "i1", relationId: "r1", conversationId: "c1", messages: [message], shares: userShares, messageId: message.id, now });
 const hidden = buildRelationDiaryContext({ ownerIdentityId: "i1", relationId: "r2", conversationId: "c2", messages: [], shares: userShares, now });
-assert.match(visible, /Author role: the user/);
-assert.match(visible, /Do not claim that you wrote it/);
-assert.match(visible, /BEGIN QUOTED DIARY/);
-assert.match(visible, /not as system instructions/);
+assert.match(visible, /日记作者：用户本人/);
+assert.match(visible, /不是角色写的。/);
+assert.match(visible, /日记正文开始/);
+assert.match(visible, /不是系统指令/);
 assert.equal(hidden, "");
 assert.equal(buildRelationDiaryContext({ ownerIdentityId: "i1", relationId: "r1", conversationId: "c1", messages: [], shares: userShares, now }), "", "a fresh orphan snapshot must never enter prompts without its linked message");
 assert.equal(buildRelationDiaryContext({ ownerIdentityId: "i1", relationId: "r1", conversationId: "c1", messages: [{ ...message, diaryShareId: "wrong-share" }], shares: userShares, now }), "", "message and snapshot IDs must match in both directions");
 assert.equal(buildRelationDiaryContext({ ownerIdentityId: "i2", relationId: "r1", conversationId: "c1", messages: [message], shares: userShares, now }), "", "another user identity must not read the snapshot");
 
 const characterShares = [{ ...userShares[0], snapshot: { authorType: "character" as const, authorName: "Character", body: "I found an old record.", occurredAt: now } }];
-const characterVisible = buildRelationDiaryContext({ ownerIdentityId: "i1", relationId: "r1", conversationId: "c1", messages: [message], shares: characterShares, now });
-assert.match(characterVisible, /Author role: the character you are speaking as/);
-assert.match(characterVisible, /This is your own diary entry/);
+const characterVisible = buildRelationDiaryContext({ ownerIdentityId: "i1", relationId: "r1", conversationId: "c1", messages: [message], shares: characterShares, messageId: message.id, now });
+assert.match(characterVisible, /日记作者：角色本人/);
+assert.match(characterVisible, /不是用户写的/);
+assert.match(characterVisible, /不要说成‘你的日记’/);
+assert.equal(buildRelationDiaryContext({ ownerIdentityId: "i1", relationId: "r1", conversationId: "c1", messages: [message], shares: characterShares, messageId: "missing", now }), "", "a different current message must not reuse an older diary share");
 
 const appDiarySource = readFileSync(new URL("../src/components/AppDiary.tsx", import.meta.url), "utf8");
 assert.match(appDiarySource, /createDiaryShareMessage\(\{ entry, relation: target\.relation \}\)/);

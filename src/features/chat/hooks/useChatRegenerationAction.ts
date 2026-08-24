@@ -263,6 +263,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
           messages: previousMessages,
           shares: loadDiaryShares().value,
+          messageId: lastUserMsg.id,
         })
         : "";
       const userMemoContext = activeRelationship

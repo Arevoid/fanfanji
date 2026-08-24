@@ -1677,6 +1677,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
           messages: finalMsgs,
           shares: loadDiaryShares().value,
+          messageId: userMsg?.id,
         })
         : "";
       const userMemoContext = activeRelationship
