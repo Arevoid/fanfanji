@@ -28,7 +28,16 @@ export function useOfflineStoryExitFinalization({
   const finalizeStoryBeforeLeaving = async (story: OfflineStory): Promise<OfflineStory> => {
     let completedStory = story;
     if (shouldSyncStoryMemory(story)) {
-      completedStory = await handleSyncMemoryToBrain(story, { userConfirmed: true, syncIntent: "automatic_end" });
+      const sourceMessages = getOfflineHandoffSourceMessagesForReturn(story);
+      void handleSyncMemoryToBrain(story, { userConfirmed: true, syncIntent: "automatic_end" }).then((syncedStory) => {
+        const syncedWithHandoff = createPendingOfflineHandoff({
+          story: syncedStory,
+          sourceMessages,
+          now: Date.now(),
+        });
+        if (activeStoryRef.current?.id === syncedWithHandoff.id) saveActiveStorySnapshot(syncedWithHandoff);
+        else void onSaveOfflineStory(syncedWithHandoff);
+      });
     }
     const handoffCreatedAt = Date.now();
     if (!completedStory.archivedAt) {

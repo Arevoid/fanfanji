@@ -13,6 +13,7 @@ import { findRelationshipForCanonicalCharacter } from "../../../domain/relations
 import { applyConfirmedOfflineRelationshipTransition } from "../../../domain/relationship/offlineRelationshipTransition";
 import { captureOfflineStoryCompletedEvent } from "../../characterLife/services/offlineStoryEventCaptureService";
 import { createOfflineGroupParticipantMemories } from "../services/offlineGroupMemorySync";
+import { notifyOfflineMemorySync } from "../services/offlineMemorySyncNotifications";
 
 interface UseOfflineStoryMemorySyncActionsOptions {
   characters: readonly Character[];
@@ -111,12 +112,14 @@ export function useOfflineStoryMemorySyncActions({
     memorySyncInFlightRef.current.add(story.id);
     setMemorySyncingStoryId(story.id);
     showToast("正在总结并同步剧情记忆，请稍候…");
+    notifyOfflineMemorySync({ message: "正在总结并同步剧情记忆，请稍候…" });
     try {
       if (sourceMessages.length === 0) {
         const syncedStory = markSynced();
         if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory); else onSaveOfflineStory(syncedStory);
         if (options.userConfirmed) captureOfflineStoryCompletedEvent({ story: syncedStory, userIdentityId: relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId, sourceMessages, userConfirmed: true, recordedAt: now });
         showToast("没有可提取的线下新增剧情，已保留故事内容");
+        notifyOfflineMemorySync({ message: "线下剧情同步完成" });
         return syncedStory;
       }
 
@@ -129,6 +132,7 @@ export function useOfflineStoryMemorySyncActions({
         const syncedStory = markSynced(groupMemories.map((memory) => memory.id));
         if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory); else onSaveOfflineStory(syncedStory);
         showToast("多人线下剧情已分别同步到每位参与成员");
+        notifyOfflineMemorySync({ message: "多人线下剧情同步完成" });
         return syncedStory;
       }
       if (character.isGroupChat) throw new Error("Offline group story participant scope is invalid");
@@ -180,12 +184,14 @@ export function useOfflineStoryMemorySyncActions({
       if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory); else onSaveOfflineStory(syncedStory);
       if (options.userConfirmed) captureOfflineStoryCompletedEvent({ story: syncedStory, userIdentityId: relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId, sourceMessages, userConfirmed: true, confirmedFacts, recordedAt: now });
       showToast(usedSafeFallback ? "提炼接口未返回可用摘要，已保存可核对的安全剧情摘要" : "线下剧情摘要已同步到当前角色");
+      notifyOfflineMemorySync({ message: "线下剧情同步完成" });
       return syncedStory;
     } catch (error) {
       console.error("Failed to sync offline story memories:", error);
       const failedStory: OfflineStory = { ...story, memorySyncStatus: "failed", updatedAt: Date.now() };
       if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(failedStory); else onSaveOfflineStory(failedStory);
       showToast("线下剧情记忆同步失败，故事已保留，可稍后重试");
+      notifyOfflineMemorySync({ message: "线下剧情记忆同步失败，故事已保留，可稍后重试", isError: true });
       return failedStory;
     } finally {
       memorySyncInFlightRef.current.delete(story.id);

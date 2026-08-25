@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
+import { subscribeOfflineMemorySyncNotifications } from "./features/offline/services/offlineMemorySyncNotifications";
 import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
@@ -680,7 +681,11 @@ export default function App() {
   } | null>(null);
 
   // Global Toast warning/success state (P2: alert on save failures)
-  const [globalToast] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [globalToast, setGlobalToast] = useState<{ message: string; isError?: boolean } | null>(null);
+  useEffect(() => subscribeOfflineMemorySyncNotifications((notification) => {
+    setGlobalToast(notification);
+    window.setTimeout(() => setGlobalToast((current) => current?.message === notification.message ? null : current), 3200);
+  }), []);
 
   const [isStandaloneMode, setIsStandaloneMode] = useState(isStandalonePwa);
 
