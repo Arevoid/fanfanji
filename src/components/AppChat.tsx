@@ -148,6 +148,7 @@ import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, load
 import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from "../domain/forum/forumShare";
 import { removeForumGenerationTasksByRelation } from "../domain/forum/forumGenerationGuard";
 import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryTranslations, saveDiaryEntries, saveDiaryGenerationTasks, saveDiaryShares, saveDiaryTranslations } from "../core/storage/repositories/diaryRepository";
+import { maybeGenerateDiaryAfterChat } from "../features/diary/services/diaryGenerationService";
 import { cleanupDiaryForRelations } from "../domain/diary/diaryCleanup";
 import { useProactiveChatScheduler } from "../features/chat/hooks/useProactiveChatScheduler";
 import { Button, Card, Modal } from "./ui";
@@ -2082,6 +2083,16 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
             activeOfflineStoryId,
             extractInterval: recallSettings?.extractInterval,
           });
+          if (createdMessages.length > 0 && turnRelationship && !replyContext.isGroup) {
+            void maybeGenerateDiaryAfterChat({
+              relation: turnRelationship,
+              character: turnCharacter,
+              ownerIdentityId: activeIdentityId,
+              messages: [...sourceMsgs, ...createdMessages],
+              worldBookEntries,
+              settings,
+            });
+          }
         }
       } else {
         if (isCancelledCallTurn() || signal?.aborted) return;

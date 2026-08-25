@@ -515,7 +515,7 @@ export default function AppDiary({
           <button
             onClick={generateFromHeader}
             title="让 TA 写一篇日记"
-            className="app-nav-icon-button grid h-9 w-9 place-items-center text-[var(--segmented-active-text)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center text-[var(--text-primary)]"
           >
             <BookHeart size={18} />
           </button>
@@ -523,7 +523,7 @@ export default function AppDiary({
           <button
             onClick={() => beginEdit()}
             title="新建日记"
-            className="app-nav-icon-button grid h-9 w-9 place-items-center text-[var(--segmented-active-text)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center text-[var(--text-primary)]"
           >
             <Plus size={19} />
           </button>
@@ -566,8 +566,7 @@ export default function AppDiary({
             </div>
             {tab === "counterpart" && (
               <section className="mt-4">
-                <h2 className="text-sm font-bold">当前关系</h2>
-                <div className="mt-2 flex gap-2 overflow-x-auto pb-2">
+                <div className="flex items-start justify-start gap-3 overflow-x-auto pb-2 no-scrollbar">
                   {directRelations.map(({ relation, character }) => (
                     <button
                       key={relation.id}
@@ -577,14 +576,13 @@ export default function AppDiary({
                         )
                       }
                       disabled={busyRelationId === relation.id}
-                      className={`shrink-0 rounded-2xl border px-3 py-2 text-left text-xs ${relation.id === relationFilterId ? "border-[var(--text-primary)] bg-[var(--surface-muted)]" : "border-[var(--border)] bg-[var(--surface)]"}`}
+                      className={`group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 text-center transition-all ${relation.id === relationFilterId ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)]"}`}
                     >
-                      <span className="font-bold">
-                        {character.remark || character.name}
+                      <span className={`relative rounded-full p-0.5 transition-all ${relation.id === relationFilterId ? "bg-rose-300" : "bg-transparent"}`}>
+                        <img src={character.avatar} alt="" className="h-8 w-8 rounded-full border border-slate-200 object-cover" />
+                        {relation.id === relationFilterId && <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-rose-400 text-[7px] font-bold text-white">✓</span>}
                       </span>
-                      <span className="diary-filter-hint ml-1 text-[var(--text-secondary)]">
-                        {busyRelationId === relation.id ? "生成中…" : "筛选"}
-                      </span>
+                      <span className="max-w-full truncate text-[9px] font-bold leading-3">{character.remark || character.name}</span>
                     </button>
                   ))}{" "}
                 </div>
