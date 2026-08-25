@@ -529,12 +529,12 @@ export default function AppSettings({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans" data-settings-shell>
+    <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans" data-settings-shell data-theme-page="settings">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           onClick={handleBack}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           id="settings_back_btn"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />

@@ -1059,7 +1059,7 @@ export default function AppForum({
         <button
           type="button"
           onClick={handleBack}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-700 active:bg-slate-100"
+          className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-700"
           aria-label="返回"
         >
           <ChevronLeft className="h-5 w-5" />
@@ -1073,7 +1073,7 @@ export default function AppForum({
             type="button"
             onClick={() => setShowHomeActions(true)}
             disabled={isRefreshing}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-950 text-white active:scale-95"
+            className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-800 active:scale-95"
             aria-label="论坛操作"
           >
             {isRefreshing
@@ -1085,7 +1085,7 @@ export default function AppForum({
             ref={communityNpcMenuAnchorRef}
             type="button"
             onClick={() => setShowCommunityNpcMenu(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-950 text-white active:scale-95"
+            className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-800 active:scale-95"
             aria-label="NPC角色操作"
           >
             <Plus className="h-4 w-4" />
@@ -1095,7 +1095,7 @@ export default function AppForum({
             type="button"
             onClick={() => void runThreadActivity("manual-thread-refresh", activeThread)}
             disabled={isThreadRefreshing}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-600 active:bg-slate-100 disabled:text-slate-300"
+            className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-600 disabled:text-slate-300"
             aria-label="刷新帖子动态"
           >
             <RefreshCw className={`h-4 w-4 ${isThreadRefreshing ? "animate-spin" : ""}`} />
@@ -1105,7 +1105,7 @@ export default function AppForum({
             type="button"
             onClick={() => void requestForumStoryUpdate(activeStoryId)}
             disabled={isStoryUpdating}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-600 active:bg-slate-100 disabled:text-slate-300"
+            className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-600 disabled:text-slate-300"
             aria-label="刷新帖子动态"
           >
             <RefreshCw className={`h-4 w-4 ${isStoryUpdating ? "animate-spin" : ""}`} />

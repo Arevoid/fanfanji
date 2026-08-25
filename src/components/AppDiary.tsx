@@ -327,14 +327,14 @@ export default function AppDiary({
         <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center px-3 py-2">
           <button
             onClick={() => setEditing(null)}
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center"
           >
             <ChevronLeft size={19} />
           </button>
           <h1 className="truncate text-center text-base font-bold">写日记</h1>
           <button
             onClick={saveEntry}
-            className="h-9 rounded-full bg-[var(--segmented-active-bg)] text-xs font-bold text-[var(--segmented-active-text)]"
+            className="app-nav-icon-button h-9 px-2 text-xs font-bold text-[var(--segmented-active-text)]"
           >
             保存
           </button>
@@ -389,14 +389,14 @@ export default function AppDiary({
         <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center px-3 py-2">
           <button
             onClick={() => setSelectedId(null)}
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center"
           >
             <ChevronLeft size={19} />
           </button>
           <h1 className="truncate text-center text-sm font-bold">日记详情</h1>
           <button
             onClick={() => removeEntry(selected)}
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)] text-rose-500"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center text-rose-500"
             title="删除日记"
           >
             <Trash2 size={16} />
@@ -506,7 +506,7 @@ export default function AppDiary({
       <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center px-3 py-2">
         <button
           onClick={onClose}
-          className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)]"
+          className="app-nav-icon-button grid h-9 w-9 place-items-center"
         >
           <ChevronLeft size={19} />
         </button>
@@ -515,7 +515,7 @@ export default function AppDiary({
           <button
             onClick={generateFromHeader}
             title="让 TA 写一篇日记"
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center text-[var(--segmented-active-text)]"
           >
             <BookHeart size={18} />
           </button>
@@ -523,7 +523,7 @@ export default function AppDiary({
           <button
             onClick={() => beginEdit()}
             title="新建日记"
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center text-[var(--segmented-active-text)]"
           >
             <Plus size={19} />
           </button>

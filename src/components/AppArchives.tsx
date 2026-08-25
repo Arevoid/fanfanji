@@ -529,7 +529,7 @@ export default function AppArchives({
         <button
           type="button"
           onClick={isCreating ? resetForm : onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           id="archives_back_btn"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -555,7 +555,7 @@ export default function AppArchives({
                     }
                   );
                 }}
-                className="w-8 h-8 rounded-xl bg-rose-50 flex items-center justify-center hover:bg-rose-100 border border-rose-100 transition-colors"
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors"
                 title="删除角色"
               >
                 <Trash2 className="w-4 h-4 text-rose-600" />
@@ -566,7 +566,7 @@ export default function AppArchives({
               <button
                 type="button"
                 onClick={() => setShowAddMenu(!showAddMenu)}
-                className="w-8 h-8 bg-neutral-950 hover:bg-neutral-900 text-white rounded-full transition-colors shadow flex items-center justify-center"
+                className="app-nav-icon-button w-8 h-8 text-slate-800 transition-colors flex items-center justify-center"
                 id="archives_add_btn"
               >
                 <Plus className="w-4.5 h-4.5" />
@@ -1127,7 +1127,7 @@ export default function AppArchives({
                 <button
                   type="button"
                   onClick={() => setIsCreating(true)}
-                  className="mt-4 px-4 py-2 bg-neutral-950 hover:bg-neutral-900 text-white rounded-xl text-xs font-semibold transition-all shadow-sm"
+                  className="empty-state-action mt-4"
                 >
                   现在去创建
                 </button>

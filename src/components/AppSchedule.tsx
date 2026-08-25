@@ -62,7 +62,7 @@ export default function AppSchedule({ entries, appointments, characters, onOpenC
   return (
     <div data-theme-page="schedule" className="relative flex h-full flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text-primary)]">
       <header className="relative flex shrink-0 items-center justify-between px-4 py-3">
-        <button id="schedule_back_btn" type="button" onClick={onClose} title="返回" aria-label="返回桌面" className="back-btn flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]">
+        <button id="schedule_back_btn" type="button" onClick={onClose} title="返回" aria-label="返回桌面" className="app-nav-icon-button back-btn flex h-9 w-9 items-center justify-center">
           <ChevronLeft className="h-5 w-5" />
         </button>
         <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-extrabold tracking-tight">日程</h1>
@@ -74,8 +74,8 @@ export default function AppSchedule({ entries, appointments, characters, onOpenC
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-extrabold">{year}年{month + 1}月</h2>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => changeMonth(-1)} aria-label="上个月" className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-raised)]"><ChevronLeft className="h-4 w-4" /></button>
-              <button type="button" onClick={() => changeMonth(1)} aria-label="下个月" className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-raised)]"><ChevronRight className="h-4 w-4" /></button>
+              <button type="button" onClick={() => changeMonth(-1)} aria-label="上个月" className="app-nav-icon-button flex h-8 w-8 items-center justify-center"><ChevronLeft className="h-4 w-4" /></button>
+              <button type="button" onClick={() => changeMonth(1)} aria-label="下个月" className="app-nav-icon-button flex h-8 w-8 items-center justify-center"><ChevronRight className="h-4 w-4" /></button>
             </div>
           </div>
           <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-[var(--text-secondary)]">

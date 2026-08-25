@@ -171,10 +171,10 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   cinema: loadAppCinema,
 };
 
-// Preload app modules after the first paint. This only downloads JavaScript;
-// it does not mount an app or run its effects, so switching apps can use the
-// browser module cache without making the initial render heavier.
-const IDLE_PRELOAD_APP_IDS = [
+// Load every app module as soon as the phone shell enters. This keeps the
+// first visit to an app from showing a lazy-load state; modules are still
+// mounted only when their app is opened, so their effects remain isolated.
+const ALL_APP_IDS = [
   "chat",
   "archives",
   "worldbook",
@@ -190,6 +190,14 @@ const IDLE_PRELOAD_APP_IDS = [
   "reading",
   "cinema",
 ] as const;
+
+const ALL_APP_MODULES_PROMISE = Promise.all(
+  ALL_APP_IDS.map((appId) => APP_LOADERS[appId]()),
+).catch((error) => {
+  console.error("Failed to preload one or more app modules:", error);
+  return [];
+});
+void ALL_APP_MODULES_PROMISE;
 
 const preloadApp = (appId: string) => {
   const loader = APP_LOADERS[appId];
@@ -409,30 +417,6 @@ export default function App() {
   const seedScheduleForFreshInstall = useRef(
     typeof window !== "undefined" && shouldSeedScheduleForFreshInstall(window.localStorage),
   ).current;
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const preloadIdleApps = () => {
-      const connection = (navigator as Navigator & {
-        connection?: { saveData?: boolean; effectiveType?: string };
-      }).connection;
-      const isConstrainedNetwork = connection?.saveData
-        || connection?.effectiveType === "slow-2g"
-        || connection?.effectiveType === "2g";
-      const appIds = isConstrainedNetwork ? ["chat"] : IDLE_PRELOAD_APP_IDS;
-      appIds.forEach(preloadApp);
-    };
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-      cancelIdleCallback?: (handle: number) => void;
-    };
-    if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 1500 });
-      return () => idleWindow.cancelIdleCallback?.(handle);
-    }
-    const handle = window.setTimeout(preloadIdleApps, 600);
-    return () => window.clearTimeout(handle);
-  }, []);
 
   // Load initial states from LocalStorage or fallbacks
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
@@ -3034,9 +3018,36 @@ export default function App() {
         /* Shared settings primitives for feature pages outside the main settings shell. */
         .phone-screen-container .settings-panel-card {
           background: var(--surface) !important;
+          border: 0 !important;
+          border-radius: 10px !important;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+        }
+
+        /* Unified content containers: match the compact grouped-card style
+           used by the reference mobile UI. Keep bubbles, avatars, toggles,
+           app icons and floating overlays on their own visual system. */
+        .phone-screen-container :is([data-theme-page], [data-settings-shell], [data-chat-shell]) :is(div, section, article)[class~="bg-white"][class*="rounded-"]:not([class*="rounded-full"]):not(.app-icon-surface):not(.message-bubble):not(.chat-bubble-other) {
+          border-radius: 10px !important;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+        }
+        .phone-screen-container .empty-state-action {
+          display: inline-flex !important;
+          min-height: 44px;
+          align-items: center;
+          justify-content: center;
+          padding: 0 16px;
           border: 1px solid var(--border) !important;
-          border-radius: 16px !important;
-          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+          border-radius: 14px !important;
+          background: var(--surface) !important;
+          color: var(--text-primary) !important;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+          font-size: 12px;
+          font-weight: 600;
+          transition: background-color 160ms ease, box-shadow 160ms ease;
+        }
+        .phone-screen-container .empty-state-action:hover {
+          background: var(--surface-muted) !important;
+          box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08) !important;
         }
         .phone-screen-container .settings-wide-action-group {
           display: flex;

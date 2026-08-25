@@ -507,7 +507,7 @@ export default function AppWorldBook({
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           onClick={isEditing ? resetForm : onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           id="worldbook_back_btn"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -522,7 +522,7 @@ export default function AppWorldBook({
             <div className="relative">
               <button
                 onClick={() => setShowAddMenu(!showAddMenu)}
-                className="w-8 h-8 bg-neutral-950 hover:bg-neutral-900 text-white rounded-full transition-colors shadow flex items-center justify-center"
+                className="app-nav-icon-button w-8 h-8 text-slate-800 transition-colors flex items-center justify-center"
                 id="worldbook_add_btn"
               >
                 <Plus className="w-4.5 h-4.5" />
@@ -574,7 +574,7 @@ export default function AppWorldBook({
                     }
                   );
                 }}
-                className="w-8 h-8 rounded-full bg-rose-50 flex items-center justify-center hover:bg-rose-100 border border-rose-100 transition-colors"
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors"
                 title="删除词条"
               >
                 <Trash2 className="w-4 h-4 text-rose-600" />

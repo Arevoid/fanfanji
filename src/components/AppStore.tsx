@@ -193,7 +193,7 @@ export default function AppStore({
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           onClick={onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
         </button>

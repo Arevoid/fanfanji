@@ -81,11 +81,11 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
     <div data-theme-page="moments" className="bg-[var(--app-bg)] text-[var(--text-primary)] min-h-full pb-20 overflow-y-auto">
       <div className="h-64 bg-slate-200 relative shrink-0">
         <img src={tabCover} alt="Moments Cover" className="w-full h-full object-cover" />
-        <button onClick={onClose} className="absolute top-4 left-4 p-1.5 rounded-full bg-black/40 hover:bg-black/65 text-white z-20 transition-colors shadow-sm" title="返回主页">
+        <button onClick={onClose} className="app-nav-icon-button absolute top-4 left-4 p-1.5 text-white z-20 transition-colors" title="返回主页">
           <ChevronLeft className="w-5 h-5" />
         </button>
         <div className="absolute top-4 right-4 flex gap-2.5 z-20">
-          <label className="p-1.5 rounded-full bg-black/40 hover:bg-black/65 text-white cursor-pointer transition-colors shadow-sm" title="更换封面图">
+          <label className="app-nav-icon-button p-1.5 text-white cursor-pointer transition-colors" title="更换封面图">
             <Camera className="w-5 h-5" />
             <input
               type="file"
@@ -97,7 +97,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
               }}
             />
           </label>
-          <button onClick={() => setShowPublisher(true)} className="p-1.5 rounded-full bg-black/40 hover:bg-black/65 text-white transition-colors shadow-sm" title="发布新动态">
+          <button onClick={() => setShowPublisher(true)} className="app-nav-icon-button p-1.5 text-white transition-colors" title="发布新动态">
             <Plus className="w-5 h-5" />
           </button>
         </div>

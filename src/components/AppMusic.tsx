@@ -316,7 +316,7 @@ export default function AppMusic({
       <div className={`flex items-center justify-between px-4 py-1.5 z-10 shrink-0 relative ${showLibrary ? "bg-transparent" : "bg-sky-50/70"}`}>
         <button
           onClick={() => showLibrary ? onClose() : setShowLibrary(true)}
-          className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-200/70 transition-colors z-10 shrink-0 ${showLibrary ? "bg-slate-100" : "bg-transparent"}`}
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           title={showLibrary ? "返回桌面" : "返回音乐首页"}
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -329,7 +329,7 @@ export default function AppMusic({
         <div className="w-8 h-8 flex items-center justify-end z-10">
           {!showLibrary && <button
             onClick={() => setIsShowingImportModal(true)}
-            className="w-8 h-8 rounded-full bg-neutral-950 hover:bg-neutral-900 text-white transition-all flex items-center justify-center shadow-sm"
+            className="app-nav-icon-button w-8 h-8 text-slate-800 transition-all flex items-center justify-center"
             title="导入音乐"
           >
             <Plus className="w-4.5 h-4.5" />

@@ -425,21 +425,17 @@ export default function AppOffline({
             className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50"
           >
             {/* Header */}
-            <div className="px-4 py-3.5 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-2.5">
-                <button 
-                  onClick={onClose}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
-                <div>
-                  <h1 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                    <span>线下剧本模式</span>
-                  </h1>
-                  <p className="text-[10px] text-slate-500">线下独立走向，与线上大脑记忆互通</p>
-                </div>
-              </div>
+            <div className="relative flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0">
+              <button
+                onClick={onClose}
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-500 transition-colors"
+                aria-label="返回"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-bold tracking-tight text-slate-800">
+                线下
+              </h1>
 
               <button 
                 onClick={() => {
@@ -448,7 +444,7 @@ export default function AppOffline({
                   setShowCreateModal(true);
                 }}
                 disabled={!selectedChar}
-                className="w-8 h-8 rounded-full bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                className="app-nav-icon-button w-8 h-8 text-slate-800 flex items-center justify-center transition-colors disabled:text-slate-400"
                 title={selectedChar ? (selectedChar.isGroupChat ? "新建多人故事" : "新建故事") : "请先在档案馆创建角色"}
               >
                 <Plus className="w-4 h-4" />
@@ -456,9 +452,8 @@ export default function AppOffline({
             </div>
 
             {/* Character Selector Grid */}
-            <div className="p-3 bg-white border-b border-slate-100">
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">选择人物剧本空间</p>
-              <div className="flex items-center gap-3 overflow-x-auto pb-1 no-scrollbar">
+            <div className="px-3 pt-3 pb-2 bg-white border-b border-slate-100">
+              <div className="flex items-start justify-start gap-3 overflow-x-auto pb-1 no-scrollbar">
                 {selectableCharacters.map(char => {
                   const isSel = char.id === selectedCharId;
                   const charRelation = relationships.find((relation) =>
@@ -483,29 +478,22 @@ export default function AppOffline({
                     <button
                       key={char.id}
                       onClick={() => setSelectedCharId(char.id)}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all shrink-0 ${
-                        isSel 
-                          ? "bg-slate-900 border-slate-900 text-white font-bold shadow-sm" 
-                          : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-slate-300"
+                      className={`group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 transition-all ${
+                        isSel ? "text-slate-900" : "text-slate-600 hover:bg-slate-50"
                       }`}
                     >
-                      <img src={char.avatar} alt="" className="w-5 h-5 rounded-full object-cover border border-slate-200" />
-                      <span className="text-xs font-bold">{char.remark || char.name}</span>
-                      <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-slate-100 text-slate-500">
+                      <span className={`relative rounded-full p-0.5 transition-all ${isSel ? "bg-rose-300" : "bg-transparent"}`}>
+                        <img src={char.avatar} alt="" className="h-8 w-8 rounded-full object-cover border border-slate-200" />
+                        {isSel && <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-rose-400 text-[7px] font-bold text-white">✓</span>}
+                      </span>
+                      <span className="max-w-full truncate text-[9px] font-bold leading-3">{char.remark || char.name}</span>
+                      <span className={`min-w-4 rounded-full px-1 py-0.5 text-center text-[8px] leading-2.5 ${isSel ? "bg-rose-100 text-rose-500" : "bg-slate-100 text-slate-500"}`}>
                         {charStoriesCount}
                       </span>
                     </button>
                   );
                 })}
               </div>
-              {relationChoices.length > 0 && (
-                <div className="mt-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
-                  {relationChoices.map((relation) => {
-                    const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
-                    return <button key={relation.id} onClick={() => setSelectedRelationId(relation.id)} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === relation.id ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{identity?.name || relation.userIdentityId}</button>;
-                  })}
-                </div>
-              )}
             </div>
 
             {/* Stories Directory Content */}
@@ -515,9 +503,23 @@ export default function AppOffline({
                   <BookOpen className="w-3.5 h-3.5 text-slate-400" />
                   <span>故事列表 ({charStories.length})</span>
                 </h2>
-                {selectedChar && (
-                  <span className="text-[11px] text-slate-500">当前角色: {selectedChar.remark || selectedChar.name}</span>
-                )}
+                <label className="flex items-center gap-0.5 text-xs leading-4 text-slate-500">
+                  <span>当前身份:</span>
+                  <select
+                    value={selectedRelationId}
+                    onChange={(event) => setSelectedRelationId(event.target.value)}
+                    disabled={relationChoices.length === 0}
+                    aria-label="选择我的人设"
+                    className="h-5 w-[112px] max-w-[112px] rounded-md border-0 bg-transparent py-0 pl-0.5 pr-4 text-xs leading-4 text-slate-500 outline-none disabled:text-slate-300"
+                  >
+                    {relationChoices.length === 0 ? (
+                      <option value="">暂无可用人设</option>
+                    ) : relationChoices.map((relation) => {
+                      const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
+                      return <option key={relation.id} value={relation.id}>{identity?.name || relation.userIdentityId}</option>;
+                    })}
+                  </select>
+                </label>
               </div>
 
               {!selectedChar ? (
@@ -532,9 +534,9 @@ export default function AppOffline({
                   <button
                     type="button"
                     onClick={onClose}
-                    className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all inline-block shadow-sm"
+                    className="empty-state-action"
                   >
-                    返回桌面
+                    现在去创建
                   </button>
                 </div>
               ) : charStories.length === 0 ? (
@@ -670,15 +672,15 @@ export default function AppOffline({
               /* ================= STORY SETTINGS PAGE ================= */
               <div className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-[#F7F7F9]">
                 {/* Header */}
-                <div className="px-4 py-3 bg-white border-b border-[#F0F0F0] flex items-center justify-between shadow-sm z-10 shrink-0 relative">
+                <div className="relative flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0">
                   <button 
                     onClick={() => setIsSettingsOpen(false)}
-                    className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors shrink-0"
+                    className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-500 transition-colors shrink-0"
                     title="返回剧本空间"
                   >
                     <ArrowLeft className="w-4 h-4 text-slate-700" />
                   </button>
-                  <h3 className="text-base font-semibold text-[#111111] absolute left-1/2 -translate-x-1/2 w-max">
+                  <h3 className="text-base font-bold tracking-tight text-[#111111] absolute left-1/2 -translate-x-1/2 w-max">
                     剧本高级设置
                   </h3>
                   <div className="w-8 h-8" />

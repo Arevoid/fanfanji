@@ -182,7 +182,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           onClick={isEditingNote ? () => setIsEditingNote(false) : onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           title="返回"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -196,7 +196,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
           {isEditingNote ? (
             <button 
               onClick={handleSaveNote}
-              className="w-8 h-8 rounded-full bg-neutral-950 hover:bg-neutral-900 text-white transition-all flex items-center justify-center shadow-sm"
+              className="app-nav-icon-button w-8 h-8 text-slate-800 transition-all flex items-center justify-center"
               title="保存"
             >
               <Save className="w-4 h-4" />
@@ -205,7 +205,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
             activeTab === "notes" && (
               <button 
                 onClick={handleOpenCreateNote}
-                className="w-8 h-8 bg-neutral-950 hover:bg-neutral-900 text-white rounded-full transition-colors flex items-center justify-center shadow-sm"
+                className="app-nav-icon-button w-8 h-8 text-slate-800 transition-colors flex items-center justify-center"
                 title="新建笔记"
               >
                 <Plus className="w-4.5 h-4.5" />

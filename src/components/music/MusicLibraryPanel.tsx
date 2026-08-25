@@ -288,7 +288,7 @@ export default function MusicLibraryPanel({
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="shrink-0 px-4 pb-3 pt-2">
-        <div className="relative flex h-9 items-center justify-between"><button type="button" onClick={() => selectedPlaylist ? setSelectedPlaylist(null) : onClose()} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]" title={selectedPlaylist ? "返回歌单" : "返回主页"} aria-label={selectedPlaylist ? "返回歌单" : "返回主页"}><ChevronLeft className="h-4 w-4" /></button><h1 className="absolute left-1/2 -translate-x-1/2 text-base font-bold text-[var(--text-primary)]">音乐库</h1><span className="h-8 w-8" /></div>
+        <div className="relative flex h-9 items-center justify-between"><button type="button" onClick={() => selectedPlaylist ? setSelectedPlaylist(null) : onClose()} className="app-nav-icon-button flex h-8 w-8 items-center justify-center" title={selectedPlaylist ? "返回歌单" : "返回主页"} aria-label={selectedPlaylist ? "返回歌单" : "返回主页"}><ChevronLeft className="h-4 w-4" /></button><h1 className="absolute left-1/2 -translate-x-1/2 text-base font-bold text-[var(--text-primary)]">音乐库</h1><span className="h-8 w-8" /></div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
         {error && <div className={`mb-3 flex items-start gap-2 rounded-2xl border px-3 py-2 text-[11px] ${error.includes("NETEASE_API_BASE_URL") ? "border-amber-200 bg-amber-50 text-amber-700" : "border-red-200 bg-red-50 text-red-600"}`}><span className="flex-1">{error}</span><button type="button" onClick={() => setError(null)} aria-label="关闭提示"><X className="h-3.5 w-3.5" /></button></div>}

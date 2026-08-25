@@ -26,7 +26,7 @@ export function OfflineWorkspaceHeader({
   return (
     <header className="offline-workspace-header">
       <div className="offline-workspace-nav">
-        <button type="button" onClick={onExit} aria-label="返回线下故事列表" className="offline-icon-button offline-workspace-back">
+        <button type="button" onClick={onExit} aria-label="返回线下故事列表" className="offline-icon-button offline-workspace-back app-nav-icon-button">
           <ArrowLeft size={18} />
         </button>
         <div className="offline-workspace-title">
@@ -37,7 +37,7 @@ export function OfflineWorkspaceHeader({
           <p>与「{characterName}」的离线剧本空间</p>
         </div>
         <div className="offline-workspace-menu-anchor">
-          <button ref={triggerRef} type="button" onClick={() => setMenuOpen((open) => !open)} aria-label="打开线下剧情菜单" className="offline-icon-button">
+          <button ref={triggerRef} type="button" onClick={() => setMenuOpen((open) => !open)} aria-label="打开线下剧情菜单" className="offline-icon-button app-nav-icon-button">
             <MoreHorizontal size={18} />
           </button>
           <PopoverMenu open={menuOpen} onClose={closeMenu} anchorRef={triggerRef} placement="bottom-end" ariaLabel="线下剧情菜单" className="offline-workspace-menu">

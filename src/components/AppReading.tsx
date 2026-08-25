@@ -1287,7 +1287,7 @@ export default function AppReading({
             type="button"
             onClick={() => setSelectedRoomId(null)}
             aria-label="返回共读列表"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]"
+            className="app-nav-icon-button flex h-8 w-8 items-center justify-center"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -1298,7 +1298,7 @@ export default function AppReading({
             type="button"
             onClick={() => setRoomDeleteTarget(selectedRoom)}
             aria-label="删除共读房间"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-rose-200/70 text-rose-500"
+            className="app-nav-icon-button flex h-8 w-8 items-center justify-center text-rose-500"
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -1511,7 +1511,7 @@ export default function AppReading({
               setNotice(null);
             }}
             aria-label="返回书架"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]"
+            className="app-nav-icon-button flex h-8 w-8 items-center justify-center"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -1522,7 +1522,7 @@ export default function AppReading({
             type="button"
             onClick={beginEditing}
             aria-label="编辑书籍资料"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]"
+            className="app-nav-icon-button flex h-8 w-8 items-center justify-center"
           >
             <Pencil className="h-4 w-4" />
           </button>
@@ -1943,7 +1943,7 @@ export default function AppReading({
           type="button"
           onClick={onClose}
           aria-label="返回桌面"
-          className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)]"
+          className="app-nav-icon-button flex h-8 w-8 items-center justify-center"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -1970,7 +1970,7 @@ export default function AppReading({
                 ? "新建原创世界"
                 : "当前栏目"
           }
-          className={`flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] ${rootTab === "co_reading" ? "invisible" : ""}`}
+          className={`app-nav-icon-button flex h-8 w-8 items-center justify-center ${rootTab === "co_reading" ? "invisible" : ""}`}
         >
           {rootTab === "world" ? (
             <Plus className="h-4 w-4" />

@@ -1437,6 +1437,21 @@ export default function AppChat({
       : null;
     const isCancelledCallTurn = () => callTurnGeneration !== null
       && callTurnGeneration !== callSpeechGenerationRef.current;
+    const publishReplyError = (message: string) => {
+      const timestamp = Date.now();
+      if (activeAttachModal === "calling" && callingStatus === "connected") {
+        setCallTranscript((previous) => [...previous, {
+          id: `call-error-${timestamp}`,
+          sender: "character",
+          content: message,
+          timestamp,
+        }]);
+        return;
+      }
+      // An API failure is application state, not a message authored by the
+      // character. Keep it out of the conversation history.
+      showToast(message);
+    };
     // Resolve toggles from the latest props for every send. A queued callback
     // may have been created by an earlier render, so its captured character
     // must never decide the next prompt or output filtering.
@@ -2070,13 +2085,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
         }
       } else {
         if (isCancelledCallTurn() || signal?.aborted) return;
-        const errMsg = createCharacterTextMessage({
-          id: (Date.now() + 1).toString(),
-          context: replyContext,
-          content: `⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`,
-          timestamp: Date.now(),
-        });
-        onSendMessageRaw(errMsg);
+        publishReplyError(`⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`);
       }
     } catch (err: any) {
       if (isCancelledCallTurn() || signal?.aborted) return;
@@ -2089,15 +2098,9 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                                 errMsgStr.toLowerCase().includes("400") ||
                                 errMsgStr.toLowerCase().includes("invalid");
 
-      const errMsg = createCharacterTextMessage({
-        id: (Date.now() + 1).toString(),
-        context: replyContext,
-        content: isQuotaOrKeyError
-          ? `⚠️ [连接错误]：智能体响应失败 (${errMsgStr})。请检查 API Key 是否正确、是否过期或余额不足。`
-          : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`,
-        timestamp: Date.now(),
-      });
-      onSendMessageRaw(errMsg);
+      publishReplyError(isQuotaOrKeyError
+        ? `⚠️ [连接错误]：智能体响应失败 (${errMsgStr})。请检查 API Key 是否正确、是否过期或余额不足。`
+        : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`);
     } finally {
       setIsTyping(false);
     }
@@ -3854,8 +3857,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   align-items: center !important;
                   justify-content: center !important;
                 }
-                /* 液态玻璃导航控件：保留按钮底部的圆形玻璃承托，避免被
-                   聊天页基础样式重置为透明方形。 */
+                /* 导航控件保持透明方形命中区，不额外绘制圆形底板。 */
                 #conv-screen.style-liquid-glass .cv-header .back-btn,
                 #conv-screen.style-liquid-glass .cv-header .menu-btn,
                 #conv-screen.style-liquid-glass .cv-header .chat-header__back-button,
@@ -3863,14 +3865,14 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   width: 42px !important;
                   height: 42px !important;
                   min-width: 42px !important;
-                  border-radius: 50% !important;
-                  background: rgba(255, 255, 255, 0.62) !important;
-                  background-color: rgba(255, 255, 255, 0.62) !important;
-                  border: 1.5px solid rgba(255, 255, 255, 0.72) !important;
+                  border-radius: 0 !important;
+                  background: transparent !important;
+                  background-color: transparent !important;
+                  border: none !important;
                   color: #1c1917 !important;
-                  backdrop-filter: blur(20px) saturate(190%) !important;
-                  -webkit-backdrop-filter: blur(20px) saturate(190%) !important;
-                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06) !important;
+                  backdrop-filter: none !important;
+                  -webkit-backdrop-filter: none !important;
+                  box-shadow: none !important;
                   display: flex !important;
                   align-items: center !important;
                   justify-content: center !important;
@@ -3879,8 +3881,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                 #conv-screen.style-liquid-glass .cv-header .menu-btn:hover,
                 #conv-screen.style-liquid-glass .cv-header .chat-header__back-button:hover,
                 #conv-screen.style-liquid-glass .cv-header .chat-header__more-button:hover {
-                  background: rgba(255, 255, 255, 0.76) !important;
-                  opacity: 1 !important;
+                  background: transparent !important;
+                  opacity: 0.72 !important;
                   transform: scale(1.04) !important;
                 }
                 #conv-screen.style-liquid-glass .cv-header .back-btn svg,
@@ -4220,7 +4222,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   setIsShowingCardModal(false);
                   setAdvancedSettingsSection(null);
                 }}
-                className="w-8 h-8 rounded-none bg-transparent flex items-center justify-center hover:bg-transparent hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button chat-header-control--plain"
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button chat-header-control--plain"
               >
                 <span className="cv-back-icon flex items-center justify-center w-full h-full">
                   <ChevronLeft className="w-4 h-4 text-[var(--text-primary)]" />
@@ -4260,7 +4262,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   setAdvancedSettingsSection(null);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
-                className="w-8 h-8 rounded-none bg-transparent flex items-center justify-center hover:bg-transparent hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button chat-header-control--plain"
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button chat-header-control--plain"
               >
                 <span className="cv-menu-icon flex items-center justify-center w-full h-full">
                   <MoreHorizontal className="w-4 h-4 text-[var(--text-primary)]" />
@@ -4281,7 +4283,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                     if (isShowingAdvancedSettings) setAdvancedSettingsSection(null);
                     else setIsShowingCardModal(false);
                   }}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+                  className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
                 >
                   <ChevronLeft className="w-4 h-4 text-slate-700" />
                 </button>
@@ -4293,7 +4295,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   onClick={handleSaveSettings}
                   aria-label="保存设置"
                   title="保存设置"
-                  className="w-8 h-8 rounded-full bg-neutral-950 text-white flex items-center justify-center hover:bg-neutral-800 active:scale-95 transition-all z-10 shrink-0"
+                  className="app-nav-icon-button w-8 h-8 text-slate-800 flex items-center justify-center hover:opacity-70 active:scale-95 transition-all z-10 shrink-0"
                 >
                   <Check className="w-4 h-4" strokeWidth={2.5} />
                 </button>
@@ -5995,6 +5997,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
               }
               isTyping={isTyping}
               isReplyInFlight={isReplyInFlight}
+              isOfflineMode={isOfflineModeActive}
               showAttachPanel={showAttachPanel}
               onToggleAttach={() => {
                 setShowAttachPanel(!showAttachPanel);
@@ -7009,7 +7012,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                 const senderChar = characters.find((character) => character.id === message.senderId);
                 return `${senderChar ? (senderChar.remark || senderChar.name) : "成员"}: ${content}`;
               }}
-              header={<ChatTopBar title={<>聊天 ({chatThreads.length})</>} leftAction={<button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => { setGroupNameInput(""); setSelectedGroupMemberIds([]); setShowCreateGroupModal(true); }} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10" title="发起群聊"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
+              header={<ChatTopBar title={<>聊天 ({chatThreads.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => { setGroupNameInput(""); setSelectedGroupMemberIds([]); setShowCreateGroupModal(true); }} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="发起群聊"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
             />
           )}
 
@@ -7018,7 +7021,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
             <ContactList
               contacts={friendContacts}
               onSelect={startChatWith}
-              header={<ChatTopBar title={<>通讯录 ({friends.length})</>} leftAction={<button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setIsShowingAddFriendDialog(true)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 text-slate-700 transition-colors shrink-0 z-10" title="添加好友"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
+              header={<ChatTopBar title={<>通讯录 ({friends.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setIsShowingAddFriendDialog(true)} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="添加好友"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
             />
           )}
 
@@ -7062,7 +7065,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   <div className="px-4 py-1.5 bg-transparent sticky top-0 z-10 flex items-center justify-between relative shrink-0">
                     <button
                       onClick={onClose}
-                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+                      className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
                       title="返回主页"
                     >
                       <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -7106,7 +7109,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                             e.stopPropagation();
                             setIsEditingProfile(true);
                           }}
-                          className="text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all px-3.5 py-1.5 rounded-full shadow-sm"
+                          className="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors px-3 py-1.5 rounded-[8px]"
                         >
                           编辑资料
                         </button>
@@ -7196,7 +7199,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   <div className="px-4 py-1.5 bg-white sticky top-0 z-10 flex items-center justify-between border-b border-slate-100">
                     <button
                       onClick={() => setMeActiveSubView("none")}
-                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                      className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors shrink-0"
                     >
                       <ChevronLeft className="w-4 h-4 text-slate-700" />
                     </button>
@@ -7293,7 +7296,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   <div className="px-4 py-1.5 bg-white sticky top-0 z-10 flex items-center justify-between border-b border-slate-100">
                     <button
                       onClick={() => setMeActiveSubView("none")}
-                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                      className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors shrink-0"
                     >
                       <ChevronLeft className="w-4 h-4 text-slate-700" />
                     </button>
@@ -7499,14 +7502,14 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   <div className="px-4 py-1.5 bg-white sticky top-0 z-30 flex items-center justify-between border-b border-slate-100 shrink-0">
                     <button
                       onClick={() => setMeActiveSubView("none")}
-                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                      className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors shrink-0"
                     >
                       <ChevronLeft className="w-4 h-4 text-slate-700" />
                     </button>
                     <h2 className="text-sm font-bold text-slate-800 tracking-tight">表情包管理</h2>
                     <button
                       onClick={() => triggerCreateStickerGroupRef.current?.()}
-                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                      className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors shrink-0"
                       title="新建分组"
                     >
                       <Plus className="w-4 h-4 text-slate-700" />
@@ -7528,7 +7531,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   <div className="px-4 py-1.5 bg-white sticky top-0 z-10 flex items-center justify-between border-b border-slate-100">
                     <button
                       onClick={() => setMeActiveSubView("none")}
-                      className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"
+                      className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors shrink-0"
                     >
                       <ChevronLeft className="w-4 h-4 text-slate-700" />
                     </button>

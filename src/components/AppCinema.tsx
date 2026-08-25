@@ -616,7 +616,7 @@ export default function AppCinema({
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
       <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center border-b border-[var(--border)] px-4 py-2">
-        <button type="button" onClick={handleBack} className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--surface-raised)]" aria-label="返回">
+        <button type="button" onClick={handleBack} className="app-nav-icon-button flex h-9 w-9 items-center justify-center" aria-label="返回">
           <ArrowLeft className="h-4 w-4" />
         </button>
         <h1 className="min-w-0 truncate text-center text-sm font-black" title={selectedMedia?.title || "影视"}>{selectedMedia?.title || "影视"}</h1>
