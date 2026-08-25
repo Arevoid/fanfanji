@@ -299,10 +299,10 @@ export default function AppMemory({
   return (
     <div data-theme-page="memory" className="w-full h-full bg-[var(--app-bg)] text-[var(--text-primary)] flex flex-col font-sans select-none relative overflow-hidden">
       {/* Upper Navigation Bar */}
-      <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
+      <div className="flex items-center justify-between px-4 py-1.5 bg-transparent border-0 z-10 shrink-0 relative">
         <button
           onClick={onClose}
-          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center rounded-none border-0 bg-transparent shadow-none transition-colors z-10 shrink-0"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
         </button>
@@ -313,7 +313,7 @@ export default function AppMemory({
         <div className="relative z-20">
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors shrink-0"
+            className="app-nav-icon-button w-8 h-8 flex items-center justify-center rounded-none border-0 bg-transparent shadow-none transition-colors shrink-0"
           >
             <MoreVertical className="w-4 h-4 text-slate-700" />
           </button>
@@ -459,7 +459,7 @@ export default function AppMemory({
           <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar select-none">
             <button
               onClick={() => setSelectedCharacterId("all")}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all shrink-0 ${
                 selectedCharacterId === "all"
                   ? "bg-slate-900 text-white shadow-sm"
                   : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
@@ -472,7 +472,7 @@ export default function AppMemory({
               <button
                 key={char.id}
                 onClick={() => setSelectedCharacterId(char.id)}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shrink-0 ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all shrink-0 ${
                   selectedCharacterId === char.id
                     ? "bg-slate-900 text-white shadow-sm"
                     : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
@@ -481,7 +481,7 @@ export default function AppMemory({
                 <img
                   src={char.avatar}
                   alt={char.name}
-                  className="w-4 h-4 rounded-full object-cover"
+                  className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
                   referrerPolicy="no-referrer"
                 />
                 {char.name}

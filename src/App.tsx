@@ -3132,6 +3132,14 @@ export default function App() {
           letter-spacing: 0.02em !important;
         }
 
+        /* Offline identity picker follows the compact story-list typography. */
+        .phone-screen-container .offline-identity-picker,
+        .phone-screen-container .offline-identity-picker__select {
+          font-size: calc(12px * var(--app-font-scale, 1)) !important;
+          font-weight: 400 !important;
+          letter-spacing: 0 !important;
+        }
+
         /* Unified Helper Small Text: light grey #a1a1aa */
         .phone-screen-container .text-[10px],
         .phone-screen-container .text-xs.text-stone-400,
@@ -3197,6 +3205,26 @@ export default function App() {
           align-items: center !important;
           justify-content: center !important;
           padding: 0 !important;
+        }
+
+        /* Navigation icon actions use a flat hit area. Avatars, badges, toggles,
+           chips and send controls keep their own shapes. */
+        .phone-screen-container button.app-nav-icon-button,
+        .phone-screen-container label.app-nav-icon-button,
+        .phone-screen-container .app-nav-icon-button,
+        .phone-screen-container #schedule_back_btn,
+        .phone-screen-container .offline-icon-button {
+          border-radius: 0 !important;
+          background: transparent !important;
+          background-color: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+        }
+        .phone-screen-container .app-nav-icon-button:hover,
+        .phone-screen-container #schedule_back_btn:hover,
+        .phone-screen-container .offline-icon-button:hover {
+          background: transparent !important;
+          opacity: .72 !important;
         }
 
         /* 8. Chat bubbles own their palette, radius and border inside AppChat.

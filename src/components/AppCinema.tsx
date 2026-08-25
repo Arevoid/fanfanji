@@ -615,12 +615,12 @@ export default function AppCinema({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
-      <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center border-b border-[var(--border)] px-4 py-2">
-        <button type="button" onClick={handleBack} className="app-nav-icon-button flex h-9 w-9 items-center justify-center" aria-label="返回">
+      <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center border-b-0 bg-transparent px-4 py-2">
+        <button type="button" onClick={handleBack} className="app-nav-icon-button flex h-9 w-9 items-center justify-center rounded-none border-0 bg-transparent shadow-none" aria-label="返回">
           <ArrowLeft className="h-4 w-4" />
         </button>
         <h1 className="min-w-0 truncate text-center text-sm font-black" title={selectedMedia?.title || "影视"}>{selectedMedia?.title || "影视"}</h1>
-        <button type="button" onClick={() => setMediaSettingsOpen(true)} disabled={!selectedMedia} className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] disabled:opacity-40" aria-label="影视设置" title="影视设置">
+        <button type="button" onClick={() => setMediaSettingsOpen(true)} disabled={!selectedMedia} className="app-nav-icon-button flex h-9 w-9 items-center justify-center rounded-none border-0 bg-transparent shadow-none disabled:opacity-40" aria-label="影视设置" title="影视设置">
           <SettingsIcon className="h-4 w-4" />
         </button>
         <input ref={fileInputRef} type="file" accept="video/*,.mp4,.webm,.mov,.m4v,.ogv" className="hidden" onChange={handleVideoUpload} />

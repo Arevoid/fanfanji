@@ -503,14 +503,14 @@ export default function AppOffline({
                   <BookOpen className="w-3.5 h-3.5 text-slate-400" />
                   <span>故事列表 ({charStories.length})</span>
                 </h2>
-                <label className="flex items-center gap-0.5 text-xs leading-4 text-slate-500">
+                <label className="offline-identity-picker flex items-center gap-0.5 text-xs leading-4 text-slate-500">
                   <span>当前身份:</span>
                   <select
                     value={selectedRelationId}
                     onChange={(event) => setSelectedRelationId(event.target.value)}
                     disabled={relationChoices.length === 0}
                     aria-label="选择我的人设"
-                    className="h-5 w-[112px] max-w-[112px] rounded-md border-0 bg-transparent py-0 pl-0.5 pr-4 text-xs leading-4 text-slate-500 outline-none disabled:text-slate-300"
+                    className="offline-identity-picker__select h-5 w-[76px] max-w-[76px] rounded-md border-0 bg-transparent py-0 pl-0.5 pr-4 text-xs leading-4 text-slate-500 outline-none disabled:text-slate-300"
                   >
                     {relationChoices.length === 0 ? (
                       <option value="">暂无可用人设</option>
