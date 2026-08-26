@@ -50,6 +50,8 @@ const synced = syncedResult.memories;
 assert.equal(synced.length, 2);
 assert.deepEqual(synced.map((memory) => memory.relationId).sort(), ["ra", "rb"]);
 assert.equal(synced.every((memory) => memory.content.includes("offline-story:story-g:summary")), true);
+assert.equal(synced.every((memory) => !memory.content.includes("我推开门")), true);
+assert.deepEqual(syncedResult.fallbackParticipantNames.sort(), ["A", "B"]);
 assert.equal(hasOfflineStorySummary(story, synced), true);
 
 console.log("PASS group offline snapshots and synced memories stay participant-scoped");

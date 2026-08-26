@@ -407,6 +407,7 @@ export default function AppChat({
   const [showAliasDirectory, setShowAliasDirectory] = useState(false);
   const [aliasDeleteTarget, setAliasDeleteTarget] = useState<string | null>(null);
   const [showCreateAliasModal, setShowCreateAliasModal] = useState(false);
+  const [aliasEditTargetId, setAliasEditTargetId] = useState<string | null>(null);
   const [aliasDraftName, setAliasDraftName] = useState("");
   const [aliasDraftBio, setAliasDraftBio] = useState("");
   const [aliasDraftAvatar, setAliasDraftAvatar] = useState("");
@@ -450,8 +451,14 @@ export default function AppChat({
     }
   };
   
-  // Navigation State
-  const activeRelationship = activeChatRelationId ? relationships.find((relation) => relation.id === activeChatRelationId) : undefined;
+  // Navigation State. A relation ID alone is not sufficient: during an
+  // identity switch the old relation can briefly remain selected. Binding the
+  // lookup to the active identity prevents the primary account's context from
+  // leaking into an alias turn.
+  const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const activeRelationship = activeChatRelationId
+    ? relationships.find((relation) => relation.id === activeChatRelationId && relation.userIdentityId === activeIdentityId)
+    : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
   const activeCharacterDisplayName = activeCharacter
     ? activeCharacter.isGroupChat
@@ -481,7 +488,6 @@ export default function AppChat({
     activeRelationship,
     activeCharacter,
   });
-  const activeIdentityId = settings.activeIdentityId || "identity-1";
   const activeDirectScope = resolveDirectInteractionScope({
     characterId: activeCharacter?.id,
     activeIdentityId,
@@ -1687,6 +1693,26 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const userProfileText = `User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
+      const activeIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId);
+      const aliasDisclosure = activeIdentity?.kind === "alias"
+        && ["我是", "我叫", "身份是", "其实是", "原来是"].some((prefix) => currentMessageContextText.includes(prefix))
+        && [activeIdentity.name, activeIdentity.bio].some((term) => Boolean(term.trim()) && currentMessageContextText.includes(term.trim()));
+      if (aliasDisclosure) {
+        const primaryRelation = relationships.find((relation) =>
+          relation.userIdentityId === "identity-1"
+          && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
+        );
+        if (primaryRelation) {
+          const primaryMessages = messages
+            .filter((message) => message.relationId === primaryRelation.id)
+            .sort((left, right) => right.timestamp - left.timestamp)
+            .slice(0, 8)
+            .reverse()
+            .map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: activeCharacter.name }).replace(/\\s+/gu, " ").trim().slice(0, 180))
+            .filter(Boolean);
+          characterContextText += `\\n[用户已在当前马甲聊天中明确自报身份；可参考主号与当前角色的核心关系，不得凭空确认未提及的细节]\\n主号关系摘要：${primaryRelation.compressedMemory?.trim() || "暂无已归纳摘要"}\\n主号近期对话线索：${primaryMessages.join(" | ") || "暂无"}\\n只有这些内容可作为参考；不要向用户说明系统中的身份关联，也不要把主号称呼直接套用到马甲。`;
+        }
+      }
       const userKnowledgeBoundary = formatUserKnowledgeBoundary();
       const relationshipContext = characterProjection.relationship?.content || "";
       const chatPromptContext = cognitiveContext
@@ -7088,6 +7114,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   leftAction={<button onClick={() => setShowAliasDirectory(false)} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回通讯录"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>}
                   rightAction={<button
                     onClick={() => {
+                      setAliasEditTargetId(null);
                       setAliasDraftName("");
                       setAliasDraftBio("");
                       setAliasDraftAvatar(settings.avatar);
@@ -7108,13 +7135,31 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                         event.preventDefault();
                         const name = aliasDraftName.trim();
                         if (!name) return;
-                        const alias = { id: createId("identity"), name, avatar: aliasDraftAvatar || settings.avatar, signature: "", bio: aliasDraftBio.trim(), kind: "alias" as const };
+                        const avatar = aliasDraftAvatar || settings.avatar;
+                        const bio = aliasDraftBio.trim();
+                        if (aliasEditTargetId) {
+                          const editedAlias = settings.identities?.find((identity) => identity.id === aliasEditTargetId);
+                          if (!editedAlias) return;
+                          const identities = (settings.identities || []).map((identity) => identity.id === aliasEditTargetId
+                            ? { ...identity, name, avatar, bio }
+                            : identity);
+                          onSaveSettings({
+                            ...settings,
+                            identities,
+                            ...(activeIdentityId === aliasEditTargetId ? { name, avatar, bio } : {}),
+                          });
+                          setShowCreateAliasModal(false);
+                          setAliasEditTargetId(null);
+                          showToast(`已更新马甲：${name}`);
+                          return;
+                        }
+                        const alias = { id: createId("identity"), name, avatar, signature: "", bio, kind: "alias" as const };
                         onSaveSettings({ ...settings, identities: [...(settings.identities || []), alias] });
                         setShowCreateAliasModal(false);
                         showToast(`已创建马甲：${alias.name}`);
                       }}
                     >
-                      <h3 className="text-sm font-bold">新建马甲</h3>
+                      <h3 className="text-sm font-bold">{aliasEditTargetId ? "编辑马甲" : "新建马甲"}</h3>
                       <div className="mt-3 flex flex-col items-center gap-2">
                         <img src={aliasDraftAvatar || settings.avatar} alt="" className="h-16 w-16 rounded-full border border-[var(--border)] object-cover" />
                         <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setAliasDraftAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
@@ -7129,20 +7174,41 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   {(settings.identities || []).filter((identity) => identity.kind === "alias" && identity.name.trim()).map((identity) => {
                     const aliasRelations = relationships.filter((relation) => relation.userIdentityId === identity.id);
                     const isActive = identity.id === activeIdentityId;
+                    const primaryIdentityName = settings.identities?.find((item) => item.id === "identity-1")?.name || "主号";
                     return (
                       <div key={identity.id} onPointerDown={() => startAliasLongPress(identity.id)} onPointerUp={clearAliasLongPress} onPointerLeave={clearAliasLongPress} onContextMenu={(event) => { event.preventDefault(); setAliasDeleteTarget(identity.id); }} className="flex items-center gap-3 px-4 py-3">
-                        <img src={identity.avatar} alt={identity.name} className="h-12 w-12 rounded-full object-cover border border-[var(--border)] bg-[var(--surface-muted)] shrink-0" referrerPolicy="no-referrer" />
+                        <button
+                          type="button"
+                          aria-label={`编辑马甲${identity.name}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setAliasEditTargetId(identity.id);
+                            setAliasDraftName(identity.name);
+                            setAliasDraftBio(identity.bio || "");
+                            setAliasDraftAvatar(identity.avatar);
+                            setShowCreateAliasModal(true);
+                          }}
+                          className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                        >
+                          <img src={identity.avatar} alt={identity.name} className="h-12 w-12 rounded-full object-cover border border-[var(--border)] bg-[var(--surface-muted)]" referrerPolicy="no-referrer" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
-                            if (onSwitchIdentity) onSwitchIdentity(identity.id);
-                            else onSaveSettings({ ...settings, activeIdentityId: identity.id, name: identity.name, avatar: identity.avatar, signature: identity.signature, bio: identity.bio });
-                            showToast(`已切换为：${identity.name}`);
+                            const nextIdentityId = isActive ? "identity-1" : identity.id;
+                            const nextIdentity = isActive
+                              ? settings.identities?.find((item) => item.id === "identity-1")
+                              : identity;
+                            if (!nextIdentity) return;
+                            if (onSwitchIdentity) onSwitchIdentity(nextIdentityId);
+                            else onSaveSettings({ ...settings, activeIdentityId: nextIdentity.id, name: nextIdentity.name, avatar: nextIdentity.avatar, signature: nextIdentity.signature, bio: nextIdentity.bio });
+                            showToast(isActive ? `已切换为：${primaryIdentityName}` : `已切换为：${identity.name}`);
                           }}
                           className="min-w-0 flex-1 text-left"
                         >
                           <p className="truncate text-sm font-bold">{identity.name}</p>
-                          <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">已添加 {aliasRelations.length} 个角色{isActive ? " · 当前使用中" : ""}</p>
+                          <p className="mt-0.5 text-[10px] font-semibold text-[var(--text-secondary)]">{isActive ? `切换（${primaryIdentityName}）` : "切换马甲身份"}</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">已添加 {aliasRelations.length} 个角色</p>
                         </button>
                         <button
                           type="button"

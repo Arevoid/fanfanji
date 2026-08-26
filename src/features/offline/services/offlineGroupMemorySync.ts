@@ -21,10 +21,11 @@ export async function createOfflineGroupParticipantMemories(input: {
   existingMemories: readonly MemoryItem[];
   offlineStoryPolicyInput?: MemoryExtractionContext["offlineStoryPolicyInput"];
   extractApi: MemoryExtractionApi;
-}): Promise<{ memories: MemoryItem[]; acceptedClaims: KnowledgeClaim[] }> {
-  if (input.sourceMessages.length === 0) return { memories: [], acceptedClaims: [] };
+}): Promise<{ memories: MemoryItem[]; acceptedClaims: KnowledgeClaim[]; fallbackParticipantNames: string[] }> {
+  if (input.sourceMessages.length === 0) return { memories: [], acceptedClaims: [], fallbackParticipantNames: [] };
   const memories: MemoryItem[] = [];
   const acceptedClaims: KnowledgeClaim[] = [];
+  const fallbackParticipantNames: string[] = [];
   await Promise.all(input.participants.map(async (participant) => {
     const relationship = findRelationshipForCanonicalCharacter(
       input.relationships,
@@ -70,6 +71,7 @@ export async function createOfflineGroupParticipantMemories(input: {
       console.warn(`多人线下记忆提取失败（${participant.name}），使用安全交接摘要：`, error);
     }
     if (extracted.length === 0) {
+      fallbackParticipantNames.push(participant.name);
       extracted = [createOfflineStoryHandoffMemory({
         story: input.story,
         sourceMessages: input.sourceMessages,
@@ -79,10 +81,10 @@ export async function createOfflineGroupParticipantMemories(input: {
         id: `offline-group-memory:${input.story.id}:${participant.id}`,
         timestamp: input.now,
         marker: "summary",
-        includeConfirmedExcerpts: true,
+        includeConfirmedExcerpts: false,
       })];
     }
     memories.push(...extracted);
   }));
-  return { memories, acceptedClaims };
+  return { memories, acceptedClaims, fallbackParticipantNames };
 }

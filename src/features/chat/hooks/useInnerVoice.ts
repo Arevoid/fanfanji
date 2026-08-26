@@ -4,6 +4,7 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
 import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, saveInnerVoiceRecords, type InnerVoiceScope } from "../../../core/storage/repositories/innerVoiceRepository";
 import { generateInnerVoice } from "../services/innerVoiceService";
+import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerializer";
 
 interface UseInnerVoiceOptions {
   characters: Character[];
@@ -69,11 +70,21 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     setCharacter(targetCharacter); setMode("current"); setError(null);
     const stored = loadInnerVoiceRecords([]).value;
     const existing = findInnerVoiceByMessage(stored, scope);
-    setHistory(listHistory(stored));
+    const scopedHistory = listHistory(stored);
+    setHistory(scopedHistory);
+    // Some legacy/segmented replies persisted a different message id while
+    // retaining the same message summary. Recover only within this exact
+    // relationship/group scope; never fall back to the newest voice.
+    const triggerSummary = serializeMessageContentForPrompt(triggerMessage, {
+      mode: "history",
+      userName: settings.name,
+      characterName: targetCharacter.name,
+    }).slice(0, 120);
+    const compatibleExisting = existing || scopedHistory.find((item) => item.triggerMessageSummary === triggerSummary);
     // Current voice must belong to the message that was clicked. Never use a
     // different message's newest record as a fallback, otherwise every
     // message without an exact match would display the same inner voice.
-    if (existing && !force) { setRecord(existing); setLoading(false); return; }
+    if (compatibleExisting && !force) { setRecord(compatibleExisting); setLoading(false); return; }
     // A normal avatar click only reads the inline record created with the chat
     // reply. Manual generation is reserved for the explicit refresh action.
     if (!force) {
