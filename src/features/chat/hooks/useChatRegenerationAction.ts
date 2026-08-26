@@ -13,7 +13,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatMemoriesForPrompt, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
     getPendingOfflineHandoff, buildPendingOfflineTimelineHandoff, isOfflineStoryHandoffMemory,
-    buildOfflineTimelineHandoff, allMoments, activeIdentityId, getKnownMomentsContextString,
+    buildOfflineTimelineHandoff, allMoments, activeIdentityId, getKnownMomentsContextString, relationships,
     getOfflineStoriesContextForOnlineChat, musicTracks, identityMusicStates, relationshipMusicStates,
     buildRelationMusicContext, loadForumShares, loadForumThreads, buildRelationForumContext, getConversationId,
     loadDiaryShares, buildRelationDiaryContext, loadUserMemoPromptContext, buildCharacterBehaviorPrompt,
@@ -238,6 +238,34 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 - Personality/Bio: ${settings.bio}`;
       const userKnowledgeBoundary = formatUserKnowledgeBoundary();
       const relationshipContext = characterProjection.relationship?.content || "";
+      if (activeIdentity?.kind === "alias") {
+        const primaryRelation = relationships?.find((relation: { userIdentityId: string; characterId: string }) =>
+          relation.userIdentityId === "identity-1" && relation.characterId === activeCharacter.id,
+        );
+        if (primaryRelation) {
+          const primaryMemories = MemoryService.retrieveRelevantMemories({
+            characterId: activeCharacter.id,
+            relationId: primaryRelation.id,
+            queryText: currentMessageContextText,
+            existingMemories: memories || [],
+            limit: topK,
+            scenario: "chat",
+          });
+          const legacyMemories = MemoryService.retrieveRelevantMemories({
+            characterId: activeCharacter.id,
+            queryText: currentMessageContextText,
+            existingMemories: memories || [],
+            limit: topK,
+            scenario: "chat",
+          });
+          const eventMemories = [...primaryMemories, ...legacyMemories]
+            .filter((memory, index, all) => all.findIndex((candidate) => candidate.id === memory.id) === index)
+            .slice(0, topK)
+            .map((memory) => `- ${memory.content}`)
+            .join("\n");
+          characterContextText += `\n[角色自身关于另一位联系人的既有记忆]\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。当前说话者仍是陌生联系人；不得因为职业、措辞或事件相似就认定当前马甲是饭饭，也不得把主号聊天历史当作当前对话历史。只有当前联系人明确说“我就是饭饭”等内容时，才允许建立身份关联。\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}\n` : ""}${eventMemories || "暂无相关既有记忆"}`;
+        }
+      }
 
       const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextForOnlineChat();
