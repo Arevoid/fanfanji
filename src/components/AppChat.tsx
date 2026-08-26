@@ -1597,8 +1597,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
       let characterDescriptionText = characterProjection.description.content;
       let characterContextText = "";
+      const isAliasIdentity = settings.identities?.some((identity) => identity.id === activeIdentityId && identity.kind === "alias") ?? false;
 
-      if (activeCharacter.initialChatMode === "context" && activeCharacter.initialChatContext?.trim() && msgsForHistory.length === 0) {
+      if (!isAliasIdentity && activeCharacter.initialChatMode === "context" && activeCharacter.initialChatContext?.trim() && msgsForHistory.length === 0) {
         characterDescriptionText += `\n\n[First chat setup — hidden guidance only]\n${activeCharacter.initialChatContext.trim()}\nUse this scene and relationship as the starting point for your first reply. Do not quote, mention, or render this setup as a system message or chat bubble.`;
       }
 

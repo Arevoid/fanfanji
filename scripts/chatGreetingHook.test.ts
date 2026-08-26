@@ -10,5 +10,6 @@ assert.match(hook, /suppressGreeting/);
 assert.match(hook, /primary account's private relationship context/);
 assert.match(chat, /useChatGreeting\(/);
 assert.match(chat, /suppressGreeting:/);
+assert.match(chat, /!isAliasIdentity && activeCharacter\.initialChatMode/);
 assert.doesNotMatch(chat, /msg-greeting-/);
 console.log("PASS chat greeting side effect is isolated behind a cleanup-safe hook");
