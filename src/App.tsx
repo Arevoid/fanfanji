@@ -2710,6 +2710,13 @@ export default function App() {
     signature: settings.signature,
     bio: settings.bio,
   };
+  const primaryIdentity = settings.identities?.find((identity) => identity.id === DEFAULT_IDENTITY_ID) || {
+    id: DEFAULT_IDENTITY_ID,
+    name: settings.name,
+    avatar: settings.avatar,
+    signature: settings.signature,
+    bio: settings.bio,
+  };
   const handleSwitchIdentity = (identityId: string) => {
     const identity = settings.identities?.find((item) => item.id === identityId);
     if (!identity) return;
