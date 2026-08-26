@@ -650,6 +650,8 @@ export interface UserIdentity {
   avatar: string;
   signature: string;
   bio: string;
+  /** Alias identities belong to the contacts identity switcher, not the main profile/settings surfaces. */
+  kind?: "primary" | "alias";
 }
 
 export interface UserSettings {

@@ -725,7 +725,7 @@ export default function AppSettings({
               {/* Identity Switcher */}
               <div className="border-b border-slate-50 pb-4">
                 <div className="grid grid-cols-3 gap-2">
-                  {(settings.identities || []).map((idty, index) => {
+                  {(settings.identities || []).filter((idty) => idty.kind !== "alias").map((idty, index) => {
                     const isSelected = idty.id === (settings.activeIdentityId || "identity-1");
                     return (
                       <button

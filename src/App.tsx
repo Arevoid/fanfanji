@@ -3486,17 +3486,17 @@ export default function App() {
                                     }}
                                   >
                                     <img
-                                      src={settings.avatar}
-                                      alt={settings.name}
+                                      src={primaryIdentity.avatar}
+                                      alt={primaryIdentity.name}
                                       className="w-12 h-12 rounded-full object-cover border border-slate-200/20 shadow-sm shrink-0"
                                       referrerPolicy="no-referrer"
                                     />
                                     <div className="min-w-0 flex-1">
                                       <h2 className="text-sm font-extrabold text-neutral-900 tracking-tight leading-tight">
-                                        {settings.name}
+                                        {primaryIdentity.name}
                                       </h2>
                                       <p className="text-[11px] text-neutral-500 mt-1 line-clamp-1 leading-relaxed">
-                                        {settings.signature}
+                                        {primaryIdentity.signature}
                                       </p>
                                     </div>
                                   </div>

@@ -404,6 +404,21 @@ export default function AppChat({
   } = useChatStickerState();
 
   const { initiatedChatIds, setInitiatedChatIds, lastReadTimestamps, setLastReadTimestamps, getUnreadCount } = useChatReadState({ activeChatCharId, activeChatRelationId, messages });
+  const [showAliasDirectory, setShowAliasDirectory] = useState(false);
+  const [aliasDeleteTarget, setAliasDeleteTarget] = useState<string | null>(null);
+  const [showCreateAliasModal, setShowCreateAliasModal] = useState(false);
+  const [aliasDraftName, setAliasDraftName] = useState("");
+  const [aliasDraftBio, setAliasDraftBio] = useState("");
+  const [aliasDraftAvatar, setAliasDraftAvatar] = useState("");
+  const aliasLongPressTimerRef = useRef<number | null>(null);
+  const startAliasLongPress = (identityId: string) => {
+    if (aliasLongPressTimerRef.current !== null) window.clearTimeout(aliasLongPressTimerRef.current);
+    aliasLongPressTimerRef.current = window.setTimeout(() => setAliasDeleteTarget(identityId), 650);
+  };
+  const clearAliasLongPress = () => {
+    if (aliasLongPressTimerRef.current !== null) window.clearTimeout(aliasLongPressTimerRef.current);
+    aliasLongPressTimerRef.current = null;
+  };
 
   const startChatWith = (relationId: string) => {
     const relation = relationships.find((item) => item.id === relationId);
@@ -422,6 +437,9 @@ export default function AppChat({
       setActiveChatCharId(group.id);
       if (!initiatedChatIds.includes(group.id)) setInitiatedChatIds((previous) => [...previous, group.id]);
       return;
+    }
+    if (relation.userIdentityId !== activeIdentityId) {
+      onSwitchIdentity?.(relation.userIdentityId);
     }
     setActiveChatRelationId(relation.id);
     // Some older data still points at a contact-copy ID. Keep the relationship
@@ -602,12 +620,17 @@ export default function AppChat({
     characterId,
     characters,
   );
+  const chatListRelationships = relationships.filter((relation) =>
+    availableCharacterIds.has(resolveCanonicalCharacterId(relation.characterId, characters))
+    && (relation.userIdentityId === "identity-1" || settings.identities?.some((identity) => identity.kind === "alias" && identity.id === relation.userIdentityId)),
+  );
   const friends = activeRelationships.map((relation) =>
     characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters)),
   ).filter((character): character is Character => Boolean(character));
-  const friendContacts = activeRelationships.map((relation) => {
+  const friendContacts = chatListRelationships.map((relation) => {
     const character = characters.find((item) => item.id === resolveCanonicalCharacterId(relation.characterId, characters))!;
-    return { id: relation.id, character, subtitle: settings.identities?.find((identity) => identity.id === relation.userIdentityId)?.name };
+    const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
+    return { id: relation.id, character, subtitle: identity?.kind === "alias" ? identity.name : undefined };
   }).filter((item) => Boolean(item.character));
 
   // Never leave an old identity's direct or group thread open after switching
@@ -2761,6 +2784,23 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       const proactiveCharacterProjection = projectCharacterPrompt(friend, relationship.relationship);
 
       const taskPrompt = customTaskText || "It has been 3 hours since the last conversation. Start a message in the way this character would naturally initiate contact with this user. Do not impose concern, warmth, brevity, or a generic check-in.";
+      if (relationship.userIdentityId === "identity-1") {
+        const aliasInteractions = relationships
+          .filter((candidate) => candidate.userIdentityId !== relationship.userIdentityId
+            && resolveCanonicalCharacterId(candidate.characterId, characters) === resolveCanonicalCharacterId(relationship.characterId, characters))
+          .map((candidate) => {
+            const alias = settings.identities?.find((identity) => identity.id === candidate.userIdentityId);
+            const latest = messagesRef.current
+              .filter((message) => message.relationId === candidate.id)
+              .sort((left, right) => right.timestamp - left.timestamp)[0];
+            return alias && latest ? `联系人“${alias.name}”最近联系过你，内容是：${latest.content.slice(0, 180)}` : null;
+          })
+          .filter((event): event is string => Boolean(event))
+          .slice(0, 3);
+        if (aliasInteractions.length > 0) {
+          instructionsPrompt += `\n【可自然提及的其他联系人互动】\n${aliasInteractions.join("\n")}\n如果符合当前语境，你可以主动向当前用户提起这些互动或表达自己的感受；不要透露其他联系人和当前用户属于同一系统账户，也不要直接确认对方就是当前用户。`;
+        }
+      }
 
       const systemInstruction = buildProactiveChatSystemInstruction({
         characterName: friend.name,
@@ -3365,12 +3405,13 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
   };
 
   // Active chat threads list builder
-  const directThreads = activeRelationships.map((relation) => {
+  const directThreads = chatListRelationships.map((relation) => {
     const character = characters.find((item) => item.id === resolveCanonicalCharacterId(relation.characterId, characters));
     if (!character) return null;
     const threadMsgs = messages.filter((message) => message.relationId === relation.id && !message.isOffline);
     if (!threadMsgs.length && !initiatedChatIds.includes(relation.id) && activeChatRelationId !== relation.id) return null;
-    return { id: relation.id, character, lastMessage: threadMsgs.at(-1) || null, isPinned: character.isPinned || false, subtitle: settings.identities?.find((identity) => identity.id === relation.userIdentityId)?.name };
+    const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
+    return { id: relation.id, character, lastMessage: threadMsgs.at(-1) || null, isPinned: character.isPinned || false, subtitle: identity?.kind === "alias" ? identity.name : undefined };
   }).filter((thread): thread is NonNullable<typeof thread> => Boolean(thread));
   const groupThreads = characters.filter((character) => character.isGroupChat && belongsToActiveIdentity(character.ownerIdentityId)).map((character) => {
     const threadMsgs = messages.filter((message) => message.characterId === character.id && !message.isOffline);
@@ -7040,11 +7081,148 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
 
           {/* TABS: CONTACTS LIST (通讯录) */}
           {activeTab === "contacts" && (
-            <ContactList
-              contacts={friendContacts}
-              onSelect={startChatWith}
-              header={<ChatTopBar title={<>通讯录 ({friends.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setIsShowingAddFriendDialog(true)} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="添加好友"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
-            />
+            showAliasDirectory ? (
+              <div className="min-h-full bg-[var(--surface)] text-[var(--text-primary)]">
+                <ChatTopBar
+                  title="我的马甲"
+                  leftAction={<button onClick={() => setShowAliasDirectory(false)} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回通讯录"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>}
+                  rightAction={<button
+                    onClick={() => {
+                      setAliasDraftName("");
+                      setAliasDraftBio("");
+                      setAliasDraftAvatar(settings.avatar);
+                      setShowCreateAliasModal(true);
+                    }}
+                    className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10"
+                    title="新建马甲"
+                  ><Plus className="w-4 h-4 text-slate-700" /></button>}
+                />
+                <div className="border-b border-[var(--divider)] px-4 py-3 text-xs text-[var(--text-secondary)]">
+                  每个马甲拥有独立的联系人、聊天记录、关系和记忆。角色不会自动知道不同身份属于同一个人。
+                </div>
+                {showCreateAliasModal && (
+                  <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
+                    <form
+                      className="w-full max-w-[320px] rounded-2xl bg-[var(--surface)] p-4 shadow-xl"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const name = aliasDraftName.trim();
+                        if (!name) return;
+                        const alias = { id: createId("identity"), name, avatar: aliasDraftAvatar || settings.avatar, signature: "", bio: aliasDraftBio.trim(), kind: "alias" as const };
+                        onSaveSettings({ ...settings, identities: [...(settings.identities || []), alias] });
+                        setShowCreateAliasModal(false);
+                        showToast(`已创建马甲：${alias.name}`);
+                      }}
+                    >
+                      <h3 className="text-sm font-bold">新建马甲</h3>
+                      <div className="mt-3 flex flex-col items-center gap-2">
+                        <img src={aliasDraftAvatar || settings.avatar} alt="" className="h-16 w-16 rounded-full border border-[var(--border)] object-cover" />
+                        <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setAliasDraftAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
+                      </div>
+                      <label className="mt-3 block text-xs text-[var(--text-secondary)]">昵称<input required value={aliasDraftName} onChange={(event) => setAliasDraftName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" placeholder="例如：小雨" /></label>
+                      <label className="mt-3 block text-xs text-[var(--text-secondary)]">人设<textarea value={aliasDraftBio} onChange={(event) => setAliasDraftBio(event.target.value)} className="mt-1 h-20 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none" placeholder="这个身份对外呈现的性格、背景和说话方式" /></label>
+                      <div className="mt-4 flex gap-2"><button type="button" onClick={() => setShowCreateAliasModal(false)} className="flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-xs">取消</button><button type="submit" className="flex-1 rounded-xl bg-[var(--button-primary-bg)] px-3 py-2 text-xs font-semibold text-[var(--button-primary-text)]">创建</button></div>
+                    </form>
+                  </div>
+                )}
+                <div className="divide-y divide-[var(--divider)]">
+                  {(settings.identities || []).filter((identity) => identity.kind === "alias" && identity.name.trim()).map((identity) => {
+                    const aliasRelations = relationships.filter((relation) => relation.userIdentityId === identity.id);
+                    const isActive = identity.id === activeIdentityId;
+                    return (
+                      <div key={identity.id} onPointerDown={() => startAliasLongPress(identity.id)} onPointerUp={clearAliasLongPress} onPointerLeave={clearAliasLongPress} onContextMenu={(event) => { event.preventDefault(); setAliasDeleteTarget(identity.id); }} className="flex items-center gap-3 px-4 py-3">
+                        <img src={identity.avatar} alt={identity.name} className="h-12 w-12 rounded-full object-cover border border-[var(--border)] bg-[var(--surface-muted)] shrink-0" referrerPolicy="no-referrer" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onSwitchIdentity) onSwitchIdentity(identity.id);
+                            else onSaveSettings({ ...settings, activeIdentityId: identity.id, name: identity.name, avatar: identity.avatar, signature: identity.signature, bio: identity.bio });
+                            showToast(`已切换为：${identity.name}`);
+                          }}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <p className="truncate text-sm font-bold">{identity.name}</p>
+                          <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">已添加 {aliasRelations.length} 个角色{isActive ? " · 当前使用中" : ""}</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isActive) {
+                              if (onSwitchIdentity) onSwitchIdentity(identity.id);
+                              else onSaveSettings({ ...settings, activeIdentityId: identity.id, name: identity.name, avatar: identity.avatar, signature: identity.signature, bio: identity.bio });
+                            }
+                            setShowAliasDirectory(false);
+                            setIsShowingAddFriendDialog(true);
+                          }}
+                          className="shrink-0 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-muted)]"
+                        >
+                          添加角色
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {(settings.identities || []).filter((identity) => identity.kind === "alias" && identity.name.trim()).length === 0 && (
+                    <div className="px-4 py-16 text-center text-xs text-[var(--text-tertiary)]">还没有马甲，点击右上角 + 创建</div>
+                  )}
+                </div>
+                {aliasDeleteTarget && (() => {
+                  const target = settings.identities?.find((identity) => identity.id === aliasDeleteTarget);
+                  if (!target) return null;
+                  const targetRelations = relationships.filter((relation) => relation.userIdentityId === target.id);
+                  const removeIdentity = (deleteData: boolean) => {
+                    if (deleteData) {
+                      targetRelations.forEach((relation) => {
+                        onClearMessages?.(relation.characterId, 0, relation.id);
+                        onDeleteRelationshipMusic?.(relation.id);
+                      });
+                      onSaveMemories(memories.filter((memory) => !memory.relationId || !targetRelations.some((relation) => relation.id === memory.relationId)));
+                      const innerVoices = loadInnerVoiceRecords([]).value;
+                      const remaining = targetRelations.reduce((records, relation) => removeInnerVoicesByRelation(records, relation.id), innerVoices);
+                      if (remaining.length !== innerVoices.length) saveInnerVoiceRecords(remaining);
+                    }
+                    onSaveRelationships(relationships.filter((relation) => relation.userIdentityId !== target.id));
+                    const remainingIdentities = (settings.identities || []).filter((identity) => identity.id !== target.id);
+                    const primary = remainingIdentities.find((identity) => identity.id === "identity-1");
+                    if (activeIdentityId === target.id) {
+                      if (onSwitchIdentity) onSwitchIdentity("identity-1");
+                      onSaveSettings({ ...settings, identities: remainingIdentities, activeIdentityId: "identity-1", name: primary?.name || settings.name, avatar: primary?.avatar || settings.avatar, signature: primary?.signature || settings.signature, bio: primary?.bio || settings.bio });
+                    } else {
+                      onSaveSettings({ ...settings, identities: remainingIdentities });
+                    }
+                    setAliasDeleteTarget(null);
+                    showToast(deleteData ? `已彻底删除马甲“${target.name}”及其数据` : `已删除马甲“${target.name}”，角色记忆已保留`);
+                  };
+                  return (
+                    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
+                      <div className="w-full max-w-[320px] rounded-2xl bg-[var(--surface)] p-4 shadow-xl">
+                        <h3 className="text-sm font-bold">删除马甲“{target.name}”</h3>
+                        <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">请选择删除范围。保留角色记忆不会删除角色对该身份的历史认知；彻底删除会同时清理聊天、关系和相关记忆。</p>
+                        <div className="mt-4 space-y-2">
+                          <button type="button" onClick={() => removeIdentity(false)} className="w-full rounded-xl border border-[var(--border)] px-3 py-2 text-center text-xs font-semibold hover:bg-[var(--surface-muted)]">删除马甲，保留角色记忆</button>
+                          <button type="button" onClick={() => removeIdentity(true)} className="w-full rounded-xl bg-red-600 px-3 py-2 text-center text-xs font-semibold text-white hover:bg-red-700">彻底删除，不保留任何记忆</button>
+                          <button type="button" onClick={() => setAliasDeleteTarget(null)} className="w-full px-3 py-2 text-xs text-[var(--text-tertiary)]">取消</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <>
+                <ContactList
+                  contacts={friendContacts}
+                  onSelect={startChatWith}
+                  header={<>
+                    <ChatTopBar title={<>通讯录 ({friendContacts.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setIsShowingAddFriendDialog(true)} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="添加好友"><Plus className="w-4 h-4 text-slate-700" /></button>} />
+                    <button type="button" onClick={() => setShowAliasDirectory(true)} className="flex w-full items-center gap-3 border-b border-[var(--divider)] bg-[var(--surface)] px-4 py-3 text-left hover:bg-[var(--surface-muted)]">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg">◎</div>
+                      <div className="min-w-0 flex-1"><p className="text-sm font-bold">我的马甲</p><p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">管理多个身份，分别与角色聊天</p></div>
+                      <ChevronRight className="h-4 w-4 text-[var(--text-tertiary)]" />
+                    </button>
+                  </>}
+                />
+              </>
+            )
           )}
 
           {/* TABS: MOMENTS FEED (朋友圈) */}
@@ -8016,7 +8194,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
               {/* Identity Switcher */}
               <div className="border-b border-slate-50 pb-4">
                 <div className="grid grid-cols-3 gap-2">
-                  {(settings.identities || []).map((idty, index) => {
+                  {(settings.identities || []).filter((idty) => idty.kind !== "alias").map((idty, index) => {
                     const isSelected = idty.id === (settings.activeIdentityId || "identity-1");
                     return (
                       <button
