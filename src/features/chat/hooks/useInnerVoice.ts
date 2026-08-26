@@ -70,14 +70,10 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const stored = loadInnerVoiceRecords([]).value;
     const existing = findInnerVoiceByMessage(stored, scope);
     setHistory(listHistory(stored));
-    if (!force) {
-      // Prefer the record attached to the clicked message. If an older
-      // message was rehydrated with a different id, fall back to the newest
-      // already-persisted record in this same relation/group scope so the
-      // current panel does not disagree with the history panel.
-      const current = existing || listHistory(stored)[0];
-      if (current) { setRecord(current); setLoading(false); return; }
-    }
+    // Current voice must belong to the message that was clicked. Never use a
+    // different message's newest record as a fallback, otherwise every
+    // message without an exact match would display the same inner voice.
+    if (existing && !force) { setRecord(existing); setLoading(false); return; }
     // A normal avatar click only reads the inline record created with the chat
     // reply. Manual generation is reserved for the explicit refresh action.
     if (!force) {
