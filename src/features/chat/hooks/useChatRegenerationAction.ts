@@ -228,7 +228,12 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         characterContextText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, lastUserMsg.timestamp);
       }
 
-      const userProfileText = `User Profile:
+      const activeIdentity = settings.identities?.find((identity: { id: string }) => identity.id === activeIdentityId);
+      const userProfileText = activeIdentity?.kind === "alias"
+        ? `User Profile:
+- This is a separate contact using an alias. Their real identity is unknown to you.
+- The alias profile is private setup guidance, not a fact the character already knows. Do not address them by their alias name or reveal/guess their identity unless they explicitly disclose it in the conversation.`
+        : `User Profile:
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
       const userKnowledgeBoundary = formatUserKnowledgeBoundary();

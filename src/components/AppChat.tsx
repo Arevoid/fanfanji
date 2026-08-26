@@ -1690,10 +1690,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         characterContextText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, userMsg?.timestamp);
       }
 
-      const userProfileText = `User Profile (interacting with you):
+      const activeIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId);
+      const userProfileText = activeIdentity?.kind === "alias"
+        ? `User Profile (interacting with you):
+- This is a separate contact using an alias. Their real identity is unknown to you.
+- The alias profile is private setup guidance, not a fact the character already knows. Do not address them by their alias name or reveal/guess their identity unless they explicitly disclose it in the conversation.`
+        : `User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
-      const activeIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId);
       const aliasDisclosure = activeIdentity?.kind === "alias"
         && ["我是", "我叫", "身份是", "其实是", "原来是"].some((prefix) => currentMessageContextText.includes(prefix))
         && [activeIdentity.name, activeIdentity.bio].some((term) => Boolean(term.trim()) && currentMessageContextText.includes(term.trim()));
