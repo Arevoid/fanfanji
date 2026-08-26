@@ -12,6 +12,7 @@ interface UseChatGreetingOptions {
   onSendMessage: (message: Message) => void;
   setSentGreetings: (update: (previous: string[]) => string[]) => void;
   setIsTyping: (value: boolean) => void;
+  suppressGreeting?: boolean;
 }
 
 /** Sends a character's configured opening line once per chat scope. */
@@ -25,9 +26,14 @@ export function useChatGreeting({
   onSendMessage,
   setSentGreetings,
   setIsTyping,
+  suppressGreeting = false,
 }: UseChatGreetingOptions): void {
   useEffect(() => {
     if (!activeChatCharId || !activeCharacter || (!activeCharacter.isGroupChat && !activeRelationship)) return;
+    // Character greetings are authored globally on the character card and may
+    // contain the primary account's private relationship context. An alias
+    // must begin as an unknown contact, so it has no automatic greeting turn.
+    if (suppressGreeting) return;
     const chatKey = activeRelationship?.id || activeChatCharId;
     if (isOfflineStoryActiveFor(chatKey)) return;
     const currentChatMessages = messages.filter((message) =>
@@ -53,5 +59,5 @@ export function useChatGreeting({
       clearTimeout(timer);
       setIsTyping(false);
     };
-  }, [activeChatCharId, activeRelationship, activeCharacter, messages, onSendMessage, sentGreetings, isOfflineStoryActiveFor, setSentGreetings, setIsTyping]);
+  }, [activeChatCharId, activeRelationship, activeCharacter, messages, onSendMessage, sentGreetings, isOfflineStoryActiveFor, setSentGreetings, setIsTyping, suppressGreeting]);
 }

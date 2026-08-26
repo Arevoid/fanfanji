@@ -1186,6 +1186,7 @@ export default function AppChat({
     onSendMessage,
     setSentGreetings,
     setIsTyping,
+    suppressGreeting: settings.identities?.some((identity) => identity.id === activeIdentityId && identity.kind === "alias") ?? false,
   });
 
   const updateRelationshipSession = (relationId: string, patch: Partial<CharacterRelationship>) => {
