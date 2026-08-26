@@ -39,3 +39,18 @@ export function retrieveRelevantMemories(
   scored.sort((left, right) => right.score - left.score);
   return scored.slice(0, topK).map(({ memory }) => memory);
 }
+
+export function retrieveRelevantMemoriesForScopes(
+  memories: readonly MemoryItem[],
+  scopes: readonly { characterId: string; relationId: string }[],
+  userQuery: string,
+  topK = 5,
+): MemoryItem[] {
+  const ranked = scopes.flatMap((scope) =>
+    retrieveRelevantMemories(memories, scope.characterId, userQuery, topK, scope.relationId),
+  );
+  const unique = Array.from(new Map(ranked.map((memory) => [memory.id, memory])).values());
+  return unique
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .slice(0, topK);
+}

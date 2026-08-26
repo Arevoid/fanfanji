@@ -1592,7 +1592,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // Recall memories from Memory Vault
       const topK = recallSettings?.recallCount || 5;
       const relevantMemories = shouldLoadLongTermMemory
-        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, scenario: "chat" })
+        ? activeCharacter?.isGroupChat
+          ? MemoryService.retrieveRelevantMemoriesForScopes({
+            existingMemories: memories || [],
+            scopes: (activeCharacter.memberIds || []).flatMap((memberId) => {
+              const member = characters.find((candidate) => candidate.id === memberId);
+              const relationship = member ? relationForCharacter(member.id) : undefined;
+              return relationship && member ? [{ characterId: member.id, relationId: relationship.id }] : [];
+            }),
+            queryText: currentMessageContextText,
+            limit: topK,
+          })
+          : MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, scenario: "chat" })
         : [];
       const truthRetrieval = activeRelationship
         ? retrieveTruthForPrivatePrompt({

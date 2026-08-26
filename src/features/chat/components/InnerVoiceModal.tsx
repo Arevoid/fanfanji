@@ -51,6 +51,7 @@ export function InnerVoiceModal({ character, mode, onModeChange, onClose, loadin
         <div className="space-y-3">
           {loading && <p className="py-6 text-center text-sm text-[var(--color-text-secondary)]">正在捕捉此刻的心声…</p>}
           {!loading && error && <p className="py-6 text-center text-sm text-red-500">{error}</p>}
+          {!loading && !error && !record && <p className="py-6 text-center text-sm text-[var(--color-text-secondary)]">这条消息暂无已生成的心声。</p>}
           {!loading && record && (
             <Card variant="secondary" padding="md" className="space-y-3">
               <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">此刻的心声</h3>

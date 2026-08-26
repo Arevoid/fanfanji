@@ -31,6 +31,25 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
   const close = () => { setRecord(null); setCharacter(null); setMode("current"); setError(null); };
   const getEmotion = (value: InnerVoiceRecord) => value.emotionalState?.trim() || `当前情绪：${value.state || "难以言说的心绪"}`;
 
+  const refreshHistory = () => {
+    const lastOpen = lastOpenRef.current;
+    if (!lastOpen) return;
+    const canonicalCharacterId = resolveCanonicalCharacterId(lastOpen.targetCharacterId, characters);
+    const relationId = activeRelationship?.id;
+    const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
+    const conversationId = relationId ? activeRelationship?.conversationId : lastOpen.triggerMessage.conversationId || groupId;
+    if (!conversationId || (!relationId && !groupId)) return;
+    const stored = loadInnerVoiceRecords([]).value;
+    setHistory(relationId
+      ? listInnerVoicesByRelation(stored, relationId)
+      : listInnerVoicesByGroup(stored, groupId!, conversationId, canonicalCharacterId));
+  };
+
+  const changeMode = (nextMode: "current" | "history") => {
+    setMode(nextMode);
+    if (nextMode === "history") refreshHistory();
+  };
+
   const open = async (targetCharacterId: string, triggerMessage: Message, force = false) => {
     const canonicalCharacterId = resolveCanonicalCharacterId(targetCharacterId, characters);
     const targetCharacter = characters.find((item) => item.id === canonicalCharacterId);
@@ -52,6 +71,14 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const existing = findInnerVoiceByMessage(stored, scope);
     setHistory(listHistory(stored));
     if (existing && !force) { setRecord(existing); setLoading(false); return; }
+    // A normal avatar click only reads the inline record created with the chat
+    // reply. Manual generation is reserved for the explicit refresh action.
+    if (!force) {
+      setRecord(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     const requestKey = `${scope.kind}:${scope.kind === "direct" ? scope.relationId : `${scope.groupId}:${scope.conversationId}:${scope.characterId}`}:${scope.messageId}`;
     if (requestsRef.current.has(requestKey)) return;
     requestsRef.current.add(requestKey);
@@ -100,5 +127,5 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     await open(lastOpen.targetCharacterId, lastOpen.triggerMessage, true);
   };
 
-  return { record, character, mode, setMode, loading, error, history, open, refresh, close, getEmotion };
+  return { record, character, mode, setMode: changeMode, loading, error, history, open, refresh, close, getEmotion };
 }

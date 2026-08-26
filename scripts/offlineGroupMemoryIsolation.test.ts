@@ -38,13 +38,18 @@ const story: OfflineStory = {
 assert.equal(canSyncOfflineStoryToMemory({ story, userConfirmed: true, syncIntent: "automatic_end", sourceMessages, participantRelationIds: ["ra", "rb"] }), true);
 assert.equal(canSyncOfflineStoryToMemory({ story, userConfirmed: true, syncIntent: "automatic_end", sourceMessages, participantRelationIds: ["ra"] }), false);
 
-const synced = createOfflineGroupParticipantMemories({
+const syncedResult = await createOfflineGroupParticipantMemories({
   story, participants: [a, b], characters: [group, a, b], relationships,
   activeIdentityId: "identity-1", sourceMessages, userName: "用户", now: 10,
+  settings: { apiKey: "", selectedModel: "test-model", apiEndpoint: "" } as any,
+  recallSettings: { extractModel: "test-model" } as any,
+  existingMemories: memories,
+  extractApi: async () => ({ candidates: [] }),
 });
+const synced = syncedResult.memories;
 assert.equal(synced.length, 2);
 assert.deepEqual(synced.map((memory) => memory.relationId).sort(), ["ra", "rb"]);
-assert.equal(synced.every((memory) => memory.content.includes("A 看向 B，B 点了点头")), true);
+assert.equal(synced.every((memory) => memory.content.includes("offline-story:story-g:summary")), true);
 assert.equal(hasOfflineStorySummary(story, synced), true);
 
 console.log("PASS group offline snapshots and synced memories stay participant-scoped");

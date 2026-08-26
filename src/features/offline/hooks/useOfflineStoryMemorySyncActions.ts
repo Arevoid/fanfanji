@@ -124,8 +124,10 @@ export function useOfflineStoryMemorySyncActions({
       }
 
       if (isGroupStory) {
-        const groupMemories = createOfflineGroupParticipantMemories({ story, participants: participantCharacters, characters: [...characters], relationships: [...relationships], activeIdentityId, sourceMessages, userName: settings.name, now });
+        const groupResult = await createOfflineGroupParticipantMemories({ story, participants: participantCharacters, characters: [...characters], relationships: [...relationships], activeIdentityId, sourceMessages, userName: settings.name, now, settings, recallSettings, existingMemories: memories, offlineStoryPolicyInput, extractApi: (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel) });
+        const groupMemories = groupResult.memories;
         if (groupMemories.length !== participantCharacters.length) throw new Error("Offline group story is missing one or more participant relationship scopes");
+        if (groupResult.acceptedClaims.length > 0 && !appendKnowledgeClaims(groupResult.acceptedClaims).success) throw new Error("Offline group story knowledge persistence failed");
         const retainedMemories = memories.filter((memory) => !isOfflineStoryHandoffMemory(memory, story));
         const persisted = onPersistMemories ? await onPersistMemories(MemoryService.mergeMemories(retainedMemories, groupMemories)) : (onSaveMemories(MemoryService.mergeMemories(retainedMemories, groupMemories)), true);
         if (!persisted) throw new Error("Offline group story memory persistence failed");

@@ -1,7 +1,7 @@
 import type { MemoryItem } from "../../types";
 import { isDuplicateMemory, isDuplicateMemoryMarker } from "./MemoryDeduplicator";
 import { extractMemories } from "./MemoryExtractor";
-import { retrieveRelevantMemories } from "./MemoryRetriever";
+import { retrieveRelevantMemories, retrieveRelevantMemoriesForScopes } from "./MemoryRetriever";
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "./memoryFormatter";
 import type { MemoryExtractionApi, MemoryExtractionContext, MemoryRetrievalContext } from "./memoryTypes";
 
@@ -11,6 +11,14 @@ export type { MemoryScenario, MemoryExtractionContext, MemoryRetrievalContext } 
 export const MemoryService = {
   retrieveRelevantMemories(context: MemoryRetrievalContext): MemoryItem[] {
     return retrieveRelevantMemories(context.existingMemories, context.characterId, context.queryText, context.limit, context.relationId);
+  },
+  retrieveRelevantMemoriesForScopes(context: {
+    existingMemories: readonly MemoryItem[];
+    scopes: readonly { characterId: string; relationId: string }[];
+    queryText: string;
+    limit?: number;
+  }): MemoryItem[] {
+    return retrieveRelevantMemoriesForScopes(context.existingMemories, context.scopes, context.queryText, context.limit);
   },
   formatMemoriesForPrompt,
   extractMemories(context: MemoryExtractionContext, extractApi: MemoryExtractionApi) {
