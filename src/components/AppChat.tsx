@@ -656,7 +656,7 @@ export default function AppChat({
       setActiveChatCharId(null);
       setActiveChatRelationId(null);
     }
-  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId, activeCharacter?.isGroupChat, selectedRelationship?.id, selectedRelationship?.userIdentityId]);
+  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId, activeCharacter?.isGroupChat, activeRelationship?.id, activeRelationship?.userIdentityId]);
 
   useEffect(() => {
     if (!activeChatCharId) return;
