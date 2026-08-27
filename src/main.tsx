@@ -18,17 +18,14 @@ if (typeof window !== "undefined") {
   // even after its source has changed. Remove that controller once on local
   // development hosts so lazy-loaded Chat chunks always come from the dev
   // server instead of an old cache.
-  if ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && "serviceWorker" in navigator) {
-    const cleanupKey = "fanfan-local-sw-cleaned";
-    if (!sessionStorage.getItem(cleanupKey)) {
-      sessionStorage.setItem(cleanupKey, "1");
-      Promise.all([
-        navigator.serviceWorker.getRegistrations().then((registrations) => Promise.all(registrations.map((registration) => registration.unregister()))),
-        caches.keys().then((cacheNames) => Promise.all(cacheNames.filter((name) => name.startsWith("fanfan-phone-")).map((name) => caches.delete(name)))),
-      ]).then(() => {
-        if (navigator.serviceWorker.controller) window.location.reload();
-      }).catch(() => undefined);
-    }
+  const isLocalDevelopmentHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  if (isLocalDevelopmentHost && "serviceWorker" in navigator) {
+    Promise.all([
+      navigator.serviceWorker.getRegistrations().then((registrations) => Promise.all(registrations.map((registration) => registration.unregister()))),
+      caches.keys().then((cacheNames) => Promise.all(cacheNames.filter((name) => name.startsWith("fanfan-phone-")).map((name) => caches.delete(name)))),
+    ]).then(() => {
+      if (navigator.serviceWorker.controller) window.location.reload();
+    }).catch(() => undefined);
   }
 
   // Stash beforeinstallprompt event
@@ -40,7 +37,7 @@ if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("pwa-install-prompt-available"));
   });
 
-  if ("serviceWorker" in navigator) {
+  if (!isLocalDevelopmentHost && "serviceWorker" in navigator) {
     const registerSW = () => {
       navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
         .then((registration) => {
