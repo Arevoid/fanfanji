@@ -26,7 +26,11 @@ export async function createOfflineGroupParticipantMemories(input: {
   const memories: MemoryItem[] = [];
   const acceptedClaims: KnowledgeClaim[] = [];
   const fallbackParticipantNames: string[] = [];
-  await Promise.all(input.participants.map(async (participant) => {
+  // Extract one participant at a time. Custom providers frequently enforce a
+  // low concurrent-request limit; firing every participant at once made one
+  // member fall into the empty-result fallback even when the same story was
+  // successfully extracted for the other members.
+  for (const participant of input.participants) {
     const relationship = findRelationshipForCanonicalCharacter(
       input.relationships,
       input.activeIdentityId,
@@ -72,7 +76,7 @@ export async function createOfflineGroupParticipantMemories(input: {
     }
     if (extracted.length === 0) {
       fallbackParticipantNames.push(participant.name);
-      extracted = [createOfflineStoryHandoffMemory({
+      const fallback = createOfflineStoryHandoffMemory({
         story: input.story,
         sourceMessages: input.sourceMessages,
         characterId: participant.id,
@@ -82,9 +86,24 @@ export async function createOfflineGroupParticipantMemories(input: {
         timestamp: input.now,
         marker: "summary",
         includeConfirmedExcerpts: false,
-      })];
+      });
+      // Keep the fallback in the same display format as a normal extraction,
+      // including the selected refined/delicate archive template. The facts
+      // remain deterministic and participant-scoped; only their presentation
+      // is adapted here.
+      const fallbackFacts = fallback.content
+        .split("\n")
+        .filter((line) => line.startsWith("- "))
+        .map((line) => line.slice(2).trim())
+        .filter(Boolean);
+      extracted = [{
+        ...fallback,
+        content: formatContent(fallbackFacts.length > 0 ? fallbackFacts : [participant.name], {
+          displayItems: fallbackFacts.length > 0 ? fallbackFacts : [participant.name],
+        }),
+      }];
     }
     memories.push(...extracted);
-  }));
+  }
   return { memories, acceptedClaims, fallbackParticipantNames };
 }
