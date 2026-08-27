@@ -3889,8 +3889,9 @@ export default function App() {
               <div className="w-full flex-1 min-h-0 relative">
                 {(activeApp === "chat" || chatModuleActivated) && (
                   <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
-                    <LazyAppBoundary>
+                  <LazyAppBoundary>
                       <AppChat
+                    key={`chat-${activeIdentityId}`}
                     characters={characters}
                     relationships={relationships}
                     settings={settings}

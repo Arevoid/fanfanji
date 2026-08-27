@@ -6,7 +6,7 @@ import { readJson, readString, remove as removeStoredValue, writeJson, writeStri
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { createId } from "../core/id/createId";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState } from "../types";
+import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "../types";
 import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
@@ -291,7 +291,7 @@ interface AppChatProps {
   onDeleteMessage?: (messageId: string, scope?: MessageMutationScope) => void;
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => void;
   onClose: () => void;
-  onSaveSettings: (settings: UserSettings) => void;
+  onSaveSettings: (settings: UserSettingsUpdate) => void;
   onSwitchIdentity?: (id: string, openChat?: { relationId: string; characterId: string }) => void;
   onNavigateToApp: (appId: string) => void;
   worldBookEntries?: WorldBookEntry[];
@@ -422,7 +422,10 @@ export default function AppChat({
   };
 
   const startChatWith = (relationId: string) => {
-    const relation = relationships.find((item) => item.id === relationId);
+    // Relation IDs are globally unique, but the active identity is still a
+    // required ownership boundary. Never open a relation from another
+    // identity when a stale list item or navigation event is replayed.
+    const relation = relationships.find((item) => item.id === relationId && item.userIdentityId === activeIdentityId);
     if (!relation) {
       const directRelation = relationForCharacter(relationId);
       if (directRelation) {
@@ -7160,21 +7163,23 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                         if (aliasEditTargetId) {
                           const editedAlias = settings.identities?.find((identity) => identity.id === aliasEditTargetId);
                           if (!editedAlias) return;
-                          const identities = (settings.identities || []).map((identity) => identity.id === aliasEditTargetId
-                            ? { ...identity, name, avatar, bio }
-                            : identity);
-                          onSaveSettings({
-                            ...settings,
-                            identities,
-                            ...(activeIdentityId === aliasEditTargetId ? { name, avatar, bio } : {}),
-                          });
+                          onSaveSettings((previous) => ({
+                            ...previous,
+                            identities: (previous.identities || []).map((identity) => identity.id === aliasEditTargetId
+                              ? { ...identity, name, avatar, bio }
+                              : identity),
+                            ...(previous.activeIdentityId === aliasEditTargetId ? { name, avatar, bio } : {}),
+                          }));
                           setShowCreateAliasModal(false);
                           setAliasEditTargetId(null);
                           showToast(`已更新马甲：${name}`);
                           return;
                         }
                         const alias = { id: createId("identity"), name, avatar, signature: "", bio, kind: "alias" as const };
-                        onSaveSettings({ ...settings, identities: [...(settings.identities || []), alias] });
+                        onSaveSettings((previous) => ({
+                          ...previous,
+                          identities: [...(previous.identities || []), alias],
+                        }));
                         setShowCreateAliasModal(false);
                         showToast(`已创建马甲：${alias.name}`);
                       }}
@@ -7221,7 +7226,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                               : identity;
                             if (!nextIdentity) return;
                             if (onSwitchIdentity) onSwitchIdentity(nextIdentityId);
-                            else onSaveSettings({ ...settings, activeIdentityId: nextIdentity.id, name: nextIdentity.name, avatar: nextIdentity.avatar, signature: nextIdentity.signature, bio: nextIdentity.bio });
+                            else onSaveSettings((previous) => ({ ...previous, activeIdentityId: nextIdentity.id, name: nextIdentity.name, avatar: nextIdentity.avatar, signature: nextIdentity.signature, bio: nextIdentity.bio }));
                             showToast(isActive ? `已切换为：${primaryIdentityName}` : `已切换为：${identity.name}`);
                           }}
                           className="min-w-0 flex-1 text-left"
@@ -7235,7 +7240,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                           onClick={() => {
                             if (!isActive) {
                               if (onSwitchIdentity) onSwitchIdentity(identity.id);
-                              else onSaveSettings({ ...settings, activeIdentityId: identity.id, name: identity.name, avatar: identity.avatar, signature: identity.signature, bio: identity.bio });
+                              else onSaveSettings((previous) => ({ ...previous, activeIdentityId: identity.id, name: identity.name, avatar: identity.avatar, signature: identity.signature, bio: identity.bio }));
                             }
                             setShowAliasDirectory(false);
                             setIsShowingAddFriendDialog(true);
@@ -7267,13 +7272,15 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                       if (remaining.length !== innerVoices.length) saveInnerVoiceRecords(remaining);
                     }
                     onSaveRelationships(relationships.filter((relation) => relation.userIdentityId !== target.id));
-                    const remainingIdentities = (settings.identities || []).filter((identity) => identity.id !== target.id);
-                    const primary = remainingIdentities.find((identity) => identity.id === "identity-1");
                     if (activeIdentityId === target.id) {
                       if (onSwitchIdentity) onSwitchIdentity("identity-1");
-                      onSaveSettings({ ...settings, identities: remainingIdentities, activeIdentityId: "identity-1", name: primary?.name || settings.name, avatar: primary?.avatar || settings.avatar, signature: primary?.signature || settings.signature, bio: primary?.bio || settings.bio });
+                      onSaveSettings((previous) => {
+                        const remainingIdentities = (previous.identities || []).filter((identity) => identity.id !== target.id);
+                        const primary = remainingIdentities.find((identity) => identity.id === "identity-1");
+                        return { ...previous, identities: remainingIdentities, activeIdentityId: "identity-1", name: primary?.name || previous.name, avatar: primary?.avatar || previous.avatar, signature: primary?.signature || previous.signature, bio: primary?.bio || previous.bio };
+                      });
                     } else {
-                      onSaveSettings({ ...settings, identities: remainingIdentities });
+                      onSaveSettings((previous) => ({ ...previous, identities: (previous.identities || []).filter((identity) => identity.id !== target.id) }));
                     }
                     setAliasDeleteTarget(null);
                     showToast(deleteData ? `已彻底删除马甲“${target.name}”及其数据` : `已删除马甲“${target.name}”，角色记忆已保留`);
@@ -8424,28 +8431,23 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
               </button>
               <button
                 onClick={() => {
-                  const updatedIdentities = (settings.identities || []).map(idty => {
-                    if (idty.id === (settings.activeIdentityId || "identity-1")) {
-                      return {
-                        ...idty,
-                        name: editMyName,
-                        avatar: editMyAvatar,
-                        signature: editMySignature,
-                        bio: editMyBio,
-                      };
-                    }
-                    return idty;
-                  });
-
-                  onSaveSettings({
-                    ...settings,
+                  onSaveSettings((previous) => ({
+                    ...previous,
                     name: editMyName,
                     avatar: editMyAvatar,
                     signature: editMySignature,
                     bio: editMyBio,
                     globalChatStylePreset: editGlobalChatStylePreset,
-                    identities: updatedIdentities,
-                  });
+                    identities: (previous.identities || []).map((idty) => idty.id === (previous.activeIdentityId || "identity-1")
+                      ? {
+                          ...idty,
+                          name: editMyName,
+                          avatar: editMyAvatar,
+                          signature: editMySignature,
+                          bio: editMyBio,
+                        }
+                      : idty),
+                  }));
                   setIsEditingProfile(false);
                 }}
                 className="flex-1 py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
