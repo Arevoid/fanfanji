@@ -2719,9 +2719,16 @@ export default function App() {
     signature: settings.signature,
     bio: settings.bio,
   };
-  const handleSwitchIdentity = (identityId: string) => {
+  const handleSwitchIdentity = (identityId: string, openChat?: { relationId: string; characterId: string }) => {
     const identity = settings.identities?.find((item) => item.id === identityId);
     if (!identity) return;
+    if (openChat) {
+      setActiveChatRelationId(openChat.relationId);
+      setActiveChatCharId(openChat.characterId);
+    } else {
+      setActiveChatCharId(null);
+      setActiveChatRelationId(null);
+    }
     const nextSettings = {
       ...settingsRef.current,
       activeIdentityId: identity.id,

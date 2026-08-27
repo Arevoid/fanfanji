@@ -14,8 +14,8 @@ export interface ConversationThread {
 interface ConversationListProps {
   header: ReactNode;
   threads: readonly ConversationThread[];
-  onSelect: (characterId: string) => void;
-  getUnreadCount: (characterId: string) => number;
+  onSelect: (relationId: string) => void;
+  getUnreadCount: (relationId: string) => number;
   renderAvatar: (character: Character) => ReactNode;
   getGroupMessageSummary: (message: Message) => string;
 }

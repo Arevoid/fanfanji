@@ -439,13 +439,16 @@ export default function AppChat({
       if (!initiatedChatIds.includes(group.id)) setInitiatedChatIds((previous) => [...previous, group.id]);
       return;
     }
+    const characterId = resolveCanonicalCharacterId(relation.characterId, characters);
     if (relation.userIdentityId !== activeIdentityId) {
-      onSwitchIdentity?.(relation.userIdentityId);
+      // Identity changes and conversation selection must be committed together.
+      // Otherwise the parent can clear the old chat after this handler runs.
+      onSwitchIdentity?.(relation.userIdentityId, { relationId: relation.id, characterId });
     }
     setActiveChatRelationId(relation.id);
     // Some older data still points at a contact-copy ID. Keep the relationship
     // as the conversation boundary, but always open its canonical profile.
-    setActiveChatCharId(resolveCanonicalCharacterId(relation.characterId, characters));
+    setActiveChatCharId(characterId);
     if (!initiatedChatIds.includes(relation.id)) {
       setInitiatedChatIds((prev) => [...prev, relation.id]);
     }
@@ -456,9 +459,6 @@ export default function AppChat({
   // lookup to the active identity prevents the primary account's context from
   // leaking into an alias turn.
   const activeIdentityId = settings.activeIdentityId || "identity-1";
-  const selectedRelationship = activeChatRelationId
-    ? relationships.find((relation) => relation.id === activeChatRelationId)
-    : undefined;
   const activeRelationship = activeChatRelationId
     ? relationships.find((relation) => relation.id === activeChatRelationId && relation.userIdentityId === activeIdentityId)
     : undefined;
@@ -647,7 +647,7 @@ export default function AppChat({
   // the previous profile's relation-scoped history.
   useEffect(() => {
     const isForeignDirectRelation = Boolean(
-      selectedRelationship && !activeCharacter?.isGroupChat && selectedRelationship.userIdentityId !== activeIdentityId,
+      activeRelationship && !activeCharacter?.isGroupChat && activeRelationship.userIdentityId !== activeIdentityId,
     );
     const isForeignGroup = Boolean(
       activeChatCharId && activeCharacter?.isGroupChat && !belongsToActiveIdentity(activeCharacter.ownerIdentityId),
