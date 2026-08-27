@@ -836,7 +836,7 @@ export default function App() {
         // Keep the safe defaults when a legacy value is malformed.
       }
     }
-    const filtered = parsed;
+    const filtered = parsed.filter((id) => id !== "character-phone");
     if (!filtered.includes("notes")) {
       filtered.push("notes");
     }
@@ -1062,6 +1062,7 @@ export default function App() {
     }
 
     items = items
+      .filter((item) => item.id !== "character-phone")
       .filter((item) => !(item.widgetType === "album" && item.size === "1x4"))
       .map((item) => item.widgetType === "album" && item.size === "2x4"
         ? { ...item, widgetType: "calendar-album" }
@@ -1465,6 +1466,7 @@ export default function App() {
   }, [currentPage, visibleHomePageCount]);
 
   const handleInstallApp = (id: string) => {
+    if (id === "character-phone") return;
     if (installedAppIds.includes(id)) return;
     setHomeScreenItems((current) => {
       if (current.some((item) => item.id === id)) {

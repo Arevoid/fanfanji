@@ -157,6 +157,7 @@ export default function AppStore({
   const [searchQuery, setSearchQuery] = useState("");
 
   const startDownload = (id: string) => {
+    if (id === "character-phone") return;
     setDownloadingId(id);
     setProgress(0);
     const interval = setInterval(() => {
@@ -181,7 +182,7 @@ export default function AppStore({
     }, 45);
   };
 
-  const filteredApps = APPS_LIST.filter((app) =>
+  const filteredApps = APPS_LIST.filter((app) => app.id !== "character-phone").filter((app) =>
     app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     app.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
     app.description.toLowerCase().includes(searchQuery.toLowerCase())
