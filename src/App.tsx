@@ -2720,8 +2720,6 @@ export default function App() {
   const handleSwitchIdentity = (identityId: string) => {
     const identity = settings.identities?.find((item) => item.id === identityId);
     if (!identity) return;
-    setActiveChatCharId(null);
-    setActiveChatRelationId(null);
     const nextSettings = {
       ...settingsRef.current,
       activeIdentityId: identity.id,

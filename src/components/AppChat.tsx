@@ -456,6 +456,9 @@ export default function AppChat({
   // lookup to the active identity prevents the primary account's context from
   // leaking into an alias turn.
   const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const selectedRelationship = activeChatRelationId
+    ? relationships.find((relation) => relation.id === activeChatRelationId)
+    : undefined;
   const activeRelationship = activeChatRelationId
     ? relationships.find((relation) => relation.id === activeChatRelationId && relation.userIdentityId === activeIdentityId)
     : undefined;
@@ -644,7 +647,7 @@ export default function AppChat({
   // the previous profile's relation-scoped history.
   useEffect(() => {
     const isForeignDirectRelation = Boolean(
-      activeRelationship && !activeCharacter?.isGroupChat && activeRelationship.userIdentityId !== activeIdentityId,
+      selectedRelationship && !activeCharacter?.isGroupChat && selectedRelationship.userIdentityId !== activeIdentityId,
     );
     const isForeignGroup = Boolean(
       activeChatCharId && activeCharacter?.isGroupChat && !belongsToActiveIdentity(activeCharacter.ownerIdentityId),
@@ -653,7 +656,7 @@ export default function AppChat({
       setActiveChatCharId(null);
       setActiveChatRelationId(null);
     }
-  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId, activeCharacter?.isGroupChat, activeRelationship?.id, activeRelationship?.userIdentityId]);
+  }, [activeIdentityId, activeChatCharId, activeCharacter?.ownerIdentityId, activeCharacter?.isGroupChat, selectedRelationship?.id, selectedRelationship?.userIdentityId]);
 
   useEffect(() => {
     if (!activeChatCharId) return;
