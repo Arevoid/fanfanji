@@ -2298,7 +2298,8 @@ export default function App() {
     if (!isGroupMessage) {
       const relationship = msg.relationId ? relationships.find((item) => item.id === msg.relationId) : undefined;
       if (!relationship
-        || relationship.characterId !== msg.characterId
+        || relationship.userIdentityId !== (settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID)
+        || resolveCanonicalCharacterId(relationship.characterId, characters) !== resolveCanonicalCharacterId(msg.characterId, characters)
         || (msg.conversationId && msg.conversationId !== (relationship.conversationId || getConversationId(relationship.id)))) {
         console.warn("Direct message write rejected because its relationship scope is missing or inconsistent.", msg.id);
         return;
@@ -2749,7 +2750,8 @@ export default function App() {
     bio: settings.bio,
   };
   const handleSwitchIdentity = (identityId: string, openChat?: { relationId: string; characterId: string }) => {
-    const identity = settings.identities?.find((item) => item.id === identityId);
+    const currentSettings = settingsRef.current;
+    const identity = currentSettings.identities?.find((item) => item.id === identityId);
     if (!identity) return;
     const targetRelation = openChat
       ? relationships.find((relation) => relation.id === openChat.relationId
@@ -2763,20 +2765,41 @@ export default function App() {
       setActiveChatCharId(null);
       setActiveChatRelationId(null);
     }
-    const nextSettings = {
-      ...settingsRef.current,
+    const saved = setSettings((previous) => ({
+      ...previous,
       activeIdentityId: identity.id,
       name: identity.name,
       avatar: identity.avatar,
       signature: identity.signature || "",
       bio: identity.bio || "",
-    };
-    settingsRef.current = nextSettings;
-    setSettingsState(nextSettings);
-    const saved = saveSettings(nextSettings);
-    if (!saved.success) {
+    }));
+    if (!saved) {
       alert("身份已切换，但当前浏览器存储空间不足，刷新页面后可能无法保留本次切换。请先清理存储空间。");
     }
+  };
+
+  // Every non-chat app can request a chat target. Resolve that target against
+  // the current identity before changing the chat route; a relation ID alone
+  // must never be enough to open another identity's conversation.
+  const openChatForCurrentIdentity = (characterId: string, relationId: string | null) => {
+    const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    if (relationId) {
+      const relationship = relationships.find((candidate) => candidate.id === relationId
+        && candidate.userIdentityId === ownerIdentityId
+        && resolveCanonicalCharacterId(candidate.characterId, characters) === resolveCanonicalCharacterId(characterId, characters));
+      if (!relationship) return false;
+      setActiveChatCharId(resolveCanonicalCharacterId(relationship.characterId, characters));
+      setActiveChatRelationId(relationship.id);
+    } else {
+      const group = characters.find((candidate) => candidate.id === characterId
+        && candidate.isGroupChat
+        && (candidate.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId);
+      if (!group) return false;
+      setActiveChatCharId(group.id);
+      setActiveChatRelationId(null);
+    }
+    setActiveApp("chat");
+    return true;
   };
 
   const handlePlayMusicTrack = async (track: MusicTrack) => {
@@ -3414,9 +3437,18 @@ export default function App() {
           <div
             onClick={(e) => {
               const target = getNotificationChatTarget(globalNotification);
-              setActiveApp("chat");
-              setActiveChatRelationId(target.relationId);
-              setActiveChatCharId(target.characterId);
+              const targetRelation = target.relationId
+                ? relationships.find((relation) => relation.id === target.relationId)
+                : undefined;
+              if (targetRelation && targetRelation.userIdentityId !== activeIdentityId) {
+                handleSwitchIdentity(targetRelation.userIdentityId, {
+                  relationId: targetRelation.id,
+                  characterId: resolveCanonicalCharacterId(targetRelation.characterId, characters),
+                });
+              } else if (!openChatForCurrentIdentity(target.characterId, target.relationId)) {
+                setGlobalNotification(null);
+                return;
+              }
               setGlobalNotification(null);
             }}
             className="absolute left-3.5 right-3.5 z-50 animate-slide-down bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 p-3 flex items-center gap-3 cursor-pointer select-none animate-fade-in"
@@ -4016,9 +4048,7 @@ export default function App() {
                       onOpenForumShareHandled={() => setOpenForumShareId(null)}
                       onSendMessage={handleSendMessage}
                       onOpenChat={(characterId, relationId) => {
-                        setActiveChatCharId(characterId);
-                        setActiveChatRelationId(relationId);
-                        setActiveApp("chat");
+                        openChatForCurrentIdentity(characterId, relationId);
                       }}
                       onClose={() => setActiveApp(null)}
                     />
@@ -4040,9 +4070,7 @@ export default function App() {
                       appointments={scheduleStore.appointments}
                       characters={characters}
                       onOpenChat={(characterId, relationId) => {
-                        setActiveChatCharId(characterId);
-                        setActiveChatRelationId(relationId);
-                        setActiveApp("chat");
+                        openChatForCurrentIdentity(characterId, relationId);
                       }}
                       onClose={() => setActiveApp(null)}
                     />
@@ -4087,10 +4115,8 @@ export default function App() {
                     settings={settings}
                     onSendMessage={handleSendMessage}
                     onOpenChat={(characterId, relationId, sourceMessageId) => {
-                      setActiveChatCharId(characterId);
-                      setActiveChatRelationId(relationId);
+                      if (!openChatForCurrentIdentity(characterId, relationId)) return;
                       setPendingDiaryShareMessageId(sourceMessageId || null);
-                      setActiveApp("chat");
                     }}
                     onClose={() => setActiveApp(null)}
                     />

@@ -1,4 +1,5 @@
-import type { Message } from "../../../types";
+import type { Character, Message } from "../../../types";
+import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
 import { getConversationId, type CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { ChatRuntimeContext } from "./chatRuntimeContext";
 
@@ -14,11 +15,18 @@ export function resolveDirectInteractionScope(input: {
   characterId?: string | null;
   activeIdentityId: string;
   relationship?: CharacterRelationship;
+  characters?: readonly Character[];
   isGroupChat: boolean;
 }): DirectInteractionScope | undefined {
-  const { relationship, characterId, activeIdentityId, isGroupChat } = input;
+  const { relationship, characterId, activeIdentityId, characters, isGroupChat } = input;
   if (!relationship || !characterId || isGroupChat) return undefined;
-  if (relationship.userIdentityId !== activeIdentityId || relationship.characterId !== characterId) return undefined;
+  const relationshipCharacterId = characters
+    ? resolveCanonicalCharacterId(relationship.characterId, characters)
+    : relationship.characterId;
+  const currentCharacterId = characters
+    ? resolveCanonicalCharacterId(characterId, characters)
+    : characterId;
+  if (relationship.userIdentityId !== activeIdentityId || relationshipCharacterId !== currentCharacterId) return undefined;
   return {
     characterId,
     relationId: relationship.id,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../utils/apiHelper";
@@ -303,7 +303,7 @@ interface AppChatProps {
   setActiveChatCharId: (id: string | null) => void;
   activeChatRelationId: string | null;
   setActiveChatRelationId: (id: string | null) => void;
-  onSaveRelationships: (relationships: CharacterRelationship[]) => void;
+  onSaveRelationships: Dispatch<SetStateAction<CharacterRelationship[]>>;
   appointments?: Appointment[];
   onSaveAppointment?: (appointment: Appointment) => boolean;
   offlineStories?: OfflineStory[];
@@ -498,6 +498,7 @@ export default function AppChat({
     characterId: activeCharacter?.id,
     activeIdentityId,
     relationship: activeRelationship,
+    characters,
     isGroupChat: Boolean(activeCharacter?.isGroupChat),
   });
   const isActiveChatScopeValid = Boolean(activeCharacter && (activeCharacter.isGroupChat
@@ -3366,7 +3367,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     if (file) {
       try {
         const compressed = await compressImage(file, 1000, 1000, 0.7);
-        onSaveSettings({ ...settings, momentsCover: compressed });
+      onSaveSettings((previous) => ({ ...previous, momentsCover: compressed }));
       } catch (err) {
         console.error("Moments cover compression failed:", err);
       }
@@ -3447,7 +3448,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
   const uploadMomentImageFromFeature = async (file: File, kind: "moment" | "cover") => {
     const compressed = await compressImage(file, kind === "cover" ? 1000 : 800, kind === "cover" ? 1000 : 800, 0.7);
     if (kind === "cover") {
-      onSaveSettings({ ...settings, momentsCover: compressed });
+      onSaveSettings((previous) => ({ ...previous, momentsCover: compressed }));
       return undefined;
     }
     return compressed;
@@ -8550,7 +8551,9 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                               const now = Date.now();
                               const relationId = `rel-${now}-${Math.random().toString(36).slice(2, 7)}`;
                               const relationship = createRelationship({ id: relationId, characterId, userIdentityId: activeIdentityId, now });
-                              onSaveRelationships([...relationships, relationship]);
+                              onSaveRelationships((previous) => previous.some((candidate) => candidate.id === relationship.id)
+                                ? previous
+                                : [...previous, relationship]);
                               captureRelationshipCreatedEvent(relationship, now);
                             }}
                             className="px-2.5 py-1 bg-[var(--button-primary-bg)] hover:bg-[var(--button-primary-hover-bg)] text-[var(--button-primary-text)] rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
