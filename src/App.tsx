@@ -2751,9 +2751,14 @@ export default function App() {
   const handleSwitchIdentity = (identityId: string, openChat?: { relationId: string; characterId: string }) => {
     const identity = settings.identities?.find((item) => item.id === identityId);
     if (!identity) return;
-    if (openChat) {
-      setActiveChatRelationId(openChat.relationId);
-      setActiveChatCharId(openChat.characterId);
+    const targetRelation = openChat
+      ? relationships.find((relation) => relation.id === openChat.relationId
+        && relation.userIdentityId === identity.id
+        && resolveCanonicalCharacterId(relation.characterId, characters) === openChat.characterId)
+      : undefined;
+    if (targetRelation) {
+      setActiveChatRelationId(targetRelation.id);
+      setActiveChatCharId(resolveCanonicalCharacterId(targetRelation.characterId, characters));
     } else {
       setActiveChatCharId(null);
       setActiveChatRelationId(null);

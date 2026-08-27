@@ -292,7 +292,7 @@ interface AppChatProps {
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => void;
   onClose: () => void;
   onSaveSettings: (settings: UserSettings) => void;
-  onSwitchIdentity?: (id: string) => void;
+  onSwitchIdentity?: (id: string, openChat?: { relationId: string; characterId: string }) => void;
   onNavigateToApp: (appId: string) => void;
   worldBookEntries?: WorldBookEntry[];
   onClearMessages?: (charId: string, keepLastCount?: number, relationId?: string) => void;
@@ -629,10 +629,10 @@ export default function AppChat({
     characterId,
     characters,
   );
-  const chatListRelationships = relationships.filter((relation) =>
-    availableCharacterIds.has(resolveCanonicalCharacterId(relation.characterId, characters))
-    && (relation.userIdentityId === "identity-1" || settings.identities?.some((identity) => identity.kind === "alias" && identity.id === relation.userIdentityId)),
-  );
+  // The chat list is scoped to the active identity. Cross-identity threads
+  // must not leak into the current profile; switching profiles is handled by
+  // the identity picker instead of mixing every relation into one list.
+  const chatListRelationships = activeRelationships;
   const friends = activeRelationships.map((relation) =>
     characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters)),
   ).filter((character): character is Character => Boolean(character));
