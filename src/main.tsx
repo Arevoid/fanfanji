@@ -14,6 +14,23 @@ createRoot(document.getElementById('root')!).render(
 
 // Register service worker for PWA capability and listen to beforeinstallprompt
 if (typeof window !== "undefined") {
+  // A previously installed PWA worker can keep controlling a local Vite page
+  // even after its source has changed. Remove that controller once on local
+  // development hosts so lazy-loaded Chat chunks always come from the dev
+  // server instead of an old cache.
+  if ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && "serviceWorker" in navigator) {
+    const cleanupKey = "fanfan-local-sw-cleaned";
+    if (!sessionStorage.getItem(cleanupKey)) {
+      sessionStorage.setItem(cleanupKey, "1");
+      Promise.all([
+        navigator.serviceWorker.getRegistrations().then((registrations) => Promise.all(registrations.map((registration) => registration.unregister()))),
+        caches.keys().then((cacheNames) => Promise.all(cacheNames.filter((name) => name.startsWith("fanfan-phone-")).map((name) => caches.delete(name)))),
+      ]).then(() => {
+        if (navigator.serviceWorker.controller) window.location.reload();
+      }).catch(() => undefined);
+    }
+  }
+
   // Stash beforeinstallprompt event
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
