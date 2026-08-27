@@ -1,4 +1,4 @@
-const CACHE_NAME = "fanfan-phone-0.0.0-30c9b9be310e";
+const CACHE_NAME = "fanfan-phone-0.0.0-259078bd0353";
 const ASSETS_TO_CACHE = [
   "/",
   "/index.html",
@@ -37,6 +37,12 @@ self.addEventListener("activate", (event) => {
 // Fetch Event - handle caching strategies
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+
+  // Do not cache Vite development modules. Stale module versions can make a
+  // lazy-loaded app, especially Chat, fail as a blank screen.
+  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+    return;
+  }
 
   // Bypass API requests to ensure real-time response from backend
   if (url.pathname.startsWith("/api/")) {

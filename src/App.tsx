@@ -219,6 +219,33 @@ const AppOffline = React.lazy(loadAppOffline);
 const AppSchedule = React.lazy(loadAppSchedule);
 const AppReading = React.lazy(loadAppReading);
 const AppCinema = React.lazy(loadAppCinema);
+class LazyAppErrorBoundary extends React.Component<
+  React.PropsWithChildren<{ visible?: boolean }>,
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  private readonly childNodes: React.ReactNode;
+
+  constructor(props: React.PropsWithChildren<{ visible?: boolean }>) {
+    super(props);
+    this.childNodes = props.children;
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    if (!this.state.error) return this.childNodes;
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] px-6 text-center text-[var(--text-secondary)]" role="alert">
+        <span className="text-sm font-semibold text-[var(--text-primary)]">应用加载失败</span>
+        <span className="text-xs">请重试后继续。</span>
+        <button type="button" className="rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white" onClick={() => window.location.reload()}>重试</button>
+      </div>
+    );
+  }
+}
 
 function LazyAppBoundary({
   children,
@@ -230,6 +257,7 @@ function LazyAppBoundary({
       style={{ display: visible ? "block" : "none" }}
       aria-hidden={!visible}
     >
+      <LazyAppErrorBoundary visible={visible}>
       <React.Suspense
       fallback={(
         <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] text-[var(--text-secondary)]" role="status" aria-live="polite">
@@ -240,6 +268,7 @@ function LazyAppBoundary({
       >
         {children}
       </React.Suspense>
+      </LazyAppErrorBoundary>
     </div>
   );
 }
