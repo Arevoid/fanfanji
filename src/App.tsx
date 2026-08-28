@@ -2759,13 +2759,6 @@ export default function App() {
     signature: settings.signature,
     bio: settings.bio,
   };
-  const primaryIdentity = settings.identities?.find((identity) => identity.id === DEFAULT_IDENTITY_ID) || {
-    id: DEFAULT_IDENTITY_ID,
-    name: settings.name,
-    avatar: settings.avatar,
-    signature: settings.signature,
-    bio: settings.bio,
-  };
   const handleSwitchIdentity = (identityId: string, openChat?: { relationId: string; characterId: string }) => {
     const currentSettings = settingsRef.current;
     const identity = currentSettings.identities?.find((item) => item.id === identityId);
@@ -3583,17 +3576,17 @@ export default function App() {
                                     }}
                                   >
                                     <img
-                                      src={primaryIdentity.avatar}
-                                      alt={primaryIdentity.name}
+                                      src={activeIdentity.avatar}
+                                      alt={activeIdentity.name}
                                       className="w-12 h-12 rounded-full object-cover border border-slate-200/20 shadow-sm shrink-0"
                                       referrerPolicy="no-referrer"
                                     />
                                     <div className="min-w-0 flex-1">
                                       <h2 className="text-sm font-extrabold text-neutral-900 tracking-tight leading-tight">
-                                        {primaryIdentity.name}
+                                        {activeIdentity.name}
                                       </h2>
                                       <p className="text-[11px] text-neutral-500 mt-1 line-clamp-1 leading-relaxed">
-                                        {primaryIdentity.signature}
+                                        {activeIdentity.signature}
                                       </p>
                                     </div>
                                   </div>
