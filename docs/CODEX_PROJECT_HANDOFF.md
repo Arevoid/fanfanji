@@ -1069,3 +1069,21 @@ AppSettings 自定义图标、存储仓储/迁移/备份/清理、新旧用户�
 ### 18.5 新会话的单一入口
 
 新会话只需先完整阅读本文，不再把 `LONG_TERM_OPTIMIZATION_ACCEPTANCE.md` 作为第二份必读规则文档。若旧链接仍指向该文件，它现在只是兼容入口；本文与代码不一致时，以当前代码和测试为准，并在同一提交中更新本文。
+
+## 19. 2026-08-24 会话增量：旧版备份聊天记录恢复与查手机暂停
+
+本次会话新增根目录 `HANDOFF.md`，用于记录会话级未完成状态、工作区边界和下一步计划。新会话应先读 `HANDOFF.md`，再读本文。
+
+### 19.1 旧版备份聊天记录
+
+已确认旧版扁平备份 `饭饭机_20260811.json` 中存在 `phone_messages_v3`，共 986 条消息；问题不是备份没有聊天记录，而是旧导入路径只恢复到 LocalStorage，而当前消息初始化使用 IndexedDB 的 `message-entry-v1` durable store。
+
+`src/features/settings/systemBackup.ts` 已将旧键映射为 `phone_messages_v3 -> message-entry-v1`，复用现有 IndexedDB 恢复和启用逻辑。相关测试已加入 `scripts/systemBackup.test.ts`。修复提交为 `8860f1a fix: restore legacy chat messages from backups`，已推送到 `staging/long-term-optimization-2026-08-20`。用户需要重新导入旧备份才能触发恢复。
+
+### 19.2 查手机应用明确暂停
+
+角色手机/查手机应用目前只有未完成的实验性工作区改动，尚未真正复用“我的手机”的完整页面、路由、操作逻辑和数据边界。用户已明确暂时暂停开发，因此不得继续修改、验证或推送这部分；不得把 `AppCharacterPhone`、`characterPhone` 相关目录或其可能牵连的公共文件误并入其他修复提交。新会话必须先查看实际 `git status`，保留这些未提交改动，不得用破坏性命令清理。
+
+### 19.3 本次会话的验证边界
+
+本次备份修复已通过系统备份测试、备份检查、内容存储迁移测试、lint、build 和真实备份文件归一化检查。以上只证明仓库代码和该导入路径的本地验证通过，不代表真实移动设备、staging、弱网或查手机应用已经验收完成。

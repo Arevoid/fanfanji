@@ -155,21 +155,37 @@ const loadAppSchedule = () => import("./components/AppSchedule");
 const loadAppReading = () => import("./components/AppReading");
 const loadAppCinema = () => import("./components/AppCinema");
 
+// Vite can briefly return a failed module response while the dev server is
+// transforming the large chat module. Give the same navigation attempt one
+// bounded retry, and make preload failures non-fatal to the actual click.
+const withModuleRetry = <T,>(loader: () => Promise<T>) => async (): Promise<T> => {
+  try {
+    return await loader();
+  } catch (firstError) {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    try {
+      return await loader();
+    } catch {
+      throw firstError;
+    }
+  }
+};
+
 const APP_LOADERS: Record<string, () => Promise<unknown>> = {
-  chat: loadAppChat,
-  archives: loadAppArchives,
-  worldbook: loadAppWorldBook,
-  music: loadAppMusic,
-  forum: loadAppForum,
-  notes: loadAppNotes,
-  diary: loadAppDiary,
-  store: loadAppStore,
-  settings: loadAppSettings,
-  memory: loadAppMemory,
-  offline: loadAppOffline,
-  schedule: loadAppSchedule,
-  reading: loadAppReading,
-  cinema: loadAppCinema,
+  chat: withModuleRetry(loadAppChat),
+  archives: withModuleRetry(loadAppArchives),
+  worldbook: withModuleRetry(loadAppWorldBook),
+  music: withModuleRetry(loadAppMusic),
+  forum: withModuleRetry(loadAppForum),
+  notes: withModuleRetry(loadAppNotes),
+  diary: withModuleRetry(loadAppDiary),
+  store: withModuleRetry(loadAppStore),
+  settings: withModuleRetry(loadAppSettings),
+  memory: withModuleRetry(loadAppMemory),
+  offline: withModuleRetry(loadAppOffline),
+  schedule: withModuleRetry(loadAppSchedule),
+  reading: withModuleRetry(loadAppReading),
+  cinema: withModuleRetry(loadAppCinema),
 };
 
 // Load every app module as soon as the phone shell enters. This keeps the
@@ -202,7 +218,9 @@ void ALL_APP_MODULES_PROMISE;
 
 const preloadApp = (appId: string) => {
   const loader = APP_LOADERS[appId];
-  if (loader) void loader();
+  if (loader) void loader().catch((error) => {
+    console.warn(`预加载应用 ${appId} 失败，打开时将再次尝试。`, error);
+  });
 };
 
 const AppChat = React.lazy(loadAppChat);
@@ -224,11 +242,9 @@ class LazyAppErrorBoundary extends React.Component<
   { error: Error | null }
 > {
   state = { error: null as Error | null };
-  private readonly childNodes: React.ReactNode;
 
   constructor(props: React.PropsWithChildren<{ visible?: boolean }>) {
     super(props);
-    this.childNodes = props.children;
   }
 
   static getDerivedStateFromError(error: Error) {
@@ -236,7 +252,8 @@ class LazyAppErrorBoundary extends React.Component<
   }
 
   render() {
-    if (!this.state.error) return this.childNodes;
+    const currentProps = (this as unknown as { props: React.PropsWithChildren<{ visible?: boolean }> }).props;
+    if (!this.state.error) return currentProps.children;
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] px-6 text-center text-[var(--text-secondary)]" role="alert">
         <span className="text-sm font-semibold text-[var(--text-primary)]">应用加载失败</span>

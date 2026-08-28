@@ -44,6 +44,7 @@ export const storageKeys = {
   conversationSummaries: "phone_conversation_summaries",
   behaviorCorrections: "phone_behavior_corrections",
   characterKnowledgeMigrationState: "phone_character_knowledge_migration_state",
+  characterPhones: "phone_character_phones_v1",
   momentTopicHistory: "phone_moment_topic_history",
   proactiveTopicHistory: "phone_proactive_topic_history",
   offlineStories: "phone_offline_stories",

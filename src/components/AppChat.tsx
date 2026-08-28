@@ -1180,7 +1180,7 @@ export default function AppChat({
   useEffect(() => {
     if (!activeRelationship) return;
     const timestamp = Date.now();
-    onSaveRelationships(touchRelationshipSession(relationships, activeRelationship.id, timestamp));
+    onSaveRelationships((previous) => touchRelationshipSession(previous, activeRelationship.id, timestamp));
   }, [activeChatRelationId]);
 
   useChatGreeting({
@@ -1197,7 +1197,7 @@ export default function AppChat({
   });
 
   const updateRelationshipSession = (relationId: string, patch: Partial<CharacterRelationship>) => {
-    onSaveRelationships(relationships.map((relation) => relation.id === relationId
+    onSaveRelationships((previous) => previous.map((relation) => relation.id === relationId
       ? { ...relation, ...patch, updatedAt: Date.now() }
       : relation));
   };
@@ -2274,6 +2274,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     onSaveOfflineStory,
     extractMemories: (messagesToCompress) => handleExtractMemories(messagesToCompress),
     onSaveRelationships,
+    updateRelationships: onSaveRelationships,
     onSaveCharacter,
   });
 

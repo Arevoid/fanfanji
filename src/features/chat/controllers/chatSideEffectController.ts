@@ -18,6 +18,7 @@ export interface ChatSideEffectControllerDependencies {
   onSaveOfflineStory?: (story: OfflineStory) => void;
   extractMemories: (messages: Message[]) => Promise<number>;
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
+  updateRelationships?: (update: (previous: CharacterRelationship[]) => CharacterRelationship[]) => void;
   onSaveCharacter: (character: Character) => void;
   schedule?: (task: () => void | Promise<void>, delayMs: number) => void;
   now?: () => number;
@@ -37,6 +38,16 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
     }, delayMs);
   });
   const now = dependencies.now || (() => Date.now());
+  const saveRelationships = (
+    base: CharacterRelationship[],
+    update: (previous: CharacterRelationship[]) => CharacterRelationship[],
+  ) => {
+    if (dependencies.updateRelationships) {
+      dependencies.updateRelationships(update);
+      return;
+    }
+    dependencies.onSaveRelationships(update(base));
+  };
 
   return {
     afterReplySuccess(input: ChatReplySideEffectInput): void {
@@ -82,7 +93,7 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
             if (count >= 0) {
               const lastMessage = eligibleMessages[eligibleMessages.length - 1];
               if (lastMessage && input.activeRelationship) {
-                dependencies.onSaveRelationships(input.relationships.map((relation) => relation.id === input.activeRelationship?.id
+                saveRelationships(input.relationships, (previous) => previous.map((relation) => relation.id === input.activeRelationship?.id
                   ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }
                   : relation));
               }
