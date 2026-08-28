@@ -1,13 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Activity,
   ArrowLeft,
   ArrowRight,
   BookHeart,
   Bookmark,
   Camera,
   CalendarDays,
-  ChevronLeft,
   Globe2,
   Image,
   LockKeyhole,
@@ -18,8 +16,6 @@ import {
   RefreshCw,
   Search,
   Share2,
-  Settings2,
-  Smartphone,
   Trash2,
   EyeOff,
   X,
@@ -47,12 +43,15 @@ import {
   listCharacterPhoneThreadMessages,
 } from "../features/characterPhone/characterPhoneThreadService";
 import { TimeWidget } from "./HomeScreenWidgets";
+import { resolveDesktopBackground } from "../features/theme/desktopBackground";
+import type { ResolvedTheme } from "../features/theme/theme";
 
 interface AppCharacterPhoneProps {
   userIdentityId: string;
   characters: Character[];
   relationships: CharacterRelationship[];
   settings?: UserSettings;
+  resolvedTheme?: ResolvedTheme;
   onSendMessage?: (message: Message) => void;
   onClose: () => void;
 }
@@ -93,12 +92,13 @@ const APP_META: Record<
     color: "bg-emerald-500",
   },
 };
-const WALLPAPERS = [
-  "linear-gradient(145deg, #d8e5df 0%, #f4eadc 100%)",
-  "linear-gradient(145deg, #dbeafe 0%, #fce7f3 100%)",
-  "linear-gradient(145deg, #ede9fe 0%, #fef3c7 100%)",
+const PHONE_NAV_APPS: CharacterPhoneAppId[] = [
+  "chat",
+  "browser",
+  "schedule",
+  "gallery",
+  "diary",
 ];
-
 function openCharacterPhone(
   ownerIdentityId: string,
   character: Character,
@@ -134,6 +134,7 @@ export default function AppCharacterPhone({
   characters,
   relationships,
   settings,
+  resolvedTheme = "light",
   onSendMessage,
   onClose,
 }: AppCharacterPhoneProps) {
@@ -148,10 +149,14 @@ export default function AppCharacterPhone({
       ? openCharacterPhone(userIdentityId, selectedCharacter)
       : null,
   );
+  useEffect(() => {
+    if (!selectedCharacterId && characters[0]) {
+      setSelectedCharacterId(characters[0].id);
+      setPhone(openCharacterPhone(userIdentityId, characters[0]));
+    }
+  }, [characters, selectedCharacterId, userIdentityId]);
   const [unlocked, setUnlocked] = useState(false);
-  const [activeApp, setActiveApp] = useState<CharacterPhoneAppId | null>(null);
-  const [showActivity, setShowActivity] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [activeApp, setActiveApp] = useState<CharacterPhoneAppId>("chat");
   const [galleryMode, setGalleryMode] = useState<GalleryMode>("main");
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(
     null,
@@ -263,9 +268,7 @@ export default function AppCharacterPhone({
     setSelectedCharacterId(characterId);
     setPhone(openCharacterPhone(userIdentityId, character));
     setUnlocked(false);
-    setActiveApp(null);
-    setShowActivity(false);
-    setShowSettings(false);
+    setActiveApp("chat");
     setInput("");
     setNotice("");
   };
@@ -429,27 +432,12 @@ export default function AppCharacterPhone({
     saveCharacterPhone(next);
     setPhone(next);
     setActiveApp(appId);
-    setShowActivity(false);
-    setShowSettings(false);
   };
   const updatePhone = (patch: Partial<CharacterPhoneRecord>) => {
     if (!currentPhone) return;
     const next = { ...currentPhone, ...patch, updatedAt: Date.now() };
     saveCharacterPhone(next);
     setPhone(next);
-  };
-  const cycleWallpaper = () => {
-    const index = WALLPAPERS.indexOf(currentPhone?.wallpaper || WALLPAPERS[0]);
-    updatePhone({ wallpaper: WALLPAPERS[(index + 1) % WALLPAPERS.length] });
-  };
-  const moveApp = (appId: CharacterPhoneAppId, direction: -1 | 1) => {
-    if (!currentPhone) return;
-    const order = [...currentPhone.appOrder];
-    const index = order.indexOf(appId);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= order.length) return;
-    [order[index], order[target]] = [order[target], order[index]];
-    updatePhone({ appOrder: order });
   };
 
   const updatePhonePost = (
@@ -796,7 +784,7 @@ export default function AppCharacterPhone({
       </>
     ) : activeApp === "browser" ? (
       <>
-        <div className="-mx-5 -mt-14 flex min-h-[calc(100%+5rem)] flex-col bg-[#f8f8fa] text-[#1f2937]">
+        <div className="-mx-5 flex min-h-full flex-col bg-[#f8f8fa] text-[#1f2937]">
           <div className="flex items-center justify-between bg-[#f8f8fa] px-4 pb-2 pt-3 text-[10px] font-semibold">
             <span>22:08</span>
             <span>5G　⌁　▮</span>
@@ -927,7 +915,7 @@ export default function AppCharacterPhone({
         </div>
       </>
     ) : activeApp === "schedule" ? (
-      <div className="-mx-5 -mt-5 min-h-[calc(100%+2.5rem)] bg-[var(--app-bg)]">
+      <div className="-mx-5 min-h-full bg-[var(--app-bg)]">
         <AppSchedule
           entries={phoneScheduleEntries}
           appointments={phoneAppointments}
@@ -1053,7 +1041,7 @@ export default function AppCharacterPhone({
     ) : activeApp === "gallery" ? (
       <>
         {selectedGallery ? (
-          <div className="-mx-5 -mt-14 flex min-h-[calc(100%+5rem)] flex-col bg-black text-white">
+          <div className="-mx-5 flex min-h-full flex-col bg-black text-white">
             <div className="flex items-center justify-between px-4 pb-3 pt-5">
               <button
                 type="button"
@@ -1117,7 +1105,7 @@ export default function AppCharacterPhone({
             </div>
           </div>
         ) : (
-          <div className="-mx-5 -mt-14 min-h-[calc(100%+5rem)] bg-[#f8f8fa] text-[#1f2937]">
+          <div className="-mx-5 min-h-full bg-[#f8f8fa] text-[#1f2937]">
             <div className="flex items-center justify-between px-4 pb-2 pt-4">
               <h2 className="text-2xl font-bold">相册</h2>
               <div className="flex items-center gap-3">
@@ -1350,102 +1338,59 @@ export default function AppCharacterPhone({
         )}
       </>
     );
-  const settingsContent = (
-    <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-6 pt-14 text-neutral-900">
-      <h2 className="text-xl font-bold">手机设置</h2>
-      <button
-        type="button"
-        onClick={cycleWallpaper}
-        className="mt-5 rounded-2xl bg-white/70 p-4 text-left"
-      >
-        <p className="text-sm font-bold">更换壁纸</p>
-        <p className="mt-1 text-xs text-neutral-600">
-          角色可能会注意到壁纸被改过。
-        </p>
-        <span
-          className="mt-3 block h-12 rounded-xl"
-          style={{ background: currentPhone.wallpaper }}
-        />
-      </button>
-      <div className="mt-5 rounded-2xl bg-white/70 p-4">
-        <p className="text-sm font-bold">桌面应用顺序</p>
-        {currentPhone.appOrder.map((appId, index) => (
-          <div
-            key={appId}
-            className="mt-3 flex items-center justify-between text-xs"
-          >
-            <span>
-              {index + 1}. {APP_META[appId].label}
-            </span>
-            <span className="flex gap-1">
-              <button
-                type="button"
-                onClick={() => moveApp(appId, -1)}
-                className="rounded bg-black/10 px-2 py-1"
-              >
-                上移
-              </button>
-              <button
-                type="button"
-                onClick={() => moveApp(appId, 1)}
-                className="rounded bg-black/10 px-2 py-1"
-              >
-                下移
-              </button>
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  const desktopBackground = resolveDesktopBackground({
+    resolvedTheme,
+    wallpaper: settings?.wallpaper,
+    wallpaperSource: settings?.wallpaperSource,
+  });
   return (
-    <div className="relative flex h-full min-h-0 items-center justify-center overflow-hidden bg-black/25 p-3 backdrop-blur-md sm:p-6">
-      <div className="relative flex h-[min(94%,860px)] min-h-0 w-[min(94%,440px)] flex-col overflow-hidden rounded-[2.75rem] border-[10px] border-neutral-950 bg-neutral-950 text-white shadow-[0_24px_80px_rgba(0,0,0,0.45)] ring-1 ring-white/25">
-        <div className="pointer-events-none absolute left-1/2 top-1.5 z-30 h-5 w-24 -translate-x-1/2 rounded-full bg-black/85 shadow-inner" />
-        <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 px-3 py-2 text-xs">
-        <button
-          type="button"
-          className="shrink-0"
-          onClick={
-            activeApp || showActivity || showSettings
-              ? () => {
-                  setActiveApp(null);
-                  setShowActivity(false);
-                  setShowSettings(false);
-                }
-              : onClose
-          }
-          aria-label="返回"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
-          <span className="max-w-[45vw] truncate text-center font-bold">
-            {selectedCharacter.name} 的手机
-          </span>
-          <select
-            aria-label="选择角色"
-            value={selectedCharacter.id}
-            onChange={(event) => selectCharacter(event.target.value)}
-            className="w-16 shrink-0 rounded-lg bg-white/10 px-1 py-1 text-[10px] outline-none"
+    <div className="relative flex h-full min-h-0 items-center justify-center overflow-hidden bg-black/25 p-3 sm:p-6">
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 scale-110 bg-cover bg-center blur-2xl"
+        style={{
+          background: settings?.wallpaper?.trim()
+            ? (settings.wallpaper.trim().startsWith("linear-gradient")
+              ? settings.wallpaper.trim()
+              : `url(${settings.wallpaper.trim()}) center/cover no-repeat`)
+            : desktopBackground.background,
+        }}
+      />
+      <div aria-hidden="true" className="absolute inset-0 bg-black/10 backdrop-blur-sm" />
+      <div className="relative z-10 flex h-full min-h-0 w-full max-w-[440px] flex-col text-neutral-900">
+        <div className="flex min-h-16 shrink-0 items-center justify-between gap-3 px-4 py-2 text-xs">
+          <label className="relative flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-full py-1 text-left">
+            <img
+              src={selectedCharacter.avatar}
+              alt={selectedCharacter.name}
+              className="h-9 w-9 shrink-0 rounded-full object-cover ring-2 ring-white/50"
+              referrerPolicy="no-referrer"
+            />
+            <span className="min-w-0 truncate font-bold">{selectedCharacter.name}</span>
+            <select
+              aria-label="选择角色"
+              value={selectedCharacter.id}
+              onChange={(event) => selectCharacter(event.target.value)}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            >
+              {characters.map((character) => (
+                <option key={character.id} value={character.id} className="text-black">
+                  {character.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-full px-3 py-2 font-bold text-neutral-800 hover:bg-black/5"
+            aria-label="返回"
           >
-            {characters.map((character) => (
-              <option
-                key={character.id}
-                value={character.id}
-                className="text-black"
-              >
-                {character.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button type="button" onClick={onClose} aria-label="关闭">
-          <X className="h-5 w-5" />
-        </button>
+            返回
+          </button>
         </div>
         <div
-          className="relative mx-auto flex min-h-0 w-full flex-1 overflow-hidden rounded-[2rem] bg-neutral-900"
+          className="relative mx-auto flex min-h-0 w-full flex-1 overflow-hidden rounded-[1.75rem] bg-white/60 shadow-[0_16px_45px_rgba(15,23,42,0.12)] ring-1 ring-white/60 backdrop-blur-xl"
         style={{ background: currentPhone.wallpaper }}
         >
         <div className="absolute inset-x-0 top-0 z-10 flex justify-between px-5 py-3 text-[10px] font-bold text-neutral-800">
@@ -1488,89 +1433,36 @@ export default function AppCharacterPhone({
               </p>
             )}
           </div>
-        ) : showSettings ? (
-          settingsContent
-        ) : showActivity ? (
-          <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-6 pt-14 text-neutral-900">
-            <h2 className="text-xl font-bold">操作痕迹</h2>
-            <p className="mt-2 text-xs text-neutral-600">
-              这部手机会记住有人打开过哪些地方。
-            </p>
-            {currentPhone.activities
-              .slice()
-              .reverse()
-              .map((activity) => (
-                <div
-                  key={activity.id}
-                  className="mt-3 rounded-2xl bg-white/65 p-3"
-                >
-                  <p className="text-sm">{activity.label}</p>
-                  <p className="mt-1 text-[10px] text-neutral-500">
-                    {new Date(activity.timestamp).toLocaleString("zh-CN")}
-                  </p>
-                </div>
-              ))}
-          </div>
-        ) : activeApp ? (
-          <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-6 pt-14 text-neutral-900">
-            {appContent}
-          </div>
         ) : (
-          <div className="flex flex-1 flex-col px-5 pb-8 pt-16 text-neutral-900">
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowSettings(true)}
-                aria-label="手机设置"
-                className="rounded-full bg-white/40 p-2"
-              >
-                <Settings2 className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="mb-6 grid grid-cols-2 gap-3"><div className="col-span-2 row-span-2 overflow-hidden rounded-[1.75rem] bg-white/45 shadow-sm"><TimeWidget id="character-phone-time" isEditing={false} onRemove={() => undefined} /></div></div>
-            <div className="grid grid-cols-3 gap-5">
-              {currentPhone.appOrder
-                .filter((appId) => appId !== "moments")
-                .map((appId) => (
-                <button
-                  key={appId}
-                  type="button"
-                  onClick={() => openApp(appId)}
-                  className="relative flex flex-col items-center gap-2"
-                >
-                  <span
-                    className={`flex h-14 w-14 items-center justify-center rounded-[1.2rem] text-white shadow-lg ${APP_META[appId].color}`}
-                  >
-                    {APP_META[appId].icon}
-                  </span>
-                  <span className="text-[11px] font-bold">
-                    {APP_META[appId].label}
-                  </span>
-                  {appId === "chat" && unreadCount > 0 && (
-                    <span className="absolute right-2 top-[-4px] flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                      {unreadCount}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowActivity(true)}
-              className="mt-6 flex items-center justify-center gap-2 rounded-2xl bg-white/40 py-3 text-[11px] text-neutral-700"
-            >
-              <Activity className="h-3.5 w-3.5" />
-              查看操作痕迹
-            </button>
-            <div className="mt-auto flex items-center justify-center gap-2 text-[10px] text-neutral-700">
-              <Smartphone className="h-3.5 w-3.5" />
-              {isAdvancing
-                ? "正在补齐最近的生活痕迹…"
-                : "最近使用记录和未读通知会在这里逐步生成"}
-            </div>
+          <div
+            className="flex flex-1 flex-col overflow-y-auto text-neutral-900"
+            style={{ padding: "64px 20px 24px" }}
+          >
+            {appContent}
           </div>
         )}
         </div>
+        {unlocked && (
+          <nav className="mt-3 grid shrink-0 grid-cols-5 gap-1 rounded-full border border-white/70 bg-white/80 px-3 py-2.5 text-neutral-500 shadow-[0_12px_30px_rgba(15,23,42,0.12)] backdrop-blur-xl">
+            {PHONE_NAV_APPS.map((appId) => (
+              <button
+                key={appId}
+                type="button"
+                onClick={() => openApp(appId)}
+                className={`relative flex flex-col items-center gap-1 rounded-full py-1.5 text-[10px] font-bold transition-colors ${activeApp === appId ? "bg-neutral-900 text-white shadow-sm" : "hover:bg-black/5"}`}
+                aria-label={APP_META[appId].label}
+              >
+                {APP_META[appId].icon}
+                <span>{APP_META[appId].label}</span>
+                {appId === "chat" && unreadCount > 0 && (
+                  <span className="absolute right-3 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+        )}
       </div>
     </div>
   );

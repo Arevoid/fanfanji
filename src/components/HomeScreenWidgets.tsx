@@ -91,6 +91,7 @@ interface WidgetProps {
   id: string;
   isEditing?: boolean;
   onRemove?: () => void;
+  compact?: boolean;
   // Music states for MusicWidget
   isPlaying?: boolean;
   onTogglePlay?: () => void;
@@ -330,7 +331,7 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
 }
 
 /** Frameless 2×4 clock matching the compact date-over-time reference layout. */
-export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
+export function TimeWidget({ id, isEditing, onRemove, compact = false }: WidgetProps) {
   const [now, setNow] = useState(() => new Date());
   const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(readString(`time_widget_font_color_${id}`).value, "#1c1917"));
   const [draftFontColor, setDraftFontColor] = useState(fontColor);
@@ -397,13 +398,13 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
       >
         <span
           ref={(element) => { textRefs.current[0] = element; }}
-          className="w-full whitespace-nowrap text-center text-[17px] font-bold leading-none tracking-[-0.02em]"
+          className={`w-full whitespace-nowrap text-center font-bold leading-none tracking-[-0.02em] ${compact ? "text-[11px]" : "text-[17px]"}`}
         >
           {display.heading}
         </span>
         <span
           ref={(element) => { textRefs.current[1] = element; }}
-          className="mt-4 whitespace-nowrap text-[clamp(92px,28vw,118px)] font-normal leading-[0.74] tracking-[-0.045em]"
+          className={`whitespace-nowrap font-normal leading-[0.74] tracking-[-0.045em] ${compact ? "mt-1 text-[54px]" : "mt-4 text-[clamp(92px,28vw,118px)]"}`}
         >
           {display.time}
         </span>

@@ -146,7 +146,7 @@ export interface IndexedDbResourceHealthEntry {
 
 export interface StorageHealthFinding {
   key: string;
-  kind: "invalid-json" | "duplicate-id" | "orphan-reference";
+  kind: "invalid-json" | "duplicate-id" | "orphan-reference" | "identity-integrity";
   count: number;
   detail: string;
 }
@@ -223,6 +223,47 @@ function inspectStorageHealth(storage: Storage): StorageHealthReport {
   reportMissingReferences(storageKeys.offlineStories, "relationId", storageKeys.characterRelationships, "线下关系");
   reportMissingReferences(storageKeys.forumReplies, "threadId", storageKeys.forumThreads, "论坛主题");
   reportMissingReferences(storageKeys.moments, "characterId", storageKeys.characters, "角色");
+
+  // Identity switching bugs are usually caused by legacy records whose owner
+  // fields no longer agree. Keep this scan read-only: ownership cannot be
+  // guessed safely when two identities have similar names or avatars.
+  const settingsRaw = storage.getItem(storageKeys.settings);
+  const relationshipRecords = collections.get(storageKeys.characterRelationships) || [];
+  if (settingsRaw) {
+    try {
+      const settings = JSON.parse(settingsRaw) as Record<string, unknown>;
+      const identities = Array.isArray(settings.identities)
+        ? settings.identities.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
+        : [];
+      const identityIds = identities.map((identity) => identity.id).filter((id): id is string => typeof id === "string" && id.length > 0);
+      const identityIdSet = new Set(identityIds);
+      const duplicateIdentityIds = identityIds.length - identityIdSet.size;
+      if (duplicateIdentityIds > 0) {
+        findings.push({ key: storageKeys.settings, kind: "identity-integrity", count: duplicateIdentityIds, detail: "用户身份存在重复 ID，切换结果可能无法稳定对应。" });
+      }
+      const activeIdentityId = typeof settings.activeIdentityId === "string" ? settings.activeIdentityId : "";
+      if (activeIdentityId && !identityIdSet.has(activeIdentityId)) {
+        findings.push({ key: storageKeys.settings, kind: "identity-integrity", count: 1, detail: "当前激活身份 ID 不存在于身份列表。" });
+      }
+      const invalidRelationshipOwners = relationshipRecords.filter((relation) => {
+        const owner = relation.userIdentityId;
+        return typeof owner !== "string" || owner.length === 0 || (identityIdSet.size > 0 && !identityIdSet.has(owner));
+      }).length;
+      if (invalidRelationshipOwners > 0) {
+        findings.push({ key: storageKeys.characterRelationships, kind: "identity-integrity", count: invalidRelationshipOwners, detail: "好友关系引用了缺失或未知的用户身份。" });
+      }
+      const scopedRelationKeys = relationshipRecords
+        .map((relation) => `${String(relation.userIdentityId || "")}\u0000${String(relation.characterId || "")}`)
+        .filter((key) => !key.startsWith("\u0000"));
+      const duplicateScopedRelations = scopedRelationKeys.length - new Set(scopedRelationKeys).size;
+      if (duplicateScopedRelations > 0) {
+        findings.push({ key: storageKeys.characterRelationships, kind: "identity-integrity", count: duplicateScopedRelations, detail: "同一身份下存在重复角色好友关系。" });
+      }
+    } catch {
+      // The generic invalid-json finding above is intentionally kept as the
+      // source of truth for malformed settings.
+    }
+  }
   return { checkedCollections, findings, indexedDb: [], resources: [] };
 }
 

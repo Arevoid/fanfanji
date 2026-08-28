@@ -1,0 +1,46 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const component = readFileSync(new URL("../src/components/AppCharacterPhone.tsx", import.meta.url), "utf8");
+const repository = readFileSync(new URL("../src/core/storage/repositories/characterPhoneRepository.ts", import.meta.url), "utf8");
+const progression = readFileSync(new URL("../src/features/characterPhone/characterPhoneProgression.ts", import.meta.url), "utf8");
+const reaction = readFileSync(new URL("../src/features/characterPhone/characterPhoneReaction.ts", import.meta.url), "utf8");
+const thread = readFileSync(new URL("../src/features/characterPhone/characterPhoneThreadService.ts", import.meta.url), "utf8");
+const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const store = readFileSync(new URL("../src/components/AppStore.tsx", import.meta.url), "utf8");
+
+assert.match(component, /输入密码查看手机/);
+assert.match(component, /failedAttempts >= 5/);
+assert.match(component, /failedAttempts:\s*0,\s*lockedUntil:\s*undefined/);
+assert.match(component, /advanceCharacterPhone/);
+assert.match(component, /setIsAdvancing/);
+assert.match(component, /角色已经知道有人尝试进入/);
+assert.match(component, /awarenessLevel/);
+assert.match(component, /phone-awareness/);
+assert.match(component, /onSendMessage/);
+assert.match(component, /messages|browserHistory|diaryEntries/);
+assert.match(repository, /storageKeys\.characterPhones/);
+assert.match(repository, /phone\.ownerIdentityId === ownerIdentityId[\s\S]*phone\.characterId === characterId/);
+assert.match(progression, /lastOpenedAt/);
+assert.match(progression, /apiChat/);
+assert.match(repository, /hidden: true/);
+assert.match(repository, /deletedAt/);
+assert.match(reaction, /buildCharacterPhoneAwarenessMessage/);
+assert.match(reaction, /傲娇|嘴硬/);
+assert.match(repository, /threadMessages/);
+assert.match(repository, /isNpc: true/);
+assert.match(thread, /operatedByUser/);
+assert.match(thread, /user_edit/);
+assert.match(thread, /shouldUpgradeNpc/);
+assert.match(thread, /phone-thread-reply/);
+assert.match(thread, /聊天记录截图/);
+assert.match(progression, /threadMessage/);
+assert.match(progression, /followUp/);
+assert.match(repository, /phone-post/);
+assert.match(component, /朋友圈/);
+assert.match(component, /phone-proactive/);
+assert.match(app, /get\("characterPhoneTest"\) === "1"/);
+assert.match(app, /setActiveApp\("character-phone"\)/);
+assert.doesNotMatch(store, /name: "角色手机"/);
+
+console.log("character phone MVP tests passed");

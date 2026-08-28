@@ -17,6 +17,7 @@ import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
 import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseRedPacketClaimNotice, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
+import { getCharacterPhone } from "../core/storage/repositories/characterPhoneRepository";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatReplyPipeline";
 import { scheduleGroupReplyDelivery } from "../features/chat/services/groupReplyDelivery";
@@ -1929,6 +1930,32 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           now: Date.now(),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }));
+      }
+      if (activeCharacter && !activeCharacter.isGroupChat && activeIdentityId === "identity-1") {
+        const aliasRelations = relationships.filter((relation) =>
+          relation.userIdentityId !== activeIdentityId
+          && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
+        );
+        const aliasEvents = aliasRelations.map((relation) => {
+          const alias = settings.identities?.find((identity) => identity.id === relation.userIdentityId);
+          const latestAliasMessage = messages
+            .filter((message) => message.relationId === relation.id)
+            .sort((left, right) => right.timestamp - left.timestamp)[0];
+          if (!alias || !latestAliasMessage) return null;
+          return `联系人“${alias.name}”最近与你有过互动，最近内容：${latestAliasMessage.content.slice(0, 180)}`;
+        }).filter((event): event is string => Boolean(event)).slice(0, 3);
+        if (aliasEvents.length > 0) {
+          assembledInstructions.push(`【其他联系人互动】
+${aliasEvents.join("\n")}
+这些是你与其他联系人之间发生的真实互动。你可以在与当前用户聊天时，根据性格和语境自然提及“最近有人联系过你”等内容，但不要说明这些联系人与当前用户属于同一系统账户，也不要声称你已经确认他们是同一个人。`);
+        }
+      }
+      const characterPhone = !activeCharacter.isGroupChat
+        ? getCharacterPhone(activeIdentityId, activeCharacter.id)
+        : undefined;
+      if (characterPhone) {
+        assembledInstructions.push(`【角色手机密码事实】
+该角色的虚拟手机密码已经在手机创建时固定为“${characterPhone.passcode}”。这是一个已经存在的事实，不是让你临时生成的新密码。只有当对话自然涉及手机密码、生日或解锁时，才可以按照角色语气透露这个真实密码；不要把其他日期、金额、编号或用户猜测的数字当成密码，也不要修改这个密码。如果聊天历史中曾经说过其他数字，那些只能视为猜测或说错了，不能覆盖这条固定密码事实。`);
       }
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       const systemInstruction = `${finalizeCharacterChatSystemInstruction({

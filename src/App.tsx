@@ -137,6 +137,7 @@ import {
   Settings as SettingsIcon,
   ShoppingBag,
   WalletCards,
+  Smartphone,
   X
 } from "lucide-react";
 
@@ -154,6 +155,7 @@ const loadAppOffline = () => import("./components/AppOffline");
 const loadAppSchedule = () => import("./components/AppSchedule");
 const loadAppReading = () => import("./components/AppReading");
 const loadAppCinema = () => import("./components/AppCinema");
+const loadAppCharacterPhone = () => import("./components/AppCharacterPhone");
 
 // Vite can briefly return a failed module response while the dev server is
 // transforming the large chat module. Give the same navigation attempt one
@@ -186,6 +188,7 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   schedule: withModuleRetry(loadAppSchedule),
   reading: withModuleRetry(loadAppReading),
   cinema: withModuleRetry(loadAppCinema),
+  "character-phone": withModuleRetry(loadAppCharacterPhone),
 };
 
 // Load every app module as soon as the phone shell enters. This keeps the
@@ -206,6 +209,7 @@ const ALL_APP_IDS = [
   "schedule",
   "reading",
   "cinema",
+  "character-phone",
 ] as const;
 
 const ALL_APP_MODULES_PROMISE = Promise.all(
@@ -237,6 +241,7 @@ const AppOffline = React.lazy(loadAppOffline);
 const AppSchedule = React.lazy(loadAppSchedule);
 const AppReading = React.lazy(loadAppReading);
 const AppCinema = React.lazy(loadAppCinema);
+const AppCharacterPhone = React.lazy(loadAppCharacterPhone);
 class LazyAppErrorBoundary extends React.Component<
   React.PropsWithChildren<{ visible?: boolean }>,
   { error: Error | null }
@@ -305,6 +310,7 @@ const AppIcons = {
   schedule: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
   reading: (className = "w-6 h-6") => <BookOpenText className={className} strokeWidth={1.8} />,
   cinema: (className = "w-6 h-6") => <Film className={className} strokeWidth={1.8} />,
+  "character-phone": (className = "w-6 h-6") => <Smartphone className={className} strokeWidth={1.8} />,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.8} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.8} />,
@@ -358,6 +364,17 @@ const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
 
 // Default Seed Characters
 const DEFAULT_CHARACTERS: Character[] = [];
+const CHARACTER_PHONE_TEST_CHARACTER: Character = {
+  id: "character-phone-test",
+  name: "测试角色",
+  age: "",
+  avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
+  gender: "神秘",
+  mbti: "",
+  personality: "仅用于角色手机功能测试。",
+  backstory: "",
+  greeting: "今天也有好好吃饭吗？",
+};
 
 const DEFAULT_SETTINGS: UserSettings = {
   name: "饭饭",
@@ -464,16 +481,25 @@ export default function App() {
   const seedScheduleForFreshInstall = useRef(
     typeof window !== "undefined" && shouldSeedScheduleForFreshInstall(window.localStorage),
   ).current;
+  const isCharacterPhoneTest = typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get("characterPhoneTest") === "1";
 
   // Load initial states from LocalStorage or fallbacks
-  const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
+  const [characters, setCharacters] = useState<Character[]>(() => {
+    const loaded = loadCharacters(DEFAULT_CHARACTERS).value;
+    return isCharacterPhoneTest && loaded.length === 0
+      ? [CHARACTER_PHONE_TEST_CHARACTER]
+      : loaded;
+  });
 
   useEffect(() => {
     let active = true;
     initializeCharacterRepository(DEFAULT_CHARACTERS).then((result) => {
       if (active && result.valid) {
         skipNextCharactersPersistenceRef.current = true;
-        setCharacters(result.value);
+        setCharacters(isCharacterPhoneTest && result.value.length === 0
+          ? [CHARACTER_PHONE_TEST_CHARACTER]
+          : result.value);
       }
     });
     return () => { active = false; };
@@ -581,6 +607,15 @@ export default function App() {
   const [activeApp, setActiveApp] = useState<string | null>(null);
   const [mountedAppIds, setMountedAppIds] = useState<Set<string>>(() => new Set());
   const isAppMounted = (appId: string) => activeApp === appId || mountedAppIds.has(appId);
+  // Temporary test-only entry for the unfinished character phone experiment.
+  // It is intentionally query-gated and does not alter installed apps or the
+  // normal desktop/store surfaces.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("characterPhoneTest") === "1") {
+      setActiveApp("character-phone");
+    }
+  }, []);
   useEffect(() => {
     if (!activeApp) return;
     setMountedAppIds((current) => current.has(activeApp)
@@ -3922,7 +3957,7 @@ export default function App() {
           ) : (
             // Full screen app view ports with transitions
             <div 
-              className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full"
+              className={`absolute inset-0 z-30 ${activeApp === "character-phone" ? "bg-transparent" : "bg-slate-50/92 backdrop-blur-md"} flex flex-col h-full`}
               style={{
                  paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
                 paddingBottom: "env(safe-area-inset-bottom, 0px)"
@@ -3997,6 +4032,11 @@ export default function App() {
                       onSaveCharacter={handleSaveCharacter}
                       onDeleteCharacter={handleDeleteCharacter}
                       onClose={() => setActiveApp(null)}
+                      onOpenCharacterPhone={
+                        typeof window !== "undefined" && new URLSearchParams(window.location.search).get("characterPhoneTest") === "1"
+                          ? () => setActiveApp("character-phone")
+                          : undefined
+                      }
                       onSaveWorldBookEntries={handleSaveWorldBookEntries}
                     />
                   </LazyAppBoundary>
@@ -4109,6 +4149,20 @@ export default function App() {
                       relationships={relationships}
                       memories={memories}
                       onSaveMemories={setMemories}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("character-phone") && (
+                  <LazyAppBoundary visible={activeApp === "character-phone"}>
+                    <AppCharacterPhone
+                      userIdentityId={activeIdentityId}
+                      characters={characters}
+                      relationships={relationships}
+                      settings={settings}
+                      resolvedTheme={resolvedTheme}
+                      onSendMessage={handleSendMessage}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

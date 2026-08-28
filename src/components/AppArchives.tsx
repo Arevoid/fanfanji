@@ -13,6 +13,7 @@ interface AppArchivesProps {
   onSaveCharacter: (character: Character) => void | boolean | Promise<boolean>;
   onDeleteCharacter: (id: string, skipConfirm?: boolean) => void;
   onClose: () => void;
+  onOpenCharacterPhone?: (characterId: string) => void;
   worldBookEntries?: WorldBookEntry[];
   onSaveWorldBookEntries?: (entries: WorldBookEntry[]) => void;
 }
@@ -30,6 +31,7 @@ export default function AppArchives({
   onSaveCharacter,
   onDeleteCharacter,
   onClose,
+  onOpenCharacterPhone,
   worldBookEntries = [],
   onSaveWorldBookEntries,
 }: AppArchivesProps) {
@@ -1170,6 +1172,18 @@ export default function AppArchives({
                         {char.personality}
                       </p>
                     </div>
+                    {onOpenCharacterPhone && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenCharacterPhone(char.id);
+                        }}
+                        className="absolute bottom-3 right-3 rounded-full bg-neutral-900 px-2.5 py-1 text-[10px] font-bold text-white"
+                      >
+                        角色手机测试
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
