@@ -73,6 +73,7 @@ export function StorageDiagnosticsCard({
             {diagnostics.migrationLock && <div>迁移锁：{diagnostics.migrationLock.ownerId}，有效至 {new Date(diagnostics.migrationLock.expiresAt).toLocaleString()}</div>}
             <div>状态：{diagnostics.pressure === "critical" ? "空间严重不足" : diagnostics.pressure === "warning" ? "空间偏高" : diagnostics.pressure === "normal" ? "正常" : "未知"}</div>
             <div>健康扫描：已检查 {diagnostics.health.checkedCollections} 个数据集合，发现 {diagnostics.health.findings.length} 项待检查问题</div>
+            {diagnostics.identitySummary && <div>身份关系摘要：{diagnostics.identitySummary.identityCount} 个身份，当前身份{diagnostics.identitySummary.activeIdentityIdPresent ? "有效" : "无效"}；{diagnostics.identitySummary.identities.map((identity) => `${identity.idFingerprint} 好友 ${identity.relationshipCount} 人`).join("、")}</div>}
             {diagnostics.health.indexedDb.length > 0 && <div>IndexedDB：{diagnostics.health.indexedDb.map((database) => `${database.name}（${database.records} 条）`).join("、")}</div>}
             {diagnostics.health.resources.length > 0 && <div>资源引用：{diagnostics.health.resources.map((resource) => `${resource.database}/${resource.store}（已存 ${resource.stored}，引用 ${resource.referenced}，孤儿 ${resource.orphaned}，缺失 ${resource.missing}）`).join("；")}</div>}
             {diagnostics.health.findings.slice(0, 5).map((finding) => <div key={`${finding.key}-${finding.kind}`} className="text-amber-700">待检查：{finding.key} · {finding.detail}</div>)}

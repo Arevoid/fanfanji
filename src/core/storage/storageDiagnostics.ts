@@ -28,6 +28,20 @@ export interface StorageDiagnostics {
   migrationLock?: StorageMigrationLock | null;
   pressure: "normal" | "warning" | "critical" | "unknown";
   health: StorageHealthReport;
+  identitySummary?: IdentityDiagnosticSummary;
+}
+
+export interface IdentityDiagnosticSummary {
+  identityCount: number;
+  activeIdentityIdPresent: boolean;
+  identities: Array<{
+    idFingerprint: string;
+    nameLength: number;
+    nameFingerprint: string;
+    avatarFingerprint: string;
+    relationshipCount: number;
+    relationshipCharacterFingerprints: string[];
+  }>;
 }
 
 export interface StorageDiagnosticReport {
@@ -315,6 +329,51 @@ async function collectReferencedAssetIds(storage: Storage): Promise<ReferencedAs
   return { ids: referenced, complete };
 }
 
+function fingerprint(value: unknown): string {
+  const input = typeof value === "string" ? value : String(value ?? "");
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function buildIdentityDiagnosticSummary(storage: Storage): IdentityDiagnosticSummary | undefined {
+  const settingsRaw = storage.getItem(storageKeys.settings);
+  if (!settingsRaw) return undefined;
+  try {
+    const settings = JSON.parse(settingsRaw) as Record<string, unknown>;
+    const identities = Array.isArray(settings.identities)
+      ? settings.identities.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
+      : [];
+    const relationshipsRaw = storage.getItem(storageKeys.characterRelationships);
+    const relationships = relationshipsRaw ? JSON.parse(relationshipsRaw) : [];
+    const relationRecords = Array.isArray(relationships)
+      ? relationships.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
+      : [];
+    const activeIdentityId = typeof settings.activeIdentityId === "string" ? settings.activeIdentityId : "";
+    return {
+      identityCount: identities.length,
+      activeIdentityIdPresent: identities.some((identity) => identity.id === activeIdentityId),
+      identities: identities.map((identity) => {
+        const id = typeof identity.id === "string" ? identity.id : "";
+        const ownedRelationships = relationRecords.filter((relation) => relation.userIdentityId === id);
+        return {
+          idFingerprint: fingerprint(id),
+          nameLength: typeof identity.name === "string" ? identity.name.length : 0,
+          nameFingerprint: fingerprint(identity.name),
+          avatarFingerprint: fingerprint(identity.avatar),
+          relationshipCount: ownedRelationships.length,
+          relationshipCharacterFingerprints: ownedRelationships.map((relation) => fingerprint(relation.characterId)).sort(),
+        };
+      }),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function getExistingDatabaseNames(): Promise<Set<string>> {
   if (typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function") return Promise.resolve(new Set());
   return indexedDB.databases()
@@ -514,6 +573,9 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
   health.resources = typeof window !== "undefined"
     ? await inspectIndexedDbResources(window.localStorage, existingDatabaseNames)
     : [];
+  const identitySummary = typeof window !== "undefined"
+    ? buildIdentityDiagnosticSummary(window.localStorage)
+    : undefined;
   return {
     localStorageBytes,
     localStorageEntries: entries,
@@ -526,6 +588,7 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
     currentSchemaVersion: CURRENT_STORAGE_SCHEMA_VERSION,
     migrationScriptVersion: STORAGE_MIGRATION_SCRIPT_VERSION,
     health,
+    identitySummary,
     pressure: ratio === undefined ? "unknown" : ratio >= 0.95 ? "critical" : ratio >= 0.8 ? "warning" : "normal",
   };
 }
