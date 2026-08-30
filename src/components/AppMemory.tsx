@@ -565,8 +565,8 @@ export default function AppMemory({
                           <textarea
                             value={editContent}
                             onChange={(e) => setEditContent(e.target.value)}
-                            rows={2}
-                            className="w-full bg-slate-50 p-2 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 resize-none leading-relaxed font-medium"
+                            rows={5}
+                            className="w-full min-h-[132px] bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 resize-y leading-relaxed font-medium"
                           />
                           <div className="flex justify-end gap-2">
                             <button
