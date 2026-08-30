@@ -20,6 +20,7 @@ import { OfflineWorkspaceHeader } from "../features/offline/components/OfflineWo
 import { useOfflineStorySettings } from "../features/offline/hooks/useOfflineStorySettings";
 import { useOfflineToast } from "../features/offline/hooks/useOfflineToast";
 import { OfflineStoryCard } from "./offline/OfflineStoryCard";
+import { OFFLINE_CSS_EXAMPLE_TEMPLATE, scopeOfflineCustomCss } from "./offline/offlineCustomCss";
 import { MessageList } from "../features/chat/components/MessageList";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
 import { resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
@@ -237,6 +238,26 @@ export default function AppOffline({
     settingsStylePromptContent, setSettingsStylePromptContent, settingsCustomCss, setSettingsCustomCss,
     hasSelectedCustomPreset, handleSaveSettings, handleRefreshWorldBookSnapshot, handleCreateCustomPreset, handleDeleteCustomPreset,
   } = offlineStorySettings;
+  const [offlineCssTemplateCopied, setOfflineCssTemplateCopied] = useState(false);
+
+  const copyOfflineCssTemplate = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(OFFLINE_CSS_EXAMPLE_TEMPLATE);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = OFFLINE_CSS_EXAMPLE_TEMPLATE;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+      setOfflineCssTemplateCopied(true);
+      window.setTimeout(() => setOfflineCssTemplateCopied(false), 1500);
+    } catch {
+      alert("复制失败，请手动复制输入框中的模板。");
+    }
+  };
   const selectedChar = selectableCharacters.find(c => c.id === selectedCharId) || selectableCharacters[0];
   const charStories = offlineStories.filter((story) =>
     canAccessStoryFromCurrentRelation(story)
@@ -396,7 +417,8 @@ export default function AppOffline({
   return (
     <div
       data-theme-page="offline"
-      className="offline-page w-full h-full min-h-0 flex flex-col relative overflow-hidden font-sans select-none"
+      className={`offline-page ${activeStory ? "is-workspace" : "is-directory"} ${isSettingsOpen ? "is-settings" : ""} w-full h-full min-h-0 flex flex-col relative overflow-hidden font-sans select-none`}
+      data-offline-view={activeStory ? (isSettingsOpen ? "settings" : "workspace") : "directory"}
       style={readingStyle}
     >
       
@@ -422,10 +444,10 @@ export default function AppOffline({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50"
+            className="offline-story-directory flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50"
           >
             {/* Header */}
-            <div className="relative flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0">
+            <div className="offline-directory-header relative flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0">
               <button
                 onClick={onClose}
                 className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-500 transition-colors"
@@ -452,8 +474,8 @@ export default function AppOffline({
             </div>
 
             {/* Character Selector Grid */}
-            <div className="px-3 pt-3 pb-2 bg-white border-b border-slate-100">
-              <div className="flex items-start justify-start gap-3 overflow-x-auto pb-1 no-scrollbar">
+            <div className="offline-character-filter px-3 pt-3 pb-2 bg-white border-b border-slate-100">
+              <div className="offline-character-filter-list flex items-start justify-start gap-3 overflow-x-auto pb-1 no-scrollbar">
                 {selectableCharacters.map(char => {
                   const isSel = char.id === selectedCharId;
                   const charRelation = relationships.find((relation) =>
@@ -478,12 +500,12 @@ export default function AppOffline({
                     <button
                       key={char.id}
                       onClick={() => setSelectedCharId(char.id)}
-                      className={`group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 transition-all ${
+                      className={`offline-character-filter-item ${isSel ? "is-active" : ""} group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 transition-all ${
                         isSel ? "text-slate-900" : "text-slate-600 hover:bg-slate-50"
                       }`}
                     >
                       <span className={`relative rounded-full p-0.5 transition-all ${isSel ? "bg-rose-300" : "bg-transparent"}`}>
-                        <img src={char.avatar} alt="" className="h-8 w-8 rounded-full object-cover border border-slate-200" />
+                        <img src={char.avatar} alt="" className="offline-character-filter-avatar h-8 w-8 rounded-full object-cover border border-slate-200" />
                         {isSel && <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-rose-400 text-[7px] font-bold text-white">✓</span>}
                       </span>
                       <span className="max-w-full truncate text-[9px] font-bold leading-3">{char.remark || char.name}</span>
@@ -497,7 +519,7 @@ export default function AppOffline({
             </div>
 
             {/* Stories Directory Content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="offline-story-directory-list flex-1 overflow-y-auto p-4 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <h2 className="text-xs font-bold text-slate-500 flex items-center gap-1">
                   <BookOpen className="w-3.5 h-3.5 text-slate-400" />
@@ -666,7 +688,7 @@ export default function AppOffline({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50 offline-workspace-container"
+            className={`offline-story-workspace flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50 ${activeStory ? `is-mode-${activeStory.mode}` : ""}`}
           >
             {isSettingsOpen ? (
               /* ================= STORY SETTINGS PAGE ================= */
@@ -901,51 +923,24 @@ export default function AppOffline({
 
                   {/* Custom CSS */}
                   <section className="space-y-2">
-                    <h4 className="text-sm font-medium text-[#999999]">自定义美化</h4>
                   <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">线下卡片美化 (自定义 CSS)</label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSettingsCustomCss(`/* 仿宣纸文艺背景 */
-.offline-workspace-container {
-  background-color: #fdfaf2 !important;
-}
-.offline-message-list {
-  background-color: transparent !important;
-}
-.offline-msg-content {
-  font-size: calc(15px * var(--app-font-scale, 1)) !important;
-  color: #3f3f46 !important;
-  line-height: 1.8 !important;
-  letter-spacing: 0.05em !important;
-}
-.offline-dialogue-text {
-  color: #c2410c !important; /* 朱红色对话高亮 */
-  font-weight: 600 !important;
-}
-.offline-narrative-text {
-  color: #52525b !important;
-  font-style: italic !important;
-}`);
-                        }}
-                        className="text-[10px] text-indigo-600 font-bold hover:underline"
-                      >
-                        导入文艺宣纸模板
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">线下界面样式 CSS</label>
+                      </div>
+                      <button type="button" onClick={() => void copyOfflineCssTemplate()} className="shrink-0 rounded-[8px] bg-slate-100 px-2 py-1 text-[9px] font-medium text-slate-500 transition-colors hover:bg-slate-200">
+                        {offlineCssTemplateCopied ? "已复制" : "复制模板"}
                       </button>
                     </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">用于修改当前线下页面视觉效果，包括背景、导航、剧情卡片、正文和输入区域等。</p>
                     <textarea
                       value={settingsCustomCss}
                       onChange={(e) => setSettingsCustomCss(e.target.value)}
-                      placeholder={`/* 支持代码美化，常用CSS类名： */
-.offline-workspace-container { ... }
-.offline-message-list { ... }
-.offline-msg-content { ... }`}
+                      placeholder={OFFLINE_CSS_EXAMPLE_TEMPLATE}
                       rows={5}
                       className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-3 py-2 font-mono text-xs text-[#111111] outline-none focus:border-slate-400"
                     />
-                    <p className="text-[10px] text-slate-400">在这里输入 CSS 样式规则，点击保存后即可在当前剧本空间内实时渲染应用！</p>
+                    <p className="text-[10px] text-slate-400">保存剧本设置后，样式会在当前线下页面中生效。</p>
                   </div>
                   </section>
                 </div>
@@ -1005,12 +1000,12 @@ export default function AppOffline({
             <MessageList
               messages={visibleStoryMessages}
               scrollRef={workspaceScrollRef}
-              className="offline-story-scroll offline-message-list"
+              className="offline-story-scroll"
               style={{}}
               contentClassName="offline-story-list"
               header={(
                 <>
-                  {activeStory.customCss && <style dangerouslySetInnerHTML={{ __html: activeStory.customCss }} />}
+                  {activeStory.customCss && <style data-offline-custom-css dangerouslySetInnerHTML={{ __html: scopeOfflineCustomCss(activeStory.customCss) }} />}
                   {visibleStoryMessages.length > 0 && <div className="offline-story-session"><span>{new Date(activeStory.createdAt).toLocaleDateString()} · 剧情记录</span><span>{visibleStoryMessages.length} 段</span></div>}
                   {visibleStoryMessages.length === 0 && (
                     <div className="offline-empty-state">

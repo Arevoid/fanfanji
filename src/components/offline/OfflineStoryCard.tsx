@@ -58,16 +58,16 @@ export function OfflineStoryCard({ message, character, settings, showAvatars, me
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <article className={`offline-story-card ${isUser ? "is-user" : "is-character"}`}>
+    <article className={`offline-story-card ${isUser ? "is-user offline-story-card--user" : "is-character offline-story-card--character"}`}>
       <header className="offline-story-card-header">
         <div className="offline-story-author">
-          {showAvatars && avatar ? <img src={avatar} alt="" referrerPolicy="no-referrer" /> : <span className="offline-author-placeholder" />}
-          <div><strong>{authorName}</strong><span>{formatTime(message.timestamp)}</span></div>
+          {showAvatars && avatar ? <img className="offline-story-author-avatar" src={avatar} alt="" referrerPolicy="no-referrer" /> : <span className="offline-author-placeholder offline-story-author-avatar" />}
+          <div className="offline-story-author-copy"><strong>{authorName}</strong><span className="offline-story-card-time">{formatTime(message.timestamp)}</span></div>
         </div>
       </header>
-      <div className="offline-raw-content">{renderStoryMarkup(message.content)}</div>
+      <div className="offline-story-card-content offline-raw-content">{renderStoryMarkup(message.content)}</div>
       <footer className="offline-story-card-footer">
-        <div className="offline-node-menu-anchor">
+        <div className="offline-story-card-actions offline-node-menu-anchor">
           <button ref={menuTriggerRef} type="button" className="offline-node-trigger" onClick={onMenuToggle} aria-label="打开剧情节点菜单"><MoreHorizontal size={20} /></button>
           {menuOpen && <OfflineNodeMenu anchorRef={menuTriggerRef} onEdit={onEdit} onDelete={onDelete} onGuidance={onGuidance} onRegenerate={isUser ? undefined : onRegenerate} onClose={onMenuToggle} />}
         </div>

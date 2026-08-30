@@ -24,7 +24,7 @@ export function OfflineWorkspaceHeader({
   const closeMenu = () => setMenuOpen(false);
 
   return (
-    <header className="offline-workspace-header">
+    <header className={`offline-workspace-header offline-workspace-header--${story.mode}`} data-offline-mode={story.mode}>
       <div className="offline-workspace-nav">
         <button type="button" onClick={onExit} aria-label="返回线下故事列表" className="offline-icon-button offline-workspace-back app-nav-icon-button">
           <ArrowLeft size={18} />
