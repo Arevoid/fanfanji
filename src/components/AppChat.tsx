@@ -2123,7 +2123,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
             signal,
             shouldCancel: isCancelledCallTurn,
             onTyping: setIsTyping,
-            onSendMessage: onSendMessageRaw,
+            onSendMessage: isConnectedVoiceCall ? onSendMessage : onSendMessageRaw,
           });
           if (signal?.aborted) return;
 
