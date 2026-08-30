@@ -2399,6 +2399,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     sendCustomMessage(
       `[表情]|${sticker.name}|sticker://${sticker.id}|${encodeURIComponent(semanticDescription)}`,
       capturedContext,
+      { triggerReply: false },
     );
 
     if (!sticker.semanticDescription && settings.apiKey) {
@@ -6428,7 +6429,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                     onClick={() => {
                       if (!voiceText.trim()) return;
                       const secs = Math.max(1, Math.min(60, Math.ceil(voiceText.trim().length * 0.35 + 1.2)));
-                      sendCustomMessage(`[语音]|${secs}|${voiceText.trim()}`);
+                      sendCustomMessage(`[语音]|${secs}|${voiceText.trim()}`, activeRuntimeContext, { triggerReply: false });
                       setVoiceText("");
                       setActiveAttachModal(null);
                     }}
