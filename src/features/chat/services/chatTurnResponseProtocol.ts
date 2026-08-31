@@ -114,15 +114,21 @@ const readVoice = (value: unknown): InlineInnerVoicePayload | undefined => {
 export function parseChatTurnResponse(text: string): ParsedChatTurnResponse {
   const candidate = cleanJsonCandidate(text);
   const value = parseJsonRecord(candidate);
-  if (value && typeof value.reply === "string" && value.reply.trim()) {
+  const reply = value && Array.isArray(value.reply)
+    ? value.reply.filter((item): item is string => typeof item === "string").join("\n")
+    : value?.reply;
+  if (typeof reply === "string" && reply.trim()) {
     return {
-      reply: value.reply.trim(),
+      reply: reply.trim(),
       ...(typeof value.translation === "string" && value.translation.trim() ? { translation: value.translation.trim() } : {}),
       innerVoice: readVoice(value.innerVoice),
     };
   }
   if (value && Array.isArray(value.replies)) {
     return { reply: JSON.stringify({ replies: value.replies }), innerVoice: undefined };
+  }
+  if (/^\s*\{[\s\S]*\}\s*$/u.test(candidate) && /["']reply["']\s*:/u.test(candidate)) {
+    throw new Error("模型返回了无法识别的结构化回复格式。");
   }
   return { reply: text };
 }
