@@ -19,6 +19,7 @@ export async function generateAutomaticMomentReply(input: {
   targetDescription: string;
   userCommentText: string;
   replyingToContent?: string;
+  replyTargetName?: string;
   character: Character;
   relationship: CharacterRelationship;
   worldBookEntries: readonly WorldBookEntry[];
@@ -51,7 +52,7 @@ export async function generateAutomaticMomentReply(input: {
       ...input.targetMoment.comments,
       {
         id: "public-comment-input",
-        authorName: input.settings.name,
+        authorName: input.replyTargetName || input.settings.name,
         authorAvatar: input.settings.avatar,
         content: input.userCommentText,
         timestamp: Date.now(),
@@ -91,7 +92,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(input.charac
       apiTemperature: input.settings.apiTemperature,
     },
     character: input.character,
-    userName: input.settings.name,
+    userName: input.replyTargetName || input.settings.name,
     cleanText: input.cleanText,
     temporalContext,
     publicContext,

@@ -14,6 +14,7 @@ interface ProactiveChatPassDependencies {
   updateRelationshipSession: (relationId: string, patch: Partial<CharacterRelationship>) => void;
   triggerProactiveFor: (relationId: string, customTaskText?: string, backdateTimestamp?: number) => void | Promise<void>;
   checkAndTriggerCharacterMoments: () => void | Promise<void>;
+  runRelationshipNetworkNpcAutomationPass?: () => void | Promise<void>;
   now?: () => number;
   random?: () => number;
 }
@@ -83,4 +84,5 @@ export async function runBackgroundProactivePass(deps: ProactiveChatPassDependen
     deps.triggerProactiveFor(relation.id);
   });
   await deps.checkAndTriggerCharacterMoments();
+  await deps.runRelationshipNetworkNpcAutomationPass?.();
 }

@@ -9,10 +9,12 @@ import { readString, remove as removeStoredValue, writeJson, writeString } from 
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { initializeMessages, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
-import { initializeMomentRepository, loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
+import { flushMoments, initializeMomentRepository, loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
 import { removeMemoriesForMoment } from "./features/moments/services/momentMemory";
 import { sanitizeMomentPublishText } from "./features/moments/services/momentContent";
+import { cleanAndExtractMoment } from "./features/moments/services/chatMomentUtils";
+import { generateRelationshipNetworkNpcMoment } from "./features/moments/services/relationshipNetworkNpcMomentService";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
@@ -55,7 +57,20 @@ import {
 } from "./core/storage/repositories/musicWidgetRepository";
 import { imageAssetDb } from "./utils/imageAssetDb";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
-import { DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import { createRelationship, DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import type { RelationshipNetworkNpc } from "./domain/relationshipNetwork/relationshipNetworkTypes";
+import { findRelationshipNetworkChatLink, loadRelationshipNetworkChatLinks } from "./core/storage/repositories/relationshipNetworkChatLinkRepository";
+import { findRelationshipNetworkNpcAutomationState, upsertRelationshipNetworkNpcAutomationState } from "./core/storage/repositories/relationshipNetworkNpcAutomationRepository";
+import { loadRelationshipNetworkNpcs } from "./core/storage/repositories/relationshipNetworkRepository";
+import {
+  appendRelationshipNetworkPendingMoment,
+  listRelationshipNetworkPendingMomentsForIdentity,
+  removeRelationshipNetworkPendingMoment,
+} from "./core/storage/repositories/relationshipNetworkPendingMomentRepository";
+import type { RelationshipNetworkPendingMoment } from "./domain/relationshipNetwork/relationshipNetworkTypes";
+import { selectRelationshipNetworkNpcMomentAutomationCandidate } from "./features/moments/services/relationshipNetworkNpcAutomationService";
+import type { RelationshipNetworkNpcMomentAutomationTrigger } from "./features/moments/services/relationshipNetworkNpcAutomationService";
+import { captureRelationshipCreatedEvent } from "./features/characterLife/services/characterEventCaptureService";
 import { messageMatchesMutationScope, type MessageMutationScope } from "./features/chat/context/directInteractionScope";
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, removePaymentStatusesForMessages, type RedPacketStatusMap } from "./features/chat/services/paymentScope";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
@@ -99,15 +114,16 @@ import { useTheme } from "./features/theme/ThemeProvider";
 import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
-import { retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
+import { listByRelation as listCharacterEventsByRelation, retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
 import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
-import { removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
+import { loadMomentTopicRecords, removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
 import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters } from "./core/storage/repositories/proactiveTopicRepository";
 import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/services/legacyCharacterKnowledgeMigration";
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
 import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
 import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
+import { MOMENT_CHARACTER_EXPRESSION_PROMPT } from "./utils/livingPrompt";
 import {
   migrateLegacyClassicBubblePreset,
   migrateUnreadableClassicBubblePalette,
@@ -124,6 +140,7 @@ import {
   Cloud,
   ContactRound,
   Film,
+  Network,
   Images,
   Layers3,
   MessageCircle,
@@ -156,6 +173,7 @@ const loadAppSchedule = () => import("./components/AppSchedule");
 const loadAppReading = () => import("./components/AppReading");
 const loadAppCinema = () => import("./components/AppCinema");
 const loadAppCharacterPhone = () => import("./components/AppCharacterPhone");
+const loadAppRelationshipNetwork = () => import("./components/AppRelationshipNetwork");
 
 // Vite can briefly return a failed module response while the dev server is
 // transforming the large chat module. Give the same navigation attempt one
@@ -189,6 +207,7 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   reading: withModuleRetry(loadAppReading),
   cinema: withModuleRetry(loadAppCinema),
   "character-phone": withModuleRetry(loadAppCharacterPhone),
+  "relationship-network": withModuleRetry(loadAppRelationshipNetwork),
 };
 
 // Load every app module as soon as the phone shell enters. This keeps the
@@ -210,6 +229,7 @@ const ALL_APP_IDS = [
   "reading",
   "cinema",
   "character-phone",
+  "relationship-network",
 ] as const;
 
 const ALL_APP_MODULES_PROMISE = Promise.all(
@@ -242,6 +262,7 @@ const AppSchedule = React.lazy(loadAppSchedule);
 const AppReading = React.lazy(loadAppReading);
 const AppCinema = React.lazy(loadAppCinema);
 const AppCharacterPhone = React.lazy(loadAppCharacterPhone);
+const AppRelationshipNetwork = React.lazy(loadAppRelationshipNetwork);
 class LazyAppErrorBoundary extends React.Component<
   React.PropsWithChildren<{ visible?: boolean }>,
   { error: Error | null }
@@ -311,6 +332,7 @@ const AppIcons = {
   reading: (className = "w-6 h-6") => <BookOpenText className={className} strokeWidth={1.8} />,
   cinema: (className = "w-6 h-6") => <Film className={className} strokeWidth={1.8} />,
   "character-phone": (className = "w-6 h-6") => <Smartphone className={className} strokeWidth={1.8} />,
+  "relationship-network": (className = "w-6 h-6") => <Network className={className} strokeWidth={1.8} />,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.8} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.8} />,
@@ -364,6 +386,47 @@ const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
 
 // Default Seed Characters
 const DEFAULT_CHARACTERS: Character[] = [];
+
+function createChatCharacterFromRelationshipNetworkNpc(npc: RelationshipNetworkNpc, characterId: string, ownerIdentityId: string): Character {
+  return {
+    id: characterId,
+    name: npc.name,
+    avatar: npc.avatar || "👤",
+    personality: npc.personality || npc.summary || "一个从关系网档案创建的角色。",
+    backstory: [npc.summary, npc.motivation ? `当前动机：${npc.motivation}` : "", npc.tags?.length ? `标签：${npc.tags.join("、")}` : ""].filter(Boolean).join("\n\n"),
+    remark: npc.role || "来自关系网的 NPC",
+    ownerIdentityId,
+    relationshipNetworkNpcId: npc.id,
+  };
+}
+
+function hydrateRelationshipNetworkCharacters(baseCharacters: Character[]): Character[] {
+  const npcs = loadRelationshipNetworkNpcs().value;
+  const npcById = new Map(npcs.map((npc) => [npc.id, npc]));
+  const nextCharacters = [...baseCharacters];
+  loadRelationshipNetworkChatLinks().forEach((link) => {
+    const npc = npcById.get(link.npcId);
+    if (!npc || nextCharacters.some((character) => character.id === link.characterId)) return;
+    nextCharacters.push(createChatCharacterFromRelationshipNetworkNpc(npc, link.characterId, link.ownerIdentityId));
+  });
+  return nextCharacters;
+}
+
+function hydrateRelationshipNetworkRelationships(baseRelationships: CharacterRelationship[]): CharacterRelationship[] {
+  const nextRelationships = [...baseRelationships];
+  loadRelationshipNetworkChatLinks().forEach((link) => {
+    if (nextRelationships.some((relationship) => relationship.id === link.relationId)) return;
+    nextRelationships.push(createRelationship({
+      id: link.relationId,
+      characterId: link.characterId,
+      userIdentityId: link.ownerIdentityId,
+      now: link.createdAt,
+      relationship: "unknown",
+    }));
+  });
+  return nextRelationships;
+}
+
 const CHARACTER_PHONE_TEST_CHARACTER: Character = {
   id: "character-phone-test",
   name: "测试角色",
@@ -486,7 +549,7 @@ export default function App() {
 
   // Load initial states from LocalStorage or fallbacks
   const [characters, setCharacters] = useState<Character[]>(() => {
-    const loaded = loadCharacters(DEFAULT_CHARACTERS).value;
+    const loaded = hydrateRelationshipNetworkCharacters(loadCharacters(DEFAULT_CHARACTERS).value);
     return isCharacterPhoneTest && loaded.length === 0
       ? [CHARACTER_PHONE_TEST_CHARACTER]
       : loaded;
@@ -497,9 +560,10 @@ export default function App() {
     initializeCharacterRepository(DEFAULT_CHARACTERS).then((result) => {
       if (active && result.valid) {
         skipNextCharactersPersistenceRef.current = true;
-        setCharacters(isCharacterPhoneTest && result.value.length === 0
+        const hydratedCharacters = hydrateRelationshipNetworkCharacters(result.value);
+        setCharacters(isCharacterPhoneTest && hydratedCharacters.length === 0
           ? [CHARACTER_PHONE_TEST_CHARACTER]
-          : result.value);
+          : hydratedCharacters);
       }
     });
     return () => { active = false; };
@@ -628,7 +692,7 @@ export default function App() {
   const [pendingOfflineStoryId, setPendingOfflineStoryId] = useState<string | null>(null);
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
-  const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
+  const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => hydrateRelationshipNetworkRelationships(loadRelationships([]).value));
 
   // Do not download/mount the large chat application when another app is
   // opened first. Once chat is active, keep it mounted while navigating to a
@@ -2781,6 +2845,11 @@ export default function App() {
       icon: AppIcons.cinema(),
     },
     {
+      id: "relationship-network",
+      name: "关系网",
+      icon: AppIcons["relationship-network"](),
+    },
+    {
       id: "settings",
       name: "设置",
       icon: AppIcons.settings(),
@@ -2794,6 +2863,12 @@ export default function App() {
     signature: settings.signature,
     bio: settings.bio,
   };
+  const relationshipNetworkNpcMomentInFlightRef = useRef<Set<string>>(new Set());
+  const [relationshipNetworkPendingMoments, setRelationshipNetworkPendingMoments] = useState<RelationshipNetworkPendingMoment[]>(() =>
+    listRelationshipNetworkPendingMomentsForIdentity(activeIdentityId));
+  useEffect(() => {
+    setRelationshipNetworkPendingMoments(listRelationshipNetworkPendingMomentsForIdentity(activeIdentityId));
+  }, [activeIdentityId]);
   const handleSwitchIdentity = (identityId: string, openChat?: { relationId: string; characterId: string }) => {
     const currentSettings = settingsRef.current;
     const identity = currentSettings.identities?.find((item) => item.id === identityId);
@@ -2821,6 +2896,213 @@ export default function App() {
     if (!saved) {
       alert("身份已切换，但当前浏览器存储空间不足，刷新页面后可能无法保留本次切换。请先清理存储空间。");
     }
+  };
+
+  const linkRelationshipNetworkNpcToChat = async (npc: RelationshipNetworkNpc): Promise<{ characterId: string; relationId: string } | null> => {
+    const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    const savedLink = findRelationshipNetworkChatLink(ownerIdentityId, npc.id);
+    const characterId = savedLink?.characterId || npc.linkedCharacterId || createId("char-network-npc");
+    const relationId = savedLink?.relationId || createId("relation-network-npc");
+    const existingCharacter = characters.find((character) =>
+      (character.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId
+      && ((character.id === characterId)
+        || character.relationshipNetworkNpcId === npc.id
+        || (character.name === npc.name && character.remark === (npc.role || "来自关系网的 NPC"))));
+    if (existingCharacter) {
+      const existingRelation = relationships.find((relation) => relation.userIdentityId === ownerIdentityId
+        && (relation.id === relationId || relation.characterId === existingCharacter.id));
+      if (existingRelation) return { characterId: existingCharacter.id, relationId: existingRelation.id };
+    }
+
+    const now = Date.now();
+    if (!existingCharacter) {
+      const character = createChatCharacterFromRelationshipNetworkNpc(npc, characterId, ownerIdentityId);
+      if (!(await handleSaveCharacter(character))) {
+        alert("聊天角色创建失败，请检查浏览器存储空间。关系网 NPC 未被修改。");
+        return null;
+      }
+    }
+
+    const existingRelation = relationships.find((relation) => relation.userIdentityId === ownerIdentityId
+      && (relation.id === relationId || relation.characterId === (existingCharacter?.id || characterId)));
+    if (existingRelation) {
+      setRelationships((current) => current.some((relation) => relation.id === existingRelation.id) ? current : [...current, existingRelation]);
+      return { characterId: existingCharacter?.id || characterId, relationId: existingRelation.id };
+    }
+    const relation = createRelationship({
+      id: relationId,
+      characterId: existingCharacter?.id || characterId,
+      userIdentityId: ownerIdentityId,
+      now,
+      relationship: "unknown",
+    });
+    const nextRelationships = [...relationships, relation];
+    const savedRelationships = saveRelationships(nextRelationships);
+    if (!savedRelationships.success) {
+      alert("聊天关系创建失败，请检查浏览器存储空间。角色档案已创建，可稍后在关系网中重试关联。");
+      return null;
+    }
+    setRelationships(nextRelationships);
+    captureRelationshipCreatedEvent(relation, now);
+    return { characterId, relationId: relation.id };
+  };
+
+  const generateRelationshipNetworkNpcMomentFromNetwork = async (
+    npc: RelationshipNetworkNpc,
+    options?: { automationTrigger?: RelationshipNetworkNpcMomentAutomationTrigger },
+  ): Promise<{ success: boolean; message: string }> => {
+    const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    if (npc.ownerIdentityId !== ownerIdentityId) return { success: false, message: "这个 NPC 不属于当前身份，无法发布动态。" };
+    if (relationshipNetworkNpcMomentInFlightRef.current.has(npc.id)) return { success: false, message: "这个 NPC 正在生成动态，请稍候。" };
+
+    const chatLink = findRelationshipNetworkChatLink(ownerIdentityId, npc.id);
+    const sourceCharacter = characters.find((character) =>
+      (character.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId
+      && ((chatLink?.characterId && character.id === chatLink.characterId)
+        || character.relationshipNetworkNpcId === npc.id));
+    const sourceRelationship = relationships.find((relationship) =>
+      relationship.userIdentityId === ownerIdentityId
+      && (chatLink?.relationId === relationship.id
+        || (sourceCharacter && resolveCanonicalCharacterId(relationship.characterId, characters) === resolveCanonicalCharacterId(sourceCharacter.id, characters))));
+    if (!sourceCharacter || !sourceRelationship) {
+      return { success: false, message: "请先为这个 NPC 关联聊天角色，再让它发布朋友圈。" };
+    }
+
+    relationshipNetworkNpcMomentInFlightRef.current.add(npc.id);
+    try {
+      const generated = await generateRelationshipNetworkNpcMoment({
+        npc,
+        sourceCharacter,
+        relationship: sourceRelationship,
+        characters,
+        moments,
+        worldBookEntries,
+        knowledgeClaims: loadKnowledgeClaims().value,
+        memories,
+        events: listCharacterEventsByRelation(sourceRelationship.id),
+        topicHistory: loadMomentTopicRecords().value,
+        settings: settingsRef.current,
+        activeIdentityId: ownerIdentityId,
+        occurredAt: Date.now(),
+        requestAi: apiChat,
+        cleanAndExtractMoment,
+        characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
+        automationTrigger: options?.automationTrigger,
+      });
+      if (generated.blockedReason === "prohibited-content") {
+        return { success: false, message: `「${npc.name}」这次没有发布动态。` };
+      }
+      if (!generated.moment) return { success: false, message: `「${npc.name}」暂时没有适合公开的新动态。` };
+
+      if (npc.momentApprovalMode === "confirm") {
+        const pending: RelationshipNetworkPendingMoment = {
+          id: generated.moment.id,
+          ownerIdentityId,
+          npcId: npc.id,
+          sourceCharacterId: sourceCharacter.id,
+          sourceRelationId: sourceRelationship.id,
+          moment: generated.moment,
+          createdAt: Date.now(),
+        };
+        const pendingResult = appendRelationshipNetworkPendingMoment(pending);
+        if (!pendingResult.success) {
+          console.error("Failed to queue relationship-network NPC Moment:", pendingResult.error);
+          return { success: false, message: "动态已生成，但待确认列表保存失败，请稍后重试。" };
+        }
+        setRelationshipNetworkPendingMoments((current) => [
+          pending,
+          ...current.filter((item) => item.id !== pending.id),
+        ]);
+        return { success: true, message: `「${npc.name}」已生成动态，等待确认发布。` };
+      }
+
+      handleAddMoment(generated.moment);
+      return { success: true, message: `「${npc.name}」已发布一条朋友圈。` };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (/401|api[_ -]?key|authentication fails|invalid.*key/i.test(errorMessage)) {
+        return { success: false, message: "AI 服务鉴权失败，请检查 API Key。" };
+      }
+      console.error(`Failed to generate relationship-network NPC Moment for ${npc.name}:`, error);
+      return { success: false, message: `「${npc.name}」动态生成失败，请稍后重试。` };
+    } finally {
+      relationshipNetworkNpcMomentInFlightRef.current.delete(npc.id);
+    }
+  };
+
+  const checkRelationshipNetworkNpcAutomation = async (npc: RelationshipNetworkNpc): Promise<{ success: boolean; message: string }> => {
+    const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    if (npc.ownerIdentityId !== ownerIdentityId) return { success: false, message: "这个 NPC 不属于当前身份。" };
+    const chatLink = findRelationshipNetworkChatLink(ownerIdentityId, npc.id);
+    const sourceCharacter = characters.find((character) =>
+      (character.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId
+      && ((chatLink?.characterId && character.id === chatLink.characterId)
+        || character.relationshipNetworkNpcId === npc.id));
+    const sourceRelationship = relationships.find((relationship) =>
+      relationship.userIdentityId === ownerIdentityId
+      && (chatLink?.relationId === relationship.id
+        || (sourceCharacter && resolveCanonicalCharacterId(relationship.characterId, characters) === resolveCanonicalCharacterId(sourceCharacter.id, characters))));
+    if (!sourceCharacter || !sourceRelationship) {
+      return { success: false, message: "请先为这个 NPC 关联聊天角色，自动行为才会生效。" };
+    }
+
+    const now = Date.now();
+    const state = findRelationshipNetworkNpcAutomationState(ownerIdentityId, npc.id);
+    const candidate = selectRelationshipNetworkNpcMomentAutomationCandidate({
+      npc,
+      relationship: sourceRelationship,
+      messages,
+      moments,
+      events: listCharacterEventsByRelation(sourceRelationship.id),
+      state,
+      now,
+    });
+    if (!candidate) return { success: false, message: `「${npc.name}」当前没有满足自动发动态条件的时间或事件。` };
+
+    const result = await generateRelationshipNetworkNpcMomentFromNetwork(npc, { automationTrigger: candidate.trigger });
+    // Record the trigger even when the model returns SKIP or a provider error;
+    // otherwise the 60-second scheduler could hammer the same event forever.
+    if (!result.message.includes("正在生成动态")) {
+      const stateResult = upsertRelationshipNetworkNpcAutomationState({
+        ...(state || { ownerIdentityId, npcId: npc.id }),
+        lastAttemptKey: candidate.key,
+        lastAttemptAt: now,
+        ...(result.success ? { lastPublishedAt: now } : {}),
+        updatedAt: now,
+      });
+      if (!stateResult.success) console.error("Failed to persist NPC automation state:", stateResult.error);
+    }
+    return result.success
+      ? { ...result, message: `${result.message}（${candidate.reason}）` }
+      : result;
+  };
+
+  const approveRelationshipNetworkNpcMoment = (pending: RelationshipNetworkPendingMoment) => {
+    if (pending.ownerIdentityId !== activeIdentityId) return;
+    handleAddMoment(pending.moment);
+    const nextMoments = [pending.moment, ...moments.filter((moment) => moment.id !== pending.moment.id)];
+    const persisted = saveMoments(nextMoments);
+    if (!persisted.success) {
+      console.error("Failed to persist published relationship-network NPC Moment:", persisted.error);
+      return;
+    }
+    void flushMoments().catch((error) => console.error("Failed to flush published relationship-network NPC Moment:", error));
+    const removed = removeRelationshipNetworkPendingMoment(activeIdentityId, pending.id);
+    if (!removed.success) {
+      console.error("Failed to remove published relationship-network NPC Moment:", removed.error);
+      return;
+    }
+    setRelationshipNetworkPendingMoments((current) => current.filter((item) => item.id !== pending.id));
+  };
+
+  const rejectRelationshipNetworkNpcMoment = (pending: RelationshipNetworkPendingMoment) => {
+    if (pending.ownerIdentityId !== activeIdentityId) return;
+    const removed = removeRelationshipNetworkPendingMoment(activeIdentityId, pending.id);
+    if (!removed.success) {
+      console.error("Failed to reject relationship-network NPC Moment:", removed.error);
+      return;
+    }
+    setRelationshipNetworkPendingMoments((current) => current.filter((item) => item.id !== pending.id));
   };
 
   // Every non-chat app can request a chat target. Resolve that target against
@@ -4015,6 +4297,10 @@ export default function App() {
                     relationshipMusicStates={relationshipMusicStates}
                     pendingDiaryShareMessageId={pendingDiaryShareMessageId}
                     onDiaryShareHandled={() => setPendingDiaryShareMessageId(null)}
+                    pendingRelationshipNetworkMoments={relationshipNetworkPendingMoments}
+                    onApproveRelationshipNetworkNpcMoment={approveRelationshipNetworkNpcMoment}
+                    onRejectRelationshipNetworkNpcMoment={rejectRelationshipNetworkNpcMoment}
+                    onCheckRelationshipNetworkNpcAutomation={checkRelationshipNetworkNpcAutomation}
                     onOpenForumShare={(shareId) => {
                       setOpenForumShareId(shareId);
                       setActiveApp("forum");
@@ -4149,6 +4435,24 @@ export default function App() {
                       relationships={relationships}
                       memories={memories}
                       onSaveMemories={setMemories}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("relationship-network") && (
+                  <LazyAppBoundary visible={activeApp === "relationship-network"}>
+                    <AppRelationshipNetwork
+                      key={`relationship-network-${activeIdentityId}`}
+                      activeIdentity={activeIdentity}
+                      characters={characters}
+                      relationships={relationships}
+                      onOpenChat={(characterId, relationId) => {
+                        openChatForCurrentIdentity(characterId, relationId);
+                      }}
+                      onLinkNpcToChat={linkRelationshipNetworkNpcToChat}
+                      onGenerateNpcMoment={generateRelationshipNetworkNpcMomentFromNetwork}
+                      onCheckNpcAutomation={checkRelationshipNetworkNpcAutomation}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

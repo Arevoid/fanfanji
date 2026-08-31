@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Camera, ChevronLeft, FileText, Heart, Image as ImageIcon, Languages, MessageCircle, Plus, X } from "lucide-react";
+import { Camera, ChevronLeft, FileText, Heart, Image as ImageIcon, Languages, MessageCircle, Plus, Sparkles, X } from "lucide-react";
 import type { Character, Moment, MomentComment, UserSettings } from "../../types";
+import type { RelationshipNetworkPendingInteraction, RelationshipNetworkPendingMoment } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
 import { cleanAndExtractMoment, getMomentComments, renderMomentContent, sanitizeMomentPublishText } from "./services/momentContent";
 
 export interface MomentsAppProps {
@@ -19,6 +20,13 @@ export interface MomentsAppProps {
   onSaveSettings: (settings: UserSettings) => void;
   onPublishUserMoment: (input: { content: string; image: string | null; imageDescription: string }) => void;
   onPublishComment: (momentId: string, content: string, replyingTo?: MomentComment) => void;
+  onTriggerRelationshipNetworkComments?: (moment: Moment) => void;
+  pendingRelationshipNetworkInteractions?: RelationshipNetworkPendingInteraction[];
+  onApproveRelationshipNetworkInteraction?: (interaction: RelationshipNetworkPendingInteraction) => void;
+  onRejectRelationshipNetworkInteraction?: (interaction: RelationshipNetworkPendingInteraction) => void;
+  pendingRelationshipNetworkMoments?: RelationshipNetworkPendingMoment[];
+  onApproveRelationshipNetworkNpcMoment?: (pending: RelationshipNetworkPendingMoment) => void;
+  onRejectRelationshipNetworkNpcMoment?: (pending: RelationshipNetworkPendingMoment) => void;
   onUploadImage: (file: File, kind: "moment" | "cover") => Promise<string | undefined>;
   onAutoReply?: (momentId: string, content: string, replyingTo?: MomentComment) => void;
   onMomentTextContextMenu: (event: React.MouseEvent, momentId: string, text: string, authorName: string, authorAvatar: string, isOwn: boolean, timestamp: number) => void;
@@ -31,7 +39,7 @@ export interface MomentsAppProps {
   showToast: (message: string) => void;
 }
 
-export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, settings, translations, filterCharacterId, onClearFilter, onClose, onAddMoment: _onAddMoment, onAddComment: _onAddComment, onDeleteComment, onDeleteMoment, onLikeMoment, onSaveSettings, onPublishUserMoment, onPublishComment, onUploadImage, showToast, onMomentTextContextMenu, onMomentTextPointerDown, onMomentTextPointerUpOrLeave, onMomentTextPointerMove, onCommentClick, onCommentPointerDown, onClearCommentLongPress }) => {
+export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, settings, translations, filterCharacterId, onClearFilter, onClose, onAddMoment: _onAddMoment, onAddComment: _onAddComment, onDeleteComment, onDeleteMoment, onLikeMoment, onSaveSettings, onPublishUserMoment, onPublishComment, onUploadImage, onTriggerRelationshipNetworkComments, pendingRelationshipNetworkInteractions = [], onApproveRelationshipNetworkInteraction, onRejectRelationshipNetworkInteraction, pendingRelationshipNetworkMoments = [], onApproveRelationshipNetworkNpcMoment, onRejectRelationshipNetworkNpcMoment, showToast, onMomentTextContextMenu, onMomentTextPointerDown, onMomentTextPointerUpOrLeave, onMomentTextPointerMove, onCommentClick, onCommentPointerDown, onClearCommentLongPress }) => {
   const [showPublisher, setShowPublisher] = useState(false);
   const [content, setContent] = useState("");
   const [image, setImage] = useState<string | null>(null);
@@ -41,6 +49,8 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
   const [showCommentInput, setShowCommentInput] = useState<Record<string, boolean>>({});
   const [replyingTo, setReplyingTo] = useState<Record<string, MomentComment>>({});
   const [viewingDescription, setViewingDescription] = useState<string | null>(null);
+  const [showPendingInteractions, setShowPendingInteractions] = useState(false);
+  const [showPendingMoments, setShowPendingMoments] = useState(false);
 
   const filterCharacter = filterCharacterId ? characters.find((character) => character.id === filterCharacterId) : null;
   const tabName = filterCharacter ? filterCharacter.remark || filterCharacter.name : settings.name;
@@ -107,6 +117,18 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
         </div>
       </div>
       <div className="h-10" />
+      {pendingRelationshipNetworkInteractions.length > 0 && (
+        <button type="button" onClick={() => setShowPendingInteractions(true)} className="mx-4 my-2 flex w-[calc(100%-2rem)] items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-left text-[11px] text-amber-800 shadow-sm">
+          <span className="font-bold">✨ 待确认互动</span>
+          <span>{pendingRelationshipNetworkInteractions.length} 条 · 点击查看</span>
+        </button>
+      )}
+      {pendingRelationshipNetworkMoments.length > 0 && (
+        <button type="button" onClick={() => setShowPendingMoments(true)} className="mx-4 my-2 flex w-[calc(100%-2rem)] items-center justify-between rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-left text-[11px] text-violet-800 shadow-sm">
+          <span className="font-bold">✨ 待确认动态</span>
+          <span>{pendingRelationshipNetworkMoments.length} 条 · 点击查看</span>
+        </button>
+      )}
       {filterCharacterId && (
         <div className="mx-4 my-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl flex justify-between items-center text-xs">
           <span className="font-medium text-slate-500">正在查看好友的朋友圈</span>
@@ -167,7 +189,8 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
           <div className="text-center py-16 text-slate-400 text-xs">暂无动态，点击右上角相机发布第一条朋友圈吧！</div>
         ) : (
           visibleMoments.map((moment) => {
-            const character = moment.characterId ? characters.find((item) => item.id === moment.characterId) : undefined;
+            const isRelationshipNetworkNpcMoment = Boolean(moment.relationshipNetworkNpcId);
+            const character = !isRelationshipNetworkNpcMoment && moment.characterId ? characters.find((item) => item.id === moment.characterId) : undefined;
             const authorName = character ? character.remark || character.name : moment.authorName;
             const authorAvatar = character ? character.avatar : moment.authorAvatar;
             const textImageDescription = moment.imageDescription || cleanAndExtractMoment(moment.content).imageDescription;
@@ -214,8 +237,14 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                         hour12: false,
                       })}
                     </span>
-                    <div className="flex items-center gap-4">
-                      <button onClick={() => onLikeMoment(moment.id, settings.name)} className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${liked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"}`}>
+                      <div className="flex items-center gap-3">
+                        {!moment.characterId && onTriggerRelationshipNetworkComments && (
+                          <button type="button" onClick={() => onTriggerRelationshipNetworkComments(moment)} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-indigo-500 font-semibold transition-colors" title="让关系网参与">
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>关系网</span>
+                          </button>
+                        )}
+                        <button onClick={() => onLikeMoment(moment.id, settings.name)} className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${liked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"}`}>
                         <Heart className={`w-3.5 h-3.5 ${liked ? "fill-rose-500 text-rose-500" : ""}`} />
                         <span>{moment.likes.length || "赞"}</span>
                       </button>
@@ -301,6 +330,51 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
           })
         )}
       </div>
+      {showPendingInteractions && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4">
+          <div className="max-h-[78vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div><h2 className="text-sm font-bold text-slate-800">待确认互动</h2><p className="mt-1 text-[10px] text-slate-400">AI 生成的评论/回复不会自动公开。</p></div>
+              <button type="button" onClick={() => setShowPendingInteractions(false)} className="text-slate-400" aria-label="关闭待确认互动"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {pendingRelationshipNetworkInteractions.map((interaction) => {
+                const targetMoment = moments.find((moment) => moment.id === interaction.targetMomentId);
+                const targetName = targetMoment?.characterId
+                  ? characters.find((character) => character.id === targetMoment.characterId)?.remark || targetMoment.authorName
+                  : targetMoment?.authorName || settings.name;
+                return (
+                  <div key={interaction.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-2"><p className="text-[11px] font-bold text-slate-700">{interaction.authorName} · {interaction.action === "reply" ? "回复评论" : "发表评论"}</p><span className="text-[9px] text-slate-400">{targetName}</span></div>
+                    <p className="mt-2 text-xs leading-5 text-slate-700">{interaction.content}</p>
+                    <div className="mt-3 flex gap-2"><button type="button" onClick={() => onRejectRelationshipNetworkInteraction?.(interaction)} className="flex-1 rounded-lg bg-white py-2 text-[10px] font-bold text-slate-500">拒绝互动</button><button type="button" onClick={() => onApproveRelationshipNetworkInteraction?.(interaction)} className="flex-1 rounded-lg bg-slate-900 py-2 text-[10px] font-bold text-white">发布互动</button></div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+      {showPendingMoments && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4">
+          <div className="max-h-[78vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div><h2 className="text-sm font-bold text-slate-800">待确认动态</h2><p className="mt-1 text-[10px] text-slate-400">AI 生成的 NPC 动态不会自动公开，确认后才会进入朋友圈。</p></div>
+              <button type="button" onClick={() => setShowPendingMoments(false)} className="text-slate-400" aria-label="关闭待确认动态"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {pendingRelationshipNetworkMoments.map((pending) => (
+                <div key={pending.id} className="rounded-xl border border-violet-100 bg-violet-50/50 p-3">
+                  <div className="flex items-center justify-between gap-2"><p className="text-[11px] font-bold text-slate-700">{pending.moment.authorName} · NPC 动态</p><span className="text-[9px] text-slate-400">{new Date(pending.moment.timestamp).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span></div>
+                  <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700">{renderMomentContent(pending.moment.content)}</p>
+                  {pending.moment.imageDescription && <p className="mt-2 rounded-lg bg-white/70 px-2.5 py-2 text-[10px] leading-4 text-slate-500">配图描述：{pending.moment.imageDescription}</p>}
+                  <div className="mt-3 flex gap-2"><button type="button" onClick={() => { onRejectRelationshipNetworkNpcMoment?.(pending); if (pendingRelationshipNetworkMoments.length <= 1) setShowPendingMoments(false); showToast(`已拒绝 ${pending.moment.authorName} 的动态`); }} className="flex-1 rounded-lg bg-white py-2 text-[10px] font-bold text-slate-500">拒绝动态</button><button type="button" onClick={() => { onApproveRelationshipNetworkNpcMoment?.(pending); if (pendingRelationshipNetworkMoments.length <= 1) setShowPendingMoments(false); showToast(`已发布 ${pending.moment.authorName} 的动态`); }} className="flex-1 rounded-lg bg-violet-700 py-2 text-[10px] font-bold text-white">发布动态</button></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {viewingDescription && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-5">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5">

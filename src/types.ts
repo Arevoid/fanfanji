@@ -79,6 +79,8 @@ export interface Character {
   /** Contact copies are hidden from the archive and keep a link to their source profile. */
   isContactInstance?: boolean;
   profileSourceId?: string;
+  /** Identifies a chat profile created from a Relationship Network NPC. */
+  relationshipNetworkNpcId?: string;
   minimaxVoiceId?: string;
   mosslandVoiceId?: string;
   minimaxSpeed?: number;
@@ -276,6 +278,8 @@ export interface MomentComment {
   authorAvatar: string;
   content: string;
   timestamp: number;
+  /** Stable parent comment id for public reply threads. */
+  replyToCommentId?: string;
 }
 
 export interface Moment {
@@ -283,6 +287,8 @@ export interface Moment {
   characterId?: string; // If posted by a character, otherwise user
   /** Direct-chat relationship that owns an automatically generated character Moment. */
   relationId?: string;
+  /** Optional stable source when a relationship-network NPC publishes the post. */
+  relationshipNetworkNpcId?: string;
   authorName: string;
   authorAvatar: string;
   content: string;

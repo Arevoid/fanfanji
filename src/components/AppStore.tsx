@@ -114,6 +114,17 @@ const APPS_LIST: AppItem[] = [
     description: "上传本地视频，与指定 AI 好友在同一页面边看边讨论；支持 SRT/VTT 字幕、低频主动反应和手动保存观影记忆。"
   },
   {
+    id: "relationship-network",
+    name: "关系网",
+    category: "人物关系与世界设定",
+    icon: "🕸️",
+    iconBg: "bg-violet-500",
+    rating: 5.0,
+    reviews: "全新",
+    size: "4.6 MB",
+    description: "用画布整理人物、NPC 与自己的关系。支持头像节点、单向或双向箭头、关系描述和自由拖拽布局；关系网内容默认只供整理，不会自动进入聊天。"
+  },
+  {
     id: "diary",
     name: "日记",
     category: "生活记录与私密书写",

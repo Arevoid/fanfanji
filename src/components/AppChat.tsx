@@ -180,7 +180,31 @@ import { requestMomentCommentReply } from "../features/moments/services/momentRe
 import { buildRelationMomentContext, formatMomentSourceText } from "../features/moments/services/momentRelationContext";
 import { generateCharacterMomentPipeline } from "../features/moments/services/characterMomentGenerationPipeline";
 import { generateAutomaticMomentComment } from "../features/moments/services/automaticMomentCommentPipeline";
+import {
+  generateRelationshipNetworkNpcMomentComment,
+  generateRelationshipNetworkNpcMomentReply,
+  listRelationshipNetworkMomentCommentCandidates,
+  type RelationshipNetworkMomentCommentCandidate,
+} from "../features/moments/services/relationshipNetworkMomentCommentService";
 import { generateAutomaticMomentReply } from "../features/moments/services/automaticMomentReplyPipeline";
+import {
+  appendRelationshipNetworkInteractionRecord,
+  listRelationshipNetworkInteractionRecordsForIdentity,
+  upsertRelationshipNetworkInteractionRecord,
+} from "../core/storage/repositories/relationshipNetworkInteractionRepository";
+import {
+  appendRelationshipNetworkPendingInteraction,
+  listRelationshipNetworkPendingInteractionsForIdentity,
+  removeRelationshipNetworkPendingInteraction,
+} from "../core/storage/repositories/relationshipNetworkPendingInteractionRepository";
+import { listRelationshipNetworkChatLinksForIdentity } from "../core/storage/repositories/relationshipNetworkChatLinkRepository";
+import { listRelationshipNetworkNpcsForIdentity } from "../core/storage/repositories/relationshipNetworkRepository";
+import type {
+  RelationshipNetworkInteractionStatus,
+  RelationshipNetworkPendingInteraction,
+  RelationshipNetworkPendingMoment,
+  RelationshipNetworkNpc,
+} from "../domain/relationshipNetwork/relationshipNetworkTypes";
 import { analyzeMomentPhoto } from "../features/moments/services/momentPhotoAnalysisService";
 import { deliverDirectReplyCandidates } from "../features/chat/services/directReplyDeliveryService";
 import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
@@ -318,6 +342,10 @@ interface AppChatProps {
   relationshipMusicStates?: RelationshipMusicState[];
   pendingDiaryShareMessageId?: string | null;
   onDiaryShareHandled?: () => void;
+  pendingRelationshipNetworkMoments?: RelationshipNetworkPendingMoment[];
+  onApproveRelationshipNetworkNpcMoment?: (pending: RelationshipNetworkPendingMoment) => void;
+  onRejectRelationshipNetworkNpcMoment?: (pending: RelationshipNetworkPendingMoment) => void;
+  onCheckRelationshipNetworkNpcAutomation?: (npc: RelationshipNetworkNpc) => Promise<{ success: boolean; message: string }>;
   onOpenForumShare?: (shareId: string) => void;
 }
 
@@ -370,6 +398,10 @@ export default function AppChat({
   relationshipMusicStates = [],
   pendingDiaryShareMessageId,
   onDiaryShareHandled,
+  pendingRelationshipNetworkMoments = [],
+  onApproveRelationshipNetworkNpcMoment,
+  onRejectRelationshipNetworkNpcMoment,
+  onCheckRelationshipNetworkNpcAutomation,
   onOpenForumShare,
 }: AppChatProps) {
   const {
@@ -463,6 +495,50 @@ export default function AppChat({
   // lookup to the active identity prevents the primary account's context from
   // leaking into an alias turn.
   const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const loadPendingRelationshipNetworkInteractions = (): RelationshipNetworkPendingInteraction[] => {
+    const stored = listRelationshipNetworkPendingInteractionsForIdentity(activeIdentityId);
+    const storedIds = new Set(stored.map((interaction) => interaction.id));
+    const npcs = new Map(listRelationshipNetworkNpcsForIdentity(activeIdentityId).map((npc) => [npc.id, npc]));
+    const recovered = listRelationshipNetworkInteractionRecordsForIdentity(activeIdentityId)
+      .filter((record) => record.status === "pending" && (record.action === "comment" || record.action === "reply") && Boolean(record.content))
+      .map((record): RelationshipNetworkPendingInteraction | null => {
+        const pendingId = record.id.endsWith(":interaction") ? record.id.slice(0, -":interaction".length) : record.id;
+        if (storedIds.has(pendingId)) return null;
+        const npc = npcs.get(record.sourceNpcId);
+        const sourceCharacter = characters.find((character) => character.id === record.sourceCharacterId);
+        if (!record.targetCharacterId && !record.targetIdentityId) return null;
+        const sourceRelationId = sourceCharacter
+          ? relationships.find((relation) =>
+            relation.userIdentityId === activeIdentityId
+            && resolveCanonicalCharacterId(relation.characterId, characters) === resolveCanonicalCharacterId(sourceCharacter.id, characters),
+          )?.id
+          : undefined;
+        const action = record.action === "reply" ? "reply" : "comment";
+        return {
+          id: pendingId,
+          ownerIdentityId: activeIdentityId,
+          socialLinkId: record.socialLinkId,
+          sourceNpcId: record.sourceNpcId,
+          sourceCharacterId: record.sourceCharacterId,
+          ...(sourceRelationId ? { sourceRelationId } : {}),
+          ...(record.targetCharacterId ? { targetCharacterId: record.targetCharacterId } : { targetIdentityId: record.targetIdentityId! }),
+          targetMomentId: record.targetMomentId,
+          ...(record.targetCommentId ? { targetCommentId: record.targetCommentId, replyToCommentId: record.targetCommentId } : {}),
+          action,
+          content: record.content!,
+          authorName: npc?.name || sourceCharacter?.remark || sourceCharacter?.name || "关系网 NPC",
+          authorAvatar: npc?.avatar || sourceCharacter?.avatar || "👤",
+          createdAt: record.occurredAt,
+        };
+      })
+      .filter((interaction): interaction is RelationshipNetworkPendingInteraction => Boolean(interaction));
+    return [...stored, ...recovered].sort((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id));
+  };
+  const [relationshipNetworkPendingInteractions, setRelationshipNetworkPendingInteractions] = useState<RelationshipNetworkPendingInteraction[]>(() =>
+    loadPendingRelationshipNetworkInteractions());
+  useEffect(() => {
+    setRelationshipNetworkPendingInteractions(loadPendingRelationshipNetworkInteractions());
+  }, [activeIdentityId]);
   const activeRelationship = activeChatRelationId
     ? relationships.find((relation) => relation.id === activeChatRelationId && relation.userIdentityId === activeIdentityId)
     : undefined;
@@ -1094,12 +1170,15 @@ export default function AppChat({
   // Stop background generation after an authentication failure so a missing
   // or invalid provider key cannot create a repeated request/logging loop.
   const backgroundGenerationBlockedRef = useRef(false);
+  const relationshipNetworkCommentInFlightRef = useRef<Set<string>>(new Set());
+  const relationshipNetworkCommentBlockedRef = useRef(false);
   // Prevent a burst of streamed/direct replies from opening duplicate offline
   // stories before the navigation state has caught up.
   const offlineAutoStartInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     backgroundGenerationBlockedRef.current = false;
+    relationshipNetworkCommentBlockedRef.current = false;
   }, [settings.apiKey, settings.apiEndpoint, settings.selectedModel]);
   const {
     showClearHistoryModal, setShowClearHistoryModal, showDisbandGroupModal, setShowDisbandGroupModal,
@@ -3069,6 +3148,121 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     moment.imageDescription ? `配图识别：${moment.imageDescription}` : (moment.image ? "配图：有一张尚未识别内容的照片" : ""),
   ].filter(Boolean).join("\n");
 
+  const queueRelationshipNetworkInteraction = (
+    candidate: RelationshipNetworkMomentCommentCandidate,
+    moment: Moment,
+    action: "comment" | "reply",
+    requestKey: string,
+    content: string,
+  ) => {
+    const pending: RelationshipNetworkPendingInteraction = {
+      id: requestKey,
+      ownerIdentityId: activeIdentityId,
+      socialLinkId: candidate.socialLink.id,
+      sourceNpcId: candidate.npc.id,
+      sourceCharacterId: candidate.sourceCharacter.id,
+      sourceRelationId: candidate.sourceRelationship.id,
+      ...(candidate.targetEntityType === "character"
+        ? { targetCharacterId: candidate.targetEntityId }
+        : { targetIdentityId: candidate.targetEntityId }),
+      targetMomentId: moment.id,
+      ...(candidate.replyingTo ? { targetCommentId: candidate.replyingTo.id, replyToCommentId: candidate.replyingTo.id } : {}),
+      action,
+      content: content.trim(),
+      authorName: candidate.npc.name,
+      authorAvatar: candidate.npc.avatar || candidate.sourceCharacter.avatar,
+      createdAt: Date.now(),
+    };
+    const pendingResult = appendRelationshipNetworkPendingInteraction(pending);
+    if (!pendingResult.success) {
+      console.error("Failed to queue relationship-network interaction:", pendingResult.error);
+      return;
+    }
+    const auditResult = upsertRelationshipNetworkInteractionRecord({
+      id: `${requestKey}:interaction`,
+      ownerIdentityId: activeIdentityId,
+      socialLinkId: candidate.socialLink.id,
+      sourceNpcId: candidate.npc.id,
+      sourceCharacterId: candidate.sourceCharacter.id,
+      ...(candidate.targetEntityType === "character"
+        ? { targetCharacterId: candidate.targetEntityId }
+        : { targetIdentityId: candidate.targetEntityId }),
+      targetMomentId: moment.id,
+      ...(candidate.replyingTo ? { targetCommentId: candidate.replyingTo.id } : {}),
+      action,
+      status: "pending",
+      content: content.trim(),
+      occurredAt: pending.createdAt,
+    });
+    if (!auditResult.success) console.error("Failed to record pending relationship-network interaction:", auditResult.error);
+    setRelationshipNetworkPendingInteractions((current) => [
+      pending,
+      ...current.filter((item) => item.id !== pending.id),
+    ]);
+    showToast(`✨ ${candidate.npc.name} 的${action === "reply" ? "回复" : "评论"}已生成，等待确认发布`);
+  };
+
+  const approveRelationshipNetworkInteraction = (pending: RelationshipNetworkPendingInteraction) => {
+    if (pending.ownerIdentityId !== activeIdentityId) return;
+    const targetMoment = moments.find((moment) => moment.id === pending.targetMomentId);
+    if (!targetMoment || (pending.targetCommentId && !getMomentComments(targetMoment).some((comment) => comment.id === pending.targetCommentId))) {
+      rejectRelationshipNetworkInteraction(pending, "目标朋友圈或评论已不存在");
+      return;
+    }
+    const comment: MomentComment = {
+      id: `${pending.id}:published`,
+      authorName: pending.authorName,
+      authorAvatar: pending.authorAvatar,
+      content: pending.content,
+      characterId: pending.sourceCharacterId,
+      ...(pending.sourceRelationId ? { relationId: pending.sourceRelationId } : {}),
+      ...(pending.replyToCommentId ? { replyToCommentId: pending.replyToCommentId } : {}),
+      timestamp: Date.now(),
+    };
+    onAddCommentToMoment(pending.targetMomentId, comment);
+    const auditResult = upsertRelationshipNetworkInteractionRecord({
+      id: `${pending.id}:interaction`,
+      ownerIdentityId: activeIdentityId,
+      socialLinkId: pending.socialLinkId,
+      sourceNpcId: pending.sourceNpcId,
+      sourceCharacterId: pending.sourceCharacterId,
+      ...(pending.targetCharacterId ? { targetCharacterId: pending.targetCharacterId } : { targetIdentityId: pending.targetIdentityId! }),
+      targetMomentId: pending.targetMomentId,
+      ...(pending.targetCommentId ? { targetCommentId: pending.targetCommentId } : {}),
+      action: pending.action,
+      status: "completed",
+      content: pending.content,
+      occurredAt: Date.now(),
+    });
+    if (!auditResult.success) console.error("Failed to finalize relationship-network interaction:", auditResult.error);
+    removeRelationshipNetworkPendingInteraction(activeIdentityId, pending.id);
+    setRelationshipNetworkPendingInteractions((current) => current.filter((item) => item.id !== pending.id));
+    showToast(`已发布 ${pending.authorName} 的${pending.action === "reply" ? "回复" : "评论"}`);
+  };
+
+  const rejectRelationshipNetworkInteraction = (pending: RelationshipNetworkPendingInteraction, reason = "用户拒绝发布") => {
+    if (pending.ownerIdentityId !== activeIdentityId) return;
+    const auditResult = upsertRelationshipNetworkInteractionRecord({
+      id: `${pending.id}:interaction`,
+      ownerIdentityId: activeIdentityId,
+      socialLinkId: pending.socialLinkId,
+      sourceNpcId: pending.sourceNpcId,
+      sourceCharacterId: pending.sourceCharacterId,
+      ...(pending.targetCharacterId ? { targetCharacterId: pending.targetCharacterId } : { targetIdentityId: pending.targetIdentityId! }),
+      targetMomentId: pending.targetMomentId,
+      ...(pending.targetCommentId ? { targetCommentId: pending.targetCommentId } : {}),
+      action: pending.action,
+      status: "skipped",
+      content: pending.content,
+      reason,
+      occurredAt: Date.now(),
+    });
+    if (!auditResult.success) console.error("Failed to record rejected relationship-network interaction:", auditResult.error);
+    removeRelationshipNetworkPendingInteraction(activeIdentityId, pending.id);
+    setRelationshipNetworkPendingInteractions((current) => current.filter((item) => item.id !== pending.id));
+    if (reason === "用户拒绝发布") showToast("已拒绝这条待确认互动");
+  };
+
   const handleAutoCommentOnUserMoment = async (newMo: Moment) => {
     if (activeRelationships.length === 0) return;
 
@@ -3192,6 +3386,265 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     }, delay);
   };
 
+  const handleRelationshipNetworkCommentsOnMoment = async (newMo: Moment, options: { force?: boolean; showEmptyToast?: boolean } = {}): Promise<number> => {
+    if (relationshipNetworkCommentBlockedRef.current
+      || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
+    const candidates = listRelationshipNetworkMomentCommentCandidates({
+      ownerIdentityId: activeIdentityId,
+      ...(newMo.characterId
+        ? { targetCharacterId: newMo.characterId }
+        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: settings.name }),
+      characters,
+      relationships,
+      existingMoments: moments,
+      currentMoment: newMo,
+      force: options.force,
+    });
+    if (options.force && options.showEmptyToast !== false && candidates.length === 0) {
+      showToast("当前没有符合权限和关系条件的 NPC 可参与这条朋友圈");
+      return 0;
+    }
+
+    for (const candidate of candidates) {
+      const requestKey = `${newMo.id}:${candidate.socialLink.id}`;
+      if (relationshipNetworkCommentInFlightRef.current.has(requestKey)) continue;
+      relationshipNetworkCommentInFlightRef.current.add(requestKey);
+      const recordInteraction = (status: RelationshipNetworkInteractionStatus, details: { content?: string; reason?: string } = {}) => {
+        const result = appendRelationshipNetworkInteractionRecord({
+          id: `${requestKey}:${status}`,
+          ownerIdentityId: activeIdentityId,
+          socialLinkId: candidate.socialLink.id,
+          sourceNpcId: candidate.npc.id,
+          sourceCharacterId: candidate.sourceCharacter.id,
+          ...(candidate.targetEntityType === "character"
+            ? { targetCharacterId: candidate.targetEntityId }
+            : { targetIdentityId: candidate.targetEntityId }),
+          targetMomentId: newMo.id,
+          action: "comment",
+          status,
+          ...(details.content ? { content: details.content } : {}),
+          ...(details.reason ? { reason: details.reason.slice(0, 180) } : {}),
+          occurredAt: Date.now(),
+        });
+        if (!result.success) console.error("Failed to record relationship-network interaction:", result.error);
+      };
+      try {
+        const comment = await generateRelationshipNetworkNpcMomentComment({
+          candidate,
+          moment: newMo,
+          targetDescription: getMomentTargetDescription(newMo),
+          worldBookEntries: worldBookEntries || [],
+          topicHistory: loadMomentTopicRecords().value,
+          knowledgeClaims: loadKnowledgeClaims().value,
+          memories: memories || [],
+          events: listCharacterEventsByRelation(candidate.sourceRelationship.id),
+          settings,
+          requestAi: apiChat,
+          cleanText: (text) => cleanOnlineMessage(text, true),
+          characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
+        });
+        if (comment) {
+          if (candidate.socialLink.interactionApprovalMode === "confirm") {
+            queueRelationshipNetworkInteraction(candidate, newMo, "comment", requestKey, comment.content);
+          } else {
+            onAddCommentToMoment(newMo.id, {
+              ...comment,
+              // Keep the relationship-network NPC's own display identity instead
+              // of exposing the linked chat role's remark as the public author.
+              authorName: candidate.npc.name,
+              authorAvatar: candidate.npc.avatar || candidate.sourceCharacter.avatar,
+              characterId: candidate.sourceCharacter.id,
+              relationId: candidate.sourceRelationship.id,
+            });
+            recordInteraction("completed", { content: comment.content });
+            const targetName = candidate.targetCharacter?.remark
+              || candidate.targetCharacter?.name
+              || candidate.targetIdentityName
+              || "目标朋友圈";
+            showToast(`💬 ${candidate.npc.name} 评论了 ${targetName} 的朋友圈`);
+          }
+        } else {
+          recordInteraction("skipped", { reason: "模型未返回可发布的评论" });
+        }
+      } catch (err) {
+        // Social comments are optional background behavior. A provider failure
+        // must not block the character's original Moment or ordinary chat.
+        console.error(`Failed to generate relationship-network comment for ${candidate.npc.name}:`, err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const isAuthenticationError = /401|api[_ -]?key|authentication fails|invalid.*key/i.test(errorMessage);
+        recordInteraction("failed", {
+          reason: isAuthenticationError ? "AI 服务鉴权失败，请检查 API Key" : errorMessage,
+        });
+        if (isAuthenticationError) {
+          relationshipNetworkCommentBlockedRef.current = true;
+        }
+      } finally {
+        relationshipNetworkCommentInFlightRef.current.delete(requestKey);
+      }
+    }
+    return candidates.length;
+  };
+
+  const handleRelationshipNetworkLikesOnMoment = async (newMo: Moment, options: { force?: boolean } = {}): Promise<number> => {
+    if ((newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
+    const candidates = listRelationshipNetworkMomentCommentCandidates({
+      ownerIdentityId: activeIdentityId,
+      ...(newMo.characterId
+        ? { targetCharacterId: newMo.characterId }
+        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: settings.name }),
+      characters,
+      relationships,
+      existingMoments: moments,
+      currentMoment: newMo,
+      force: options.force,
+      action: "like",
+    });
+
+    for (const candidate of candidates) {
+      const requestKey = `${newMo.id}:${candidate.socialLink.id}:like`;
+      if (relationshipNetworkCommentInFlightRef.current.has(requestKey)) continue;
+      relationshipNetworkCommentInFlightRef.current.add(requestKey);
+      try {
+        onLikeMoment(newMo.id, candidate.npc.name);
+        const result = appendRelationshipNetworkInteractionRecord({
+          id: `${requestKey}:completed`,
+          ownerIdentityId: activeIdentityId,
+          socialLinkId: candidate.socialLink.id,
+          sourceNpcId: candidate.npc.id,
+          sourceCharacterId: candidate.sourceCharacter.id,
+          ...(candidate.targetEntityType === "character"
+            ? { targetCharacterId: candidate.targetEntityId }
+            : { targetIdentityId: candidate.targetEntityId }),
+          targetMomentId: newMo.id,
+          action: "like",
+          status: "completed",
+          occurredAt: Date.now(),
+        });
+        if (!result.success) console.error("Failed to record relationship-network like:", result.error);
+        if (options.force) {
+          const targetName = candidate.targetCharacter?.remark
+            || candidate.targetCharacter?.name
+            || candidate.targetIdentityName
+            || "目标朋友圈";
+          showToast(`❤️ ${candidate.npc.name} 点赞了 ${targetName} 的朋友圈`);
+        }
+      } finally {
+        relationshipNetworkCommentInFlightRef.current.delete(requestKey);
+      }
+    }
+    return candidates.length;
+  };
+
+  const handleRelationshipNetworkRepliesOnMoment = async (newMo: Moment, options: { force?: boolean } = {}): Promise<number> => {
+    if (relationshipNetworkCommentBlockedRef.current
+      || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
+    const candidates = listRelationshipNetworkMomentCommentCandidates({
+      ownerIdentityId: activeIdentityId,
+      ...(newMo.characterId
+        ? { targetCharacterId: newMo.characterId }
+        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: settings.name }),
+      characters,
+      relationships,
+      existingMoments: moments,
+      currentMoment: newMo,
+      force: options.force,
+      action: "reply",
+    });
+
+    for (const candidate of candidates) {
+      const replyingTo = candidate.replyingTo;
+      if (!replyingTo) continue;
+      const requestKey = `${newMo.id}:${candidate.socialLink.id}:reply:${replyingTo.id}`;
+      if (relationshipNetworkCommentInFlightRef.current.has(requestKey)) continue;
+      relationshipNetworkCommentInFlightRef.current.add(requestKey);
+      const recordInteraction = (status: RelationshipNetworkInteractionStatus, details: { content?: string; reason?: string } = {}) => {
+        const result = appendRelationshipNetworkInteractionRecord({
+          id: `${requestKey}:${status}`,
+          ownerIdentityId: activeIdentityId,
+          socialLinkId: candidate.socialLink.id,
+          sourceNpcId: candidate.npc.id,
+          sourceCharacterId: candidate.sourceCharacter.id,
+          ...(candidate.targetEntityType === "character"
+            ? { targetCharacterId: candidate.targetEntityId }
+            : { targetIdentityId: candidate.targetEntityId }),
+          targetMomentId: newMo.id,
+          targetCommentId: replyingTo.id,
+          action: "reply",
+          status,
+          ...(details.content ? { content: details.content } : {}),
+          ...(details.reason ? { reason: details.reason.slice(0, 180) } : {}),
+          occurredAt: Date.now(),
+        });
+        if (!result.success) console.error("Failed to record relationship-network reply:", result.error);
+      };
+      try {
+        const reply = await generateRelationshipNetworkNpcMomentReply({
+          candidate,
+          moment: newMo,
+          targetDescription: getMomentTargetDescription(newMo),
+          worldBookEntries: worldBookEntries || [],
+          topicHistory: loadMomentTopicRecords().value,
+          knowledgeClaims: loadKnowledgeClaims().value,
+          memories: memories || [],
+          events: listCharacterEventsByRelation(candidate.sourceRelationship.id),
+          settings,
+          requestAi: apiChat,
+          cleanText: (text) => cleanOnlineMessage(text, true),
+          characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
+        });
+        if (reply) {
+          if (candidate.socialLink.interactionApprovalMode === "confirm") {
+            queueRelationshipNetworkInteraction(candidate, newMo, "reply", requestKey, reply.content);
+          } else {
+            onAddCommentToMoment(newMo.id, {
+              ...reply,
+              authorName: candidate.npc.name,
+              authorAvatar: candidate.npc.avatar || candidate.sourceCharacter.avatar,
+              characterId: candidate.sourceCharacter.id,
+              relationId: candidate.sourceRelationship.id,
+              replyToCommentId: replyingTo.id,
+            });
+            recordInteraction("completed", { content: reply.content });
+            showToast(`↩️ ${candidate.npc.name} 回复了 ${replyingTo.authorName} 的评论`);
+          }
+        } else {
+          recordInteraction("skipped", { reason: "模型未返回可发布的回复" });
+        }
+      } catch (err) {
+        console.error(`Failed to generate relationship-network reply for ${candidate.npc.name}:`, err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const isAuthenticationError = /401|api[_ -]?key|authentication fails|invalid.*key/i.test(errorMessage);
+        recordInteraction("failed", {
+          reason: isAuthenticationError ? "AI 服务鉴权失败，请检查 API Key" : errorMessage,
+        });
+        if (isAuthenticationError) relationshipNetworkCommentBlockedRef.current = true;
+      } finally {
+        relationshipNetworkCommentInFlightRef.current.delete(requestKey);
+      }
+    }
+    return candidates.length;
+  };
+
+  const handleRelationshipNetworkReplyToComment = async (momentId: string, comment: MomentComment, options: { force?: boolean } = {}): Promise<number> => {
+    const targetMoment = moments.find((moment) => moment.id === momentId);
+    if (!targetMoment) return 0;
+    return handleRelationshipNetworkRepliesOnMoment({
+      ...targetMoment,
+      comments: [...targetMoment.comments, comment],
+    }, options);
+  };
+
+  const handleRelationshipNetworkInteractionsOnMoment = async (newMo: Moment, options: { force?: boolean } = {}) => {
+    const [commentCandidates, likeCandidates, replyCandidates] = await Promise.all([
+      handleRelationshipNetworkCommentsOnMoment(newMo, { ...options, showEmptyToast: false }),
+      handleRelationshipNetworkLikesOnMoment(newMo, options),
+      handleRelationshipNetworkRepliesOnMoment(newMo, options),
+    ]);
+    if (options.force && commentCandidates + likeCandidates + replyCandidates === 0) {
+      showToast("当前没有符合权限和关系条件的 NPC 可参与这条朋友圈");
+    }
+  };
+
   const generateCharacterMoment = async (relationship: CharacterRelationship, occurredAt: number): Promise<boolean> => {
     const friend = findMomentRelationshipCharacter(characters, relationship);
     if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return false;
@@ -3220,6 +3673,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       }
       if (generated.moment) {
         onAddMoment(generated.moment);
+        void handleRelationshipNetworkInteractionsOnMoment(generated.moment);
         const topic = compactTopicHint([generated.moment.content]);
         const topicRecord = topic
           ? createMomentTopicRecord({
@@ -3275,6 +3729,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       if (!description && !renderMomentContent(moment.content)) return;
     }
     await handleAutoCommentOnUserMoment(enriched);
+    await handleRelationshipNetworkInteractionsOnMoment(enriched);
   };
 
   const checkAndTriggerCharacterMoments = async () => {
@@ -3320,6 +3775,19 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     }
   };
 
+  const runRelationshipNetworkNpcAutomationPass = async () => {
+    if (!onCheckRelationshipNetworkNpcAutomation || backgroundGenerationBlockedRef.current) return;
+    const npcs = listRelationshipNetworkNpcsForIdentity(activeIdentityId)
+      .filter((npc) => npc.momentAutoMode && npc.momentAutoMode !== "manual")
+      .filter((npc) => listRelationshipNetworkChatLinksForIdentity(activeIdentityId).some((link) => link.npcId === npc.id));
+    // Keep the background pass gentle: one NPC may call the AI per minute,
+    // while the persisted trigger key prevents the same event from retrying.
+    for (const npc of npcs) {
+      const result = await onCheckRelationshipNetworkNpcAutomation(npc);
+      if (result.success) break;
+    }
+  };
+
   const proactivePassDependencies = {
     relationships: activeRelationships,
     characters,
@@ -3331,6 +3799,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     updateRelationshipSession,
     triggerProactiveFor,
     checkAndTriggerCharacterMoments,
+    runRelationshipNetworkNpcAutomationPass,
   };
   const runProactiveCatchup = async () => {
     runProactiveCatchupPass(proactivePassDependencies);
@@ -3418,6 +3887,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       authorAvatar: settings.avatar,
       content: finalContent,
       timestamp: Date.now(),
+      ...(replyingTo ? { replyToCommentId: replyingTo.id } : {}),
     };
 
     onAddCommentToMoment(momentId, newComment);
@@ -3433,6 +3903,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       });
     }
 
+    void handleRelationshipNetworkReplyToComment(momentId, newComment);
     // Trigger character auto-reply to the user's new comment
     handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
   };
@@ -3469,8 +3940,10 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       authorAvatar: settings.avatar,
       content,
       timestamp: Date.now(),
+      ...(replyingTo ? { replyToCommentId: replyingTo.id } : {}),
     };
     onAddCommentToMoment(momentId, newComment);
+    void handleRelationshipNetworkReplyToComment(momentId, newComment);
     handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
   };
 
@@ -7366,6 +7839,13 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
               onSaveSettings={onSaveSettings}
               onPublishUserMoment={publishMomentFromFeature}
               onPublishComment={publishMomentCommentFromFeature}
+              onTriggerRelationshipNetworkComments={(moment) => { void handleRelationshipNetworkInteractionsOnMoment(moment, { force: true }); }}
+              pendingRelationshipNetworkInteractions={relationshipNetworkPendingInteractions}
+              onApproveRelationshipNetworkInteraction={approveRelationshipNetworkInteraction}
+              onRejectRelationshipNetworkInteraction={rejectRelationshipNetworkInteraction}
+              pendingRelationshipNetworkMoments={pendingRelationshipNetworkMoments}
+              onApproveRelationshipNetworkNpcMoment={onApproveRelationshipNetworkNpcMoment}
+              onRejectRelationshipNetworkNpcMoment={onRejectRelationshipNetworkNpcMoment}
               onUploadImage={uploadMomentImageFromFeature}
               onAutoReply={handleAutoReplyToUserComment}
               showToast={showToast}

@@ -29,6 +29,10 @@ export async function generateCharacterMomentPipeline(input: {
   requestAi: typeof apiChat;
   cleanAndExtractMoment: Parameters<typeof requestCharacterMomentOnce>[0]["parseContent"];
   characterExpressionPrompt: string;
+  /** Manual network requests may use the NPC profile for a fresh post. */
+  allowProfileDrivenPost?: boolean;
+  /** Optional automation context, kept as prompt guidance rather than a fact. */
+  momentPromptHint?: string;
 }): Promise<Awaited<ReturnType<typeof requestCharacterMomentOnce>>> {
   const friend = findMomentRelationshipCharacter(input.characters, input.relationship);
   if (!friend) throw new Error("Moment character is unavailable for the relationship scope.");
@@ -71,7 +75,7 @@ export async function generateCharacterMomentPipeline(input: {
 7. Decide explicitly whether this post benefits from a visual. When a concrete scene, food, object, ticket, music, street view, outfit, or shared outing is central, prefer a text-image card. Add one final separate line in exactly this format: "(配图：图片描述)". This is an allowed Moment-only rendering instruction, not a chat attachment or body text.
 8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：".
 9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the supplied feed history. Prefer a specific detail from the scoped context over generic weather, tiredness, coffee, work, or vague feelings.
-10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or AI-inferred events. If there is no fresh scoped topic, output exactly "SKIP" and nothing else.
+10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or AI-inferred events. ${input.allowProfileDrivenPost ? "This is an explicit request to let this NPC post now; if there is no fresh event, you may create a small, concrete profile-grounded daily observation from the NPC's confirmed public profile instead of outputting SKIP." : "If there is no fresh scoped topic, output exactly \"SKIP\" and nothing else."}
 
 ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 ${input.characterExpressionPrompt}
@@ -79,7 +83,9 @@ ${CHARACTER_LANGUAGE_POLICY}
 `;
   const composedPrompt = PromptComposer.compose({
     scenario: "moment-post",
-    message: "请仅根据角色公开资料与公开动态历史，判断是否有值得发布且明显不同于历史动态的新内容；有则写一条，没有则只输出 SKIP。不要为了完成任务硬发。",
+    message: input.allowProfileDrivenPost
+      ? `用户明确要求这个 NPC 现在发布一条朋友圈。请根据 NPC 的公开资料、当前关系和公开动态历史，写一条具体、自然且明显不同于历史动态的内容；不要编造未确认事件。${input.momentPromptHint ? `这次触发背景是：${input.momentPromptHint} 请优先自然回应这个背景，但不要把触发说明原样写进朋友圈。` : ""}`
+      : "请仅根据角色公开资料与公开动态历史，判断是否有值得发布且明显不同于历史动态的新内容；有则写一条，没有则只输出 SKIP。不要为了完成任务硬发。",
     history: [],
     systemInstruction,
   });
