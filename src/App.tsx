@@ -573,6 +573,7 @@ export default function App() {
     let active = true;
     initializeMomentRepository([]).then((result) => {
       if (active && result.valid) {
+        momentsPersistenceReady.current = true;
         skipNextMomentsPersistenceRef.current = true;
         setMoments(result.value);
       }
@@ -2103,10 +2104,7 @@ export default function App() {
   }, [messages]);
 
   useEffect(() => {
-    if (!momentsPersistenceReady.current) {
-      momentsPersistenceReady.current = true;
-      return;
-    }
+    if (!momentsPersistenceReady.current) return;
     if (skipNextMomentsPersistenceRef.current) {
       skipNextMomentsPersistenceRef.current = false;
       return;

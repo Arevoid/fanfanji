@@ -171,12 +171,15 @@ export default function AppStore({
     if (id === "character-phone") return;
     setDownloadingId(id);
     setProgress(0);
+    const finishDownload = () => {
+      onInstallApp(id);
+      setDownloadingId(null);
+    };
     const interval = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 100) {
           clearInterval(interval);
-          onInstallApp(id);
-          setDownloadingId(null);
+          window.setTimeout(finishDownload, 0);
           return 100;
         }
         // Smoothly increment by an organic step every 45ms (approx. 2 seconds total)
@@ -184,8 +187,7 @@ export default function AppStore({
         const next = prev + randIncrement;
         if (next >= 100) {
           clearInterval(interval);
-          onInstallApp(id);
-          setDownloadingId(null);
+          window.setTimeout(finishDownload, 0);
           return 100;
         }
         return next;
