@@ -10,6 +10,7 @@ assert.match(chat, /scrollContainerToBottom\(container\)/);
 assert.doesNotMatch(chat, /chatEndRef\.current\?*\.scrollIntoView/);
 assert.match(chat, /min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-0 cv-messages-list chat-message-list/);
 assert.doesNotMatch(chat, /window\.visualViewport\.addEventListener\("resize", handleViewportResize\)/);
+assert.match(chat, /#conv-screen \.chat-composer__input \{[\s\S]*?box-sizing: border-box !important;[\s\S]*?padding: 10px 16px !important;[\s\S]*?line-height: 20px !important;/);
 assert.match(composer, /return <div className=\{className\}>/);
 assert.match(composer, /rows=\{1\}[\s\S]*className="[^\"]*h-10[^\"]*min-h-10[^\"]*max-h-24/);
 
