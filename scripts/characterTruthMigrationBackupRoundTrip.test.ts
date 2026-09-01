@@ -73,6 +73,7 @@ assert.equal(saveBehaviorCorrections([correction]).success, true);
 assert.equal(saveCharacterKnowledgeMigrationState({
   schemaVersion: 1,
   migrationVersion: CHARACTER_KNOWLEDGE_MIGRATION_VERSION,
+  status: "completed",
   lastRunAt: 99,
   migratedMemoryIds: ["backup-memory"],
   migratedSummaryIds: [summary.id],

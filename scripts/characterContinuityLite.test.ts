@@ -13,7 +13,7 @@ import type { Message, OfflineStory } from "../src/types";
 
 const characterId = "character-a";
 const story: OfflineStory = {
-  id: "story-water-pipe", characterId, title: "修水管", createdAt: 1, updatedAt: 3, mode: "continue",
+  id: "story-water-pipe", characterId, relationId: "relation-a", conversationId: "direct:relation-a", title: "修水管", createdAt: 1, updatedAt: 3, mode: "continue",
   messages: [
     { id: "1", characterId, sender: "user", content: "我家水管漏水了。", timestamp: 1, isOffline: true },
     { id: "2", characterId, sender: "character", content: "我走到厨房打开工具箱，然后叫小念过来。", timestamp: 2, isOffline: true },
@@ -68,6 +68,9 @@ assert.ok(describeHistoricalRelativeTime("오늘 밤 전화할게", wednesday, f
 const offlineExtraction = await MemoryService.extractMemories({
   character: { id: characterId, name: "A", avatar: "", personality: "", backstory: "" },
   characterId,
+  relationId: story.relationId,
+  userIdentityId: "identity-a",
+  conversationId: story.conversationId,
   recentMessages: story.messages,
   existingMemories: [],
   scenario: "offline",
@@ -76,7 +79,15 @@ const offlineExtraction = await MemoryService.extractMemories({
   createId: () => "offline-event",
   currentTime: () => 5,
   formatContent: (items) => items.join("；"),
-}, async () => ({ items: ["角色协助用户处理水管漏水。"] }));
+  offlineStoryPolicyInput: { story, userConfirmed: true, sourceMessages: story.messages },
+}, async () => ({ candidates: [{
+  statement: "角色协助用户处理水管漏水。",
+  kind: "fact",
+  subject: "relationship",
+  temporalStatus: "past",
+  sourceMessageIds: ["1"],
+  evidenceQuote: "我家水管漏水了。",
+}] }));
 assert.equal(offlineExtraction.extractedMemories[0]?.importance, 4, "线下短期事件应低于默认长期事实的重要度");
 
 console.log("PASS offline screenplay isolation, legacy handoff sanitization, character isolation, relative-time resolution, and short-term event weighting");

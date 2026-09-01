@@ -15,8 +15,10 @@ assert.equal(isNotificationForActiveChat(group, { characterId: "group-b", relati
 
 const appSource = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const chatSource = fs.readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
-assert.match(appSource, /setActiveChatRelationId\(target\.relationId\)/,
+assert.match(appSource, /openChatForCurrentIdentity\(target\.characterId, target\.relationId\)/,
   "notification navigation must switch the relationship together with the displayed character");
+assert.match(appSource, /setActiveChatRelationId\(relationship\.id\)/,
+  "notification navigation must commit the selected relationship scope");
 assert.match(chatSource, /context: replyContext/,
   "async direct replies must carry the request's captured relationship scope");
 assert.match(chatSource, /activeCharacter && isActiveChatScopeValid/,

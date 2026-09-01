@@ -66,27 +66,17 @@ export async function extractMemories(
     };
   }
 
-  // Compatibility-only path for callers that predate a complete relationship
-  // scope. Production direct writes pass all scope fields and use Truth Policy.
+  // A memory without a complete relationship scope cannot be attributed to a
+  // specific user's relationship. Keep the result visible to the caller as a
+  // rejected extraction, but never manufacture a legacy long-term MemoryItem.
+  // This closes the old characterId-only fallback that could leak facts across
+  // identities or conversations.
   if (!hasTruthScope(context)) {
-    const validItems = rawItems
-      .filter((item): item is string => typeof item === "string")
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const acceptedItems = context.filterItems ? context.filterItems(validItems) : validItems;
-    if (acceptedItems.length === 0) return { extractedMemories: [], acceptedClaims: [], rejectedCandidateCount: 0 };
-    const candidate: MemoryItem = {
-      id: context.createId(),
-      characterId: context.characterId,
-      ...(context.relationId ? { relationId: context.relationId } : {}),
-      content: context.formatContent(acceptedItems),
-      timestamp: context.currentTime(),
-      importance: context.scenario === "offline" ? 4 : 5,
-      isManual: false,
+    return {
+      extractedMemories: [],
+      acceptedClaims: [],
+      rejectedCandidateCount: rawItems.length,
     };
-    return isDuplicateMemory(context.existingMemories, candidate)
-      ? { extractedMemories: [], acceptedClaims: [], rejectedCandidateCount: 0 }
-      : { extractedMemories: [candidate], acceptedClaims: [], rejectedCandidateCount: 0 };
   }
 
   const allowedMessageIds = new Set(context.recentMessages.map((message) => message.id));
@@ -184,6 +174,8 @@ export async function extractMemories(
     id: baseId,
     characterId: context.characterId,
     relationId: context.relationId,
+    ...(context.userIdentityId ? { userIdentityId: context.userIdentityId } : {}),
+    ...(context.conversationId ? { conversationId: context.conversationId } : {}),
     content: context.formatContent(
       trustedClaims.map((claim) => claim.statement),
       { displayItems: trustedClaims.map((claim) => displayTextByClaimId.get(claim.id) || claim.statement) },

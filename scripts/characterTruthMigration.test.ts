@@ -55,10 +55,10 @@ const result = migrateLegacyCharacterKnowledge({
 });
 
 assert.equal(result.claims.length, 3, "ordinary legacy memories and offline handoff become claims");
-const ordinary = result.claims.find((claim) => claim.id === "legacy-memory:memory-a");
+const ordinary = result.claims.find((claim) => claim.id === `legacy-memory:memory-a:${relationA.id}`);
 assert.equal(ordinary?.truthStatus, "legacy_unverified");
 assert.equal(ordinary?.relationId, relationA.id);
-const offline = result.claims.find((claim) => claim.id === "legacy-memory:memory-offline");
+const offline = result.claims.find((claim) => claim.id === `legacy-memory:memory-offline:${relationA.id}`);
 assert.equal(offline?.source.kind, "offline_story");
 assert.equal(offline?.source.storyId, "story-1");
 assert.equal(offline?.truthStatus, "legacy_unverified", "offline marker never auto-confirms a fact");
@@ -73,7 +73,7 @@ assert.equal(result.summaries.length, 3, "both relationship summaries and one de
 assert.ok(result.summaries.some((summary) => summary.sourceRecordId === relationB.id));
 assert.ok(result.summaries.some((summary) => summary.sourceRecordId === character.id));
 
-assert.equal(result.claims.find((claim) => claim.id === "legacy-memory:memory-relationless")?.relationId, relationA.id, "a unique default relation is the only allowed fallback");
+assert.equal(result.claims.find((claim) => claim.id === `legacy-memory:memory-relationless:${relationA.id}`)?.relationId, relationA.id, "a unique default relation is the only allowed fallback");
 
 const rerun = migrateLegacyCharacterKnowledge({
   characters: [character],

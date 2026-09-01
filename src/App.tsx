@@ -23,9 +23,8 @@ import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./c
 import { isContentStorageMigrationActive } from "./core/storage/contentStorageRuntimeLock";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
-import { loadConversationSummaries, saveConversationSummaries, retractConversationSummariesBySourceMessageIds } from "./core/storage/repositories/conversationSummaryRepository";
-import { loadBehaviorCorrections, saveBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
-import { loadCharacterKnowledgeMigrationState, saveCharacterKnowledgeMigrationState } from "./core/storage/repositories/characterKnowledgeMigrationRepository";
+import { loadConversationSummaries, retractConversationSummariesBySourceMessageIds, conversationSummaryRepository } from "./core/storage/repositories/conversationSummaryRepository";
+import { loadBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadScheduleStore, saveScheduleStore, upsertAppointment } from "./core/storage/repositories/scheduleRepository";
 import { projectAppointmentsToScheduleEntries } from "./domain/schedule/scheduleProjection";
@@ -33,6 +32,7 @@ import type { Appointment } from "./domain/schedule/scheduleTypes";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
+import { commitMemoryWriteBundle } from "./domain/memory/memoryWriteCoordinator";
 import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
@@ -119,9 +119,8 @@ import { listByRelation as listCharacterEventsByRelation, retractByOfflineStoryI
 import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
 import { loadMomentTopicRecords, removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
 import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters } from "./core/storage/repositories/proactiveTopicRepository";
-import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/services/legacyCharacterKnowledgeMigration";
+import { runLegacyCharacterKnowledgeMigration } from "./features/characterKnowledge/services/legacyCharacterKnowledgeMigrationRunner";
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
-import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
 import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
 import { MOMENT_CHARACTER_EXPRESSION_PROMPT } from "./utils/livingPrompt";
@@ -211,10 +210,14 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   "relationship-network": withModuleRetry(loadAppRelationshipNetwork),
 };
 
-// Load every app module as soon as the phone shell enters. This keeps the
-// first visit to an app from showing a lazy-load state; modules are still
-// mounted only when their app is opened, so their effects remain isolated.
-const ALL_APP_IDS = [
+const preloadApp = (appId: string) => {
+  const loader = APP_LOADERS[appId];
+  if (loader) void loader().catch((error) => {
+    console.warn(`预加载应用 ${appId} 失败，打开时将再次尝试。`, error);
+  });
+};
+
+const IDLE_PRELOAD_APP_IDS = [
   "chat",
   "archives",
   "worldbook",
@@ -232,21 +235,6 @@ const ALL_APP_IDS = [
   "character-phone",
   "relationship-network",
 ] as const;
-
-const ALL_APP_MODULES_PROMISE = Promise.all(
-  ALL_APP_IDS.map((appId) => APP_LOADERS[appId]()),
-).catch((error) => {
-  console.error("Failed to preload one or more app modules:", error);
-  return [];
-});
-void ALL_APP_MODULES_PROMISE;
-
-const preloadApp = (appId: string) => {
-  const loader = APP_LOADERS[appId];
-  if (loader) void loader().catch((error) => {
-    console.warn(`预加载应用 ${appId} 失败，打开时将再次尝试。`, error);
-  });
-};
 
 const AppChat = React.lazy(loadAppChat);
 const AppArchives = React.lazy(loadAppArchives);
@@ -542,6 +530,20 @@ export default function App() {
   useRuntimeErrorMonitoring();
   const { resolvedTheme } = useTheme();
   useVisualViewport();
+
+  useEffect(() => {
+    const preloadIdleApps = () => IDLE_PRELOAD_APP_IDS.forEach((appId) => preloadApp(appId));
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 1500 });
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+    const handle = window.setTimeout(preloadIdleApps, 600);
+    return () => window.clearTimeout(handle);
+  }, []);
   const seedScheduleForFreshInstall = useRef(
     typeof window !== "undefined" && shouldSeedScheduleForFreshInstall(window.localStorage),
   ).current;
@@ -674,6 +676,7 @@ export default function App() {
 
   // Navigation State
   const [activeApp, setActiveApp] = useState<string | null>(null);
+  const [memoryDiagnosticsRequestId, setMemoryDiagnosticsRequestId] = useState(0);
   const [mountedAppIds, setMountedAppIds] = useState<Set<string>>(() => new Set());
   const isAppMounted = (appId: string) => activeApp === appId || mountedAppIds.has(appId);
   // Temporary test-only entry for the unfinished character phone experiment.
@@ -691,6 +694,10 @@ export default function App() {
       ? current
       : new Set([...current, activeApp]));
   }, [activeApp]);
+  const handleChatNavigateToApp = (appId: string) => {
+    if (appId === "memory") setMemoryDiagnosticsRequestId((current) => current + 1);
+    setActiveApp(appId);
+  };
   const [chatModuleActivated, setChatModuleActivated] = useState(false);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
@@ -1298,45 +1305,22 @@ export default function App() {
 
   // Truth Layer migration is deliberately additive. Legacy Memory and
   // compressed-memory fields remain untouched for rollback and old-build
-  // readability; deterministic source IDs make this safe on every startup.
+  // readability. The runner snapshots all three target stores and the marker,
+  // so a later write or verification failure cannot leave a half-migrated
+  // Truth Layer behind.
   useEffect(() => {
     if (characters.length === 0 || relationships.length === 0) return;
-    const existingClaims = loadKnowledgeClaims().value;
-    const existingSummaries = loadConversationSummaries().value;
-    const existingCorrections = loadBehaviorCorrections().value;
-    const result = migrateLegacyCharacterKnowledge({
+    const result = runLegacyCharacterKnowledgeMigration({
       characters,
       relationships,
       memories,
       offlineStories,
-      existingClaims,
-      existingSummaries,
-      existingCorrections,
       now: Date.now(),
     });
-    if (result.claims.length > 0) {
-      const write = appendKnowledgeClaims(result.claims);
-      if (!write.success) console.error("Failed to persist migrated character knowledge claims:", write.error);
+    if (result.status === "failed") {
+      console.error("Failed to migrate legacy character knowledge:", result.error, result.rollbackErrors);
     }
-    if (result.summaries.length > 0) {
-      const write = saveConversationSummaries([...existingSummaries, ...result.summaries]);
-      if (!write.success) console.error("Failed to persist migrated conversation summaries:", write.error);
-    }
-    if (result.corrections.length > 0) {
-      const write = saveBehaviorCorrections([...existingCorrections, ...result.corrections]);
-      if (!write.success) console.error("Failed to persist migrated behavior corrections:", write.error);
-    }
-    const previous = loadCharacterKnowledgeMigrationState().value;
-    saveCharacterKnowledgeMigrationState({
-      schemaVersion: CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION,
-      migrationVersion: CHARACTER_KNOWLEDGE_MIGRATION_VERSION,
-      lastRunAt: Date.now(),
-      migratedMemoryIds: Array.from(new Set([...previous.migratedMemoryIds, ...result.migratedMemoryIds])),
-      migratedSummaryIds: Array.from(new Set([...previous.migratedSummaryIds, ...result.migratedSummaryIds])),
-      migratedCorrectionIds: Array.from(new Set([...previous.migratedCorrectionIds, ...result.migratedCorrectionIds])),
-      orphanRecordIds: Array.from(new Set([...previous.orphanRecordIds, ...result.orphanRecordIds])),
-    });
-    result.diagnostics.forEach((diagnostic) => {
+    result.migration.diagnostics.forEach((diagnostic) => {
       console.warn(`[character truth migration] ${diagnostic.recordId}: ${diagnostic.diagnostic}`);
     });
   }, [characters, relationships, memories, offlineStories]);
@@ -1414,7 +1398,7 @@ export default function App() {
         return;
       }
 
-      const retrievalLimit = char.retrievalHistoryLimit || 100;
+      const retrievalLimit = char.historyMemoryLimit || 100;
       const relation = relationships.find((item) =>
         item.id === relationId
         && item.characterId === characterId
@@ -1464,10 +1448,6 @@ export default function App() {
       }
       const addedCount = result.extractedMemories.length;
       const processedCount = Math.max(addedCount, result.acceptedClaims.length);
-      if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
-        setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "长期认知写入失败，未更新兼容记忆" }));
-        return;
-      }
       const extractedSummary = createConversationSummaryRecord({
         scope: {
           relationId: relation.id,
@@ -1481,13 +1461,23 @@ export default function App() {
         rangeStartAt: msgsToSummarize[0]?.timestamp,
         rangeEndAt: msgsToSummarize[msgsToSummarize.length - 1]?.timestamp,
       });
-      if (extractedSummary) {
-        const summaryWrite = saveConversationSummaries([...loadConversationSummaries().value, extractedSummary]);
-        if (!summaryWrite.success) console.warn("Conversation summary cache could not be persisted:", summaryWrite.error);
+      const write = await commitMemoryWriteBundle({
+        claims: result.acceptedClaims,
+        summary: extractedSummary,
+        memories: addedCount > 0 ? MemoryService.mergeMemories(memories, result.extractedMemories) : undefined,
+        appendClaims: appendKnowledgeClaims,
+        appendSummaries: (summaries) => conversationSummaryRepository.appendMany(summaries),
+        saveMemories: (nextMemories) => {
+          setMemories([...nextMemories]);
+          return true;
+        },
+      });
+      if (!write.canonicalWritten || !write.memoriesWritten) {
+        console.error("Immediate summary memory bundle could not be persisted:", write.error || write.memoriesError);
+        setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "长期认知写入失败，未更新兼容记忆" }));
+        return;
       }
-      if (addedCount > 0) {
-        setMemories(prev => MemoryService.mergeMemories(prev, result.extractedMemories));
-      }
+      if (!write.summaryWritten) console.warn("Conversation summary cache could not be persisted:", write.summaryError);
 
       setImmediateSummaryTask({
         characterId,
@@ -4289,7 +4279,7 @@ export default function App() {
                     onClose={() => setActiveApp(null)}
                     onSaveSettings={setSettings}
                     onSwitchIdentity={handleSwitchIdentity}
-                    onNavigateToApp={setActiveApp}
+                    onNavigateToApp={handleChatNavigateToApp}
                     worldBookEntries={worldBookEntries}
                     onClearMessages={handleClearMessages}
                     memories={memories}
@@ -4560,6 +4550,7 @@ export default function App() {
                     onStartImmediateSummary={handleStartImmediateSummary}
                     onResetImmediateSummary={handleResetImmediateSummary}
                     onClose={() => setActiveApp(null)}
+                    openDiagnosticsRequestId={memoryDiagnosticsRequestId}
                     selectedModel={settings.selectedModel}
                     apiEndpoint={settings.apiEndpoint}
                     />

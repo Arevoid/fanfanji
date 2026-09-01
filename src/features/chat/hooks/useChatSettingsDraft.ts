@@ -2,6 +2,7 @@ import { useState } from "react";
 import { sanitizeChatIcons, type Character, type ChatIconOverrides } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { isProactiveOfflineEnabled } from "../../../domain/schedule/proactiveOfflinePreference";
+import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
 
 export function useChatSettingsDraft() {
   const [draftRemark, setDraftRemark] = useState("");
@@ -23,11 +24,9 @@ export function useChatSettingsDraft() {
   const [draftProactiveEndTime, setDraftProactiveEndTime] = useState("22:00");
   const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
   const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
-  const [draftContextMemoryLimit, setDraftContextMemoryLimit] = useState(20);
-  const [draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit] = useState(100);
+  const [draftContextMemoryLimit, setDraftContextMemoryLimit] = useState(150);
+  const [draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit] = useState(50);
   const [draftArchiveTemplateType, setDraftArchiveTemplateType] = useState<"refined" | "delicate">("refined");
-  const [draftAutoArchiveInterval, setDraftAutoArchiveInterval] = useState(50);
-  const [draftEnableAutoArchive, setDraftEnableAutoArchive] = useState(false);
   const [draftEnableTimeAwareness, setDraftEnableTimeAwareness] = useState(false);
   const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
   const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
@@ -58,11 +57,9 @@ export function useChatSettingsDraft() {
     setDraftProactiveEndTime(character.proactiveEndTime || "22:00");
     setDraftDisableBracketActions(character.disableBracketActions || false);
     setDraftHistoryMemoryLimit(character.historyMemoryLimit || 150);
-    setDraftContextMemoryLimit(character.contextMemoryLimit || 20);
-    setDraftRetrievalHistoryLimit(character.retrievalHistoryLimit || 100);
+    setDraftContextMemoryLimit(resolveChatContextMemoryLimit(character.contextMemoryLimit));
+    setDraftRetrievalHistoryLimit(resolveChatLongTermMemoryLimit(character.retrievalHistoryLimit));
     setDraftArchiveTemplateType(character.archiveTemplateType || "refined");
-    setDraftAutoArchiveInterval(character.autoArchiveInterval || 50);
-    setDraftEnableAutoArchive(character.enableAutoArchive !== undefined ? character.enableAutoArchive : (character.enableAutoSummary || false));
     setDraftEnableTimeAwareness(character.enableTimeAwareness || false);
     setDraftEnableAutoTranslate(character.enableAutoTranslate || false);
     setDraftMinimaxVoiceId(character.minimaxVoiceId || "");
@@ -88,7 +85,6 @@ export function useChatSettingsDraft() {
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
     draftHistoryMemoryLimit, setDraftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType, setDraftArchiveTemplateType,
-    draftAutoArchiveInterval, setDraftAutoArchiveInterval, draftEnableAutoArchive, setDraftEnableAutoArchive,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
     draftMinimaxSpeed, setDraftMinimaxSpeed,

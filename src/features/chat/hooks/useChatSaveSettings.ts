@@ -36,8 +36,6 @@ interface UseChatSaveSettingsOptions {
   draftContextMemoryLimit: any;
   draftRetrievalHistoryLimit: any;
   draftArchiveTemplateType: any;
-  draftAutoArchiveInterval: any;
-  draftEnableAutoArchive: any;
   draftEnableTimeAwareness: any;
   draftMinimaxVoiceId: any;
   draftMosslandVoiceId: any;
@@ -70,7 +68,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
     draftEnableProactiveOffline, draftRemark, draftAvatar, draftIsPinned, draftChatBg, draftCustomCss,
     draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftProactiveChatInterval,
     draftDisableBracketActions, draftHistoryMemoryLimit, draftContextMemoryLimit, draftRetrievalHistoryLimit,
-    draftArchiveTemplateType, draftAutoArchiveInterval, draftEnableAutoArchive, draftEnableTimeAwareness,
+    draftArchiveTemplateType, draftEnableTimeAwareness,
     draftMinimaxVoiceId, draftMosslandVoiceId, draftMinimaxSpeed, draftVoiceFrequency,
     draftEnableImageGeneration, draftImageAppearancePrompt, draftImageNegativePrompt,
     draftImageReferenceAssetId, draftImageReferenceMimeType,
@@ -124,10 +122,6 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       contextMemoryLimit: draftContextMemoryLimit,
       retrievalHistoryLimit: draftRetrievalHistoryLimit,
       archiveTemplateType: draftArchiveTemplateType,
-      autoArchiveInterval: draftAutoArchiveInterval,
-      enableAutoArchive: draftEnableAutoArchive,
-      enableAutoSummary: draftEnableAutoArchive, // synced with enableAutoArchive
-      summaryTriggerRound: draftAutoArchiveInterval, // synced with autoArchiveInterval
       enableTimeAwareness: draftEnableTimeAwareness,
       enableAutoTranslate: draftEnableAutoTranslate,
       minimaxVoiceId: draftMinimaxVoiceId.trim() || undefined,

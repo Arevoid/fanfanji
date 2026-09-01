@@ -9,6 +9,8 @@ import { readingAssetDb } from "./readingAssetDb";
 import { imageAssetDb } from "../../utils/imageAssetDb";
 import { stickerDb } from "../../utils/stickerDb";
 import { CURRENT_STORAGE_SCHEMA_VERSION, STORAGE_MIGRATION_SCRIPT_VERSION } from "./storageVersion";
+import { loadCharacterKnowledgeMigrationState } from "./repositories/characterKnowledgeMigrationRepository";
+import type { CharacterKnowledgeMigrationState } from "../../domain/characterKnowledge/characterKnowledgeMigrationTypes";
 
 export interface LocalStorageUsageEntry {
   key: string;
@@ -26,6 +28,7 @@ export interface StorageDiagnostics {
   migrationScriptVersion: string;
   migrationState?: StorageMigrationState | null;
   migrationLock?: StorageMigrationLock | null;
+  characterKnowledgeMigration?: CharacterKnowledgeMigrationState;
   pressure: "normal" | "warning" | "critical" | "unknown";
   health: StorageHealthReport;
   identitySummary?: IdentityDiagnosticSummary;
@@ -585,6 +588,7 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
     dataSchemaVersion: dataSchemaVersion.valid ? dataSchemaVersion.value : null,
     migrationState: loadStorageMigrationState(),
     migrationLock: loadStorageMigrationLock(),
+    characterKnowledgeMigration: loadCharacterKnowledgeMigrationState().value,
     currentSchemaVersion: CURRENT_STORAGE_SCHEMA_VERSION,
     migrationScriptVersion: STORAGE_MIGRATION_SCRIPT_VERSION,
     health,

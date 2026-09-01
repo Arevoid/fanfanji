@@ -66,6 +66,8 @@ export function buildGroupMemberPrivateContext(input: GroupMemberPrivateContextI
     queryText: input.queryText,
     existingMemories: input.memories,
     limit: input.limit,
+    maxCharacters: 2400,
+    excludeCanonicalMirrors: true,
     scenario: "group-chat",
   }).filter((memory) =>
     !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),

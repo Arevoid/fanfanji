@@ -3,7 +3,7 @@ import {
   type CharacterTruthScope,
   type ConversationSummaryRecord,
 } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
-import { isSameTruthScope } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
+import { isExactTruthScope } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readArray, writeArray } from "./repositoryUtils";
@@ -72,13 +72,22 @@ export const saveConversationSummaries = (records: readonly ConversationSummaryR
 export const listConversationSummariesByRelation = (
   scope: CharacterTruthScope,
   records: readonly ConversationSummaryRecord[] = loadConversationSummaries().value,
-): ConversationSummaryRecord[] => records.filter((record) => isSameTruthScope(record, scope));
+): ConversationSummaryRecord[] => records.filter((record) => isExactTruthScope(record, scope));
 export const appendConversationSummaries = (
   current: readonly ConversationSummaryRecord[],
   incoming: readonly ConversationSummaryRecord[],
 ): ConversationSummaryRecord[] => {
   const records = new Map(normalizeConversationSummaries(current).map((record) => [record.id, record]));
-  normalizeConversationSummaries(incoming).forEach((record) => records.set(record.id, record));
+  const normalizedIncoming = new Map<string, ConversationSummaryRecord>();
+  incoming.map(normalizeConversationSummary).forEach((record) => {
+    if (!record) return;
+    const previousIncoming = normalizedIncoming.get(record.id);
+    if (!previousIncoming || record.generatedAt >= previousIncoming.generatedAt) normalizedIncoming.set(record.id, record);
+  });
+  normalizedIncoming.forEach((record) => {
+    const existing = records.get(record.id);
+    if (!existing || record.generatedAt >= existing.generatedAt) records.set(record.id, record);
+  });
   return Array.from(records.values());
 };
 export const removeConversationSummariesByRelations = (
@@ -94,8 +103,22 @@ export const retractConversationSummariesBySourceMessageIds = (messageIds: reado
   if (removed.size === 0) return { success: true };
   return saveConversationSummaries(loadConversationSummaries().value.map((record) =>
     record.sourceMessageIds.some((sourceMessageId) => removed.has(sourceMessageId))
-      && (!scope || isSameTruthScope(record, scope))
+      && (!scope || isExactTruthScope(record, scope))
       ? { ...record, status: "retracted" as const }
+      : record));
+};
+
+export const markConversationSummariesStaleBySourceClaimIds = (
+  claimIds: readonly string[],
+  scope?: CharacterTruthScope,
+): StorageWriteResult => {
+  const changed = new Set(claimIds.filter(Boolean));
+  if (changed.size === 0) return { success: true };
+  return saveConversationSummaries(loadConversationSummaries().value.map((record) =>
+    record.sourceClaimIds.some((claimId) => changed.has(claimId))
+      && (!scope || isExactTruthScope(record, scope))
+      && record.status === "active"
+      ? { ...record, status: "stale" as const }
       : record));
 };
 
@@ -107,4 +130,5 @@ export const conversationSummaryRepository = {
   appendMany: (records: readonly ConversationSummaryRecord[]) => saveConversationSummaries(appendConversationSummaries(loadConversationSummaries().value, records)),
   removeByRelations: removeConversationSummariesForRelations,
   retractBySourceMessageIds: retractConversationSummariesBySourceMessageIds,
+  markStaleBySourceClaimIds: markConversationSummariesStaleBySourceClaimIds,
 };

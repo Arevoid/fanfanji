@@ -7,8 +7,13 @@ const hook = readFileSync(new URL("../src/features/chat/hooks/useChatMemoryExtra
 assert.match(appChat, /useChatMemoryExtraction\(\{/);
 assert.doesNotMatch(appChat, /const handleExtractMemories = async/);
 assert.match(hook, /MemoryService\.extractMemories/);
-assert.match(hook, /appendKnowledgeClaims\(result\.acceptedClaims\)/);
+assert.match(hook, /commitMemoryWriteBundle/);
+assert.match(hook, /appendClaims: appendKnowledgeClaims/);
+assert.match(hook, /appendSummaries/);
 assert.match(hook, /createConversationSummaryRecord/);
+assert.match(hook, /kind: "automatic_summary"/);
+assert.match(hook, /summaries,/);
+assert.match(hook, /Do not move the archive marker past a batch/);
 assert.match(hook, /setIsCompressingMemory\(false\)/);
 
 console.log("PASS chat memory extraction is isolated behind a relationship-scoped hook");

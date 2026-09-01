@@ -10,7 +10,7 @@ const settingsSource = readFileSync(new URL("../src/components/AppSettings.tsx",
 const readingSource = readFileSync(new URL("../src/components/AppReading.tsx", import.meta.url), "utf8");
 
 assert.match(appSource, /const loadAppReading = \(\) => import\("\.\/components\/AppReading"\)/);
-assert.match(appSource, /reading: loadAppReading/);
+assert.match(appSource, /reading:\s+withModuleRetry\(loadAppReading\)/);
 assert.match(appSource, /const AppReading = React\.lazy\(loadAppReading\)/);
 assert.match(appSource, /reading: \(className = "w-6 h-6"\) => <BookOpenText/);
 assert.match(appSource, /id: "reading",[\s\S]*?name: "阅读",[\s\S]*?icon: AppIcons\.reading\(\)/);

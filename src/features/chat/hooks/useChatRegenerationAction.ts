@@ -1,4 +1,5 @@
 import type { Message, OfflineStory } from "../../../types";
+import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
 
 /** Mechanical extraction of the existing regeneration path; dependencies stay explicit in the page context. */
 export function useChatRegenerationAction(context: Record<string, any>) {
@@ -9,7 +10,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     latestActiveCharacterRef, settings, serializeMessageContentForPrompt, shouldUseCrossDayHistoryBoundary,
     activeAttachModal, callingStatus, callTranscript, detectCallTopicShift, partitionDirectChatHistoryByCurrentDay,
     formatHistoricalMessageForPrompt, describeHistoricalRelativeTime, serializeMessageToPromptTurns, buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt,
-    projectCharacterPrompt, recallSettings, MemoryService, memories, retrieveTruthForPrivatePrompt,
+    projectCharacterPrompt, MemoryService, memories, retrieveTruthForPrivatePrompt,
     loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatMemoriesForPrompt, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
     getPendingOfflineHandoff, buildPendingOfflineTimelineHandoff, isOfflineStoryHandoffMemory,
@@ -78,8 +79,8 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     let pendingOfflineHandoffForReply: OfflineStory | undefined;
 
     try {
-      // Short-term real-time context limit: contextMemoryLimit (range 10~50, default 20), capped globally at 50
-      const limit = Math.min(50, activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20);
+      // Short-term real-time context limit: 10~300 messages, default 150.
+      const limit = resolveChatContextMemoryLimit(activeCharacter.contextMemoryLimit);
       
       // Exclude lastUserMsg from the history parameter since it is sent as the main message parameter.
       const msgsForHistory = previousMessages.filter(m => m.id !== lastUserMsg.id);
@@ -175,9 +176,9 @@ Feedback from the user: "${oocComment}".
 Please read the feedback carefully and rewrite your response to perfectly match your profile. Do NOT repeat the previous tone/behavior!`;
 
       // Recall memories
-      const topK = recallSettings?.recallCount || 5;
+      const topK = resolveChatLongTermMemoryLimit(activeCharacter?.retrievalHistoryLimit);
       const relevantMemories = shouldLoadLongTermMemory
-        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, scenario: "chat" })
+        ? MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, maxCharacters: 3600, excludeCanonicalMirrors: true, scenario: "chat" })
         : [];
       const truthRetrieval = activeRelationship
         ? retrieveTruthForPrivatePrompt({
@@ -189,6 +190,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           },
           queryText: currentMessageContextText,
           limit: topK,
+          maxCharacters: 4800,
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
           corrections: loadBehaviorCorrections().value,
@@ -249,6 +251,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
             queryText: currentMessageContextText,
             existingMemories: memories || [],
             limit: topK,
+            maxCharacters: 3600,
+            excludeCanonicalMirrors: true,
             scenario: "chat",
           });
           const legacyMemories = MemoryService.retrieveRelevantMemories({
@@ -256,6 +260,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
             queryText: currentMessageContextText,
             existingMemories: memories || [],
             limit: topK,
+            maxCharacters: 3600,
+            excludeCanonicalMirrors: true,
             scenario: "chat",
           });
           const eventMemories = [...primaryMemories, ...legacyMemories]

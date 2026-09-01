@@ -17,6 +17,9 @@ const appSource = fs.readFileSync(path.resolve("src/components/AppCinema.tsx"), 
 const appShell = fs.readFileSync(path.resolve("src/App.tsx"), "utf8");
 assert.match(appSource, /userIdentityId/);
 assert.match(appSource, /relationId/);
+assert.match(appSource, /sourceApp: "cinema"/);
+assert.match(appSource, /sourceCinemaId/);
+assert.match(appSource, /conversationId: relation\.conversationId/);
 assert.match(appSource, /保存为观影记忆/);
 assert.match(appSource, /imageDataUrl/);
 assert.match(appShell, /id: "cinema"/);

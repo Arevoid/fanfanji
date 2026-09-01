@@ -1,7 +1,9 @@
 import type { OfflineStoryFactPolicyInput } from "../offlineStory/offlineStoryFactPolicy";
+import type { MemorySourceApp } from "../memory/memoryModel";
 
 export const KNOWLEDGE_CLAIM_SCHEMA_VERSION = 1;
 export const CONVERSATION_SUMMARY_SCHEMA_VERSION = 1;
+export const CONVERSATION_SUMMARY_PROJECTION_VERSION = 2;
 export const BEHAVIOR_CORRECTION_SCHEMA_VERSION = 1;
 
 export interface CharacterTruthScope {
@@ -17,6 +19,7 @@ export type TruthStatus = "asserted" | "confirmed" | "inferred" | "disputed" | "
 export type TemporalStatus = "past" | "present" | "future" | "timeless" | "unknown";
 export type KnowledgeSourceKind =
   | "user_message"
+  | "automatic_summary"
   | "deterministic_action"
   | "manual"
   | "ooc_correction"
@@ -29,6 +32,8 @@ export type KnowledgeEvidenceForm = "statement" | "question" | "suggestion" | "r
 export interface KnowledgeSourceRef {
   kind: KnowledgeSourceKind;
   authorship: KnowledgeSourceAuthorship;
+  /** Product surface that produced this claim; kind remains the evidence form. */
+  app?: MemorySourceApp;
   messageIds?: string[];
   eventId?: string;
   storyId?: string;
@@ -46,7 +51,11 @@ export interface KnowledgeClaim extends CharacterTruthScope {
   temporalStatus: TemporalStatus;
   source: KnowledgeSourceRef;
   confidence: number;
+  /** Optional 1-10 importance supplied by a trusted writer; retrieval derives a safe fallback. */
+  importance?: number;
   userConfirmed: boolean;
+  /** Manual pause only; the claim remains stored and can be recovered later. */
+  recallDisabled?: boolean;
   occurredAt?: number;
   recordedAt: number;
   validFrom?: number;
@@ -69,6 +78,7 @@ export interface KnowledgeWriteCandidate extends CharacterTruthScope {
   evidenceForm?: KnowledgeEvidenceForm;
   requestedTruthStatus?: TruthStatus;
   confidence?: number;
+  importance?: number;
   userConfirmed?: boolean;
   occurredAt?: number;
   recordedAt: number;

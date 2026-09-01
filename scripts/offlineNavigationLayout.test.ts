@@ -109,7 +109,7 @@ const workspaceExitSource = readFileSync(new URL("../src/features/offline/hooks/
 const workspaceHeaderSource = readFileSync(new URL("../src/features/offline/components/OfflineWorkspaceHeader.tsx", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("../src/components/offline/offlineStory.css", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-const workspaceHeaderStart = workspaceHeaderSource.indexOf('<header className="offline-workspace-header">');
+const workspaceHeaderStart = workspaceHeaderSource.indexOf('<header className={`offline-workspace-header');
 const workspaceHeaderEnd = workspaceHeaderSource.indexOf("</header>", workspaceHeaderStart);
 const linkedStatusStart = componentSource.indexOf('className="offline-chat-link-card"', workspaceHeaderStart);
 

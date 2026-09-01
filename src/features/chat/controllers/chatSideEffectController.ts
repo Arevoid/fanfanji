@@ -10,7 +10,6 @@ export interface ChatReplySideEffectInput {
   relationships: CharacterRelationship[];
   isOffline: boolean;
   activeOfflineStoryId?: string | null;
-  extractInterval?: number;
 }
 
 export interface ChatSideEffectControllerDependencies {
@@ -71,10 +70,10 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
         return;
       }
 
-      if (input.activeCharacter.enableAutoSummary === true) {
-        const extractIntervalRounds = input.activeCharacter.summaryTriggerRound !== undefined
-          ? input.activeCharacter.summaryTriggerRound
-          : (input.extractInterval || 10);
+        const configuredRounds = input.activeCharacter.summaryTriggerRound;
+        const extractIntervalRounds = Number.isFinite(configuredRounds)
+          ? Math.min(100, Math.max(10, Math.round(configuredRounds as number)))
+          : 50;
         const triggerCount = extractIntervalRounds * 2;
         const currentMessages = input.userMsg
           ? [...input.currentChatMessages, input.userMsg, ...input.createdMessages]
@@ -127,8 +126,6 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
             }, 200);
           }
         }
-      }
-
       if (input.activeCharacter.album && input.activeCharacter.album.length > 0) {
         const needsCover = !input.activeCharacter.momentsCover;
         const shouldChangeCover = needsCover || Math.random() < 0.35;

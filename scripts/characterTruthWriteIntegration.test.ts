@@ -56,11 +56,11 @@ const offline = fs.readFileSync(new URL("../src/components/AppOffline.tsx", impo
 const offlineMemorySync = fs.readFileSync(new URL("../src/features/offline/hooks/useOfflineStoryMemorySyncActions.ts", import.meta.url), "utf8");
 const memoryUi = fs.readFileSync(new URL("../src/components/AppMemory.tsx", import.meta.url), "utf8");
 
-assert.match(app, /appendKnowledgeClaims\(result\.acceptedClaims\)/, "immediate summary writes Truth before compatibility Memory");
-assert.match(chatMemoryExtraction, /appendKnowledgeClaims\(result\.acceptedClaims\)/, "chat extraction writes Truth before compatibility Memory");
-assert.match(offlineMemorySync, /appendKnowledgeClaims\(result\.acceptedClaims\)/, "offline extraction writes Truth before compatibility Memory");
+assert.match(app, /commitMemoryWriteBundle/, "immediate summary uses the shared memory write coordinator");
+assert.match(chatMemoryExtraction, /commitMemoryWriteBundle/, "chat extraction uses the shared memory write coordinator");
+assert.match(offlineMemorySync, /commitMemoryWriteBundle/, "offline extraction uses the shared memory write coordinator");
 assert.match(offlineMemorySync, /const offlineStoryPolicyInput =/, "offline extraction reuses the existing story Fact Policy");
-assert.match(memoryUi, /appendKnowledgeClaim\(claim\)/, "manual add writes a confirmed claim");
+assert.match(memoryUi, /appendClaims: appendKnowledgeClaims/, "manual add writes a confirmed claim");
 assert.match(memoryUi, /supersedeKnowledgeClaim/, "manual edit preserves the supersession chain");
 assert.match(memoryUi, /retractKnowledgeClaim/, "manual deletion retracts authoritative claims");
 assert.match(chat, /behaviorCorrectionRepository\.append/, "OOC writes the dedicated correction model");

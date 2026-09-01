@@ -2,9 +2,10 @@ import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction 
 import type { Character, MemoryItem, MemoryVaultSettings, OfflineStory, UserSettings } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { KnowledgeClaim } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
-import { apiExtractMemoriesWithModelFallback } from "../../../utils/apiHelper";
 import { appendMany as appendKnowledgeClaims } from "../../../core/storage/repositories/characterKnowledgeRepository";
+import { apiExtractMemoriesWithModelFallback } from "../../../utils/apiHelper";
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../../../domain/memory/MemoryService";
+import { commitMemoryWriteBundle } from "../../../domain/memory/memoryWriteCoordinator";
 import { createId } from "../../../core/id/createId";
 import { createOfflineStoryHandoffMemory, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress, isOfflineStoryHandoffMemory } from "../../../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../../../domain/offlineStory/offlineStoryFactPolicy";
@@ -125,10 +126,21 @@ export function useOfflineStoryMemorySyncActions({
         const groupResult = await createOfflineGroupParticipantMemories({ story, participants: participantCharacters, characters: [...characters], relationships: [...relationships], activeIdentityId, sourceMessages, userName: settings.name, now, settings, recallSettings, existingMemories: memories, offlineStoryPolicyInput, extractApi: (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel) });
         const groupMemories = groupResult.memories;
         if (groupMemories.length !== participantCharacters.length) throw new Error("Offline group story is missing one or more participant relationship scopes");
-        if (groupResult.acceptedClaims.length > 0 && !appendKnowledgeClaims(groupResult.acceptedClaims).success) throw new Error("Offline group story knowledge persistence failed");
         const retainedMemories = memories.filter((memory) => !isOfflineStoryHandoffMemory(memory, story));
-        const persisted = onPersistMemories ? await onPersistMemories(MemoryService.mergeMemories(retainedMemories, groupMemories)) : (onSaveMemories(MemoryService.mergeMemories(retainedMemories, groupMemories)), true);
-        if (!persisted) throw new Error("Offline group story memory persistence failed");
+        const write = await commitMemoryWriteBundle({
+          claims: groupResult.acceptedClaims,
+          memories: MemoryService.mergeMemories(retainedMemories, groupMemories),
+          appendClaims: (claims) => {
+            // Kept as an injected callback below so the coordinator owns the
+            // ordering and failure boundary for group sync as well.
+            return appendKnowledgeClaims(claims);
+          },
+          saveMemories: async (nextMemories) => onPersistMemories
+            ? onPersistMemories([...nextMemories])
+            : (onSaveMemories([...nextMemories]), true),
+        });
+        if (!write.canonicalWritten) throw new Error("Offline group story knowledge persistence failed");
+        if (!write.memoriesWritten) throw new Error("Offline group story memory persistence failed");
         const syncedStory = markSynced(groupMemories.map((memory) => memory.id));
         if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory); else onSaveOfflineStory(syncedStory);
         const fallbackSuffix = groupResult.fallbackParticipantNames.length > 0
@@ -139,7 +151,7 @@ export function useOfflineStoryMemorySyncActions({
       }
       if (character.isGroupChat) throw new Error("Offline group story participant scope is invalid");
 
-      const historyLimit = character.retrievalHistoryLimit || 100;
+      const historyLimit = character.historyMemoryLimit || 100;
       const relationship = relationships.find((relation) => relation.id === story.relationId && relation.characterId === story.characterId && relation.conversationId === story.conversationId);
       if (!relationship) throw new Error("Offline story relationship scope is invalid");
       const isDelicate = character.archiveTemplateType === "delicate";
@@ -163,7 +175,6 @@ export function useOfflineStoryMemorySyncActions({
         }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
         if (result.apiError) createSafeFallback();
         else {
-          if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) throw new Error("Offline story knowledge persistence failed");
           acceptedOfflineClaims = result.acceptedClaims;
           confirmedFacts = result.acceptedClaims.filter((claim) => claim.status === "active" && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted")).map((claim) => claim.statement);
           extractedMemories = result.extractedMemories;
@@ -178,8 +189,16 @@ export function useOfflineStoryMemorySyncActions({
       const retainedMemories = memories.filter((memory) => !isOfflineStoryHandoffMemory(memory, story));
       const mergedMemories = MemoryService.mergeMemories(retainedMemories, extractedMemories);
       if (!hasOfflineStorySummary(story, mergedMemories)) throw new Error("Offline story summary merge verification failed");
-      const persisted = onPersistMemories ? await onPersistMemories(mergedMemories) : (onSaveMemories(mergedMemories), true);
-      if (!persisted) throw new Error("Offline story summary persistence failed");
+      const write = await commitMemoryWriteBundle({
+        claims: acceptedOfflineClaims,
+        memories: mergedMemories,
+        appendClaims: (claims) => appendKnowledgeClaims(claims),
+        saveMemories: async (nextMemories) => onPersistMemories
+          ? onPersistMemories([...nextMemories])
+          : (onSaveMemories([...nextMemories]), true),
+      });
+      if (!write.canonicalWritten) throw new Error("Offline story knowledge persistence failed");
+      if (!write.memoriesWritten) throw new Error("Offline story summary persistence failed");
       const nextRelationships = applyConfirmedOfflineRelationshipTransition({ relationships: [...relationships], relationId: relationship.id, claims: acceptedOfflineClaims, now });
       if (nextRelationships.some((item, index) => item !== relationships[index])) onSaveRelationships(nextRelationships);
       const syncedStory = markSynced(extractedMemories.map((memory) => memory.id));

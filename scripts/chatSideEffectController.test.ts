@@ -25,7 +25,7 @@ const assistantMessage = {
 const character = {
   id: "character-1",
   enableAutoSummary: true,
-  summaryTriggerRound: 1,
+  summaryTriggerRound: 10,
   album: [],
 } as Character;
 const relationship = {
@@ -33,6 +33,11 @@ const relationship = {
   lastImmediateSummaryMsgId: undefined,
 } as CharacterRelationship;
 const relationships = [relationship];
+const previousMessages = Array.from({ length: 18 }, (_, index) => ({
+  ...userMessage,
+  id: `history-${index}`,
+  timestamp: index + 10,
+})) as Message[];
 
 const scheduled: Array<() => void | Promise<void>> = [];
 let savedOfflineStory: OfflineStory | undefined;
@@ -64,7 +69,7 @@ const controller = createChatSideEffectController({
 
 controller.afterReplySuccess({
   userMsg: userMessage,
-  currentChatMessages: [],
+  currentChatMessages: previousMessages,
   createdMessages: [assistantMessage],
   activeCharacter: character,
   activeRelationship: relationship,
@@ -77,7 +82,7 @@ assert.equal(savedOfflineStory?.updatedAt, 42);
 
 controller.afterReplySuccess({
   userMsg: userMessage,
-  currentChatMessages: [],
+  currentChatMessages: previousMessages,
   createdMessages: [assistantMessage],
   activeCharacter: character,
   activeRelationship: relationship,
@@ -86,7 +91,8 @@ controller.afterReplySuccess({
 });
 assert.equal(scheduled.length, 1);
 await scheduled[0]();
-assert.deepEqual(extractedMessages.map((message) => message.id), ["user-1", "assistant-1"]);
+assert.equal(extractedMessages.length, 20);
+assert.deepEqual(extractedMessages.slice(-2).map((message) => message.id), ["user-1", "assistant-1"]);
 assert.equal(savedRelationships[0]?.lastImmediateSummaryMsgId, "assistant-1");
 
 const duplicateScheduled: Array<() => void | Promise<void>> = [];
@@ -102,7 +108,7 @@ const duplicateController = createChatSideEffectController({
 });
 const duplicateInput = {
   userMsg: userMessage,
-  currentChatMessages: [],
+  currentChatMessages: previousMessages,
   createdMessages: [assistantMessage],
   activeCharacter: { ...character, id: "character-duplicate" } as Character,
   activeRelationship: duplicateRelationship,

@@ -38,9 +38,10 @@ export interface Character {
   momentsCover?: string; // Personal moments background cover
   album?: string[]; // Personal photo gallery / album
   references?: CharacterReference[];
+  /** Legacy persisted field; automatic summary is now always enabled. */
   enableAutoSummary?: boolean;
   enableAutoTranslate?: boolean;
-  summaryTriggerRound?: number;
+  summaryTriggerRound?: number; // 10~100, default 50 rounds
   compressedMemory?: string;
   /** Optional character-level routine configuration; it is a prompt hint only. */
   routine?: CharacterRoutine;
@@ -65,12 +66,12 @@ export interface Character {
   initialChatMode?: "greeting" | "context";
   lastImmediateSummaryMsgId?: string;
   disableBracketActions?: boolean;
+  /** Number of chat messages processed per automatic/manual archive batch. */
   historyMemoryLimit?: number;
-  contextMemoryLimit?: number; // 10~50, default 20
-  retrievalHistoryLimit?: number; // 10~200, default 100
+  contextMemoryLimit?: number; // 10~300 messages, default 150
+  /** Long-term memory items retrieved and injected per chat turn. */
+  retrievalHistoryLimit?: number; // 10~100, default 50
   archiveTemplateType?: "refined" | "delicate"; // "refined" (event log) | "delicate" (first person diary)
-  autoArchiveInterval?: number; // 10~100, default 50 rounds
-  enableAutoArchive?: boolean;
   enableTimeAwareness?: boolean;
   isGroupChat?: boolean;
   memberIds?: string[];
@@ -859,10 +860,17 @@ export interface MemoryItem {
   characterId: string;
   /** The direct relationship that owns this remembered interaction. */
   relationId?: string;
+  /** Optional scope metadata for records created by newer memory writers. */
+  userIdentityId?: string;
+  conversationId?: string;
   /** The Moment that created this automatic memory, when applicable. */
   sourceMomentId?: string;
+  /** The cinema media that created this compatibility memory, when applicable. */
+  sourceCinemaId?: string;
   /** Authoritative Truth Layer records represented by this compatibility view. */
   sourceKnowledgeClaimIds?: string[];
+  /** Temporarily excludes this record from recall without deleting its content. */
+  recallDisabled?: boolean;
   content: string;
   timestamp: number;
   importance?: number; // 1-10, default 5

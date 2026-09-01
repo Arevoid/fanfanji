@@ -33,6 +33,12 @@ const summary: ConversationSummaryRecord = {
   status: "active",
   schemaVersion: 1,
 };
+const sourceBackedSummary: ConversationSummaryRecord = {
+  ...summary,
+  id: "summary-source-backed",
+  summary: "有来源的摘要",
+  sourceClaimIds: ["claim-confirmed"],
+};
 const correction: BehaviorCorrectionRecord = {
   id: "correction-a",
   ...scope,
@@ -57,7 +63,7 @@ const result = retrieveTruthForPrivatePrompt({
     claim("claim-legacy", "旧 Memory 待核验", "legacy_unverified"),
     claim("claim-other", "identity B 的电影事实", "confirmed", "fact", { ...scope, relationId: "relation-b", userIdentityId: "identity-b", conversationId: "direct:relation-b" }),
   ],
-  summaries: [summary, { ...summary, id: "summary-b", relationId: "relation-b", userIdentityId: "identity-b", conversationId: "direct:relation-b", summary: "B 的摘要" }],
+  summaries: [summary, sourceBackedSummary, { ...summary, id: "summary-b", relationId: "relation-b", userIdentityId: "identity-b", conversationId: "direct:relation-b", summary: "B 的摘要" }],
   corrections: [correction, { ...correction, id: "correction-b", relationId: "relation-b", userIdentityId: "identity-b", conversationId: "direct:relation-b", instruction: "B 的修正" }],
 });
 
@@ -67,8 +73,9 @@ assert.equal(result.projection.futurePlans.length, 1);
 assert.equal(result.projection.openBeliefsAndHypotheses.length, 1);
 assert.equal(result.projection.disputed.length, 1);
 assert.equal(result.projection.legacyUnverified.length, 1);
-assert.equal(result.summaries.length, 1);
+assert.equal(result.summaries.length, 2);
 assert.equal(result.summaries[0].summary, "只属于 A 的派生摘要");
+assert.equal(result.summaries[1].summary, "有来源的摘要");
 assert.equal(result.corrections.length, 1);
 assert.ok(result.shadowedLegacyMemoryIds.includes("claim-legacy"));
 
@@ -77,9 +84,21 @@ assert.match(prompt, /Confirmed facts/);
 assert.match(prompt, /尚未发生的计划/);
 assert.match(prompt, /不得改写成已经发生的事实/);
 assert.match(prompt, /旧数据待核验/);
-assert.doesNotMatch(prompt, /派生缓存|只属于 A 的派生摘要/, "derived summary cache must not duplicate Truth in prompts");
+assert.match(prompt, /对话摘要（非权威补充）/);
+assert.match(prompt, /只属于 A 的派生摘要/);
+assert.match(prompt, /如果与上面的具体事实/);
 assert.match(prompt, /保持克制/);
 assert.doesNotMatch(prompt, /identity B/);
+
+const staleResult = retrieveTruthForPrivatePrompt({
+  scope,
+  claims: [{ ...claim("claim-retracted-source", "已被撤回的来源", "retracted"), status: "retracted" }],
+  summaries: [{ ...sourceBackedSummary, sourceClaimIds: ["claim-retracted-source"] }],
+  corrections: [],
+});
+assert.equal(staleResult.summaries.length, 0, "a summary with retracted or missing source claims is not usable");
+const boundedPrompt = formatTruthRetrievalForPrompt({ ...result, promptCharacterLimit: 120 });
+assert.ok(boundedPrompt.length <= 120, "Truth prompt projection must respect its character budget");
 
 const diagnostics = explainTruthProjection({
   scope,

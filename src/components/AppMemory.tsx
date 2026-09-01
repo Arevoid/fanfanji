@@ -1,11 +1,16 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask } from "../types";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
-import { append as appendKnowledgeClaim, retract as retractKnowledgeClaim, supersede as supersedeKnowledgeClaim } from "../core/storage/repositories/characterKnowledgeRepository";
+import { append as appendKnowledgeClaim, appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retract as retractKnowledgeClaim, saveKnowledgeClaims, supersede as supersedeKnowledgeClaim } from "../core/storage/repositories/characterKnowledgeRepository";
+import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
+import { loadBehaviorCorrections, saveBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
+import type { BehaviorCorrectionRecord, ConversationSummaryRecord, KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
 import { createManualKnowledgeClaim } from "../features/characterKnowledge/services/manualKnowledgeService";
 import { getMemoryDisplayContent } from "../domain/memory/offlineMemorySync";
+import { commitMemoryWriteBundle } from "../domain/memory/memoryWriteCoordinator";
+import { rankRelevantMemories } from "../domain/memory/MemoryRetriever";
 import { 
   ChevronLeft,
   Search, 
@@ -21,7 +26,12 @@ import {
   Sliders,
   X,
   MoreVertical,
-  Loader2
+  Loader2,
+  Download,
+  Upload,
+  PauseCircle,
+  RotateCcw,
+  Info
 } from "lucide-react";
 
 interface AppMemoryProps {
@@ -38,7 +48,15 @@ interface AppMemoryProps {
   onClose: () => void;
   selectedModel?: string;
   apiEndpoint?: string;
+  openDiagnosticsRequestId?: number;
 }
+
+const DEFAULT_AUTO_SUMMARY_ROUNDS = 50;
+const normalizeAutoSummaryRounds = (value: number | undefined): number =>
+  Number.isFinite(value)
+    ? Math.min(100, Math.max(10, Math.round(value as number)))
+    : DEFAULT_AUTO_SUMMARY_ROUNDS;
+
 export default function AppMemory({
   characters,
   relationships,
@@ -52,7 +70,8 @@ export default function AppMemory({
   onResetImmediateSummary,
   onClose,
   selectedModel = "gemini-3.5-flash",
-  apiEndpoint = ""
+  apiEndpoint = "",
+  openDiagnosticsRequestId = 0,
 }: AppMemoryProps) {
   const displayCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
   const normalizeCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
@@ -72,11 +91,16 @@ export default function AppMemory({
   const [editingItem, setEditingItem] = useState<MemoryItem | null>(null);
   const [showApiPoolModal, setShowApiPoolModal] = useState(false);
   const [showRecallModal, setShowRecallModal] = useState(false);
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const restoreBackupRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (openDiagnosticsRequestId > 0) setShowDiagnosticsModal(true);
+  }, [openDiagnosticsRequestId]);
 
   // States for automatic summary settings
   const [selectedCharForAutoSummary, setSelectedCharForAutoSummary] = useState<string>("");
-  const [modalEnableAutoSummary, setModalEnableAutoSummary] = useState<boolean>(false);
-  const [modalSummaryTriggerRound, setModalSummaryTriggerRound] = useState<number>(15);
+  const [modalSummaryTriggerRound, setModalSummaryTriggerRound] = useState<number>(DEFAULT_AUTO_SUMMARY_ROUNDS);
   const [modalArchiveTemplateType, setModalArchiveTemplateType] = useState<"refined" | "delicate">("refined");
 
   const handleSelectCharForAutoSummary = (charId: string) => {
@@ -84,8 +108,7 @@ export default function AppMemory({
     setSelectedCharForAutoSummary(canonicalCharacterId);
     const char = displayCharacters.find(c => c.id === canonicalCharacterId);
     if (char) {
-      setModalEnableAutoSummary(char.enableAutoSummary === true); // Default to false
-      setModalSummaryTriggerRound(char.summaryTriggerRound || 15); // Default to 15
+      setModalSummaryTriggerRound(normalizeAutoSummaryRounds(char.summaryTriggerRound));
       setModalArchiveTemplateType(char.archiveTemplateType || "refined");
     }
   };
@@ -94,13 +117,11 @@ export default function AppMemory({
     const firstChar = displayCharacters[0];
     if (firstChar) {
       setSelectedCharForAutoSummary(firstChar.id);
-      setModalEnableAutoSummary(firstChar.enableAutoSummary === true);
-      setModalSummaryTriggerRound(firstChar.summaryTriggerRound || 15);
+      setModalSummaryTriggerRound(normalizeAutoSummaryRounds(firstChar.summaryTriggerRound));
       setModalArchiveTemplateType(firstChar.archiveTemplateType || "refined");
     } else {
       setSelectedCharForAutoSummary("");
-      setModalEnableAutoSummary(false);
-      setModalSummaryTriggerRound(15);
+      setModalSummaryTriggerRound(DEFAULT_AUTO_SUMMARY_ROUNDS);
       setModalArchiveTemplateType("refined");
     }
     setShowRecallModal(true);
@@ -155,8 +176,131 @@ export default function AppMemory({
     return matchesChar && matchesRelation && matchesSearch;
   });
 
+  const knowledgeClaims = loadKnowledgeClaims().value;
+  const conversationSummaries = loadConversationSummaries().value;
+  const behaviorCorrections = loadBehaviorCorrections().value;
+  const getClaimForMemory = (item: MemoryItem): KnowledgeClaim | undefined =>
+    item.sourceKnowledgeClaimIds?.map((claimId) => knowledgeClaims.find((claim) => claim.id === claimId)).find(Boolean);
+  const getRelationLabel = (relationId?: string): string => {
+    if (!relationId) return "未绑定关系";
+    const relation = relationships.find((item) => item.id === relationId);
+    const character = relation ? displayCharacters.find((item) => item.id === normalizeCharacterId(relation.characterId)) : undefined;
+    return character ? `${character.name} · ${relation?.relationship || "关系"}` : relationId;
+  };
+  const getSourceAppLabel = (item: MemoryItem, claim?: KnowledgeClaim): string => {
+    const app = claim?.source.app
+      || (item.sourceMomentId ? "moments" : item.sourceReadingRoomId ? "reading" : item.sourceCinemaId ? "cinema" : "memory");
+    return ({ chat: "聊天", moments: "朋友圈", notes: "备忘录", diary: "日记", cinema: "影视", schedule: "日程", relationship: "关系网", music: "音乐", reading: "阅读", offline: "线下剧本", memory: "记忆库", forum: "社区", system: "系统", legacy: "旧数据" } as Record<string, string>)[app] || app;
+  };
+  const getMemoryDiagnostic = (item: MemoryItem) => {
+    const claim = getClaimForMemory(item);
+    const relationId = item.relationId;
+    const ranked = rankRelevantMemories([item], item.characterId, searchQuery, {
+      relationId,
+      excludeCanonicalMirrors: false,
+    })[0];
+    const isPaused = Boolean(item.recallDisabled || claim?.recallDisabled);
+    const status = isPaused ? "已暂停" : claim?.supersededById ? "已替代" : "启用";
+    const reason = isPaused
+      ? "已手动暂停，不会参与聊天检索；记录仍保留。"
+      : claim?.supersededById
+        ? `已被新记录替代：${claim.supersededById}`
+        : searchQuery.trim()
+          ? ranked ? `当前查询可命中，综合权重 ${ranked.score.toFixed(2)}` : "当前查询未命中"
+          : "未输入查询；记录可按语义、关键词和权重参与检索。";
+    return {
+      item,
+      claim,
+      status,
+      reason,
+      score: ranked?.score,
+      app: getSourceAppLabel(item, claim),
+      scene: getRelationLabel(relationId),
+      weight: `${item.importance ?? claim?.importance ?? 5}/10 · 置信度 ${Math.round((claim?.confidence ?? (item.isManual ? 0.95 : 0.5)) * 100)}%`,
+      original: claim?.source.messageIds?.length
+        ? `原始消息 ${claim.source.messageIds.length} 条`
+        : claim?.source.sourceRecordId || item.sourceMomentId || item.sourceCinemaId || item.sourceReadingCommentId || "暂无直接消息链接",
+    };
+  };
+  const diagnosticItems = filteredMemories.slice(0, 20).map(getMemoryDiagnostic);
+  const selectedDiagnosticClaims = knowledgeClaims.filter((claim) => {
+    const characterMatch = selectedCharacterId === "all" || claim.characterId === normalizeCharacterId(selectedCharacterId);
+    const relationMatch = selectedRelationId === "all" || claim.relationId === selectedRelationId;
+    return characterMatch && relationMatch;
+  });
+
+  const toggleMemoryRecall = (item: MemoryItem) => {
+    const nextDisabled = !item.recallDisabled;
+    const claimIds = new Set(item.sourceKnowledgeClaimIds || []);
+    if (claimIds.size > 0) {
+      const nextClaims = knowledgeClaims.map((claim) => claimIds.has(claim.id) ? { ...claim, recallDisabled: nextDisabled } : claim);
+      const claimWrite = saveKnowledgeClaims(nextClaims);
+      if (!claimWrite.success) {
+        alert("记忆状态保存失败，未改变召回状态。");
+        return;
+      }
+    }
+    onSaveMemories(memories.map((candidate) => candidate.id === item.id ? { ...candidate, recallDisabled: nextDisabled } : candidate));
+  };
+
+  const downloadMemoryBackup = () => {
+    const payload = {
+      format: "fanfanji-memory-backup",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      memories,
+      claims: knowledgeClaims,
+      summaries: conversationSummaries,
+      corrections: behaviorCorrections,
+      recallSettings,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `fanfanji-memory-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setShowMenu(false);
+  };
+
+  const restoreMemoryBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text()) as Partial<{
+        format: string;
+        version: number;
+        memories: MemoryItem[];
+        claims: KnowledgeClaim[];
+        summaries: ConversationSummaryRecord[];
+        corrections: BehaviorCorrectionRecord[];
+        recallSettings: MemoryVaultSettings;
+      }>;
+      if (parsed.format !== "fanfanji-memory-backup" || parsed.version !== 1
+        || !Array.isArray(parsed.memories) || !Array.isArray(parsed.claims)
+        || !Array.isArray(parsed.summaries) || !Array.isArray(parsed.corrections)) {
+        alert("不是可识别的米饭机记忆备份文件。");
+        return;
+      }
+      if (!window.confirm("恢复记忆备份会替换当前记忆、Truth、摘要和修正记录。继续前请确认已有备份。")) return;
+      const claimWrite = saveKnowledgeClaims(parsed.claims);
+      const summaryWrite = saveConversationSummaries(parsed.summaries);
+      const correctionWrite = saveBehaviorCorrections(parsed.corrections);
+      if (!claimWrite.success || !summaryWrite.success || !correctionWrite.success) {
+        alert("记忆备份恢复失败，原有页面数据未主动清空；请检查存储空间后重试。");
+        return;
+      }
+      onSaveMemories(parsed.memories);
+      if (parsed.recallSettings) onSaveRecallSettings(parsed.recallSettings);
+      alert("记忆备份已恢复。页面中的记忆、摘要和 Truth 会在下一次读取时重新同步。");
+    } catch {
+      alert("记忆备份文件读取失败。");
+    }
+  };
+
   // Handle Add Memory
-  const handleAddMemory = (e: React.FormEvent) => {
+  const handleAddMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCharId || !newRelationId || !newContent.trim()) {
       alert("请选择角色并输入记忆内容！");
@@ -176,8 +320,9 @@ export default function AppMemory({
       statement: newContent.trim(),
       sourceRecordId: memoryId,
       recordedAt: now,
+      sourceApp: "memory",
     });
-    if (!claim || !appendKnowledgeClaim(claim).success) {
+    if (!claim) {
       alert("长期认知写入失败，未保存兼容记忆。");
       return;
     }
@@ -185,6 +330,8 @@ export default function AppMemory({
       id: memoryId,
       characterId: relation.characterId,
       relationId: newRelationId,
+      userIdentityId: relation.userIdentityId,
+      conversationId: relation.conversationId,
       content: newContent.trim(),
       timestamp: now,
       importance: newImportance,
@@ -192,7 +339,19 @@ export default function AppMemory({
       sourceKnowledgeClaimIds: [claim.id],
     };
 
-    onSaveMemories([newItem, ...normalizedMemories]);
+    const write = await commitMemoryWriteBundle({
+      claims: [claim],
+      memories: [newItem, ...normalizedMemories],
+      appendClaims: appendKnowledgeClaims,
+      saveMemories: (nextMemories) => {
+        onSaveMemories([...nextMemories]);
+        return true;
+      },
+    });
+    if (!write.canonicalWritten || !write.memoriesWritten) {
+      alert("长期认知写入失败，未保存兼容记忆。");
+      return;
+    }
     setIsAddingItem(false);
     setNewCharId("");
     setNewRelationId("");
@@ -229,7 +388,7 @@ export default function AppMemory({
     setEditContent(item.content);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editingItem || !editContent.trim()) return;
 
     const relation = editingItem.relationId
@@ -246,6 +405,7 @@ export default function AppMemory({
       statement: editContent.trim(),
       sourceRecordId: editingItem.id,
       recordedAt: now,
+      sourceApp: "memory",
     });
     if (!replacement) {
       alert("修改内容未通过长期认知审核。");
@@ -253,21 +413,12 @@ export default function AppMemory({
     }
     const previousClaimIds = editingItem.sourceKnowledgeClaimIds || [];
     const primaryClaimId = previousClaimIds[0];
-    const stored = primaryClaimId
-      ? supersedeKnowledgeClaim(toTruthScope(relation), primaryClaimId, replacement).success
-      : appendKnowledgeClaim(replacement).success;
-    if (!stored) {
-      alert("长期认知修改失败，兼容记忆保持不变。");
-      return;
-    }
-    previousClaimIds.slice(1).forEach((claimId) => {
-      retractKnowledgeClaim(toTruthScope(relation), claimId, "compatibility_memory_manually_replaced");
-    });
-
     const updated = memories.map(item => {
       if (item.id === editingItem.id) {
         return {
           ...item,
+          userIdentityId: relation.userIdentityId,
+          conversationId: relation.conversationId,
           content: editContent.trim(),
           timestamp: now,
           isManual: true,
@@ -277,7 +428,28 @@ export default function AppMemory({
       return item;
     });
 
-    onSaveMemories(updated);
+    const write = await commitMemoryWriteBundle({
+      claims: [replacement],
+      writeClaims: () => {
+        const stored = primaryClaimId
+          ? supersedeKnowledgeClaim(toTruthScope(relation), primaryClaimId, replacement).success
+          : appendKnowledgeClaim(replacement).success;
+        if (!stored) return false;
+        previousClaimIds.slice(1).forEach((claimId) => {
+          retractKnowledgeClaim(toTruthScope(relation), claimId, "compatibility_memory_manually_replaced");
+        });
+        return true;
+      },
+      memories: updated,
+      saveMemories: (nextMemories) => {
+        onSaveMemories([...nextMemories]);
+        return true;
+      },
+    });
+    if (!write.complete) {
+      alert("长期认知修改失败，兼容记忆保持不变。");
+      return;
+    }
     setEditingItem(null);
     setEditContent("");
   };
@@ -357,6 +529,28 @@ export default function AppMemory({
                     <Sparkles className="w-3.5 h-3.5 text-neutral-800" />
                     立即总结
                   </button>
+                  <button
+                    onClick={() => { setShowDiagnosticsModal(true); setShowMenu(false); }}
+                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors border-t border-slate-100"
+                  >
+                    <Info className="w-3.5 h-3.5 text-neutral-800" />
+                    管理诊断
+                  </button>
+                  <button
+                    onClick={downloadMemoryBackup}
+                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5 text-neutral-800" />
+                    导出记忆备份
+                  </button>
+                  <button
+                    onClick={() => { setShowMenu(false); restoreBackupRef.current?.click(); }}
+                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-neutral-800" />
+                    恢复记忆备份
+                  </button>
+                  <input ref={restoreBackupRef} type="file" accept="application/json,.json" onChange={restoreMemoryBackup} className="hidden" />
                 </motion.div>
               </>
             )}
@@ -738,6 +932,82 @@ export default function AppMemory({
         )}
       </AnimatePresence>
 
+      {/* MODAL: Memory diagnostics */}
+      <AnimatePresence>
+        {showDiagnosticsModal && (
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-[24px] p-5 w-full max-w-md shadow-2xl border border-slate-100 flex max-h-[90%] flex-col"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3 shrink-0">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                    <Info className="w-4 h-4 text-neutral-800" />
+                    记忆管理诊断
+                  </h3>
+                  <p className="text-[10px] text-slate-400 mt-1">查看来源、召回理由、权重、替代关系和原始消息链接。</p>
+                </div>
+                <button onClick={() => setShowDiagnosticsModal(false)} className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full" aria-label="关闭管理诊断">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto pt-3 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-[10px] text-slate-400">兼容记忆</p>
+                    <p className="text-lg font-black text-slate-800">{filteredMemories.length}</p>
+                    <p className="text-[9px] text-slate-400">当前筛选结果</p>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-[10px] text-slate-400">Truth / 摘要 / 修正</p>
+                    <p className="text-lg font-black text-slate-800">{selectedDiagnosticClaims.length} / {conversationSummaries.length} / {behaviorCorrections.length}</p>
+                    <p className="text-[9px] text-slate-400">符合当前角色的 Truth / 全局缓存 / 修正</p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-amber-50/50 p-3 text-[10px] leading-relaxed text-slate-500">
+                  当前关系：<strong className="text-slate-700">{selectedRelationId === "all" ? "全部关系" : getRelationLabel(selectedRelationId)}</strong>。
+                  暂停只影响未来召回，不会删除原文、摘要、来源消息或档案；恢复后即可重新参与检索。
+                </div>
+
+                {diagnosticItems.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-xs text-slate-400">
+                    当前筛选下没有兼容记忆记录。
+                  </div>
+                ) : diagnosticItems.map(({ item, status, reason, app, scene, weight, original }) => (
+                  <div key={item.id} className="rounded-xl border border-slate-100 p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-bold leading-relaxed text-slate-700 break-all">{getMemoryDisplayContent(item.content)}</p>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold ${status === "启用" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{status}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[9px] text-slate-400">
+                      <span>来源应用：<strong className="text-slate-600">{app}</strong></span>
+                      <span>场景/关系：<strong className="text-slate-600">{scene}</strong></span>
+                      <span>当前权重：<strong className="text-slate-600">{weight}</strong></span>
+                      <span>替代状态：<strong className="text-slate-600">{status === "已替代" ? "存在新记录" : "未被替代"}</strong></span>
+                    </div>
+                    <p className="text-[10px] leading-relaxed text-slate-500">召回诊断：{reason}</p>
+                    <p className="text-[9px] leading-relaxed text-slate-400 break-all">原始消息/记录：{original}</p>
+                    <button
+                      type="button"
+                      onClick={() => toggleMemoryRecall(item)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-100"
+                    >
+                      {item.recallDisabled ? <RotateCcw className="h-3 w-3" /> : <PauseCircle className="h-3 w-3" />}
+                      {item.recallDisabled ? "恢复召回" : "暂停召回"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* MODAL: Extract API Pool (抽取 API 池) */}
       <AnimatePresence>
         {showApiPoolModal && (
@@ -849,29 +1119,8 @@ export default function AppMemory({
                     </select>
                   </div>
 
-                  {/* Auto Extract Toggle */}
-                  <div className="flex items-center justify-between border-t border-slate-100 pt-3.5">
-                    <div className="space-y-0.5">
-                      <span className="text-xs font-bold text-slate-800 block">
-                        开启自动总结开关
-                      </span>
-                      <span className="text-[10px] text-slate-400 block">
-                        开启后系统将在触发轮数自动总结对话记忆
-                      </span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={modalEnableAutoSummary}
-                        onChange={(e) => setModalEnableAutoSummary(e.target.checked)}
-                        className="rounded border-slate-300 text-neutral-950 focus:ring-neutral-950 w-4 h-4"
-                      />
-                    </label>
-                  </div>
-
                   {/* Trigger Interval Slider */}
-                  {modalEnableAutoSummary && (
-                    <div className="space-y-1.5 border-t border-slate-100 pt-3.5">
+                  <div className="space-y-1.5 border-t border-slate-100 pt-3.5">
                       <div className="flex justify-between">
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
                           自动总结触发间隔
@@ -883,16 +1132,16 @@ export default function AppMemory({
                       <input
                         type="range"
                         min="10"
-                        max="50"
+                        max="100"
+                        step="10"
                         value={modalSummaryTriggerRound}
                         onChange={(e) => setModalSummaryTriggerRound(parseInt(e.target.value))}
                         className="w-full h-1 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                       />
                       <p className="text-[10px] text-slate-400 leading-snug">
-                        范围为 10 至 50 轮。触发后，系统会自动提炼该段对话，提炼为精致的记忆点存储在记忆库中。
+                        自动总结始终开启。范围为 10 至 100 轮，默认 50 轮；触发后，系统会自动提炼该段对话并存储到记忆库。
                       </p>
-                    </div>
-                  )}
+                  </div>
 
                   {/* Template Type Choice */}
                   <div className="space-y-2 border-t border-slate-100 pt-3.5">
@@ -936,7 +1185,7 @@ export default function AppMemory({
                       if (char && onUpdateCharacter) {
                         onUpdateCharacter({
                           ...char,
-                          enableAutoSummary: modalEnableAutoSummary,
+                          enableAutoSummary: true,
                           summaryTriggerRound: modalSummaryTriggerRound,
                           archiveTemplateType: modalArchiveTemplateType,
                         });

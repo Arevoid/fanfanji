@@ -373,6 +373,7 @@ export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = fal
     && !line.startsWith("【")
     && /^[^：:\n]{1,24}\s*[：:](?=\s*\S)/u.test(line);
   const isStructuredFieldLine = (line: string): boolean => /^【[^】\n]+】\s*[：:]/u.test(line);
+  const normalizeBubbleText = (value: string): string => value.trim();
   const results: string[] = [];
   let paragraph: string[] = [];
 
@@ -382,14 +383,14 @@ export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = fal
     // Profile cards and other labelled lists are one semantic answer. Keep
     // their line breaks visible instead of turning every field into a bubble.
     if (paragraph.every(isStructuredFieldLine)) {
-      results.push(paragraph.join("\n").trim());
+      results.push(normalizeBubbleText(paragraph.join("\n")));
       paragraph = [];
       return;
     }
 
     const paragraphText = paragraph.join("\n").trim();
     if (paragraphText.length <= MAX_BUBBLE_LENGTH) {
-      results.push(paragraphText);
+      results.push(normalizeBubbleText(paragraphText));
       paragraph = [];
       return;
     }
@@ -404,7 +405,7 @@ export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = fal
     let bubble = "";
     const flushBubble = () => {
       if (!bubble) return;
-      results.push(bubble.trim());
+      results.push(normalizeBubbleText(bubble));
       bubble = "";
     };
     for (const segment of segments) {

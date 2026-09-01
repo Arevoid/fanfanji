@@ -17,6 +17,7 @@ assert.equal(post.moment?.content, "你好");
 assert.equal(post.moment?.comments[0].content, "自评");
 assert.ok(post.memory?.content.includes("你好"));
 assert.equal(post.moment?.relationId, "relation-a");
+assert.equal(post.memory?.userIdentityId, "identity-1", "朋友圈记忆必须继承发布关系的身份作用域");
 assert.equal(post.moment?.timestamp, 10);
 assert.equal(post.moment?.comments[0].timestamp, 1010);
 assert.equal(post.memory?.relationId, "relation-a");

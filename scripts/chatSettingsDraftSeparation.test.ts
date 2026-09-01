@@ -7,7 +7,7 @@ assert.match(appChat, /useChatSettingsDraft\(\)/);
 assert.match(appChat, /loadCharacterDraft\(activeCharacter, activeRelationship\)/);
 assert.doesNotMatch(appChat, /setDraftRemark\(activeCharacter\.isGroupChat/);
 assert.match(hook, /character\.customChatCSS \|\| character\.customCss/);
-assert.match(hook, /character\.enableAutoArchive !== undefined/);
+assert.doesNotMatch(hook, /draftAutoArchive|draftEnableAutoArchive|enableAutoArchive/);
 assert.match(hook, /sanitizeChatIcons\(character\.customChatIcons\)/);
 assert.doesNotMatch(hook, /localStorage|sessionStorage|indexedDB/);
 

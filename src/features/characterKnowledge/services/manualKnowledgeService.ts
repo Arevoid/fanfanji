@@ -1,4 +1,5 @@
 import type { CharacterTruthScope, KnowledgeClaim } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
+import type { MemorySourceApp } from "../../../domain/memory/memoryModel";
 import { evaluateKnowledgeWrite } from "../../../domain/characterKnowledge/knowledgeWritePolicy";
 
 export function createManualKnowledgeClaim(input: {
@@ -7,6 +8,7 @@ export function createManualKnowledgeClaim(input: {
   statement: string;
   sourceRecordId: string;
   recordedAt: number;
+  sourceApp?: MemorySourceApp;
 }): KnowledgeClaim | undefined {
   const decision = evaluateKnowledgeWrite({
     id: input.id,
@@ -18,6 +20,7 @@ export function createManualKnowledgeClaim(input: {
     source: {
       kind: "manual",
       authorship: "user",
+      ...(input.sourceApp ? { app: input.sourceApp } : {}),
       sourceRecordId: input.sourceRecordId,
       producer: "memory-ui.manual.v1",
       evidenceKey: `manual:${input.scope.relationId}:${input.sourceRecordId}:${input.recordedAt}`,

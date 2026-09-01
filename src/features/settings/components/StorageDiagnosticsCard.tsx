@@ -66,6 +66,11 @@ export function StorageDiagnosticsCard({
             <div>最近备份：{lastBackupAt ? new Date(Number(lastBackupAt)).toLocaleString() : "暂无记录"}</div>
             <div>最近迁移：{diagnostics.migrationState?.phase === "completed" ? new Date(diagnostics.migrationState.updatedAt).toLocaleString() : "暂无已完成迁移"}</div>
             <div>未完成迁移：{diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" ? "是" : "否"}</div>
+            {diagnostics.characterKnowledgeMigration && <div>
+              Truth Layer 迁移：{diagnostics.characterKnowledgeMigration.status === "completed" ? "已完成" : diagnostics.characterKnowledgeMigration.status === "failed" ? "失败（已保留旧数据）" : "未执行"}
+              （记忆 {diagnostics.characterKnowledgeMigration.migratedMemoryIds.length}，摘要 {diagnostics.characterKnowledgeMigration.migratedSummaryIds.length}，行为纠正 {diagnostics.characterKnowledgeMigration.migratedCorrectionIds.length}，待核对孤立记录 {diagnostics.characterKnowledgeMigration.orphanRecordIds.length}）
+            </div>}
+            {diagnostics.characterKnowledgeMigration?.lastError && <div className="text-amber-700">Truth Layer 迁移提示：{diagnostics.characterKnowledgeMigration.lastError}</div>}
             <div>持久化许可：{diagnostics.persisted === undefined ? "未知" : diagnostics.persisted ? "已启用" : "未启用"}</div>
             {diagnostics.migrationState && <div>迁移状态：{diagnostics.migrationState.phase}（{diagnostics.migrationState.completedModules.length} 个模块已完成）</div>}
             {diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" && diagnostics.migrationState.phase !== "failed" && diagnostics.migrationState.phase !== "cancelled" && <button type="button" disabled={contentMigrationRunning} onClick={onResumeInterruptedMigration} className="mt-2 rounded-[10px] bg-amber-600 px-3 py-2 font-bold text-white disabled:opacity-50">恢复未完成迁移</button>}

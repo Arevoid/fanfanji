@@ -5,20 +5,68 @@ import { retrieveRelevantMemories, retrieveRelevantMemoriesForScopes } from "./M
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "./memoryFormatter";
 import type { MemoryExtractionApi, MemoryExtractionContext, MemoryRetrievalContext } from "./memoryTypes";
 
+export {
+  MEMORY_MODEL_SCHEMA_VERSION,
+  MEMORY_SOURCE_POLICIES,
+  getMemorySourcePolicy,
+  isMemoryRecordCurrentlyActive,
+  isMemoryRecordVisibleToRelation,
+  memoryRecordScopeKey,
+  memoryRecordFromBehaviorCorrection,
+  memoryRecordFromConversationSummary,
+  memoryRecordFromKnowledgeClaim,
+  memoryRecordFromLegacyItem,
+  normalizeMemoryRecord,
+} from "./memoryModel";
+export { DEFAULT_MEMORY_RECALL_CHARACTER_LIMIT, DEFAULT_TRUTH_PROMPT_CHARACTER_LIMIT, normalizeMemoryRecallBudget, selectMemoryItemsWithinBudget, truncatePromptText } from "./memoryRecallPolicy";
+export type {
+  MemoryLayer,
+  MemoryRecord,
+  MemoryRecordKind,
+  MemoryRecordProvenance,
+  MemoryRecordScope,
+  MemoryRecordStatus,
+  MemoryRecordVisibility,
+  MemoryRelationReadScope,
+  MemorySourceApp,
+  MemorySourceKind,
+  MemorySourcePolicy,
+} from "./memoryModel";
+
 export { formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt };
 export type { MemoryScenario, MemoryExtractionContext, MemoryRetrievalContext } from "./memoryTypes";
 
 export const MemoryService = {
   retrieveRelevantMemories(context: MemoryRetrievalContext): MemoryItem[] {
-    return retrieveRelevantMemories(context.existingMemories, context.characterId, context.queryText, context.limit, context.relationId);
+    return retrieveRelevantMemories(
+      context.existingMemories,
+      context.characterId,
+      context.queryText,
+      context.limit,
+      context.relationId,
+      {
+        userIdentityId: context.userIdentityId,
+        conversationId: context.conversationId,
+        maxCharacters: context.maxCharacters,
+        excludeCanonicalMirrors: context.excludeCanonicalMirrors,
+      },
+    );
   },
   retrieveRelevantMemoriesForScopes(context: {
     existingMemories: readonly MemoryItem[];
-    scopes: readonly { characterId: string; relationId: string }[];
+    scopes: readonly { characterId: string; relationId: string; userIdentityId?: string }[];
     queryText: string;
     limit?: number;
+    maxCharacters?: number;
+    excludeCanonicalMirrors?: boolean;
   }): MemoryItem[] {
-    return retrieveRelevantMemoriesForScopes(context.existingMemories, context.scopes, context.queryText, context.limit);
+    return retrieveRelevantMemoriesForScopes(
+      context.existingMemories,
+      context.scopes,
+      context.queryText,
+      context.limit,
+      { maxCharacters: context.maxCharacters, excludeCanonicalMirrors: context.excludeCanonicalMirrors },
+    );
   },
   formatMemoriesForPrompt,
   extractMemories(context: MemoryExtractionContext, extractApi: MemoryExtractionApi) {

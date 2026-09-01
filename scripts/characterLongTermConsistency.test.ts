@@ -135,6 +135,8 @@ async function testMemoryTruthContract(): Promise<void> {
     character,
     characterId: CHARACTER_ID,
     relationId: RELATION_A,
+    userIdentityId: IDENTITY_A,
+    conversationId: relationA.conversationId,
     recentMessages: [
       message("truth-a", "user", trueEventA),
       message("false-b", "character", falseEventB),
@@ -153,7 +155,14 @@ async function testMemoryTruthContract(): Promise<void> {
     const items = request.history
       .filter((entry) => entry.role === "user" && entry.text.startsWith("[CONFIRMED]"))
       .map((entry) => entry.text.replace("[CONFIRMED]", "").trim());
-    return { items };
+    return { candidates: items.map((statement) => ({
+      statement,
+      kind: "fact" as const,
+      subject: "user" as const,
+      temporalStatus: "past" as const,
+      sourceMessageIds: ["truth-a"],
+      evidenceQuote: trueEventA.replace("[CONFIRMED] ", ""),
+    })) };
   });
 
   assert.ok(capturedRequest, "the extraction boundary receives the source conversation");

@@ -3,6 +3,7 @@ import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from
 import { buildCrossDayHistoricalReferencePrompt, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../prompts/directChatTurnPrompt";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../prompts/messagePromptSerializer";
 import { formatWeChatTimestamp } from "./chatTime";
+import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from "./chatMemoryRetrievalSettings";
 
 const DEFAULT_HISTORY_CHARACTER_LIMIT = 16_000;
 const DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT = 6_000;
@@ -73,7 +74,7 @@ export function buildDirectChatHistoryContext(input: {
     currentMessageAt: input.userMessageAt,
     enableTimeAwareness: input.enableTimeAwareness,
   });
-  const liveWindow = historyPartition.liveMessages.slice(-Math.min(50, Math.max(0, input.contextLimit)));
+  const liveWindow = historyPartition.liveMessages.slice(-Math.min(MAX_CHAT_CONTEXT_MEMORY_LIMIT, Math.max(0, input.contextLimit ?? DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT)));
   const recentMessages = selectRecentMessagesWithinBudget(
     liveWindow,
     Math.max(1, input.historyCharacterLimit ?? DEFAULT_HISTORY_CHARACTER_LIMIT),

@@ -13,6 +13,7 @@ import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import { buildGroupMemberPrivateContext, type GroupMemberPrivateContextInput } from "../prompts/groupMemberPrivateContext";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage } from "../prompts/chatPromptBuilders";
 import { INLINE_GROUP_INNER_VOICE_INSTRUCTION, parseGroupTurnResponse } from "./chatTurnResponseProtocol";
+import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from "./chatMemoryRetrievalSettings";
 
 export type GroupChatTurnGenerator = (input: {
   prompt: {
@@ -44,7 +45,7 @@ export function buildGroupChatHistoryContext(input: {
     if (message) uniqueMessages.set(message.id, message);
   });
   const finalMessages = Array.from(uniqueMessages.values()).sort((left, right) => left.timestamp - right.timestamp);
-  const limit = Math.min(50, input.contextMemoryLimit !== undefined ? input.contextMemoryLimit : 20);
+  const limit = Math.min(MAX_CHAT_CONTEXT_MEMORY_LIMIT, input.contextMemoryLimit !== undefined ? input.contextMemoryLimit : DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT);
   const messages = finalMessages.slice(-limit);
   const historyText = messages.map((message) => {
     const senderCharacter = message.sender === "character"

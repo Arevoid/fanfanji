@@ -111,7 +111,8 @@ import { useChatBackgroundDraftUpload } from "../features/chat/hooks/useChatBack
 import { useChatSaveSettings } from "../features/chat/hooks/useChatSaveSettings";
 import { scheduleNextProactiveMessage } from "../features/chat/services/proactiveScheduleService";
 import { useChatGreeting } from "../features/chat/hooks/useChatGreeting";
-import { estimateChatTokens } from "../features/chat/services/chatTokenEstimate";
+import { estimateChatRequestTokens, estimateChatTokens, type ChatTokenEstimate } from "../features/chat/services/chatTokenEstimate";
+import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../features/chat/services/chatMemoryRetrievalSettings";
 import { recoverPendingOfflineHandoff } from "../features/chat/services/offlineHandoffRecoveryService";
 import { runBackgroundProactivePass, runProactiveCatchupPass } from "../features/chat/services/proactiveChatPassService";
 import { useChatMemoryExtraction } from "../features/chat/hooks/useChatMemoryExtraction";
@@ -1096,7 +1097,6 @@ export default function AppChat({
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
     draftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType,
-    draftAutoArchiveInterval, setDraftAutoArchiveInterval, draftEnableAutoArchive, setDraftEnableAutoArchive,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
     draftMinimaxSpeed, setDraftMinimaxSpeed,
@@ -1158,16 +1158,28 @@ export default function AppChat({
   });
   const { isManualArchiving, setIsManualArchiving, isCompressingMemory, setIsCompressingMemory } = useChatOperationState();
 
+  const [lastChatRequestEstimate, setLastChatRequestEstimate] = React.useState<(ChatTokenEstimate & {
+    scopeKey: string;
+    contextLimit: number;
+    longTermMemoryLimit: number;
+  }) | null>(null);
+  const tokenEstimateScopeKey = `${activeCharacter?.id || ""}:${activeRelationship?.id || "group"}`;
   const estimatedTokens = React.useMemo(() => estimateChatTokens({
     character: activeCharacter,
     relationshipCompressedMemory: activeRelationship?.compressedMemory,
     messages: currentChatMessages,
-    contextLimit: draftContextMemoryLimit,
+    contextLimit: resolveChatContextMemoryLimit(draftContextMemoryLimit),
     memories: memories || [],
     relationId: activeRelationship?.id,
+    userIdentityId: activeRelationship?.userIdentityId,
     isGroupChat: activeCharacter?.isGroupChat,
-    recallCount: recallSettings?.recallCount,
-  }), [draftContextMemoryLimit, activeCharacter, activeRelationship?.compressedMemory, activeRelationship?.id, currentChatMessages, memories, recallSettings?.recallCount]);
+    recallCount: resolveChatLongTermMemoryLimit(draftRetrievalHistoryLimit),
+  }), [draftContextMemoryLimit, draftRetrievalHistoryLimit, activeCharacter, activeRelationship?.compressedMemory, activeRelationship?.id, currentChatMessages, memories]);
+  const isShowingLastChatRequestEstimate = Boolean(lastChatRequestEstimate
+    && lastChatRequestEstimate.scopeKey === tokenEstimateScopeKey
+    && lastChatRequestEstimate.contextLimit === resolveChatContextMemoryLimit(activeCharacter?.contextMemoryLimit ?? draftContextMemoryLimit)
+    && lastChatRequestEstimate.longTermMemoryLimit === resolveChatLongTermMemoryLimit(activeCharacter?.retrievalHistoryLimit ?? draftRetrievalHistoryLimit));
+  const displayedTokenEstimate = isShowingLastChatRequestEstimate ? lastChatRequestEstimate! : estimatedTokens;
   // Memory Compression and Proactive Chat states
   const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
   // Stop background generation after an authentication failure so a missing
@@ -1422,7 +1434,7 @@ export default function AppChat({
         userName: settings.name,
         userBio: settings.bio,
         settings,
-        recallLimit: recallSettings?.recallCount || 5,
+        recallLimit: resolveChatLongTermMemoryLimit(latestActiveCharacterRef.current?.retrievalHistoryLimit),
         timeAwarenessEnabled: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness,
         disableBracketActions: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).disableBracketActions,
         generateTurn: generateGroupChatTurn,
@@ -1652,7 +1664,7 @@ export default function AppChat({
       // A call has its own live history. Keep a short online-chat lead-in for
       // continuity, then append this call's subtitles in chronological order.
       const baseSourceMsgs = isConnectedVoiceCall
-        ? [...currentChatMessages.slice(-Math.min(20, activeCharacter.contextMemoryLimit ?? 20)), ...callHistoryMessages]
+        ? [...currentChatMessages.slice(-resolveChatContextMemoryLimit(activeCharacter.contextMemoryLimit)), ...callHistoryMessages]
         : [...currentChatMessages];
       const sourceMsgs = customHistoryOverride || (userMsg ? [...baseSourceMsgs, userMsg] : baseSourceMsgs);
       const historyContext = buildDirectChatHistoryContext({
@@ -1660,7 +1672,7 @@ export default function AppChat({
         userMessageId: userMsg?.id,
         userMessageAt: userMsg?.timestamp,
         enableTimeAwareness: turnSettings.enableTimeAwareness,
-        contextLimit: activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20,
+        contextLimit: resolveChatContextMemoryLimit(activeCharacter.contextMemoryLimit),
         historyCharacterLimit: 16_000,
         historicalReferenceCharacterLimit: 6_000,
         characterName: activeCharacter.name,
@@ -1714,7 +1726,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
 
       // Recall memories from Memory Vault
-      const topK = recallSettings?.recallCount || 5;
+      const topK = resolveChatLongTermMemoryLimit(activeCharacter.retrievalHistoryLimit);
       const relevantMemories = shouldLoadLongTermMemory
         ? activeCharacter?.isGroupChat
           ? MemoryService.retrieveRelevantMemoriesForScopes({
@@ -1722,12 +1734,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             scopes: (activeCharacter.memberIds || []).flatMap((memberId) => {
               const member = characters.find((candidate) => candidate.id === memberId);
               const relationship = member ? relationForCharacter(member.id) : undefined;
-              return relationship && member ? [{ characterId: member.id, relationId: relationship.id }] : [];
+              return relationship && member ? [{ characterId: member.id, relationId: relationship.id, userIdentityId: relationship.userIdentityId }] : [];
             }),
             queryText: currentMessageContextText,
             limit: topK,
+            maxCharacters: 3600,
+            excludeCanonicalMirrors: true,
           })
-          : MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, scenario: "chat" })
+          : MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, userIdentityId: activeRelationship?.userIdentityId, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, maxCharacters: 3600, excludeCanonicalMirrors: true, scenario: "chat" })
         : [];
       const truthRetrieval = activeRelationship
         ? retrieveTruthForPrivatePrompt({
@@ -1739,21 +1753,33 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           },
           queryText: currentMessageContextText,
           limit: topK,
+          maxCharacters: 4800,
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
           corrections: loadBehaviorCorrections().value,
         })
         : undefined;
       const shadowedLegacyMemoryIds = new Set(truthRetrieval?.shadowedLegacyMemoryIds || []);
+      const truthClaimCount = truthRetrieval
+        ? [
+          ...truthRetrieval.projection.confirmedFacts,
+          ...truthRetrieval.projection.userAssertions,
+          ...truthRetrieval.projection.preferences,
+          ...truthRetrieval.projection.futurePlans,
+          ...truthRetrieval.projection.openBeliefsAndHypotheses,
+          ...truthRetrieval.projection.disputed,
+          ...truthRetrieval.projection.legacyUnverified,
+        ].length
+        : 0;
       const visibleLegacyMemories = relevantMemories.filter((memory) =>
         !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
-      );
-      if (visibleLegacyMemories.length > 0) {
-        characterContextText += formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆（仅作补充）:\n");
-      }
-      if (truthRetrieval) {
-        characterContextText += formatTruthRetrievalForPrompt(truthRetrieval);
-      }
+      ).slice(0, Math.max(0, topK - truthClaimCount));
+      const legacyMemoryPrompt = visibleLegacyMemories.length > 0
+        ? formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆（仅作补充）:\n")
+        : "";
+      const truthRetrievalPrompt = truthRetrieval ? formatTruthRetrievalForPrompt(truthRetrieval) : "";
+      characterContextText += legacyMemoryPrompt;
+      characterContextText += truthRetrievalPrompt;
 
       // A continuation synchronized while leaving the offline app is an explicit
       // handoff. Surface the newest one on the immediate return to online chat,
@@ -1805,6 +1831,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             queryText: currentMessageContextText,
             existingMemories: memories || [],
             limit: topK,
+            maxCharacters: 3600,
+            excludeCanonicalMirrors: true,
             scenario: "chat",
           });
           const legacyCharacterMemories = MemoryService.retrieveRelevantMemories({
@@ -1812,6 +1840,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             queryText: currentMessageContextText,
             existingMemories: memories || [],
             limit: topK,
+            maxCharacters: 3600,
+            excludeCanonicalMirrors: true,
             scenario: "chat",
           });
           const eventMemories = [...primaryMemories, ...legacyCharacterMemories]
@@ -2079,6 +2109,20 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       const imageInstruction = imageDataUrl
         ? "\n【当前用户消息包含真实图片】请先直接观察并识别图片中的主体、物品和场景，再回答；不要仅凭‘发送图片’这段文字猜测，也不要把包、袋子等物品擅自判断成衣服。"
         : "";
+      const requestTokenEstimate = estimateChatRequestTokens({
+        systemInstruction,
+        history,
+        message: `${promptMessage}${imageInstruction}`,
+        historyInjections: wbBlocks.at_depth,
+        retrievalText: `${legacyMemoryPrompt}\n${truthRetrievalPrompt}`,
+        hasImage: Boolean(imageDataUrl),
+      });
+      setLastChatRequestEstimate({
+        ...requestTokenEstimate,
+        scopeKey: tokenEstimateScopeKey,
+        contextLimit: resolveChatContextMemoryLimit(activeCharacter.contextMemoryLimit ?? draftContextMemoryLimit),
+        longTermMemoryLimit: topK,
+      });
 
       const data = await requestDirectChatTurn({
         prompt: { scenario: "direct-chat", message: `${promptMessage}${imageInstruction}`, imageDataUrl, history, systemInstruction, historyInjections: wbBlocks.at_depth },
@@ -2176,7 +2220,6 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
             relationships,
             isOffline: true,
             activeOfflineStoryId,
-            extractInterval: recallSettings?.extractInterval,
           });
         } else {
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
@@ -2277,7 +2320,6 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
             relationships,
             isOffline: false,
             activeOfflineStoryId,
-            extractInterval: recallSettings?.extractInterval,
           });
           if (createdMessages.length > 0 && turnRelationship && !replyContext.isGroup) {
             void maybeGenerateDiaryAfterChat({
@@ -2829,8 +2871,6 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     draftContextMemoryLimit,
     draftRetrievalHistoryLimit,
     draftArchiveTemplateType,
-    draftAutoArchiveInterval,
-    draftEnableAutoArchive,
     draftEnableTimeAwareness,
     draftMinimaxVoiceId,
     draftMosslandVoiceId,
@@ -2867,6 +2907,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     recallSettings,
     setIsCompressingMemory,
     onSaveMemories,
+    onSaveRelationships,
+    onUpdateCharacter,
     groupMembers: activeCharacter?.isGroupChat
       ? (activeCharacter.memberIds || []).map((id) => characters.find((character) => character.id === id)).filter(Boolean) as Character[]
       : [],
@@ -2964,7 +3006,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
           conversationId: relationship.conversationId,
         },
         queryText: recentConversation.recentMessages.slice(-2).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: friend.name })).join(" "),
-        limit: recallSettings?.recallCount || 5,
+        limit: resolveChatLongTermMemoryLimit(friend.retrievalHistoryLimit),
         claims: loadKnowledgeClaims().value,
         summaries: loadConversationSummaries().value,
         corrections: loadBehaviorCorrections().value,
@@ -5266,40 +5308,47 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                         <div className="space-y-3 text-xs">
                       <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100">
                         <span className="text-slate-800 font-bold text-sm">记忆配置</span>
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToApp("memory")}
+                          className="ml-auto rounded-lg bg-[var(--surface-raised)] px-2 py-1 text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-muted)]"
+                        >
+                          打开记忆诊断
+                        </button>
                       </div>
 
                       {/* Token Preview Badge Container */}
                       <div className="theme-memory-config-card bg-[var(--surface-raised)] border border-[var(--border)] p-4 rounded-[16px] space-y-3">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold text-[var(--text-primary)]">
-                            单次 Prompt 预估消耗预览
+                            {isShowingLastChatRequestEstimate ? "上次完整 Prompt 估算" : "单次 Prompt 预估消耗预览"}
                           </span>
                           <span className="theme-memory-value-badge bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] text-xs font-bold font-mono px-2.5 py-0.5 rounded-full">
-                            ~{estimatedTokens.total} Tokens
+                            ~{displayedTokenEstimate.total} Tokens
                           </span>
                         </div>
                         <div className="grid grid-cols-3 gap-2 text-[10px] text-[var(--text-secondary)] font-medium font-mono">
                           <div className="bg-[var(--surface)] p-2 rounded-[12px] border border-[var(--border)] text-center">
                             <span className="block text-[var(--text-tertiary)] text-[9px] mb-0.5">短期上下文</span>
-                            <span className="font-bold text-[var(--text-primary)]">~{estimatedTokens.context} t</span>
+                            <span className="font-bold text-[var(--text-primary)]">~{displayedTokenEstimate.context} t</span>
                           </div>
                           <div className="bg-[var(--surface)] p-2 rounded-[12px] border border-[var(--border)] text-center">
-                            <span className="block text-[var(--text-tertiary)] text-[9px] mb-0.5">深度记忆库</span>
-                            <span className="font-bold text-[var(--text-primary)]">~{estimatedTokens.retrieval} t</span>
+                            <span className="block text-[var(--text-tertiary)] text-[9px] mb-0.5">长期记忆</span>
+                            <span className="font-bold text-[var(--text-primary)]">~{displayedTokenEstimate.retrieval} t</span>
                           </div>
                           <div className="bg-[var(--surface)] p-2 rounded-[12px] border border-[var(--border)] text-center">
                             <span className="block text-[var(--text-tertiary)] text-[9px] mb-0.5">人设与常驻</span>
-                            <span className="font-bold text-[var(--text-primary)]">~{estimatedTokens.persona} t</span>
+                            <span className="font-bold text-[var(--text-primary)]">~{displayedTokenEstimate.persona} t</span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Layer 1: Short-term Context */}
+                      {/* Layer 1: Short-term Context (message count, not round count) */}
                       <div className="theme-memory-config-card bg-[var(--surface-raised)] border border-[var(--border)] space-y-3.5 p-4 rounded-[16px]">
                         <div className="flex items-center justify-between">
                           <span className="text-[var(--text-primary)] font-bold text-xs">短期实时上下文</span>
                           <span className="theme-memory-value-badge bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] text-xs font-bold font-mono px-2.5 py-0.5 rounded-full">
-                            {draftContextMemoryLimit} 轮 / {draftContextMemoryLimit} 条消息
+                            {resolveChatContextMemoryLimit(draftContextMemoryLimit)} 条消息，约 {Math.max(1, Math.round(resolveChatContextMemoryLimit(draftContextMemoryLimit) / 2))} 轮
                           </span>
                         </div>
                         
@@ -5307,27 +5356,28 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                           <input
                             type="range"
                             min={10}
-                            max={50}
-                            step={1}
-                            value={draftContextMemoryLimit}
+                            max={300}
+                            step={10}
+                            value={resolveChatContextMemoryLimit(draftContextMemoryLimit)}
                             onChange={(e) => setDraftContextMemoryLimit(parseInt(e.target.value))}
                             className="theme-memory-range w-full h-1 rounded-full appearance-none cursor-pointer"
                           />
                           <div className="flex justify-between text-[8px] text-[var(--text-tertiary)] font-mono">
-                            <span>10轮</span>
-                            <span>20轮(默认)</span>
-                            <span>35轮</span>
-                            <span>50轮</span>
+                            <span>10条</span>
+                            <span>100条</span>
+                            <span>150条(默认)</span>
+                            <span>200条</span>
+                            <span>300条</span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Layer 2: Long-term History Retrieval Pool */}
+                      {/* Layer 2: Long-term Memory Retrieval */}
                       <div className="theme-memory-config-card bg-[var(--surface-raised)] border border-[var(--border)] space-y-3.5 p-4 rounded-[16px]">
                         <div className="flex items-center justify-between">
-                          <span className="text-[var(--text-primary)] font-bold text-xs">长期历史检索池</span>
+                          <span className="text-[var(--text-primary)] font-bold text-xs">长期记忆检索</span>
                           <span className="theme-memory-value-badge bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] text-xs font-bold font-mono px-2.5 py-0.5 rounded-full">
-                            {draftRetrievalHistoryLimit} 条
+                            {draftRetrievalHistoryLimit} 条记忆
                           </span>
                         </div>
                         
@@ -5335,7 +5385,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                           <input
                             type="range"
                             min={10}
-                            max={200}
+                            max={100}
                             step={10}
                             value={draftRetrievalHistoryLimit}
                             onChange={(e) => setDraftRetrievalHistoryLimit(parseInt(e.target.value))}
@@ -5343,43 +5393,10 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                           />
                           <div className="flex justify-between text-[8px] text-[var(--text-tertiary)] font-mono">
                             <span>10条</span>
-                            <span>50条</span>
-                            <span>100条(默认)</span>
-                            <span>150条</span>
-                            <span>200条</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Layer 3: Long-term Archived Memory */}
-                      <div className="theme-memory-config-card bg-[var(--surface-raised)] border border-[var(--border)] space-y-3.5 p-4 rounded-[16px]">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[var(--text-primary)] font-bold text-xs">对话后台自动归档</span>
-                          <div className="flex items-center gap-2">
-                            <span className="theme-memory-value-badge bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] text-xs font-bold font-mono px-2.5 py-0.5 rounded-full">
-                              {draftEnableAutoArchive ? `${draftAutoArchiveInterval} 轮` : "已关闭"}
-                            </span>
-                            <SettingsSwitch checked={draftEnableAutoArchive} onChange={setDraftEnableAutoArchive} label="自动归档" />
-                          </div>
-                        </div>
-
-                        <div className={`space-y-1 transition-opacity ${draftEnableAutoArchive ? "opacity-100" : "opacity-70 pointer-events-none"}`}>
-                          <input
-                            type="range"
-                            min={10}
-                            max={100}
-                            step={10}
-                            value={draftAutoArchiveInterval}
-                            onChange={(e) => setDraftAutoArchiveInterval(parseInt(e.target.value))}
-                            disabled={!draftEnableAutoArchive}
-                            className="theme-memory-range w-full h-1 rounded-full appearance-none cursor-pointer"
-                          />
-                          <div className="flex justify-between text-[8px] text-[var(--text-tertiary)] font-mono">
-                            <span>10轮</span>
-                            <span>30轮</span>
-                            <span>50轮(默认)</span>
-                            <span>80轮</span>
-                            <span>100轮</span>
+                            <span>25条</span>
+                            <span>50条(默认)</span>
+                            <span>75条</span>
+                            <span>100条</span>
                           </div>
                         </div>
                       </div>
@@ -5394,9 +5411,9 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                               setIsManualArchiving(true);
                               const count = await handleExtractMemories();
                               if (count > 0) {
-                                showToast(`🎉 手动归档并提炼成功！已存入“${activeCharacter.name}”的记忆档案馆`);
+                                showToast(`🎉 已识别并归档 ${count} 条新记忆，已存入“${activeCharacter.name}”的记忆档案馆`);
                               } else {
-                                showToast("当前没有需要归档提炼的新深度对话！");
+                                showToast("当前没有待归档的新聊天内容，或未识别到新的长期记忆。");
                               }
                             } catch (err) {
                               showToast("一键归档时发生未知错误，请重试");
@@ -5418,10 +5435,13 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                           ) : (
                             <>
                               <Database className="w-3.5 h-3.5" />
-                              一键手动提炼归档当前对话
+                              一键总结归档记忆
                             </>
                           )}
                         </button>
+                        <p className="mt-2 text-center text-[9px] leading-relaxed text-[var(--text-tertiary)]">
+                          仅处理当前关系下上次归档之后的新聊天内容，已归档内容不会重复发送给 AI。
+                        </p>
                       </div>
                      </div>
                        </>

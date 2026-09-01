@@ -11,6 +11,7 @@ import { getSubtitleContext, parseSubtitleText, formatSubtitleTime } from "../fe
 import { createManualKnowledgeClaim } from "../features/characterKnowledge/services/manualKnowledgeService";
 import { appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import type { KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
+import { commitMemoryWriteBundle } from "../domain/memory/memoryWriteCoordinator";
 
 interface AppCinemaProps {
   userIdentityId: string;
@@ -499,18 +500,19 @@ export default function AppCinema({
     return () => window.clearInterval(timer);
   }, [selectedRoom?.id, selectedMedia?.id, plotContinuityEnabled, selectedRoom?.lastPlotSummaryAt, plotSummaryLoading]);
 
-  const saveDiscussionToMemory = (discussion: CinemaDiscussion) => {
+  const saveDiscussionToMemory = async (discussion: CinemaDiscussion) => {
     const relation = scopedRelations.find((item) => item.id === discussion.relationId);
     if (!relation || !onSaveMemories) return;
     const statement = `与用户一起观看《${selectedMedia?.title || "影视"}》时，在 ${formatSubtitleTime(discussion.positionMs)} 讨论：${discussion.userText}；角色回应：${discussion.characterText || ""}`.slice(0, 1000);
     const claim = createManualKnowledgeClaim({
       id: createId("claim-cinema"),
       scope: { relationId: relation.id, characterId: relation.characterId, userIdentityId: relation.userIdentityId, conversationId: relation.conversationId },
+      sourceApp: "cinema",
       statement,
       sourceRecordId: discussion.id,
       recordedAt: Date.now(),
     });
-    if (!claim || !appendKnowledgeClaims([claim]).success) {
+    if (!claim) {
       setNotice("观影记忆保存失败");
       return;
     }
@@ -518,18 +520,33 @@ export default function AppCinema({
       id: createId("memory-cinema"),
       characterId: relation.characterId,
       relationId: relation.id,
+      userIdentityId: relation.userIdentityId,
+      conversationId: relation.conversationId,
+      sourceCinemaId: selectedMedia?.id,
       content: statement,
       timestamp: Date.now(),
       importance: 4,
       isManual: true,
       sourceKnowledgeClaimIds: [claim.id],
     };
-    onSaveMemories([memory, ...memories]);
+    const write = await commitMemoryWriteBundle({
+      claims: [claim],
+      memories: [memory, ...memories],
+      appendClaims: appendKnowledgeClaims,
+      saveMemories: (nextMemories) => {
+        onSaveMemories([...nextMemories]);
+        return true;
+      },
+    });
+    if (!write.complete) {
+      setNotice("观影记忆保存失败，已保护当前关系认知");
+      return;
+    }
     persistStore(mergeStore(storeRef.current, { discussions: storeRef.current.discussions.map((item) => item.id === discussion.id ? { ...item, savedToMemory: true } : item) }));
     setNotice("已保存为当前关系的观影记忆");
   };
 
-  const archiveDiscussionsBeforeDelete = (media: CinemaMedia, rooms: CinemaWatchRoom[], discussions: CinemaDiscussion[]) => {
+  const archiveDiscussionsBeforeDelete = async (media: CinemaMedia, rooms: CinemaWatchRoom[], discussions: CinemaDiscussion[]) => {
     if (!onSaveMemories || !discussions.length) return true;
     const claims: KnowledgeClaim[] = [];
     const newMemories: MemoryItem[] = [];
@@ -546,6 +563,7 @@ export default function AppCinema({
       const claim = createManualKnowledgeClaim({
         id: createId("claim-cinema-archive"),
         scope: { relationId: relation.id, characterId: relation.characterId, userIdentityId: relation.userIdentityId, conversationId: relation.conversationId },
+        sourceApp: "cinema",
         statement,
         sourceRecordId: room.id,
         recordedAt: Date.now(),
@@ -556,6 +574,9 @@ export default function AppCinema({
         id: createId("memory-cinema-archive"),
         characterId: relation.characterId,
         relationId: relation.id,
+        userIdentityId: relation.userIdentityId,
+        conversationId: relation.conversationId,
+        sourceCinemaId: media.id,
         content: statement,
         timestamp: Date.now(),
         importance: 4,
@@ -564,11 +585,19 @@ export default function AppCinema({
       });
     }
     if (!claims.length) return true;
-    if (!appendKnowledgeClaims(claims).success) {
+    const write = await commitMemoryWriteBundle({
+      claims,
+      memories: [...newMemories, ...memories],
+      appendClaims: appendKnowledgeClaims,
+      saveMemories: (nextMemories) => {
+        onSaveMemories([...nextMemories]);
+        return true;
+      },
+    });
+    if (!write.complete) {
       setNotice("观影讨论归档失败，已取消删除以保护数据");
       return false;
     }
-    onSaveMemories([...newMemories, ...memories]);
     return true;
   };
 
@@ -577,7 +606,7 @@ export default function AppCinema({
     const relatedDiscussions = storeRef.current.discussions.filter((discussion) => discussion.mediaId === media.id);
     if (!window.confirm(`确定删除《${media.title}》及其本地视频、字幕和讨论记录吗？`)) return;
     const shouldArchive = relatedDiscussions.length > 0 && window.confirm("是否先将讨论内容归档总结进当前关系记忆？\n确定：归档后删除；取消：直接删除，不归档。");
-    if (shouldArchive && !archiveDiscussionsBeforeDelete(media, relatedRooms, relatedDiscussions)) return;
+    if (shouldArchive && !(await archiveDiscussionsBeforeDelete(media, relatedRooms, relatedDiscussions))) return;
     await Promise.all([
       cinemaAssetDb.delete(media.video.assetId),
       media.subtitle ? cinemaAssetDb.delete(media.subtitle.assetId) : Promise.resolve(),

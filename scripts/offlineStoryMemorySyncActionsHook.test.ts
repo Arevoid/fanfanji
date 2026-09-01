@@ -10,7 +10,8 @@ assert.doesNotMatch(appOffline, /const handleSyncMemoryToBrain\s*=\s*async/);
 assert.match(memoryHook, /memorySyncInFlightRef\.current\.add\(story\.id\)/);
 assert.match(memoryHook, /canSyncOfflineStoryToMemory\(offlineStoryPolicyInput\)/);
 assert.match(memoryHook, /createOfflineGroupParticipantMemories/);
-assert.match(memoryHook, /appendKnowledgeClaims\(result\.acceptedClaims\)/);
+assert.match(memoryHook, /commitMemoryWriteBundle/);
+assert.match(memoryHook, /appendClaims/);
 assert.match(memoryHook, /applyConfirmedOfflineRelationshipTransition/);
 assert.match(memoryHook, /memorySyncStatus: "failed"/);
 

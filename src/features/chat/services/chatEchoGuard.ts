@@ -76,6 +76,11 @@ export function isDegenerateDirectReply(
   history: readonly ChatHistoryEntry[] = [],
 ): boolean {
   const visibleReplyText = getVisibleEchoCheckText(replyText);
+  const visibleLines = visibleReplyText.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  // A model may put the copied question and its actual answer in the same
+  // paragraph. Treat the copied leading line as an echo even when the bubble
+  // splitter intentionally keeps the paragraph together for visual reasons.
+  if (visibleLines.length > 1 && isLowInformationUserEcho(userText, visibleLines[0])) return true;
   const visibleBubbles = splitIntoWeChatBubbles(visibleReplyText);
   if (visibleBubbles.some((bubble) => isLowInformationUserEcho(userText, bubble))) return true;
   if (isRepeatedCharacterTurn(visibleReplyText, history)) return true;

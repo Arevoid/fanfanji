@@ -263,6 +263,8 @@ const LIGHT_BACKUP_KEYS = [
   "phone_memory_vault_settings",
   "phone_character_events",
   "phone_character_knowledge_claims",
+  "phone_behavior_corrections",
+  "phone_character_knowledge_migration_state",
   "phone_character_relationships",
   "phone_diary_entries",
   "phone_diary_shares",

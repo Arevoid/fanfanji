@@ -153,6 +153,7 @@ export async function requestCharacterMoment(input: {
       id: `${timestamp}-moment-memory-${random().toString(36).slice(2, 6)}`,
       characterId: input.character.id,
       relationId: input.relationId,
+      userIdentityId: input.ownerIdentityId,
       sourceMomentId: moment.id,
       content: `【${input.character.name}发布的朋友圈】${parsed.content}${image ? "（发布时附有配图）" : ""}`,
       timestamp,

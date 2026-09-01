@@ -164,7 +164,7 @@ const projection = selectKnowledgeForPrivatePrompt(
 );
 assert.deepEqual(projection.confirmedFacts.map((item) => item.id), ["call-event"]);
 assert.deepEqual(projection.futurePlans.map((item) => item.id), ["plan-1"]);
-assert.deepEqual(projection.openBeliefsAndHypotheses.map((item) => item.id), ["hypothesis-1"]);
+assert.deepEqual(projection.openBeliefsAndHypotheses.map((item) => item.id), ["hypothesis-1", "ai-claim"]);
 assert.equal(projection.userAssertions.some((item) => item.id === "claim-1"), true);
 const thirtyDaysLater = selectKnowledgeForPrivatePrompt([futurePlan.claim], futurePlan.claim, 100 + 30 * 24 * 60 * 60 * 1000);
 assert.equal(thirtyDaysLater.futurePlans[0]?.temporalStatus, "future", "time passing never turns a plan into a past fact");

@@ -75,7 +75,7 @@ assert.match(detail, /返回关联聊天/);
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const scheduleSource = readFileSync(new URL("../src/components/AppSchedule.tsx", import.meta.url), "utf8");
 assert.match(appSource, /appointments=\{scheduleStore\.appointments\}/);
-assert.match(appSource, /setActiveChatRelationId\(relationId\)[\s\S]*setActiveApp\("chat"\)/);
+assert.match(appSource, /setActiveChatRelationId\(relationship\?\.id \|\| null\)[\s\S]*setActiveApp\("chat"\)/);
 assert.match(scheduleSource, /SCHEDULE_STATUS_META\[entry\.status\]\.dotClass/);
 assert.match(scheduleSource, /aria-label="日程状态筛选"/);
 assert.match(scheduleSource, /schedule-filter-control/);

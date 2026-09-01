@@ -44,8 +44,12 @@ export async function generateProactiveReplyCandidates(input: {
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(parsed.visibleText, input.disableBracketActions)));
   // Internal scheduling metadata is model context, never user-visible chat.
   // Do not fall back to the raw response when sanitization removes everything.
+  const normalizeProactiveBubble = (content: string): string => {
+    const normalized = normalizePaymentMarkup(content);
+    return input.keepPeriods ? normalized : normalized.replace(/。+$/u, "").trim();
+  };
   const bubbles = cleanedText
-    ? removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, input.keepPeriods).map(normalizePaymentMarkup))
+    ? removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, input.keepPeriods).map(normalizeProactiveBubble))
     : [];
   return {
     data,
