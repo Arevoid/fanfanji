@@ -16,6 +16,26 @@ const directAi = (async (input) => { capturedMessage = input.message; return { t
 assert.equal((await requestDirectChatTurn({ prompt, settings, requestAi: directAi })).text, "回复");
 assert.equal(capturedMessage, "当前");
 
+let formatRecoveryAttempts = 0;
+let formatRecoveryInstruction = "";
+const malformedFormatAi = (async (input) => {
+  formatRecoveryAttempts += 1;
+  formatRecoveryInstruction = input.systemInstruction || "";
+  return formatRecoveryAttempts === 1
+    ? { text: '{"reply":{"unexpected":true}}' }
+    : { text: '{"reply":"格式恢复后的回复","innerVoice":{"content":"暂未说出口","emotionalState":"平静"}}' };
+}) as typeof apiChat;
+const formatRecovered = await requestDirectChatTurn({
+  prompt,
+  settings,
+  requestAi: malformedFormatAi,
+  includeInnerVoice: true,
+});
+assert.equal(formatRecoveryAttempts, 2);
+assert.equal(formatRecovered.text, "格式恢复后的回复");
+assert.deepEqual(formatRecovered.innerVoice, { content: "暂未说出口", emotionalState: "平静" });
+assert.match(formatRecoveryInstruction, /只返回一个合法 JSON 对象/);
+
 let echoAttempts = 0;
 let retryInstruction = "";
 const echoAi = (async (input) => {

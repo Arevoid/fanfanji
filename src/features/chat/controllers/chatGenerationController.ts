@@ -11,7 +11,7 @@ import { createRegeneratedReplyCandidates } from "../services/regenerateService"
 import type { AiChatRequest, ReplyCandidateContext } from "../services/chatServiceTypes";
 import { buildTextAiRuntimeConfig } from "../services/textAiRuntimeConfig";
 import { CHAT_DEGENERATE_RETRY_INSTRUCTION, isDegenerateDirectReply, removeDegenerateReplyPattern } from "../services/chatEchoGuard";
-import { parseChatTurnResponse } from "../services/chatTurnResponseProtocol";
+import { CHAT_RESPONSE_FORMAT_RETRY_INSTRUCTION, parseChatTurnResponse } from "../services/chatTurnResponseProtocol";
 import type { ParsedAiChatResponse } from "../services/chatServiceTypes";
 
 type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "imageDataUrl" | "historyInjections">;
@@ -21,25 +21,62 @@ export function buildComposedAiChatRequest(prompt: PromptInput, settings: UserSe
   return { ...PromptComposer.compose(prompt), ...buildTextAiRuntimeConfig(settings) };
 }
 
+type NormalizedDirectChatResponse = ParsedAiChatResponse & { formatIssue?: "invalid-structured-response" };
+
+const normalizeDirectChatResponse = (raw: ParsedAiChatResponse, includeInnerVoice: boolean): NormalizedDirectChatResponse => {
+  if (!includeInnerVoice) return raw;
+  const parsed = parseChatTurnResponse(raw.text);
+  return {
+    ...raw,
+    text: parsed.reply,
+    translation: parsed.translation,
+    innerVoice: parsed.innerVoice,
+    formatIssue: parsed.formatIssue,
+  };
+};
+
+const requestDirectChatResponse = async (input: {
+  requestAi: RequestAi;
+  request: AiChatRequest;
+  includeInnerVoice?: boolean;
+}): Promise<NormalizedDirectChatResponse> => {
+  const first = normalizeDirectChatResponse(
+    await requestAiReply(input.requestAi, input.request),
+    Boolean(input.includeInnerVoice),
+  );
+  if (!first.formatIssue) return first;
+
+  const retryRaw = await requestAiReply(input.requestAi, {
+    ...input.request,
+    systemInstruction: [input.request.systemInstruction, CHAT_RESPONSE_FORMAT_RETRY_INSTRUCTION]
+      .filter(Boolean)
+      .join("\n\n"),
+  });
+  const retry = normalizeDirectChatResponse(retryRaw, true);
+  if (!retry.formatIssue && retry.text.trim()) return retry;
+
+  throw new Error("模型回复格式异常：重试后仍未得到有效文字回复。请更换模型或重试。");
+};
+
 export async function requestDirectChatTurn(input: { prompt: PromptInput; settings: UserSettings; requestAi?: RequestAi; signal?: AbortSignal; includeInnerVoice?: boolean }): Promise<ParsedAiChatResponse> {
   const requestAi = input.requestAi || apiChat;
   const request = { ...buildComposedAiChatRequest(input.prompt, input.settings), signal: input.signal };
-  const firstRaw = await requestAiReply(requestAi, request);
-  const firstParsed = input.includeInnerVoice ? parseChatTurnResponse(firstRaw.text) : { reply: firstRaw.text };
-  const first = { ...firstRaw, text: firstParsed.reply, translation: firstParsed.translation, innerVoice: firstParsed.innerVoice };
+  const first = await requestDirectChatResponse({ requestAi, request, includeInnerVoice: input.includeInnerVoice });
   if (!isDegenerateDirectReply(input.prompt.message, first.text, request.history)) return first;
   const retryHistory = removeDegenerateReplyPattern(request.history, first.text);
-  const retry = await requestAiReply(requestAi, {
-    ...request,
-    history: retryHistory,
-    systemInstruction: [request.systemInstruction, CHAT_DEGENERATE_RETRY_INSTRUCTION].filter(Boolean).join("\n\n"),
+  const retry = await requestDirectChatResponse({
+    requestAi,
+    request: {
+      ...request,
+      history: retryHistory,
+      systemInstruction: [request.systemInstruction, CHAT_DEGENERATE_RETRY_INSTRUCTION].filter(Boolean).join("\n\n"),
+    },
+    includeInnerVoice: input.includeInnerVoice,
   });
-  const retryParsed = input.includeInnerVoice ? parseChatTurnResponse(retry.text) : { reply: retry.text };
-  const normalizedRetry = { ...retry, text: retryParsed.reply, translation: retryParsed.translation, innerVoice: retryParsed.innerVoice };
-  if (!normalizedRetry.text.trim() || isDegenerateDirectReply(input.prompt.message, normalizedRetry.text, request.history)) {
+  if (!retry.text.trim() || isDegenerateDirectReply(input.prompt.message, retry.text, request.history)) {
     throw new Error("模型连续返回重复或无意义的回复，本次回复已停止写入，请重试。");
   }
-  return normalizedRetry;
+  return retry;
 }
 
 export function generateGroupChatTurn(input: {

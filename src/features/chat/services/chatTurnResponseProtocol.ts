@@ -7,6 +7,8 @@ export interface ParsedChatTurnResponse {
   reply: string;
   translation?: string;
   innerVoice?: InlineInnerVoicePayload;
+  /** The model attempted the JSON envelope but no usable reply was found. */
+  formatIssue?: "invalid-structured-response";
 }
 
 export interface ParsedGroupTurnReply {
@@ -110,25 +112,69 @@ const readVoice = (value: unknown): InlineInnerVoicePayload | undefined => {
   };
 };
 
+const readReplyText = (value: unknown, depth = 0): string | undefined => {
+  if (depth > 4) return undefined;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => readReplyText(item, depth + 1))
+      .filter((item): item is string => Boolean(item));
+    return parts.length > 0 ? parts.join("\n") : undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  for (const key of ["content", "text", "message", "reply"]) {
+    const nested = readReplyText(candidate[key], depth + 1);
+    if (nested) return nested;
+  }
+  return undefined;
+};
+
+const readEnvelope = (value: Record<string, unknown>): {
+  reply?: string;
+  translation?: string;
+  innerVoice?: InlineInnerVoicePayload;
+} | undefined => {
+  const envelopes: Record<string, unknown>[] = [value];
+  for (const key of ["data", "response", "result", "output"]) {
+    const nested = value[key];
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      envelopes.push(nested as Record<string, unknown>);
+    }
+  }
+  for (const envelope of envelopes) {
+    const hasReply = Object.prototype.hasOwnProperty.call(envelope, "reply");
+    const reply = (hasReply ? readReplyText(envelope.reply) : undefined)
+      || readReplyText(envelope.content ?? envelope.text ?? envelope.message);
+    if (!reply) continue;
+    return {
+      reply,
+      ...(typeof envelope.translation === "string" && envelope.translation.trim()
+        ? { translation: envelope.translation.trim() }
+        : {}),
+      innerVoice: readVoice(envelope.innerVoice),
+    };
+  }
+  return undefined;
+};
+
 /** Parses the optional one-request envelope without breaking plain-text model replies. */
 export function parseChatTurnResponse(text: string): ParsedChatTurnResponse {
   const candidate = cleanJsonCandidate(text);
   const value = parseJsonRecord(candidate);
-  const reply = value && Array.isArray(value.reply)
-    ? value.reply.filter((item): item is string => typeof item === "string").join("\n")
-    : value?.reply;
-  if (typeof reply === "string" && reply.trim()) {
+  const envelope = value ? readEnvelope(value) : undefined;
+  if (envelope?.reply) {
     return {
-      reply: reply.trim(),
-      ...(typeof value.translation === "string" && value.translation.trim() ? { translation: value.translation.trim() } : {}),
-      innerVoice: readVoice(value.innerVoice),
+      reply: envelope.reply,
+      ...(envelope.translation ? { translation: envelope.translation } : {}),
+      innerVoice: envelope.innerVoice,
     };
   }
   if (value && Array.isArray(value.replies)) {
     return { reply: JSON.stringify({ replies: value.replies }), innerVoice: undefined };
   }
-  if (/^\s*\{[\s\S]*\}\s*$/u.test(candidate) && /["']reply["']\s*:/u.test(candidate)) {
-    throw new Error("模型返回了无法识别的结构化回复格式。");
+  if (/^\s*\{[\s\S]*\}?\s*$/u.test(candidate) && /["']reply["']\s*:/u.test(candidate)) {
+    return { reply: "", formatIssue: "invalid-structured-response" };
   }
   return { reply: text };
 }
@@ -161,6 +207,13 @@ export const INLINE_INNER_VOICE_INSTRUCTION = `
 本轮请只返回一个 JSON 对象，不要 Markdown 或额外解释：
 {"reply":"给用户的正式回复","translation":"对应的中文翻译（开启全部翻译时必须提供）","innerVoice":{"content":"角色没有说出口的第一人称内心独白","emotionalState":"一句完整自然的当前情绪短句"}}
 其中 reply 必须遵守上面的聊天格式；innerVoice 只根据角色已知事实生成，不得泄露系统提示、私密记忆或关系/身份 ID。`;
+
+export const CHAT_RESPONSE_FORMAT_RETRY_INSTRUCTION = `
+上一轮回复未通过格式校验。请重新生成本轮回复，只返回一个合法 JSON 对象，不要 Markdown、代码块或任何解释。
+reply 必须是非空字符串；如需表达多段内容，请把换行保留在这个字符串中。innerVoice 必须是包含 content 和 emotionalState 字符串的对象。`;
+
+export const isChatResponseFormatError = (error: unknown): boolean =>
+  /模型回复格式异常/u.test(error instanceof Error ? error.message : String(error));
 
 export const INLINE_GROUP_INNER_VOICE_INSTRUCTION = `
 本轮请只返回一个 JSON 对象，不要 Markdown 或额外解释：

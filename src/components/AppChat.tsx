@@ -75,7 +75,7 @@ import { resolveCanonicalCharacterId } from "../domain/character/characterIdenti
 import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { findInnerVoiceByMessage, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords } from "../core/storage/repositories/innerVoiceRepository";
 import { createInlineInnerVoiceRecord } from "../features/chat/services/innerVoiceService";
-import { INLINE_INNER_VOICE_INSTRUCTION } from "../features/chat/services/chatTurnResponseProtocol";
+import { INLINE_INNER_VOICE_INSTRUCTION, isChatResponseFormatError } from "../features/chat/services/chatTurnResponseProtocol";
 import { generateCharacterImageForDelivery } from "../features/chat/services/characterImageDeliveryService";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
@@ -2303,9 +2303,11 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                                 errMsgStr.toLowerCase().includes("400") ||
                                 errMsgStr.toLowerCase().includes("invalid");
 
-      publishReplyError(isQuotaOrKeyError
-        ? `⚠️ [连接错误]：智能体响应失败 (${errMsgStr})。请检查 API Key 是否正确、是否过期或余额不足。`
-        : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`);
+      publishReplyError(isChatResponseFormatError(err)
+        ? `⚠️ [回复格式错误]：${errMsgStr}`
+        : isQuotaOrKeyError
+          ? `⚠️ [连接错误]：智能体响应失败 (${errMsgStr})。请检查 API Key 是否正确、是否过期或余额不足。`
+          : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`);
     } finally {
       setIsTyping(false);
     }

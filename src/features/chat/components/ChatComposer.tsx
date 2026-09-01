@@ -83,7 +83,7 @@ export function ChatInputBar({
         onChange={(event) => setInputText(event.target.value)}
         placeholder={placeholder}
         rows={1}
-        className="min-w-0 w-0 flex-1 min-h-10 max-h-24 resize-none overflow-y-auto px-4 py-2 text-xs leading-5 chat-input chat-composer__input"
+        className="min-w-0 w-0 flex-1 h-10 min-h-10 max-h-24 resize-none overflow-y-auto px-4 py-2 text-xs leading-5 chat-input chat-composer__input"
       />
 
       <button
