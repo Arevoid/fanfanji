@@ -305,7 +305,8 @@ interface AppChatProps {
   messages: Message[];
   moments: Moment[];
   onSendMessage: (msg: Message) => void;
-  onSaveCharacter: (char: Character) => void; // Support updating character remark, pinned status, chatBg
+  onSaveCharacter: (char: Character) => void | Promise<boolean>; // Support updating character remark, pinned status, chatBg
+  onUpdateCharacter?: (characterId: string, patch: Partial<Character>) => void | Promise<boolean>;
   onAddMoment: (moment: Moment) => void;
   onAddCommentToMoment: (momentId: string, comment: MomentComment) => void;
   onDeleteCommentFromMoment?: (momentId: string, commentId: string) => void;
@@ -362,6 +363,7 @@ export default function AppChat({
   moments,
   onSendMessage: onSendMessageRaw,
   onSaveCharacter,
+  onUpdateCharacter,
   onAddMoment,
   onAddCommentToMoment,
   onDeleteCommentFromMoment,
@@ -438,6 +440,7 @@ export default function AppChat({
 
   const { initiatedChatIds, setInitiatedChatIds, lastReadTimestamps, setLastReadTimestamps, getUnreadCount } = useChatReadState({ activeChatCharId, activeChatRelationId, messages });
   const [showAliasDirectory, setShowAliasDirectory] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [aliasDeleteTarget, setAliasDeleteTarget] = useState<string | null>(null);
   const [showCreateAliasModal, setShowCreateAliasModal] = useState(false);
   const [aliasEditTargetId, setAliasEditTargetId] = useState<string | null>(null);
@@ -2382,6 +2385,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     onSaveRelationships,
     updateRelationships: onSaveRelationships,
     onSaveCharacter,
+    updateCharacter: onUpdateCharacter,
   });
 
   const generateResponseForUserMessage = async (
@@ -2813,6 +2817,20 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     draftImageReferenceAssetId,
     draftImageReferenceMimeType,
   });
+
+  const saveSettingsWithFeedback = async () => {
+    if (isSavingSettings) return;
+    setIsSavingSettings(true);
+    try {
+      const persisted = await handleSaveSettings();
+      if (persisted === false) showToast("设置保存失败，请检查浏览器存储空间后重试。");
+    } catch (error) {
+      console.error("Failed to save chat settings:", error);
+      showToast("设置保存失败，请重试。");
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   const { handleExtractMemories } = useChatMemoryExtraction({
     activeChatCharId,
@@ -4913,10 +4931,11 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                 </h2>
                 <button
                   type="button"
-                  onClick={handleSaveSettings}
+                  onClick={() => void saveSettingsWithFeedback()}
+                  disabled={isSavingSettings}
                   aria-label="保存设置"
                   title="保存设置"
-                  className="app-nav-icon-button w-8 h-8 text-slate-800 flex items-center justify-center hover:opacity-70 active:scale-95 transition-all z-10 shrink-0"
+                  className="app-nav-icon-button w-8 h-8 text-slate-800 flex items-center justify-center hover:opacity-70 active:scale-95 transition-all z-10 shrink-0 disabled:opacity-40"
                 >
                   <Check className="w-4 h-4" strokeWidth={2.5} />
                 </button>

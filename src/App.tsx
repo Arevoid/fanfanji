@@ -555,11 +555,14 @@ export default function App() {
       ? [CHARACTER_PHONE_TEST_CHARACTER]
       : loaded;
   });
+  const charactersRef = useRef<Character[]>(characters);
+  charactersRef.current = characters;
 
   useEffect(() => {
     let active = true;
     initializeCharacterRepository(DEFAULT_CHARACTERS).then((result) => {
       if (active && result.valid) {
+        charactersRepositoryHydrated.current = true;
         skipNextCharactersPersistenceRef.current = true;
         const hydratedCharacters = hydrateRelationshipNetworkCharacters(result.value);
         setCharacters(isCharacterPhoneTest && hydratedCharacters.length === 0
@@ -713,7 +716,7 @@ export default function App() {
   const offlineStoriesRef = useRef(offlineStories);
   const offlineStoriesHydratedRef = useRef(false);
   const deletedOfflineStoryIdsRef = useRef(new Set<string>());
-  const charactersPersistenceReady = useRef(false);
+  const charactersRepositoryHydrated = useRef(false);
   const messagesPersistenceReady = useRef(false);
   const momentsPersistenceReady = useRef(false);
   const skipNextCharactersPersistenceRef = useRef(false);
@@ -2079,10 +2082,10 @@ export default function App() {
     }
   };
   useEffect(() => {
-    if (!charactersPersistenceReady.current) {
-      charactersPersistenceReady.current = true;
-      return;
-    }
+    // The first render may only contain a localStorage fallback while the
+    // durable character repository is still loading. Never persist that
+    // fallback, otherwise it can overwrite newer IndexedDB preferences.
+    if (!charactersRepositoryHydrated.current) return;
     if (skipNextCharactersPersistenceRef.current) {
       skipNextCharactersPersistenceRef.current = false;
       return;
@@ -2247,10 +2250,30 @@ export default function App() {
 
   // Handle character creation & updates
   const handleSaveCharacter = async (char: Character): Promise<boolean> => {
-    const exists = characters.some((candidate) => candidate.id === char.id);
-    const nextCharacters = exists
-      ? characters.map((candidate) => candidate.id === char.id ? char : candidate)
-      : [...characters, char];
+    const currentCharacters = charactersRef.current;
+    const existingCharacter = currentCharacters.find((candidate) => candidate.id === char.id);
+    const savedCharacter = existingCharacter ? { ...existingCharacter, ...char } : char;
+    const nextCharacters = existingCharacter
+      ? currentCharacters.map((candidate) => candidate.id === char.id ? savedCharacter : candidate)
+      : [...currentCharacters, savedCharacter];
+    charactersRef.current = nextCharacters;
+    setCharacters(nextCharacters);
+    const queued = saveCharacters(nextCharacters);
+    if (!queued.success) return false;
+    const persisted = await flushCharacters();
+    return persisted.success;
+  };
+
+  const handleUpdateCharacter = async (
+    characterId: string,
+    patch: Partial<Character>,
+  ): Promise<boolean> => {
+    const currentCharacters = charactersRef.current;
+    if (!currentCharacters.some((candidate) => candidate.id === characterId)) return false;
+    const nextCharacters = currentCharacters.map((candidate) =>
+      candidate.id === characterId ? { ...candidate, ...patch } : candidate,
+    );
+    charactersRef.current = nextCharacters;
     setCharacters(nextCharacters);
     const queued = saveCharacters(nextCharacters);
     if (!queued.success) return false;
@@ -4253,6 +4276,7 @@ export default function App() {
                     moments={moments}
                     onSendMessage={handleSendMessage}
                     onSaveCharacter={handleSaveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onAddMoment={handleAddMoment}
                     onAddCommentToMoment={handleAddCommentToMoment}
                     onDeleteCommentFromMoment={handleDeleteCommentFromMoment}
@@ -4532,7 +4556,6 @@ export default function App() {
                     onSaveMemories={setMemories}
                     recallSettings={recallSettings}
                     onSaveRecallSettings={setRecallSettings}
-                    onUpdateCharacter={handleSaveCharacter}
                     immediateSummaryTask={immediateSummaryTask}
                     onStartImmediateSummary={handleStartImmediateSummary}
                     onResetImmediateSummary={handleResetImmediateSummary}

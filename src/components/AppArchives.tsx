@@ -405,6 +405,10 @@ export default function AppArchives({
     const finalPersonality = personality.trim();
 
     const savedChar: Character = {
+      // Archive editing changes the profile form only. Keep chat/runtime
+      // preferences and future character fields intact instead of replacing
+      // the record with a partial profile object.
+      ...(originalChar || {}),
       id: editingId || Date.now().toString(),
       name: name.trim(),
       age,

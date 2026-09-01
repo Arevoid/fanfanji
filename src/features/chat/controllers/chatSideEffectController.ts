@@ -20,6 +20,8 @@ export interface ChatSideEffectControllerDependencies {
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
   updateRelationships?: (update: (previous: CharacterRelationship[]) => CharacterRelationship[]) => void;
   onSaveCharacter: (character: Character) => void;
+  /** Prefer a field patch for delayed side effects so stale full snapshots cannot overwrite settings. */
+  updateCharacter?: (characterId: string, patch: Partial<Character>) => void | Promise<boolean>;
   schedule?: (task: () => void | Promise<void>, delayMs: number) => void;
   now?: () => number;
 }
@@ -109,10 +111,14 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
           const albumList = input.activeCharacter.album;
           const selectedCover = albumList[Math.floor(Math.random() * albumList.length)];
           if (selectedCover !== input.activeCharacter.momentsCover) {
-            dependencies.onSaveCharacter({
-              ...input.activeCharacter,
-              momentsCover: selectedCover,
-            });
+            if (dependencies.updateCharacter) {
+              void dependencies.updateCharacter(input.activeCharacter.id, { momentsCover: selectedCover });
+            } else {
+              dependencies.onSaveCharacter({
+                ...input.activeCharacter,
+                momentsCover: selectedCover,
+              });
+            }
           }
         }
       }
