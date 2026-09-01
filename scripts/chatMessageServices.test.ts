@@ -4,10 +4,13 @@ import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, expand
 
 const clean = (text: string) => cleanAiReplyText(text, false);
 
-// A-C: ordinary, multi-bubble, and whitespace behavior.
+// A-C: short sentences are grouped, while blank lines remain explicit bubble boundaries.
 assert.equal(clean("你好"), "你好");
-assert.deepEqual(splitAiReplyBubbles("你好。再见！", false), ["你好", "再见！"]);
-assert.deepEqual(splitAiReplyBubbles("\n  第一段。\n\n 第二段  ", false), ["第一段", "第二段"]);
+assert.deepEqual(splitAiReplyBubbles("你好。再见！", false), ["你好。再见！"]);
+assert.deepEqual(splitAiReplyBubbles("第一句。第二句。第三句。第四句。", false), ["第一句。第二句。第三句。第四句。"]);
+assert.equal(splitAiReplyBubbles("这是一段很长的完整说明。".repeat(20), false).length > 1, true);
+assert.deepEqual(splitAiReplyBubbles("\n  第一段。\n\n 第二段  ", false), ["第一段。", "第二段"]);
+assert.deepEqual(splitAiReplyBubbles("【年龄】：19\n【身高】：187cm\n【体重】：78kg", false), ["【年龄】：19\n【身高】：187cm\n【体重】：78kg"]);
 
 // D-I: all existing special markup stays a single bubble and retains its visual classification.
 assert.deepEqual(splitAiReplyBubbles("[红包]|8.88|恭喜发财", false), ["[红包]|8.88|恭喜发财"]);
@@ -21,9 +24,9 @@ assert.equal(parseTextImageDescription(textImage), "窗边的猫 | 晚霞");
 assert.equal(isCallRecordMarkup("[通话记录]|语音通话|00:02|%5B%5D"), true);
 
 // J-L: group content, empty input, and mixed markup keep legacy ordering/fallbacks.
-assert.deepEqual(splitAiReplyBubbles("成员A：你好。\n成员B：收到！", false), ["成员A：你好", "成员B：收到！"]);
+assert.deepEqual(splitAiReplyBubbles("成员A：你好。\n成员B：收到！", false), ["成员A：你好。", "成员B：收到！"]);
 assert.deepEqual(splitAiReplyBubbles("", false), []);
-assert.deepEqual(splitAiReplyBubbles("普通文本。\n[红包]|1|hi\n结束！", false), ["普通文本", "[红包]|1|hi", "结束！"]);
+assert.deepEqual(splitAiReplyBubbles("普通文本。\n[红包]|1|hi\n结束！", false), ["普通文本。", "[红包]|1|hi", "结束！"]);
 assert.deepEqual(removeRedundantCharacterBubbles(["好，哥下来了", "嗯，哥下楼了", "外面有点凉"]), ["好，哥下来了", "外面有点凉"]);
 assert.equal(stripInternalDeliveryMarkers("第一句\n[15:10]\n第二句\n【下午 3：10】"), "第一句\n\n第二句");
 assert.equal(stripInternalDeliveryMarkers("催什么催\n[消息发送时间：2026年8月2日星期日\n17:52]"), "催什么催");

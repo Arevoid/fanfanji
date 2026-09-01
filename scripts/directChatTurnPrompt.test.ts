@@ -21,6 +21,7 @@ assert.match(mainPrompt, /RED PACKET CAPABILITY/);
 assert.match(mainPrompt, /unless that is your explicit character人设/);
 assert.match(mainPrompt, /ordinary greeting or short message/);
 assert.match(mainPrompt, /Never simulate a user reply/);
+assert.match(mainPrompt, /微信气泡语义分段规则/);
 assert.match(buildDirectChatMainPrompt({ characterName: "测试角色", disableBracketActions: true }), /pure conversational speech/);
 
 const timePrompt = buildTimeAwarenessPrompt(new Date("2026-08-11T08:30:00+08:00"), "HISTORY_MARK");

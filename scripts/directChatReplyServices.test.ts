@@ -27,7 +27,8 @@ const response = await requestAiReply(async (input) => {
 assert.equal(requestCount, 1);
 assert.equal(response.text, "你好。再见！");
 assert.deepEqual(createDirectReplyCandidates(candidateContext("你好")).messages.map((message) => message.content), ["你好"]);
-assert.deepEqual(createDirectReplyCandidates(candidateContext("你好。再见！")).messages.map((message) => message.content), ["你好", "再见！"]);
+assert.deepEqual(createDirectReplyCandidates(candidateContext("你好。再见！")).messages.map((message) => message.content), ["你好。再见！"]);
+assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句。第二句。第三句。第四句。")).messages.map((message) => message.content), ["第一句。第二句。第三句。第四句。"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句\n[15:10]\n第二句\n【15：10】")).messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句\n[消息发送于 2026-08-02 18:11]\n第二句\n[消息发送于 2026-08-02 18:11]")).messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.equal(createDirectReplyCandidates(candidateContext("引用回复")).messages[0].content, "引用回复");
@@ -45,9 +46,9 @@ assert.deepEqual(createDirectReplyCandidates(candidateContext("[红包]|8.88|恭
 
 // M-R: regeneration retains its legacy parse path and only returns candidates for AppChat to send/save.
 const regenerated = createRegeneratedReplyCandidates(candidateContext("第一句。第二句。"));
-assert.deepEqual(regenerated.messages.map((message) => message.content), ["第一句", "第二句"]);
-assert.deepEqual(regenerated.messages.map((message) => message.id), ["id-0", "id-1"]);
-assert.deepEqual(regenerated.messages.map((message) => message.timestamp), [100, 101]);
+assert.deepEqual(regenerated.messages.map((message) => message.content), ["第一句。第二句。"]);
+assert.deepEqual(regenerated.messages.map((message) => message.id), ["id-0"]);
+assert.deepEqual(regenerated.messages.map((message) => message.timestamp), [100]);
 assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[微信红包]|1|x")).messages.map((message) => message.content), ["[红包]|1.00|x"]);
 assert.equal(createRegeneratedReplyCandidates(candidateContext("旧消息")).messages.length, 1);
 assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("第一句\n用户：我替你回答\n第二句")).messages.map((message) => message.content), ["第一句"]);

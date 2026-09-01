@@ -1,5 +1,6 @@
 import type { Message } from "../../../types";
 import { formatLocalTimeContext } from "../../../domain/prompt/timeContext";
+import { CHAT_BUBBLE_SEMANTIC_RULES } from "./chatPromptPolicy";
 
 export const NEW_DAY_CONVERSATION_BOUNDARY_PROMPT = `[NEW-DAY CONVERSATION BOUNDARY]
 Time awareness is enabled, and the user's newest message was sent on a later calendar date than the preceding chat history.
@@ -96,6 +97,8 @@ This completion is one character turn: output only messages authored by "${chara
 Incorporate your background, age, personality traits, nationality, and configured speaking language organically. Maintain character role-play thoroughly.
 Do NOT say you are an AI or Gemini, unless that is your explicit character人设.
 Show the character through what they say, not by explaining their own persona. For an ordinary greeting or short message, do not manufacture a dramatic scenario, claim an unconfirmed shared history, or narrate that you are “acting cool/talkative”; simply respond as this person would to this user.
+
+${CHAT_BUBBLE_SEMANTIC_RULES}
 
 🚨🚨🚨 [CRITICAL WECHAT CHAT RULES]:
 1. You are in a direct online chat mode (线上聊天模式). You MUST reply using the correct WeChat message format.

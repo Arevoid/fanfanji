@@ -3,7 +3,7 @@ import { CHARACTER_LANGUAGE_POLICY } from "../../../domain/prompt/characterPromp
 import { formatUserKnowledgeBoundary } from "../../../domain/prompt/userKnowledgeBoundary";
 import { LIVING_HUMAN_PROMPT } from "../../../utils/livingPrompt";
 import { assembleChatInstructions } from "./chatInstructionAssembler";
-import { CHARACTER_MEDIA_USAGE_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "./chatPromptPolicy";
+import { CHAT_BUBBLE_SEMANTIC_RULES, CHARACTER_MEDIA_USAGE_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "./chatPromptPolicy";
 
 export function finalizeCharacterChatSystemInstruction(input: {
   instructions: readonly string[];
@@ -116,7 +116,7 @@ User Profile (interacting with you):
 
 ${formatUserKnowledgeBoundary()}
 
-${input.worldBook ? `[相关世界书背景设定]\n${input.worldBook}\n\n${WORLD_BOOK_CONTEXT_PRIORITY}\n\n` : ""}${input.timeContext}${input.knowledgeBoundary}${input.truthPrompt}\n\n${input.conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
+${input.worldBook ? `[相关世界书背景设定]\n${input.worldBook}\n\n${WORLD_BOOK_CONTEXT_PRIORITY}\n\n` : ""}${input.timeContext}${input.knowledgeBoundary}${input.truthPrompt}\n\n${input.conversationGuidance}\n\n${CHAT_BUBBLE_SEMANTIC_RULES}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 ${input.taskPrompt}
 
 ${input.instructionsPrompt}

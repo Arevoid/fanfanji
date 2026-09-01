@@ -306,7 +306,10 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
   
   for (const line of lines) {
     let trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed) {
+      if (cleanedLines.length > 0 && cleanedLines[cleanedLines.length - 1] !== "") cleanedLines.push("");
+      continue;
+    }
     
     // Check if the entire line is wrapped in parentheses/brackets/asterisks (representing action/narration settings)
     const isActionOrNarrationLine = (
@@ -349,62 +352,97 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
     }
   }
   
-  return cleanedLines.join("\n").trim();
+  return cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export function splitIntoWeChatBubbles(text: string, keepPeriods: boolean = false): string[] {
+export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = false): string[] {
   if (!text) return [];
-  
-  // Split by newlines first to ensure each paragraph/line break gets its own bubble
-  const lines = text.split(/\r?\n/);
+
+  // This is only a safety limit for an unbroken, very long answer. The model
+  // supplied blank lines remain the primary semantic bubble boundaries.
+  const MAX_BUBBLE_LENGTH = 120;
+  const isSpecialMessage = (line: string): boolean =>
+    line.startsWith("[红包]")
+    || line.startsWith("[转账]")
+    || line.startsWith("[系统]")
+    || line.startsWith("[语音")
+    || line.startsWith("[表情]|")
+    || line.startsWith("[语音通话]");
+  const isExplicitSpeakerLine = (line: string): boolean =>
+    !line.startsWith("[")
+    && !line.startsWith("【")
+    && /^[^：:\n]{1,24}\s*[：:](?=\s*\S)/u.test(line);
+  const isStructuredFieldLine = (line: string): boolean => /^【[^】\n]+】\s*[：:]/u.test(line);
   const results: string[] = [];
-  
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (!trimmedLine) continue;
-    
-    // Do not split special lines like red packets, voice, transfers, stickers, etc.
-    if (
-      trimmedLine.startsWith("[红包]") ||
-      trimmedLine.startsWith("[转账]") ||
-      trimmedLine.startsWith("[系统]") ||
-      trimmedLine.startsWith("[语音") ||
-      trimmedLine.startsWith("[表情]|") ||
-      trimmedLine.startsWith("[语音通话]")
-    ) {
-      results.push(trimmedLine);
+  let paragraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+
+    // Profile cards and other labelled lists are one semantic answer. Keep
+    // their line breaks visible instead of turning every field into a bubble.
+    if (paragraph.every(isStructuredFieldLine)) {
+      results.push(paragraph.join("\n").trim());
+      paragraph = [];
+      return;
+    }
+
+    const paragraphText = paragraph.join("\n").trim();
+    if (paragraphText.length <= MAX_BUBBLE_LENGTH) {
+      results.push(paragraphText);
+      paragraph = [];
+      return;
+    }
+
+    // If the model omitted semantic blank lines, only split an unusually
+    // long block at complete sentence boundaries. There is deliberately no
+    // fixed sentence-count rule here: two, four, or more short sentences can
+    // stay together when they form one coherent reply.
+    const segments = paragraph.flatMap((line) => line.match(/[^。！？!?]+[。！？!?]+|[^。！？!?]+$/gu) || [line])
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+    let bubble = "";
+    const flushBubble = () => {
+      if (!bubble) return;
+      results.push(bubble.trim());
+      bubble = "";
+    };
+    for (const segment of segments) {
+      const candidate = bubble ? `${bubble}${segment}` : segment;
+      if (bubble && candidate.length > MAX_BUBBLE_LENGTH) flushBubble();
+      if (segment.length > MAX_BUBBLE_LENGTH) {
+        for (let index = 0; index < segment.length; index += MAX_BUBBLE_LENGTH) {
+          const chunk = segment.slice(index, index + MAX_BUBBLE_LENGTH);
+          if (index + MAX_BUBBLE_LENGTH < segment.length) results.push(chunk);
+          else bubble = chunk;
+        }
+      } else {
+        bubble += segment;
+      }
+    }
+    flushBubble();
+    paragraph = [];
+  };
+
+  // Ordinary content follows semantic boundaries supplied by the model.
+  // Blank lines, special messages, and speaker labels remain explicit boundaries.
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
       continue;
     }
-    
-    // Split the line by major sentence endings: 。！？!?
-    const regex = /[^。！？!?]+[。！？!?]*/g;
-    const matches = trimmedLine.match(regex);
-    if (!matches) {
-      let finalBubble = trimmedLine;
-      if (!keepPeriods && finalBubble.endsWith("。")) {
-        finalBubble = finalBubble.replace(/。+$/, "");
-      }
-      if (finalBubble.trim()) {
-        results.push(finalBubble.trim());
-      }
+    if (isSpecialMessage(line)) {
+      flushParagraph();
+      results.push(line);
       continue;
     }
-    
-    for (const match of matches) {
-      let bubbleText = match.trim();
-      if (!bubbleText) continue;
-      
-      if (!keepPeriods && bubbleText.endsWith("。")) {
-        bubbleText = bubbleText.replace(/。+$/, "");
-      }
-      
-      if (bubbleText.trim()) {
-        results.push(bubbleText.trim());
-      }
-    }
+    if (isExplicitSpeakerLine(line) && paragraph.length > 0) flushParagraph();
+    paragraph.push(line);
   }
-  
-  return results.length > 0 ? results : [text];
+  flushParagraph();
+
+  return results.length > 0 ? results : [text.trim()];
 }
 
 export function compressImage(file: File, maxWidth: number, maxHeight: number, quality: number = 0.7): Promise<string> {
