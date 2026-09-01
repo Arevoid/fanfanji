@@ -6,6 +6,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
+import { callTextProvider, normalizeTextApiError } from "./src/server/textProtocolAdapters";
 import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
@@ -219,178 +220,23 @@ async function startServer() {
   // API Route: Role-play chat with Character (supports custom Endpoint, Temperature, etc.)
   app.post("/api/chat", async (req, res) => {
     try {
-      const {
-        message,
-        history,
-        systemInstruction,
-        apiKey,
-        model,
-        apiEndpoint,
-        apiTemperature,
-        streamCompatible
-        ,imageDataUrl
-      } = req.body;
-
-      const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
-      if (!apiKeyValue) {
-        return res.status(400).json({
-          error: "未检测到 API Key。请在手机“设置” -> “API设置”中填写您的 API Key，或由管理员配置后台默认 Key。",
-        });
-      }
-
-      // 1. Custom OpenAI-compatible endpoint route
-      if (apiEndpoint && apiEndpoint.trim()) {
-        let endpointUrl = apiEndpoint.trim();
-        if (!endpointUrl.endsWith("/chat/completions")) {
-          endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
-        }
-
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKeyValue}`
-        };
-
-        const messagesPayload = [];
-        const openAiPrompt = prepareOpenAiPromptTransport(history, systemInstruction);
-        if (openAiPrompt.systemInstruction) {
-          messagesPayload.push({ role: "system", content: openAiPrompt.systemInstruction });
-        }
-        if (openAiPrompt.history.length > 0) {
-          for (const h of openAiPrompt.history) {
-            messagesPayload.push(toOpenAiHistoryEntry(h));
-          }
-        }
-        if (openAiPrompt.finalSystemInstruction) {
-          messagesPayload.push({ role: "system", content: openAiPrompt.finalSystemInstruction });
-        }
-        messagesPayload.push({ role: "user", content: typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:image/")
-          ? [{ type: "text", text: message || "请结合这张画面回答。" }, { type: "image_url", image_url: { url: imageDataUrl } }]
-          : message });
-
-        const bodyPayload = {
-          model: model || "deepseek-v4-flash",
-          messages: messagesPayload,
-          temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
-          stream: streamCompatible || false
-        };
-
-        const responseFetch = await fetchWithTimeout(endpointUrl, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(bodyPayload)
-        }, API_REQUEST_TIMEOUTS.textGeneration);
-
-        if (!responseFetch.ok) {
-          const errorText = await responseFetch.text();
-          return res.status(responseFetch.status).json({
-            error: `自定义接口请求失败 (${responseFetch.status}): ${errorText || "中转服务器未响应"}`
-          });
-        }
-
-        const responseText = await responseFetch.text();
-        let aiText = "";
-        const trimmedText = responseText.trim();
-        if (trimmedText.startsWith("data:") || trimmedText.includes("\ndata:")) {
-          // It is a Server-Sent Events (SSE) stream
-          const lines = trimmedText.split("\n");
-          for (let line of lines) {
-            line = line.trim();
-            if (line.startsWith("data:")) {
-              const dataStr = line.substring(5).trim();
-              if (dataStr === "[DONE]") {
-                continue;
-              }
-              try {
-                const parsedChunk = JSON.parse(dataStr);
-                const content = parsedChunk.choices?.[0]?.delta?.content || 
-                                parsedChunk.choices?.[0]?.message?.content || 
-                                parsedChunk.choices?.[0]?.text || "";
-                aiText += content;
-              } catch (e) {
-                // Ignore individual chunk parsing failures
-              }
-            }
-          }
-        } else {
-          try {
-            const dataFetch = JSON.parse(trimmedText);
-            aiText = dataFetch.choices?.[0]?.message?.content || 
-                     dataFetch.choices?.[0]?.text || "";
-          } catch (jsonErr) {
-            aiText = trimmedText;
-          }
-        }
-        return res.json({ text: aiText });
-      }
-
-      // 2. Default Gemini endpoint route via @google/genai
-      const ai = new GoogleGenAI({
-        apiKey: apiKeyValue,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          },
-        },
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const text = await callTextProvider({
+        message: String(body.message || ""),
+        history: Array.isArray(body.history) ? body.history : [],
+        systemInstruction: typeof body.systemInstruction === "string" ? body.systemInstruction : undefined,
+        apiKey: String(body.apiKey || process.env.GEMINI_API_KEY || ""),
+        model: String(body.model || ""),
+        apiEndpoint: typeof body.apiEndpoint === "string" ? body.apiEndpoint : undefined,
+        temperature: typeof body.apiTemperature === "number" ? body.apiTemperature : 0.7,
+        streamCompatible: body.streamCompatible === true,
+        imageDataUrl: typeof body.imageDataUrl === "string" && body.imageDataUrl.startsWith("data:image/") ? body.imageDataUrl : undefined,
       });
-
-      // Format message history for Gemini:
-      const contents = [];
-      const geminiPrompt = prepareGeminiPromptTransport(history, systemInstruction);
-      if (geminiPrompt.history.length > 0) {
-        for (const h of geminiPrompt.history) {
-          const normalized = toGeminiHistoryEntry(h);
-          if (!normalized) continue; // Skip empty content to prevent API validation errors
-          const { role, text } = normalized;
-          
-          if (contents.length > 0 && contents[contents.length - 1].role === role) {
-            // Merge consecutive messages with the same role
-            contents[contents.length - 1].parts[0].text += "\n" + text;
-          } else {
-            contents.push({
-              role,
-              parts: [{ text }],
-            });
-          }
-        }
-      }
-
-      // Add current message
-      const cleanMsg = (message || "").trim();
-      if (cleanMsg || (typeof imageDataUrl === "string" && imageDataUrl.startsWith("data:image/"))) {
-        const parts: any[] = cleanMsg ? [{ text: cleanMsg }] : [];
-        const imageMatch = typeof imageDataUrl === "string" ? imageDataUrl.match(/^data:(image\/[\w.+-]+);base64,(.+)$/) : null;
-        if (imageMatch) parts.push({ inlineData: { mimeType: imageMatch[1], data: imageMatch[2] } });
-        if (contents.length > 0 && contents[contents.length - 1].role === "user") {
-          if (cleanMsg) contents[contents.length - 1].parts.push({ text: cleanMsg });
-          if (imageMatch) contents[contents.length - 1].parts.push({ inlineData: { mimeType: imageMatch[1], data: imageMatch[2] } });
-        } else {
-          contents.push({
-            role: "user",
-            parts,
-          });
-        }
-      }
-
-      if (contents.length === 0) {
-        contents.push({
-          role: "user",
-          parts: [{ text: " " }],
-        });
-      }
-
-      const response = await ai.models.generateContent({
-        model: model || "gemini-3.5-flash",
-        contents,
-        config: {
-          systemInstruction: geminiPrompt.systemInstruction,
-          temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
-        },
-      });
-
-      res.json({ text: response.text });
+      return res.json({ text });
     } catch (error: any) {
-      console.error("Chat API Error:", error);
-      res.status(500).json({ error: error.message || "角色智能体离线或回复出错，请检查配置和 Key 后重试。" });
+      const normalized = normalizeTextApiError(error, "聊天 API 请求失败。");
+      console.error("Chat API Error:", { code: normalized.code, status: normalized.status, reason: normalized.reason, message: normalized.message });
+      return res.status(normalized.status).json({ success: false, code: normalized.code, reason: normalized.reason, error: normalized.message });
     }
   });
 

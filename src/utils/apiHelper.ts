@@ -9,6 +9,7 @@ import {
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
 import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError } from "./fetchWithTimeout";
 import { recordApiUsage, type ApiUsageOperation } from "../core/monitoring/apiUsageMetrics";
+import { emptyTextApiErrorDetails, parseTextApiErrorPayload, type TextApiErrorCode } from "./textApiError";
 
 async function trackApiUsage<T>(operation: ApiUsageOperation, inputCharacters: number, request: () => Promise<T>): Promise<T> {
   try {
@@ -24,19 +25,30 @@ async function trackApiUsage<T>(operation: ApiUsageOperation, inputCharacters: n
   }
 }
 
-const parseApiErrorText = (rawText: string): string => {
-  const trimmed = rawText.trim();
-  if (!trimmed) return "无响应";
-  try {
-    const parsed = JSON.parse(trimmed);
-    return String(parsed?.detail || parsed?.error?.message || parsed?.error || parsed?.message || trimmed);
-  } catch {
-    return trimmed;
+export class ApiChatError extends Error {
+  readonly status?: number;
+  readonly code: TextApiErrorCode;
+  readonly reason?: string;
+
+  constructor(message: string, options: { status?: number; code?: TextApiErrorCode; reason?: string; cause?: unknown } = {}) {
+    super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
+    this.name = "ApiChatError";
+    this.status = options.status;
+    this.code = options.code || "unknown";
+    this.reason = options.reason;
   }
+}
+
+const apiRequestError = (error: unknown, label: string): ApiChatError => {
+  if (isApiRequestError(error, "timeout")) return new ApiChatError(describeApiRequestError(error, label), { code: "timeout", status: 504, cause: error });
+  if (isApiRequestError(error, "aborted")) return new ApiChatError(describeApiRequestError(error, label), { code: "aborted", status: 499, cause: error });
+  if (isApiRequestError(error, "network")) return new ApiChatError(describeApiRequestError(error, label), { code: "network", status: 503, cause: error });
+  return new ApiChatError(error instanceof Error ? error.message : String(error || `${label}请求失败。`), { cause: error });
 };
 
 export const isProhibitedContentError = (error: unknown): boolean =>
-  /PROHIBITED_CONTENT|request blocked by Gemini API/i.test(error instanceof Error ? error.message : String(error));
+  (error instanceof ApiChatError && error.code === "provider_safety")
+  || /PROHIBITED_CONTENT|request blocked by Gemini API|content[_ -]?safety|content[_ -]?filter/i.test(error instanceof Error ? error.message : String(error));
 
 // Helper to parse different models response formats
 export const parseModels = (data: any): string[] | null => {
@@ -120,8 +132,8 @@ async function directClientChat(params: {
     }, API_REQUEST_TIMEOUTS.textGeneration);
 
     if (!responseFetch.ok) {
-      const errorText = await responseFetch.text();
-      throw new Error(`自定义 API 接口请求失败 (${responseFetch.status}): ${parseApiErrorText(errorText)}`);
+      const details = parseTextApiErrorPayload(await responseFetch.text(), responseFetch.status);
+      throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });
     }
 
     const responseText = await responseFetch.text();
@@ -151,17 +163,20 @@ async function directClientChat(params: {
     } else {
       try {
         const dataFetch = JSON.parse(trimmedText);
-        aiText = dataFetch.choices?.[0]?.message?.content || 
-                 dataFetch.choices?.[0]?.text || "";
+            const content = dataFetch.choices?.[0]?.message?.content ?? dataFetch.choices?.[0]?.text;
+            aiText = Array.isArray(content)
+              ? content.map((part: any) => typeof part === "string" ? part : part?.text || "").join("")
+              : typeof content === "string" ? content : "";
       } catch (jsonErr) {
         aiText = trimmedText;
       }
     }
 
-    if (aiText !== undefined) {
+    if (aiText.trim()) {
       return { text: aiText };
     }
-    throw new Error(`自定义 API 接口无有效响应内容: ${responseText}`);
+    const details = emptyTextApiErrorDetails();
+    throw new ApiChatError(details.message, { status: 502, code: details.code, reason: details.reason });
   } else {
     // Gemini Direct client-side fetch
     const cleanModel = model || "gemini-1.5-flash";
@@ -233,17 +248,23 @@ async function directClientChat(params: {
       signal,
     }, API_REQUEST_TIMEOUTS.textGeneration);
 
+    const responseText = await responseFetch.text();
     if (!responseFetch.ok) {
-      const errorText = await responseFetch.text();
-      throw new Error(`Gemini API 接口请求失败 (${responseFetch.status}): ${errorText || "无响应"}`);
+      const details = parseTextApiErrorPayload(responseText, responseFetch.status);
+      throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });
     }
 
-    const dataFetch = await responseFetch.json();
-    const aiText = dataFetch.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (aiText !== undefined) {
+    let dataFetch: any;
+    try { dataFetch = JSON.parse(responseText); } catch {
+      throw new ApiChatError("Gemini 返回了无法解析的响应。", { status: 502, code: "provider_invalid_response" });
+    }
+    const aiText = dataFetch.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("") || "";
+    if (aiText.trim()) {
       return { text: aiText };
     }
-    throw new Error(`Gemini API 返回不符合预期: ${JSON.stringify(dataFetch)}`);
+    const reason = dataFetch.candidates?.[0]?.finishReason || dataFetch.promptFeedback?.blockReason || "";
+    const details = emptyTextApiErrorDetails(502, reason);
+    throw new ApiChatError(details.message, { status: 502, code: details.code, reason: details.reason });
   }
 }
 
@@ -306,12 +327,13 @@ async function apiChatImpl(params: {
     // A network failure means the optional app backend is genuinely absent.
     // Provider HTTP errors must not be retried through the browser because that
     // sends the same rejected prompt twice and hides the original status/body.
-    if (!isApiRequestError(err, "network")) throw new Error(describeApiRequestError(err, "聊天 API"));
+    if (!isApiRequestError(err, "network")) throw apiRequestError(err, "聊天 API");
     console.warn("apiChat backend network request failed, trying client direct fallback:", err);
     try {
       return await directClientChat(params);
     } catch (fallbackError) {
-      if (isApiRequestError(fallbackError)) throw new Error(describeApiRequestError(fallbackError, "聊天 API"));
+      if (fallbackError instanceof ApiChatError) throw fallbackError;
+      if (isApiRequestError(fallbackError)) throw apiRequestError(fallbackError, "聊天 API");
       throw fallbackError;
     }
   }
@@ -326,21 +348,29 @@ async function apiChatImpl(params: {
     try {
       return await directClientChat(params);
     } catch (fallbackError) {
-      if (isApiRequestError(fallbackError)) throw new Error(describeApiRequestError(fallbackError, "聊天 API"));
+      if (fallbackError instanceof ApiChatError) throw fallbackError;
+      if (isApiRequestError(fallbackError)) throw apiRequestError(fallbackError, "聊天 API");
       throw fallbackError;
     }
   }
   if (!res.ok) {
-    throw new Error(`聊天 API 请求失败 (${res.status}): ${parseApiErrorText(responseText)}`);
+    const details = parseTextApiErrorPayload(responseText, res.status);
+    throw new ApiChatError(details.message, { status: res.status, code: details.code, reason: details.reason });
   }
 
+  let data: any;
   try {
-    const data = JSON.parse(responseText);
-    if (data && typeof data.text === "string") return { text: data.text };
+    data = JSON.parse(responseText);
   } catch {
     // A successful non-JSON response is not a valid chat backend response.
+    throw new ApiChatError("聊天 API 返回成功状态，但没有有效的文本响应。", { status: 502, code: "provider_invalid_response" });
   }
-  throw new Error("聊天 API 返回成功状态，但没有有效的文本响应。");
+  if (data && typeof data.text === "string" && data.text.trim()) return { text: data.text };
+  if (data?.error) {
+    const details = parseTextApiErrorPayload(responseText, res.status || 502);
+    throw new ApiChatError(details.message, { status: res.status || 502, code: details.code, reason: details.reason });
+  }
+  throw new ApiChatError("聊天 API 返回成功状态，但没有有效的文本响应。", { status: 502, code: "provider_empty" });
 }
 
 export async function apiChat(params: Parameters<typeof apiChatImpl>[0]): Promise<{ text: string }> {
@@ -710,7 +740,7 @@ async function apiTranslateImpl(params: {
       throw new Error("翻译服务没有返回有效文本。");
     }
     if (!staticFallback) {
-      throw new Error(`翻译 API 请求失败 (${res.status}): ${parseApiErrorText(raw)}`);
+      throw new Error(`翻译 API 请求失败 (${res.status}): ${parseTextApiErrorPayload(raw, res.status).message}`);
     }
     if (params.proxyOnly) throw new Error("当前部署没有提供翻译代理路由。");
     console.warn("apiTranslate backend route is unavailable, trying client direct fallback");

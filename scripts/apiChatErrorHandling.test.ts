@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { apiChat, isProhibitedContentError } from "../src/utils/apiHelper";
+import { ApiChatError, apiChat, isProhibitedContentError } from "../src/utils/apiHelper";
 
 const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
@@ -26,7 +26,9 @@ try {
 
   await assert.rejects(
     () => apiChat(request),
-    (error) => isProhibitedContentError(error),
+    (error) => error instanceof ApiChatError
+      && error.code === "provider_safety"
+      && isProhibitedContentError(error),
     "Gemini 内容安全拦截必须保留为可识别错误",
   );
   assert.equal(blockedCalls, 1, "有效的 HTTP 400 不得再通过客户端重复请求");
@@ -55,6 +57,21 @@ try {
   }) as typeof fetch;
   await assert.rejects(() => apiChat(request), /provider model not found/);
   assert.equal(provider404Calls, 1, "带供应商错误正文的 404 不得重复直连");
+
+  let emptyResponseCalls = 0;
+  globalThis.fetch = (async () => {
+    emptyResponseCalls += 1;
+    return new Response(JSON.stringify({ success: true, text: "" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  await assert.rejects(
+    () => apiChat(request),
+    (error) => error instanceof ApiChatError && error.code === "provider_empty",
+    "成功状态但空文本不能被当成成功回复",
+  );
+  assert.equal(emptyResponseCalls, 1, "空文本响应不得被重复直连");
 
   let networkFallbackCalls = 0;
   globalThis.fetch = (async () => {

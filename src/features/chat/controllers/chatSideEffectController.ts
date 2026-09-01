@@ -28,6 +28,10 @@ export interface ChatSideEffectControllerDependencies {
 
 export type LastReadTimestamps = Record<string, number>;
 
+const AUTO_SUMMARY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+const autoSummaryInFlight = new Set<string>();
+const autoSummaryCooldownUntil = new Map<string, number>();
+
 /**
  * Reply-completion side effects. The controller deliberately receives the
  * existing Memory extraction entry point so the algorithm and persistence
@@ -87,20 +91,41 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
         }
 
         if (eligibleMessages.length >= triggerCount) {
-          schedule(async () => {
-            const count = await dependencies.extractMemories(eligibleMessages);
-            // A successful extraction with no durable facts is still a
-            // completed archive pass. Advance the marker so the same range is
-            // not sent to the model again after every subsequent reply.
-            if (count >= 0) {
-              const lastMessage = eligibleMessages[eligibleMessages.length - 1];
-              if (lastMessage && input.activeRelationship) {
-                saveRelationships(input.relationships, (previous) => previous.map((relation) => relation.id === input.activeRelationship?.id
-                  ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }
-                  : relation));
+          const summaryScopeKey = input.activeRelationship?.id || input.activeCharacter.id;
+          const currentTime = now();
+          const cooldownUntil = autoSummaryCooldownUntil.get(summaryScopeKey) || 0;
+          if (!autoSummaryInFlight.has(summaryScopeKey) && currentTime >= cooldownUntil) {
+            // Mark this scope before scheduling. The controller can be
+            // recreated by React between replies, so this guard intentionally
+            // lives at module scope and prevents duplicate hidden requests.
+            autoSummaryInFlight.add(summaryScopeKey);
+            schedule(async () => {
+              try {
+                const count = await dependencies.extractMemories(eligibleMessages);
+                // A successful extraction with no durable facts is still a
+                // completed archive pass. Advance the marker so the same
+                // range is not sent to the model again after every reply.
+                if (count >= 0) {
+                  autoSummaryCooldownUntil.delete(summaryScopeKey);
+                  const lastMessage = eligibleMessages[eligibleMessages.length - 1];
+                  if (lastMessage && input.activeRelationship) {
+                    saveRelationships(input.relationships, (previous) => previous.map((relation) => relation.id === input.activeRelationship?.id
+                      ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }
+                      : relation));
+                  }
+                } else {
+                  // A failed background request must not be replayed on every
+                  // following chat turn. Manual extraction is unaffected.
+                  autoSummaryCooldownUntil.set(summaryScopeKey, now() + AUTO_SUMMARY_FAILURE_COOLDOWN_MS);
+                }
+              } catch (error) {
+                autoSummaryCooldownUntil.set(summaryScopeKey, now() + AUTO_SUMMARY_FAILURE_COOLDOWN_MS);
+                console.warn("Automatic memory extraction skipped after an API failure:", error instanceof Error ? error.message : error);
+              } finally {
+                autoSummaryInFlight.delete(summaryScopeKey);
               }
-            }
-          }, 200);
+            }, 200);
+          }
         }
       }
 

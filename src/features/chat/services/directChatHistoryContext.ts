@@ -4,12 +4,43 @@ import { buildCrossDayHistoricalReferencePrompt, partitionDirectChatHistoryByCur
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../prompts/messagePromptSerializer";
 import { formatWeChatTimestamp } from "./chatTime";
 
+const DEFAULT_HISTORY_CHARACTER_LIMIT = 16_000;
+const DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT = 6_000;
+
+function selectRecentMessagesWithinBudget(
+  messages: readonly Message[],
+  characterLimit: number,
+  characterName: string,
+  userName: string,
+): Message[] {
+  if (messages.length === 0) return [];
+  const selected: Message[] = [];
+  let usedCharacters = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const serialized = serializeMessageContentForPrompt(message, {
+      mode: "history", userName, characterName, includeCallTranscript: false,
+    });
+    const cost = Math.max(1, serialized.length + 32);
+    // Always keep the newest message, even if it is larger than the budget;
+    // dropping the latest turn is more damaging than exceeding the soft cap.
+    if (selected.length > 0 && usedCharacters + cost > characterLimit) break;
+    selected.unshift(message);
+    usedCharacters += cost;
+  }
+  return selected;
+}
+
 export function buildDirectChatHistoryContext(input: {
   messages: readonly Message[];
   userMessageId?: string;
   userMessageAt?: number;
   enableTimeAwareness: boolean;
   contextLimit: number;
+  /** Soft prompt budget for recent chat history, measured in characters. */
+  historyCharacterLimit?: number;
+  /** Soft prompt budget for the older cross-day reference, measured in characters. */
+  historicalReferenceCharacterLimit?: number;
   characterName: string;
   userName: string;
   requestTime?: Date;
@@ -42,8 +73,20 @@ export function buildDirectChatHistoryContext(input: {
     currentMessageAt: input.userMessageAt,
     enableTimeAwareness: input.enableTimeAwareness,
   });
-  const recentMessages = historyPartition.liveMessages.slice(-Math.min(50, input.contextLimit));
-  const historicalReferenceLines = historyPartition.historicalMessages.map((message) => {
+  const liveWindow = historyPartition.liveMessages.slice(-Math.min(50, Math.max(0, input.contextLimit)));
+  const recentMessages = selectRecentMessagesWithinBudget(
+    liveWindow,
+    Math.max(1, input.historyCharacterLimit ?? DEFAULT_HISTORY_CHARACTER_LIMIT),
+    input.characterName,
+    input.userName,
+  );
+  const historicalMessages = selectRecentMessagesWithinBudget(
+    historyPartition.historicalMessages,
+    Math.max(1, input.historicalReferenceCharacterLimit ?? DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT),
+    input.characterName,
+    input.userName,
+  );
+  const historicalReferenceLines = historicalMessages.map((message) => {
     const speaker = message.sender === "user" ? "用户" : input.characterName;
     const content = serializeMessageContentForPrompt(message, {
       mode: "history", userName: input.userName, characterName: input.characterName, includeCallTranscript: false,

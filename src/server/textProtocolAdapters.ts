@@ -5,13 +5,29 @@ import {
   toOpenAiHistoryEntry,
   type TransportHistoryEntry,
 } from "../domain/prompt/promptTransport";
-import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
+import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError } from "../utils/fetchWithTimeout";
+import { emptyTextApiErrorDetails, parseTextApiErrorPayload, redactTextApiError, type TextApiErrorCode } from "../utils/textApiError";
 
 export class TextApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public code: TextApiErrorCode = "unknown", public reason?: string) {
     super(message);
     this.name = "TextApiError";
   }
+}
+
+export function normalizeTextApiError(error: unknown, fallbackMessage: string): TextApiError {
+  if (error instanceof TextApiError) return error;
+  if (isApiRequestError(error, "timeout")) {
+    return new TextApiError(504, describeApiRequestError(error, "智能体"), "timeout");
+  }
+  if (isApiRequestError(error, "aborted")) {
+    return new TextApiError(499, describeApiRequestError(error, "智能体"), "aborted");
+  }
+  if (isApiRequestError(error, "network")) {
+    return new TextApiError(503, describeApiRequestError(error, "智能体"), "network");
+  }
+  const message = redactTextApiError(error instanceof Error && error.message ? error.message : fallbackMessage);
+  return new TextApiError(502, message, "unknown");
 }
 
 export interface TextProviderInput {
@@ -25,17 +41,6 @@ export interface TextProviderInput {
   streamCompatible?: boolean;
   imageDataUrl?: string;
 }
-
-const errorText = (raw: string): string => {
-  const value = raw.trim();
-  if (!value) return "服务商未返回错误详情。";
-  try {
-    const parsed = JSON.parse(value);
-    return String(parsed?.detail || parsed?.error?.message || parsed?.error || parsed?.message || value);
-  } catch {
-    return value;
-  }
-};
 
 const openAiEndpoint = (value: string): string => {
   const endpoint = value.trim();
@@ -82,8 +87,8 @@ const parseOpenAiText = (raw: string): string => {
 export async function callTextProvider(input: TextProviderInput): Promise<string> {
   const apiKey = input.apiKey?.trim();
   const model = input.model?.trim();
-  if (!apiKey) throw new TextApiError(400, "请先填写 API Key。");
-  if (!model) throw new TextApiError(400, "请先选择或填写模型名称。");
+  if (!apiKey) throw new TextApiError(400, "请先填写 API Key。", "configuration");
+  if (!model) throw new TextApiError(400, "请先选择或填写模型名称。", "configuration");
 
   if (input.apiEndpoint?.trim()) {
     const prompt = prepareOpenAiPromptTransport(input.history, input.systemInstruction);
@@ -105,9 +110,15 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
       }),
     }, API_REQUEST_TIMEOUTS.textGeneration);
     const raw = await response.text();
-    if (!response.ok) throw new TextApiError(response.status, errorText(raw));
+    if (!response.ok) {
+      const details = parseTextApiErrorPayload(raw, response.status);
+      throw new TextApiError(response.status, details.message, details.code, details.reason);
+    }
     const text = parseOpenAiText(raw);
-    if (!text.trim()) throw new TextApiError(502, "服务商返回成功，但没有可用的文本内容。");
+    if (!text.trim()) {
+      const details = emptyTextApiErrorDetails();
+      throw new TextApiError(502, details.message, details.code, details.reason);
+    }
     return text;
   }
 
@@ -137,20 +148,24 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
     }),
   }, API_REQUEST_TIMEOUTS.textGeneration);
   const raw = await response.text();
-  if (!response.ok) throw new TextApiError(response.status, errorText(raw));
+  if (!response.ok) {
+    const details = parseTextApiErrorPayload(raw, response.status);
+    throw new TextApiError(response.status, details.message, details.code, details.reason);
+  }
   let parsed: any;
-  try { parsed = JSON.parse(raw); } catch { throw new TextApiError(502, "Gemini 返回了无法解析的响应。"); }
+  try { parsed = JSON.parse(raw); } catch { throw new TextApiError(502, "Gemini 返回了无法解析的响应。", "provider_invalid_response"); }
   const text = parsed.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("") || "";
   if (!text.trim()) {
     const reason = parsed.candidates?.[0]?.finishReason || parsed.promptFeedback?.blockReason;
-    throw new TextApiError(502, reason ? `Gemini 未返回文本：${reason}` : "Gemini 返回成功，但没有可用的文本内容。");
+    const details = emptyTextApiErrorDetails(502, reason || "");
+    throw new TextApiError(502, details.message, details.code, details.reason);
   }
   return text;
 }
 
 export async function fetchTextModels(input: { apiKey: string; apiEndpoint?: string }): Promise<string[]> {
   const apiKey = input.apiKey?.trim();
-  if (!apiKey) throw new TextApiError(400, "请先填写 API Key。");
+  if (!apiKey) throw new TextApiError(400, "请先填写 API Key。", "configuration");
   const url = input.apiEndpoint?.trim()
     ? `${openAiBase(input.apiEndpoint).replace(/\/models$/, "")}/models`
     : `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
@@ -160,15 +175,18 @@ export async function fetchTextModels(input: { apiKey: string; apiEndpoint?: str
     API_REQUEST_TIMEOUTS.modelList,
   );
   const raw = await response.text();
-  if (!response.ok) throw new TextApiError(response.status, errorText(raw));
+  if (!response.ok) {
+    const details = parseTextApiErrorPayload(raw, response.status);
+    throw new TextApiError(response.status, details.message, details.code, details.reason);
+  }
   let data: any;
-  try { data = JSON.parse(raw); } catch { throw new TextApiError(502, "模型列表响应无法解析。"); }
+  try { data = JSON.parse(raw); } catch { throw new TextApiError(502, "模型列表响应无法解析。", "provider_invalid_response"); }
   const source = Array.isArray(data) ? data : Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
   const models = source.map((item: any) => {
     const value = typeof item === "string" ? item : item?.id || item?.name || item?.model || item?.model_id;
     return typeof value === "string" ? value.replace(/^models\//, "") : "";
   }).filter(Boolean);
-  if (!models.length) throw new TextApiError(502, "接口没有返回可用的模型列表。");
+  if (!models.length) throw new TextApiError(502, "接口没有返回可用的模型列表。", "provider_empty");
   return models;
 }
 

@@ -89,6 +89,50 @@ await scheduled[0]();
 assert.deepEqual(extractedMessages.map((message) => message.id), ["user-1", "assistant-1"]);
 assert.equal(savedRelationships[0]?.lastImmediateSummaryMsgId, "assistant-1");
 
+const duplicateScheduled: Array<() => void | Promise<void>> = [];
+let duplicateCalls = 0;
+const duplicateRelationship = { id: "relation-duplicate", lastImmediateSummaryMsgId: undefined } as CharacterRelationship;
+const duplicateController = createChatSideEffectController({
+  offlineStories: [],
+  extractMemories: async () => { duplicateCalls += 1; return 0; },
+  onSaveRelationships: () => undefined,
+  onSaveCharacter: () => undefined,
+  schedule: (task) => { duplicateScheduled.push(task); },
+  now: () => 100,
+});
+const duplicateInput = {
+  userMsg: userMessage,
+  currentChatMessages: [],
+  createdMessages: [assistantMessage],
+  activeCharacter: { ...character, id: "character-duplicate" } as Character,
+  activeRelationship: duplicateRelationship,
+  relationships: [duplicateRelationship],
+  isOffline: false,
+};
+duplicateController.afterReplySuccess(duplicateInput);
+duplicateController.afterReplySuccess(duplicateInput);
+assert.equal(duplicateScheduled.length, 1, "同一关系的自动归档不能重复排队");
+await duplicateScheduled[0]();
+assert.equal(duplicateCalls, 1);
+
+const cooldownScheduled: Array<() => void | Promise<void>> = [];
+let cooldownCalls = 0;
+const cooldownRelationship = { id: "relation-cooldown", lastImmediateSummaryMsgId: undefined } as CharacterRelationship;
+const cooldownController = createChatSideEffectController({
+  offlineStories: [],
+  extractMemories: async () => { cooldownCalls += 1; return -1; },
+  onSaveRelationships: () => undefined,
+  onSaveCharacter: () => undefined,
+  schedule: (task) => { cooldownScheduled.push(task); },
+  now: () => 200,
+});
+const cooldownInput = { ...duplicateInput, activeRelationship: cooldownRelationship, relationships: [cooldownRelationship] };
+cooldownController.afterReplySuccess(cooldownInput);
+await cooldownScheduled[0]();
+cooldownController.afterReplySuccess(cooldownInput);
+assert.equal(cooldownScheduled.length, 1, "自动归档失败后应进入冷却，不能每条消息重试");
+assert.equal(cooldownCalls, 1);
+
 assert.deepEqual(markChatInitiated([], "chat-1"), ["chat-1"]);
 assert.deepEqual(markChatInitiated(["chat-1"], "chat-1"), ["chat-1"]);
 assert.deepEqual(markChatRead({}, "chat-1", 10), { "chat-1": 10 });

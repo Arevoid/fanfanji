@@ -2,7 +2,7 @@ import { assertImageGenerationTrigger } from "../features/chat/services/imageGen
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "../server/imageProtocolAdapters";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "../server/mosslandTts";
 import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
-import { buildTranslationPrompt, callTextProvider, fetchTextModels, TextApiError } from "../server/textProtocolAdapters";
+import { buildTranslationPrompt, callTextProvider, fetchTextModels, normalizeTextApiError } from "../server/textProtocolAdapters";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy";
 import { createNeteaseMusicAdapter, NeteaseMusicApiError } from "../server/neteaseMusicAdapter";
@@ -46,8 +46,8 @@ function errorResponse(error: unknown, fallbackCode: string, fallbackMessage: st
 }
 
 function textErrorResponse(error: unknown, fallbackMessage: string) {
-  const status = error instanceof TextApiError ? error.status : 500;
-  return json({ success: false, error: error instanceof Error ? error.message : fallbackMessage }, status);
+  const normalized = normalizeTextApiError(error, fallbackMessage);
+  return json({ success: false, code: normalized.code, reason: normalized.reason, error: normalized.message }, normalized.status);
 }
 
 function neteaseErrorResponse(error: unknown, fallbackMessage: string) {

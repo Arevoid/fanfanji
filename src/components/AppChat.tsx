@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
-import { apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../utils/apiHelper";
+import { ApiChatError, apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../utils/apiHelper";
 import { readJson, readString, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { createId } from "../core/id/createId";
@@ -1661,6 +1661,8 @@ export default function AppChat({
         userMessageAt: userMsg?.timestamp,
         enableTimeAwareness: turnSettings.enableTimeAwareness,
         contextLimit: activeCharacter.contextMemoryLimit !== undefined ? activeCharacter.contextMemoryLimit : 20,
+        historyCharacterLimit: 16_000,
+        historicalReferenceCharacterLimit: 6_000,
         characterName: activeCharacter.name,
         userName: settings.name,
       });
@@ -2295,19 +2297,38 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     } catch (err: any) {
       if (isCancelledCallTurn() || signal?.aborted) return;
       const errMsgStr = err?.message || "";
-      const isQuotaOrKeyError = errMsgStr.toLowerCase().includes("api_key") || 
-                                errMsgStr.toLowerCase().includes("key") || 
-                                errMsgStr.toLowerCase().includes("quota") || 
-                                errMsgStr.toLowerCase().includes("limit") || 
-                                errMsgStr.toLowerCase().includes("403") || 
-                                errMsgStr.toLowerCase().includes("400") ||
-                                errMsgStr.toLowerCase().includes("invalid");
+      const errorCode = err instanceof ApiChatError
+        ? err.code
+        : typeof err?.code === "string" ? err.code : "";
+      const legacyText = errMsgStr.toLowerCase();
+      const isLegacyCredentialError = legacyText.includes("api_key")
+        || legacyText.includes("quota")
+        || legacyText.includes("403")
+        || legacyText.includes("401")
+        || legacyText.includes("余额不足");
+      const detail = errMsgStr || "请稍后重试。";
 
-      publishReplyError(isChatResponseFormatError(err)
-        ? `⚠️ [回复格式错误]：${errMsgStr}`
-        : isQuotaOrKeyError
-          ? `⚠️ [连接错误]：智能体响应失败 (${errMsgStr})。请检查 API Key 是否正确、是否过期或余额不足。`
-          : `⚠️ [离线错误]：无法建立与智能体服务器的连接 (${errMsgStr || "请确认网络并重试"})。`);
+      let userFacingError: string;
+      if (isChatResponseFormatError(err)) {
+        userFacingError = `⚠️ [回复格式错误]：${detail}`;
+      } else if (errorCode === "provider_safety" || /PROHIBITED_CONTENT|content[_ -]?safety|content[_ -]?filter|内容安全|内容被拦截/i.test(detail)) {
+        userFacingError = `⚠️ [内容安全拦截]：服务商拒绝生成这条回复。当前不是网络离线；可以换一种表达、缩短上下文后重试。${detail ? `（${detail}）` : ""}`;
+      } else if (errorCode === "provider_rate_limit" || /rate.?limit|too many requests|429|请求过于频繁|限流/i.test(detail)) {
+        userFacingError = `⚠️ [请求频率限制]：服务商暂时限制了请求，请等待片刻后再试。${detail ? `（${detail}）` : ""}`;
+      } else if (errorCode === "context_too_large" || /context[_ -]?(?:length|window)|max[_ -]?tokens?|token[_ -]?limit|too[_ -]?long|输入过长|上下文(?:太长|过长|超出)/i.test(detail)) {
+        userFacingError = `⚠️ [上下文过长]：本次聊天附带的历史、世界书或角色设定超过了服务商限制，请减少上下文后重试。${detail ? `（${detail}）` : ""}`;
+      } else if (errorCode === "provider_auth" || errorCode === "configuration" || isLegacyCredentialError) {
+        userFacingError = `⚠️ [API 配置错误]：请检查 API Key、模型名称或账户额度。${detail ? `（${detail}）` : ""}`;
+      } else if (errorCode === "provider_request") {
+        userFacingError = `⚠️ [请求被服务商拒绝]：请检查模型、接口地址或上下文内容。${detail ? `（${detail}）` : ""}`;
+      } else if (errorCode === "provider_empty" || errorCode === "provider_invalid_response") {
+        userFacingError = `⚠️ [服务商响应异常]：服务商没有返回可用文本，可能是安全拦截、模型能力或中转格式问题。${detail ? `（${detail}）` : ""}`;
+      } else if (errorCode === "provider_unavailable" || errorCode === "timeout" || errorCode === "network" || errorCode === "aborted") {
+        userFacingError = `⚠️ [连接错误]：智能体服务暂时不可用，请检查网络、Cloudflare/接口状态后重试。${detail ? `（${detail}）` : ""}`;
+      } else {
+        userFacingError = `⚠️ [AI 请求失败]：${detail}`;
+      }
+      publishReplyError(userFacingError);
     } finally {
       setIsTyping(false);
     }
