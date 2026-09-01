@@ -6,16 +6,20 @@ import type { KnowledgeClaim } from "../../../domain/characterKnowledge/characte
 import type { CharacterEvent } from "../../../domain/characterLife/characterEventTypes";
 import { generateCharacterMomentPipeline } from "./characterMomentGenerationPipeline";
 import type { RelationshipNetworkNpcMomentAutomationTrigger } from "./relationshipNetworkNpcAutomationService";
+import {
+  getRelationshipNetworkNpcActorCharacterId,
+  resolveRelationshipNetworkNpcActor,
+} from "../../../domain/relationshipNetwork/relationshipNetworkNpcActor";
 
 /**
- * Generates one public Moment for an NPC that has already been linked to a
- * chat character. The linked character keeps the stable relation/guard scope;
- * the NPC profile is overlaid only for prompt context and public attribution.
+ * Generates one public Moment for an NPC. A full chat profile is optional: a
+ * lightweight NPC receives a stable in-memory actor so it can use its own
+ * profile without being promoted first.
  */
 export async function generateRelationshipNetworkNpcMoment(input: {
   npc: RelationshipNetworkNpc;
-  sourceCharacter: Character;
-  relationship: CharacterRelationship;
+  sourceCharacter?: Character;
+  relationship?: CharacterRelationship;
   characters: readonly Character[];
   moments: readonly Moment[];
   worldBookEntries: readonly WorldBookEntry[];
@@ -31,7 +35,16 @@ export async function generateRelationshipNetworkNpcMoment(input: {
   characterExpressionPrompt: string;
   automationTrigger?: RelationshipNetworkNpcMomentAutomationTrigger;
 }): Promise<Awaited<ReturnType<typeof generateCharacterMomentPipeline>>> {
-  const { npc, sourceCharacter } = input;
+  const actor = resolveRelationshipNetworkNpcActor({
+    npc: input.npc,
+    ownerIdentityId: input.activeIdentityId,
+    characters: input.characters,
+    relationships: input.relationship ? [input.relationship] : [],
+    preferredCharacterId: input.sourceCharacter?.id,
+    preferredRelationId: input.relationship?.id,
+  });
+  const { npc } = input;
+  const { character: sourceCharacter, relationship } = actor;
   const npcCharacter: Character = {
     ...sourceCharacter,
     name: npc.name,
@@ -44,14 +57,20 @@ export async function generateRelationshipNetworkNpcMoment(input: {
       npc.role ? `身份/职业：${npc.role}` : "",
       npc.motivation ? `当前动机：${npc.motivation}` : "",
       npc.tags?.length ? `标签：${npc.tags.join("、")}` : "",
-      sourceCharacter.backstory ? `【关联聊天角色公开资料】\n${sourceCharacter.backstory}` : "",
+      sourceCharacter.id !== getRelationshipNetworkNpcActorCharacterId(npc.id) && sourceCharacter.backstory
+        ? `【完整角色档案资料】\n${sourceCharacter.backstory}`
+        : "",
     ].filter(Boolean).join("\n\n"),
     relationshipNetworkNpcId: npc.id,
   };
-  const scopedCharacters = input.characters.map((character) =>
+  const charactersWithActor = input.characters.some((character) => character.id === sourceCharacter.id)
+    ? input.characters
+    : [...input.characters, sourceCharacter];
+  const scopedCharacters = charactersWithActor.map((character) =>
     character.id === sourceCharacter.id ? npcCharacter : character);
   const generated = await generateCharacterMomentPipeline({
     ...input,
+    relationship,
     characters: scopedCharacters,
     allowProfileDrivenPost: true,
     momentPromptHint: input.automationTrigger === "chat-event"
@@ -70,7 +89,7 @@ export async function generateRelationshipNetworkNpcMoment(input: {
     moment: {
       ...generated.moment,
       characterId: sourceCharacter.id,
-      relationId: input.relationship.id,
+      relationId: relationship.id,
       ownerIdentityId: input.activeIdentityId,
       relationshipNetworkNpcId: npc.id,
       authorName: npc.name,
@@ -85,7 +104,7 @@ export async function generateRelationshipNetworkNpcMoment(input: {
       memory: {
         ...generated.memory,
         characterId: sourceCharacter.id,
-        relationId: input.relationship.id,
+        relationId: relationship.id,
         content: `【${npc.name}发布的朋友圈】${generated.moment.content}${generated.moment.image ? "（发布时附有配图）" : ""}`,
       },
     } : {}),

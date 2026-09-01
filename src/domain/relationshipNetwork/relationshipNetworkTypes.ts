@@ -73,6 +73,8 @@ export interface RelationshipNetworkInteractionRecord {
   socialLinkId: string;
   sourceNpcId: string;
   sourceCharacterId: string;
+  /** Stable lightweight-NPC relation scope; absent on older audit records. */
+  sourceRelationId?: string;
   /** Exactly one target id is set. targetCharacterId remains optional for user-owned Moments. */
   targetCharacterId?: string;
   targetIdentityId?: string;

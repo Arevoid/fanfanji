@@ -27,6 +27,8 @@ export async function generateAutomaticMomentComment(input: {
   requestAi: typeof apiChat;
   cleanText: (text: string) => string;
   characterExpressionPrompt: string;
+  /** Public world settings belonging to the person whose Moment is being read. */
+  additionalWorldKnowledge?: readonly { title: string; content: string }[];
 }): Promise<Awaited<ReturnType<typeof requestAutomaticMomentComment>>> {
   const temporalContext = createMomentTemporalContext(new Date());
   const relationContext = buildRelationMomentContext({
@@ -37,10 +39,13 @@ export async function generateAutomaticMomentComment(input: {
     memories: input.memories,
     events: input.events,
   });
-  const relationWorldKnowledge = buildMomentWorldKnowledge(
-    [...input.worldBookEntries], input.character, input.relationship,
-    `${input.targetDescription}\n${formatMomentSourceText(relationContext)}`,
-  );
+  const relationWorldKnowledge = [
+    ...buildMomentWorldKnowledge(
+      [...input.worldBookEntries], input.character, input.relationship,
+      `${input.targetDescription}\n${formatMomentSourceText(relationContext)}`,
+    ),
+    ...(input.additionalWorldKnowledge || []),
+  ];
   const publicContext = buildPublicMomentContext({
     character: input.character,
     moments: [input.moment],

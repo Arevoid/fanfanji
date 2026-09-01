@@ -507,12 +507,12 @@ export default function AppChat({
         const npc = npcs.get(record.sourceNpcId);
         const sourceCharacter = characters.find((character) => character.id === record.sourceCharacterId);
         if (!record.targetCharacterId && !record.targetIdentityId) return null;
-        const sourceRelationId = sourceCharacter
+        const sourceRelationId = record.sourceRelationId || (sourceCharacter
           ? relationships.find((relation) =>
             relation.userIdentityId === activeIdentityId
             && resolveCanonicalCharacterId(relation.characterId, characters) === resolveCanonicalCharacterId(sourceCharacter.id, characters),
           )?.id
-          : undefined;
+          : undefined);
         const action = record.action === "reply" ? "reply" : "comment";
         return {
           id: pendingId,
@@ -3184,6 +3184,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       socialLinkId: candidate.socialLink.id,
       sourceNpcId: candidate.npc.id,
       sourceCharacterId: candidate.sourceCharacter.id,
+      sourceRelationId: candidate.sourceRelationship.id,
       ...(candidate.targetEntityType === "character"
         ? { targetCharacterId: candidate.targetEntityId }
         : { targetIdentityId: candidate.targetEntityId }),
@@ -3226,6 +3227,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       socialLinkId: pending.socialLinkId,
       sourceNpcId: pending.sourceNpcId,
       sourceCharacterId: pending.sourceCharacterId,
+      ...(pending.sourceRelationId ? { sourceRelationId: pending.sourceRelationId } : {}),
       ...(pending.targetCharacterId ? { targetCharacterId: pending.targetCharacterId } : { targetIdentityId: pending.targetIdentityId! }),
       targetMomentId: pending.targetMomentId,
       ...(pending.targetCommentId ? { targetCommentId: pending.targetCommentId } : {}),
@@ -3248,6 +3250,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       socialLinkId: pending.socialLinkId,
       sourceNpcId: pending.sourceNpcId,
       sourceCharacterId: pending.sourceCharacterId,
+      ...(pending.sourceRelationId ? { sourceRelationId: pending.sourceRelationId } : {}),
       ...(pending.targetCharacterId ? { targetCharacterId: pending.targetCharacterId } : { targetIdentityId: pending.targetIdentityId! }),
       targetMomentId: pending.targetMomentId,
       ...(pending.targetCommentId ? { targetCommentId: pending.targetCommentId } : {}),
@@ -3416,6 +3419,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
           socialLinkId: candidate.socialLink.id,
           sourceNpcId: candidate.npc.id,
           sourceCharacterId: candidate.sourceCharacter.id,
+          sourceRelationId: candidate.sourceRelationship.id,
           ...(candidate.targetEntityType === "character"
             ? { targetCharacterId: candidate.targetEntityId }
             : { targetIdentityId: candidate.targetEntityId }),
@@ -3512,6 +3516,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
           socialLinkId: candidate.socialLink.id,
           sourceNpcId: candidate.npc.id,
           sourceCharacterId: candidate.sourceCharacter.id,
+          sourceRelationId: candidate.sourceRelationship.id,
           ...(candidate.targetEntityType === "character"
             ? { targetCharacterId: candidate.targetEntityId }
             : { targetIdentityId: candidate.targetEntityId }),
@@ -3564,6 +3569,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
           socialLinkId: candidate.socialLink.id,
           sourceNpcId: candidate.npc.id,
           sourceCharacterId: candidate.sourceCharacter.id,
+          sourceRelationId: candidate.sourceRelationship.id,
           ...(candidate.targetEntityType === "character"
             ? { targetCharacterId: candidate.targetEntityId }
             : { targetIdentityId: candidate.targetEntityId }),

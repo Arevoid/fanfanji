@@ -139,6 +139,12 @@ function npcAutoModeLabel(mode?: RelationshipNetworkNpcMomentAutoMode): string {
   return "关闭自动生成";
 }
 
+function normalizeNpcAutoModeForEditor(mode?: RelationshipNetworkNpcMomentAutoMode): RelationshipNetworkNpcMomentAutoMode {
+  if (mode === "manual" || mode === "scheduled_and_event" || !mode) return mode || "manual";
+  // Keep legacy NPC configurations selectable after the editor is simplified.
+  return "scheduled_and_event";
+}
+
 function npcAutoFrequencyLabel(frequency?: RelationshipNetworkNpcMomentAutoFrequency): string {
   if (frequency === "low") return "低频";
   if (frequency === "high") return "高频";
@@ -366,19 +372,10 @@ export default function AppRelationshipNetwork({
   const socialDraftNpc = socialDraft?.sourceEntityType === "npc"
     ? npcs.find((npc) => npc.id === socialDraft.sourceEntityId)
     : undefined;
-  const socialDraftNpcCharacter = socialDraftNpc
-    ? characters.find((character) =>
-      (character.ownerIdentityId || "identity-1") === activeIdentity.id
-      && ((socialDraftNpc.linkedCharacterId && character.id === socialDraftNpc.linkedCharacterId)
-        || character.relationshipNetworkNpcId === socialDraftNpc.id),
-    )
-    : undefined;
-  const socialDraftNpcReady = Boolean(
-    socialDraftNpcCharacter
-    && relationships.some((relationship) =>
-      relationship.userIdentityId === activeIdentity.id && relationship.characterId === socialDraftNpcCharacter.id,
-    ),
-  );
+  // A lightweight NPC can participate in network interactions directly.
+  // Promotion to a full character profile is optional enrichment, not a
+  // prerequisite for the relationship line to work.
+  const socialDraftNpcReady = Boolean(socialDraftNpc);
   const draftSocialLink = socialDraft?.id
     ? socialLinks.find((link) => link.id === socialDraft.id)
     : undefined;
@@ -655,7 +652,7 @@ export default function AppRelationshipNetwork({
     setNpcMotivationDraft(npc?.motivation || "");
     setNpcTagsDraft(npc?.tags?.join("、") || "");
     setNpcMomentApprovalModeDraft(npc?.momentApprovalMode || "automatic");
-    setNpcMomentAutoModeDraft(npc?.momentAutoMode || "manual");
+    setNpcMomentAutoModeDraft(normalizeNpcAutoModeForEditor(npc?.momentAutoMode));
     setNpcMomentAutoFrequencyDraft(npc?.momentAutoFrequency || "normal");
     setNpcModalOpen(true);
     setNodePickerOpen(false);
@@ -690,10 +687,10 @@ export default function AppRelationshipNetwork({
       updatedAt: updatedNpc.updatedAt,
     });
     if (!npcResult.success || !linkResult.success) {
-      setError("聊天角色已创建，但关系网关联标记未完全保存，请稍后重试。");
+      setError("完整角色档案已创建，但关系网人物关联标记未完全保存，请稍后重试。");
     } else {
       setNpcs(listRelationshipNetworkNpcsForIdentity(activeIdentity.id));
-      setNotice("已关联聊天角色。关系网 NPC 仍保留。");
+      setNotice("NPC 已提升为完整角色，仍保留为同一个关系网人物。");
     }
     setLinkingNpc(false);
   };
@@ -1119,7 +1116,7 @@ export default function AppRelationshipNetwork({
                   </div>
                 )}
                 {selectedNpc?.motivation && <p className="mt-1 truncate text-[9px] text-[#958a9d]">动机：{selectedNpc.motivation}</p>}
-                {linkedCharacter && <p className="mt-1 truncate text-[9px] font-bold text-[#6c8570]">已关联聊天角色：{linkedCharacter.name}</p>}
+                {linkedCharacter && <p className="mt-1 truncate text-[9px] font-bold text-[#6c8570]">已提升为完整角色：{linkedCharacter.name}</p>}
                 {selectedNpc && <p className="mt-1 truncate text-[9px] text-[#958a9d]">动态：{selectedNpc.momentApprovalMode === "confirm" ? "生成后确认" : "自动发布"} · {npcAutoModeLabel(selectedNpc.momentAutoMode)} · {npcAutoFrequencyLabel(selectedNpc.momentAutoFrequency)}</p>}
               </div>
             </div>
@@ -1132,9 +1129,9 @@ export default function AppRelationshipNetwork({
               )}
               {selectedNode.type === "npc" && (
                 <>
-                  {onLinkNpcToChat && <button type="button" onClick={linkSelectedNpcToChat} disabled={linkingNpc} className="rounded-full bg-[#51483e] px-3 py-2 text-[10px] font-bold text-white disabled:opacity-60">{linkingNpc ? "正在关联…" : linkedCharacter && linkedRelationship ? "打开聊天" : "关联聊天角色"}</button>}
-                  {onGenerateNpcMoment && <button type="button" onClick={generateSelectedNpcMoment} disabled={!linkedCharacter || !linkedRelationship || generatingNpcMomentId === selectedNpc?.id} className="rounded-full bg-[#6c8570] px-3 py-2 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{generatingNpcMomentId === selectedNpc?.id ? "正在生成…" : linkedCharacter && linkedRelationship ? "让 NPC 发动态" : "先关联聊天角色"}</button>}
-                  {onCheckNpcAutomation && <button type="button" onClick={checkSelectedNpcAutomation} disabled={!linkedCharacter || !linkedRelationship || checkingNpcAutomationId === selectedNpc?.id} className="rounded-full border border-[#cfc7bb] bg-white px-3 py-2 text-[10px] font-bold text-[#6c6258] disabled:cursor-not-allowed disabled:opacity-50">{checkingNpcAutomationId === selectedNpc?.id ? "检查中…" : "检查自动行为"}</button>}
+                  {onLinkNpcToChat && <button type="button" onClick={linkSelectedNpcToChat} disabled={linkingNpc} className="rounded-full bg-[#51483e] px-3 py-2 text-[10px] font-bold text-white disabled:opacity-60">{linkingNpc ? "正在提升…" : linkedCharacter && linkedRelationship ? "打开完整角色" : "提升为完整角色"}</button>}
+                  {onGenerateNpcMoment && <button type="button" onClick={generateSelectedNpcMoment} disabled={generatingNpcMomentId === selectedNpc?.id} className="rounded-full bg-[#6c8570] px-3 py-2 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{generatingNpcMomentId === selectedNpc?.id ? "正在生成…" : "让 NPC 发动态"}</button>}
+                  {onCheckNpcAutomation && <button type="button" onClick={checkSelectedNpcAutomation} disabled={checkingNpcAutomationId === selectedNpc?.id} className="rounded-full border border-[#cfc7bb] bg-white px-3 py-2 text-[10px] font-bold text-[#6c6258] disabled:cursor-not-allowed disabled:opacity-50">{checkingNpcAutomationId === selectedNpc?.id ? "检查中…" : "检查自动行为"}</button>}
                   <button type="button" onClick={() => openNpcComposer(npcs.find((npc) => npc.id === selectedNode.node.entityId))} className="flex items-center gap-1 rounded-full bg-[#eeeae2] px-3 py-2 text-[10px] font-bold text-[#62594f]"><Pencil className="h-3 w-3" />编辑 NPC</button>
                   <button type="button" onClick={() => { const npc = npcs.find((item) => item.id === selectedNode.node.entityId); if (npc) deleteNpc(npc); }} className="flex items-center gap-1 rounded-full bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-600"><Trash2 className="h-3 w-3" />删除 NPC</button>
                 </>
@@ -1257,7 +1254,7 @@ export default function AppRelationshipNetwork({
       {npcModalOpen && (
         <div className="absolute inset-0 z-[100] flex items-end justify-center bg-[#2d2822]/30 p-3 backdrop-blur-[2px]" onPointerDown={() => setNpcModalOpen(false)}>
           <div className="w-full max-w-[420px] rounded-[26px] bg-[#fffdfa] p-4 shadow-2xl" onPointerDown={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between"><div><h2 className="text-sm font-black">{editingNpcId ? "编辑关系网 NPC" : "新建关系网 NPC"}</h2><p className="mt-0.5 text-[10px] text-[#958c80]">默认只作为关系网人物；关联聊天角色后，可让它主动发布朋友圈。</p></div><button type="button" onClick={() => setNpcModalOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f1eee7] text-[#746b60]"><X className="h-4 w-4" /></button></div>
+            <div className="flex items-center justify-between"><div><h2 className="text-sm font-black">{editingNpcId ? "编辑关系网 NPC" : "新建关系网 NPC"}</h2><p className="mt-0.5 text-[10px] text-[#958c80]">创建后就是独立人物；与角色连线后可按设定参与互动。提升为完整角色是可选的。</p></div><button type="button" onClick={() => setNpcModalOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f1eee7] text-[#746b60]"><X className="h-4 w-4" /></button></div>
             <div className="mt-4 max-h-[58vh] space-y-3 overflow-y-auto pr-0.5">
               <label className="block text-[10px] font-bold text-[#746b60]">名字<input autoFocus value={npcNameDraft} onChange={(event) => setNpcNameDraft(event.target.value)} placeholder="例如：周医生" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
               <label className="block text-[10px] font-bold text-[#746b60]">头像（Emoji 或图片 URL）<input value={npcAvatarDraft} onChange={(event) => setNpcAvatarDraft(event.target.value)} placeholder="例如：🩺 或 https://…" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
@@ -1269,11 +1266,9 @@ export default function AppRelationshipNetwork({
               <label className="block text-[10px] font-bold text-[#746b60]">性格关键词<textarea value={npcPersonalityDraft} onChange={(event) => setNpcPersonalityDraft(event.target.value)} placeholder="例如：温和、谨慎、观察力强" className="mt-1.5 min-h-14 w-full resize-none rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs leading-5 outline-none focus:border-[#a99a87]" /></label>
               <label className="block text-[10px] font-bold text-[#746b60]">当前动机<textarea value={npcMotivationDraft} onChange={(event) => setNpcMotivationDraft(event.target.value)} placeholder="例如：想查清一件旧案、保护某个人" className="mt-1.5 min-h-14 w-full resize-none rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs leading-5 outline-none focus:border-[#a99a87]" /></label>
               <label className="block text-[10px] font-bold text-[#746b60]">主动发动态方式<select value={npcMomentApprovalModeDraft} onChange={(event) => setNpcMomentApprovalModeDraft(event.target.value as RelationshipNetworkNpcMomentApprovalMode)} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]"><option value="automatic">自动发布</option><option value="confirm">生成后确认</option></select><span className="mt-1 block text-[9px] font-normal leading-4 text-[#958c80]">生成后确认：NPC 生成的朋友圈会先出现在朋友圈顶部的“待确认动态”，发布后才会公开；自动发布会直接进入朋友圈。</span></label>
-              <div className="rounded-2xl border border-[#e8e1d6] bg-[#faf8f3] p-3">
-                <label className="block text-[10px] font-bold text-[#746b60]">自动发动态触发<select value={npcMomentAutoModeDraft} onChange={(event) => setNpcMomentAutoModeDraft(event.target.value as RelationshipNetworkNpcMomentAutoMode)} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-white px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]"><option value="manual">关闭（仅手动）</option><option value="scheduled">按时间</option><option value="event">按聊天/关系事件</option><option value="scheduled_and_event">按时间或事件</option></select></label>
-                <label className="mt-2 block text-[10px] font-bold text-[#746b60]">自动频率<select value={npcMomentAutoFrequencyDraft} onChange={(event) => setNpcMomentAutoFrequencyDraft(event.target.value as RelationshipNetworkNpcMomentAutoFrequency)} disabled={npcMomentAutoModeDraft === "manual"} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-white px-3 py-2.5 text-xs outline-none focus:border-[#a99a87] disabled:opacity-50"><option value="low">低频（约每天一次）</option><option value="normal">正常（约半天一次）</option><option value="high">高频（约四小时一次）</option></select></label>
-                <span className="mt-2 block text-[9px] font-normal leading-4 text-[#958c80]">自动行为需要先关联聊天角色。按事件触发会等待聊天安静约 2 分钟；关系事件只使用已记录的关系变化。</span>
-              </div>
+              <label className="block text-[10px] font-bold text-[#746b60]">自动发动态触发<select value={npcMomentAutoModeDraft} onChange={(event) => setNpcMomentAutoModeDraft(event.target.value as RelationshipNetworkNpcMomentAutoMode)} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]"><option value="manual">关闭（仅手动）</option><option value="scheduled_and_event">按时间或事件</option></select></label>
+              <label className="mt-2 block text-[10px] font-bold text-[#746b60]">自动频率<select value={npcMomentAutoFrequencyDraft} onChange={(event) => setNpcMomentAutoFrequencyDraft(event.target.value as RelationshipNetworkNpcMomentAutoFrequency)} disabled={npcMomentAutoModeDraft === "manual"} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87] disabled:opacity-50"><option value="low">低频（约每天一次）</option><option value="normal">正常（约半天一次）</option><option value="high">高频（约四小时一次）</option></select></label>
+              <span className="block text-[9px] font-normal leading-4 text-[#958c80]">NPC 可直接使用自己的设定参与自动行为；提升为完整角色后，会额外使用档案馆中的完整人设和世界书。时间触发受上方频率控制；聊天事件会等待安静约 2 分钟，关系事件只使用已记录的关系变化。</span>
             </div>
             <div className="mt-4 flex gap-2"><button type="button" onClick={() => setNpcModalOpen(false)} className="flex-1 rounded-xl bg-[#f0ece5] py-2.5 text-xs font-bold text-[#756c61]">取消</button><button type="button" onClick={saveNpc} className="flex-1 rounded-xl bg-[#51483e] py-2.5 text-xs font-bold text-white">保存 NPC</button></div>
           </div>
@@ -1283,11 +1278,11 @@ export default function AppRelationshipNetwork({
       {npcLinkConfirmOpen && selectedNpc && (
         <div className="absolute inset-0 z-[110] flex items-end justify-center bg-[#2d2822]/30 p-3 backdrop-blur-[2px]" onPointerDown={() => setNpcLinkConfirmOpen(false)}>
           <div className="w-full max-w-[420px] rounded-[26px] bg-[#fffdfa] p-4 shadow-2xl" onPointerDown={(event) => event.stopPropagation()}>
-            <h2 className="text-sm font-black">关联聊天角色</h2>
-            <p className="mt-2 text-[11px] leading-5 text-[#81786d]">将「{selectedNpc.name}」复制到当前身份的角色档案，并创建一条新的聊天关系。原 NPC、关系线和档案会继续保留。</p>
+            <h2 className="text-sm font-black">提升为完整角色</h2>
+            <p className="mt-2 text-[11px] leading-5 text-[#81786d]">为「{selectedNpc.name}」创建一份完整角色档案和聊天入口。它仍然是原来的这个 NPC，不会与关系网中的人物重复；之后可以在档案馆继续完善人设、头像和世界书。</p>
             <div className="mt-4 flex gap-2">
-              <button type="button" onClick={() => setNpcLinkConfirmOpen(false)} className="flex-1 rounded-xl bg-[#f0ece5] py-2.5 text-xs font-bold text-[#756c61]">暂不关联</button>
-              <button type="button" onClick={confirmSelectedNpcLink} className="flex-1 rounded-xl bg-[#51483e] py-2.5 text-xs font-bold text-white">确认关联</button>
+              <button type="button" onClick={() => setNpcLinkConfirmOpen(false)} className="flex-1 rounded-xl bg-[#f0ece5] py-2.5 text-xs font-bold text-[#756c61]">暂不提升</button>
+              <button type="button" onClick={confirmSelectedNpcLink} className="flex-1 rounded-xl bg-[#51483e] py-2.5 text-xs font-bold text-white">确认提升</button>
             </div>
           </div>
         </div>
@@ -1304,8 +1299,8 @@ export default function AppRelationshipNetwork({
               <label className="block text-[10px] font-bold text-[#746c61]">关系分类（可选）<input value={edgeDraft.category} onChange={(event) => setEdgeDraft({ ...edgeDraft, category: event.target.value })} placeholder="例如：现实、过去、故事线" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
               <label className="block text-[10px] font-bold text-[#746c61]">备注（可选）<textarea value={edgeDraft.note} onChange={(event) => setEdgeDraft({ ...edgeDraft, note: event.target.value })} placeholder="补充这段关系的背景" className="mt-1.5 min-h-16 w-full resize-none rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs leading-5 outline-none focus:border-[#a99a87]" /></label>
               {socialDraft && <div className="rounded-2xl border border-[#e5ddd0] bg-[#faf7f1] p-3">
-                <div className="flex items-center justify-between"><div><p className="text-[10px] font-black text-[#62594f]">朋友圈互动关系</p><p className="mt-0.5 text-[9px] text-[#958c80]">NPC「{socialSourceName}」→ {socialTargetTypeLabel}「{socialTargetName}」</p></div><span className="rounded-full bg-[#eeeae2] px-2 py-1 text-[8px] font-bold text-[#8d8377]">基础配置</span></div>
-                 <p className="mt-2 text-[9px] leading-4 text-[#958c80]">{socialDraftNpcReady ? "启用后，已关联聊天角色的 NPC 会按互动频率参与目标朋友圈。" : "当前 NPC 尚未关联聊天角色；可以先保存关系，关联聊天角色后才会自动互动。"}</p>
+                <div className="flex items-center justify-between"><div><p className="text-[10px] font-black text-[#62594f]">朋友圈互动关系</p><p className="mt-0.5 text-[9px] text-[#958c80]">NPC「{socialSourceName}」→ {socialTargetTypeLabel}「{socialTargetName}」</p><p className="mt-0.5 text-[9px] text-[#a1988c]">箭头左侧是互动发起者，右侧是它会查看和回应的对象。</p></div><span className="rounded-full bg-[#eeeae2] px-2 py-1 text-[8px] font-bold text-[#8d8377]">基础配置</span></div>
+                 <p className="mt-2 text-[9px] leading-4 text-[#958c80]">{socialDraftNpcReady ? "NPC 会直接使用自己的设定参与目标朋友圈；提升为完整角色后，会额外使用完整档案和世界书。" : "当前 NPC 已不存在，无法启用这条朋友圈互动关系。"}</p>
                 <label className="mt-2 flex items-center gap-2 text-[10px] font-bold text-[#6d6459]"><input type="checkbox" checked={socialDraft.enabled} onChange={(event) => setSocialDraft({ ...socialDraft, enabled: event.target.checked })} />启用朋友圈互动</label>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={socialDraft.canViewMoments} disabled={!socialDraft.enabled || socialDraft.canCommentMoments} onChange={(event) => setSocialDraft({ ...socialDraft, canViewMoments: event.target.checked })} />允许查看朋友圈</label>

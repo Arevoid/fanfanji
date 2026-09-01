@@ -58,6 +58,7 @@ import {
 import { imageAssetDb } from "./utils/imageAssetDb";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
 import { createRelationship, DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import { resolveRelationshipNetworkNpcActor } from "./domain/relationshipNetwork/relationshipNetworkNpcActor";
 import type { RelationshipNetworkNpc } from "./domain/relationshipNetwork/relationshipNetworkTypes";
 import { findRelationshipNetworkChatLink, loadRelationshipNetworkChatLinks } from "./core/storage/repositories/relationshipNetworkChatLinkRepository";
 import { findRelationshipNetworkNpcAutomationState, upsertRelationshipNetworkNpcAutomationState } from "./core/storage/repositories/relationshipNetworkNpcAutomationRepository";
@@ -2937,7 +2938,7 @@ export default function App() {
     const nextRelationships = [...relationships, relation];
     const savedRelationships = saveRelationships(nextRelationships);
     if (!savedRelationships.success) {
-      alert("聊天关系创建失败，请检查浏览器存储空间。角色档案已创建，可稍后在关系网中重试关联。");
+      alert("聊天关系创建失败，请检查浏览器存储空间。完整角色档案已创建，可稍后在关系网中重试提升。");
       return null;
     }
     setRelationships(nextRelationships);
@@ -2954,17 +2955,15 @@ export default function App() {
     if (relationshipNetworkNpcMomentInFlightRef.current.has(npc.id)) return { success: false, message: "这个 NPC 正在生成动态，请稍候。" };
 
     const chatLink = findRelationshipNetworkChatLink(ownerIdentityId, npc.id);
-    const sourceCharacter = characters.find((character) =>
-      (character.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId
-      && ((chatLink?.characterId && character.id === chatLink.characterId)
-        || character.relationshipNetworkNpcId === npc.id));
-    const sourceRelationship = relationships.find((relationship) =>
-      relationship.userIdentityId === ownerIdentityId
-      && (chatLink?.relationId === relationship.id
-        || (sourceCharacter && resolveCanonicalCharacterId(relationship.characterId, characters) === resolveCanonicalCharacterId(sourceCharacter.id, characters))));
-    if (!sourceCharacter || !sourceRelationship) {
-      return { success: false, message: "请先为这个 NPC 关联聊天角色，再让它发布朋友圈。" };
-    }
+    const actor = resolveRelationshipNetworkNpcActor({
+      npc,
+      ownerIdentityId,
+      characters,
+      relationships,
+      preferredCharacterId: chatLink?.characterId || npc.linkedCharacterId,
+      preferredRelationId: chatLink?.relationId,
+    });
+    const { character: sourceCharacter, relationship: sourceRelationship } = actor;
 
     relationshipNetworkNpcMomentInFlightRef.current.add(npc.id);
     try {
@@ -3032,17 +3031,15 @@ export default function App() {
     const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
     if (npc.ownerIdentityId !== ownerIdentityId) return { success: false, message: "这个 NPC 不属于当前身份。" };
     const chatLink = findRelationshipNetworkChatLink(ownerIdentityId, npc.id);
-    const sourceCharacter = characters.find((character) =>
-      (character.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId
-      && ((chatLink?.characterId && character.id === chatLink.characterId)
-        || character.relationshipNetworkNpcId === npc.id));
-    const sourceRelationship = relationships.find((relationship) =>
-      relationship.userIdentityId === ownerIdentityId
-      && (chatLink?.relationId === relationship.id
-        || (sourceCharacter && resolveCanonicalCharacterId(relationship.characterId, characters) === resolveCanonicalCharacterId(sourceCharacter.id, characters))));
-    if (!sourceCharacter || !sourceRelationship) {
-      return { success: false, message: "请先为这个 NPC 关联聊天角色，自动行为才会生效。" };
-    }
+    const actor = resolveRelationshipNetworkNpcActor({
+      npc,
+      ownerIdentityId,
+      characters,
+      relationships,
+      preferredCharacterId: chatLink?.characterId || npc.linkedCharacterId,
+      preferredRelationId: chatLink?.relationId,
+    });
+    const { relationship: sourceRelationship } = actor;
 
     const now = Date.now();
     const state = findRelationshipNetworkNpcAutomationState(ownerIdentityId, npc.id);

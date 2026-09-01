@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import type { Character, UserSettings } from "../src/types";
 import { createRelationship } from "../src/domain/relationship/characterRelationship";
 import { createRelationshipNetworkNpc } from "../src/domain/relationshipNetwork/relationshipNetworkTypes";
+import {
+  getRelationshipNetworkNpcActorCharacterId,
+  getRelationshipNetworkNpcActorRelationId,
+} from "../src/domain/relationshipNetwork/relationshipNetworkNpcActor";
 import { cleanAndExtractMoment } from "../src/features/moments/services/chatMomentUtils";
 import { generateRelationshipNetworkNpcMoment } from "../src/features/moments/services/relationshipNetworkNpcMomentService";
 import { resetMomentGenerationRuntimeForTests } from "../src/features/moments/services/momentGenerationGuard";
@@ -104,6 +108,37 @@ const duplicateAttempt = await generateRelationshipNetworkNpcMoment({
   characterExpressionPrompt: "",
 });
 assert.equal(duplicateAttempt.moment, undefined, "one linked NPC should not publish twice in the same local day");
+
+resetMomentGenerationRuntimeForTests();
+
+const lightweightNpc = createRelationshipNetworkNpc({
+  id: "npc-lightweight",
+  ownerIdentityId,
+  name: "小李",
+  summary: "老板身边的员工。",
+  role: "员工",
+  personality: "谨慎、可靠",
+  now: 3,
+});
+const lightweightGenerated = await generateRelationshipNetworkNpcMoment({
+  npc: lightweightNpc,
+  characters: [],
+  moments: [],
+  worldBookEntries: [],
+  knowledgeClaims: [],
+  memories: [],
+  events: [],
+  topicHistory: [],
+  settings,
+  activeIdentityId: ownerIdentityId,
+  occurredAt: 1_700_086_400_000,
+  requestAi,
+  cleanAndExtractMoment,
+  characterExpressionPrompt: "",
+});
+assert.equal(lightweightGenerated.moment?.characterId, getRelationshipNetworkNpcActorCharacterId(lightweightNpc.id));
+assert.equal(lightweightGenerated.moment?.relationId, getRelationshipNetworkNpcActorRelationId(lightweightNpc.id));
+assert.equal(lightweightGenerated.moment?.relationshipNetworkNpcId, lightweightNpc.id);
 
 resetMomentGenerationRuntimeForTests();
 console.log("relationship network NPC moment tests passed");

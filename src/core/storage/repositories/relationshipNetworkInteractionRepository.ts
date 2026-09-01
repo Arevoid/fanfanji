@@ -11,6 +11,7 @@ function isInteractionRecord(value: unknown): value is RelationshipNetworkIntera
     && typeof candidate.socialLinkId === "string"
     && typeof candidate.sourceNpcId === "string"
     && typeof candidate.sourceCharacterId === "string"
+    && (candidate.sourceRelationId === undefined || typeof candidate.sourceRelationId === "string")
     && (typeof candidate.targetCharacterId === "string") !== (typeof candidate.targetIdentityId === "string")
     && (candidate.targetCharacterId === undefined || typeof candidate.targetCharacterId === "string")
     && (candidate.targetIdentityId === undefined || typeof candidate.targetIdentityId === "string")

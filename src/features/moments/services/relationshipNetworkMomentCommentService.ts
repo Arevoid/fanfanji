@@ -1,8 +1,8 @@
 import type { Character, MemoryItem, Moment, MomentComment, UserSettings, WorldBookEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { DEFAULT_IDENTITY_ID } from "../../../domain/relationship/characterRelationship";
-import { findRelationshipForCanonicalCharacter } from "../../../domain/relationship/characterRelationship";
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
+import { resolveRelationshipNetworkNpcActor } from "../../../domain/relationshipNetwork/relationshipNetworkNpcActor";
 import type {
   RelationshipNetworkInteractionAction,
   RelationshipNetworkMomentCommentFrequency,
@@ -15,6 +15,7 @@ import { listRelationshipNetworkSocialLinksForIdentity } from "../../../core/sto
 import { getMomentComments } from "./momentContent";
 import { generateAutomaticMomentComment } from "./automaticMomentCommentPipeline";
 import { generateAutomaticMomentReply } from "./automaticMomentReplyPipeline";
+import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import type { KnowledgeClaim } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import type { CharacterEvent } from "../../../domain/characterLife/characterEventTypes";
 import type { apiChat } from "../../../utils/apiHelper";
@@ -39,22 +40,6 @@ export interface RelationshipNetworkMomentCommentCandidate {
   targetIdentityId?: string;
   targetIdentityName?: string;
   replyingTo?: MomentComment;
-}
-
-function findSourceCharacter(
-  npc: RelationshipNetworkNpc,
-  linkedCharacterId: string | undefined,
-  characters: readonly Character[],
-  ownerIdentityId: string,
-): Character | undefined {
-  const linkedCharacter = linkedCharacterId
-    ? characters.find((character) => character.id === linkedCharacterId && belongsToIdentity(character, ownerIdentityId))
-    : undefined;
-  if (linkedCharacter) return linkedCharacter;
-
-  return characters.find((character) =>
-    belongsToIdentity(character, ownerIdentityId) && character.relationshipNetworkNpcId === npc.id,
-  );
 }
 
 function hasSourceCommented(
@@ -187,15 +172,20 @@ export function listRelationshipNetworkMomentCommentCandidates(input: {
       const npc = npcs.get(socialLink.sourceEntityId);
       if (!npc) return null;
       const chatLink = chatLinks.get(npc.id);
-      const sourceCharacter = findSourceCharacter(npc, chatLink?.characterId || npc.linkedCharacterId, input.characters, input.ownerIdentityId);
-      if (!sourceCharacter || (targetCharacter && sourceCharacter.id === targetCharacter.id)) return null;
-      const sourceRelationship = chatLink
-        ? input.relationships.find((relationship) =>
-          relationship.id === chatLink.relationId
-          && relationship.userIdentityId === input.ownerIdentityId
-          && resolveCanonicalCharacterId(relationship.characterId, input.characters) === resolveCanonicalCharacterId(sourceCharacter.id, input.characters),
-        )
-        : findRelationshipForCanonicalCharacter(input.relationships, input.ownerIdentityId, sourceCharacter.id, input.characters);
+      const actor = resolveRelationshipNetworkNpcActor({
+        npc,
+        ownerIdentityId: input.ownerIdentityId,
+        characters: input.characters,
+        relationships: input.relationships,
+        preferredCharacterId: chatLink?.characterId || npc.linkedCharacterId,
+        preferredRelationId: chatLink?.relationId,
+      });
+      const { character: sourceCharacter, relationship: sourceRelationship } = actor;
+      // A promoted NPC and its lightweight NPC record still describe one
+      // person. Do not let that person comment on their own post/profile.
+      const isNpcOwnMoment = input.currentMoment?.relationshipNetworkNpcId === npc.id
+        || targetCharacter?.relationshipNetworkNpcId === npc.id;
+      if (isNpcOwnMoment) return null;
       if (!sourceRelationship || seenSourceCharacterIds.has(sourceCharacter.id)) return null;
       if (input.currentMoment && (action === "comment"
         ? hasSourceCommented(input.currentMoment, sourceCharacter.id, sourceRelationship.id)
@@ -250,12 +240,29 @@ export async function generateRelationshipNetworkNpcMomentComment(input: {
     || candidate.targetCharacter?.name
     || candidate.targetIdentityName
     || "我的身份";
+  const targetProfile = candidate.targetCharacter
+    ? [
+      `目标人物公开资料：${candidate.targetCharacter.name}`,
+      candidate.targetCharacter.remark ? `身份/备注：${candidate.targetCharacter.remark}` : "",
+      candidate.targetCharacter.personality ? `性格：${candidate.targetCharacter.personality}` : "",
+      candidate.targetCharacter.backstory ? `背景：${candidate.targetCharacter.backstory}` : "",
+    ].filter(Boolean).join("\n")
+    : "";
   const networkTargetDescription = [
     input.targetDescription,
     `发帖人：${targetName}`,
     `关系网中，${candidate.npc.name} 与发帖人的关系是「${candidate.socialLink.relationshipLabel || "好友"}」。`,
+    targetProfile,
     "这是公开朋友圈互动，不是私聊；只能回应这条新动态里明确出现的内容。",
   ].join("\n");
+  const targetWorldKnowledge = candidate.targetCharacter
+    ? buildWorldBookSystemBlocks(
+      [...input.worldBookEntries],
+      candidate.targetCharacter.id,
+      networkTargetDescription,
+      { scenario: "public", characterId: candidate.targetCharacter.id },
+    ).allTriggered.map((entry) => ({ title: entry.title, content: entry.content }))
+    : [];
   return generateAutomaticMomentComment({
     moment: input.moment,
     targetDescription: networkTargetDescription,
@@ -270,6 +277,7 @@ export async function generateRelationshipNetworkNpcMomentComment(input: {
     requestAi: input.requestAi,
     cleanText: input.cleanText,
     characterExpressionPrompt: input.characterExpressionPrompt,
+    additionalWorldKnowledge: targetWorldKnowledge,
   });
 }
 
@@ -290,13 +298,38 @@ export async function generateRelationshipNetworkNpcMomentReply(input: {
   const { candidate } = input;
   const replyingTo = candidate.replyingTo;
   if (!replyingTo) return undefined;
+  const targetName = candidate.targetCharacter?.remark
+    || candidate.targetCharacter?.name
+    || candidate.targetIdentityName
+    || "我的身份";
+  const targetProfile = candidate.targetCharacter
+    ? [
+      `目标人物公开资料：${candidate.targetCharacter.name}`,
+      candidate.targetCharacter.remark ? `身份/备注：${candidate.targetCharacter.remark}` : "",
+      candidate.targetCharacter.personality ? `性格：${candidate.targetCharacter.personality}` : "",
+      candidate.targetCharacter.backstory ? `背景：${candidate.targetCharacter.backstory}` : "",
+    ].filter(Boolean).join("\n")
+    : "";
+  const networkTargetDescription = [
+    input.targetDescription,
+    `发帖人：${targetName}`,
+    `关系网中，${candidate.npc.name} 与发帖人的关系是「${candidate.socialLink.relationshipLabel || "好友"}」。`,
+    targetProfile,
+  ].join("\n");
+  const targetWorldKnowledge = candidate.targetCharacter
+    ? buildWorldBookSystemBlocks(
+      [...input.worldBookEntries],
+      candidate.targetCharacter.id,
+      networkTargetDescription,
+      { scenario: "public", characterId: candidate.targetCharacter.id },
+    ).allTriggered.map((entry) => ({ title: entry.title, content: entry.content }))
+    : [];
   return generateAutomaticMomentReply({
     targetMoment: input.moment,
     targetDescription: [
-      input.targetDescription,
+      networkTargetDescription,
       `评论作者：${replyingTo.authorName}`,
       `评论内容：${replyingTo.content}`,
-      `关系网中，${candidate.npc.name} 与发帖人的关系是「${candidate.socialLink.relationshipLabel || "好友"}」。`,
     ].join("\n"),
     userCommentText: replyingTo.content,
     replyingToContent: replyingTo.content,
@@ -312,5 +345,6 @@ export async function generateRelationshipNetworkNpcMomentReply(input: {
     requestAi: input.requestAi,
     cleanText: input.cleanText,
     characterExpressionPrompt: input.characterExpressionPrompt,
+    additionalWorldKnowledge: targetWorldKnowledge,
   });
 }
