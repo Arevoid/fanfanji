@@ -32,6 +32,33 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
   const close = () => { setRecord(null); setCharacter(null); setMode("current"); setError(null); };
   const getEmotion = (value: InnerVoiceRecord) => value.emotionalState?.trim() || `当前情绪：${value.state || "难以言说的心绪"}`;
 
+  const resolveStoredRecord = (targetCharacterId: string, triggerMessage: Message) => {
+    const canonicalCharacterId = resolveCanonicalCharacterId(targetCharacterId, characters);
+    const targetCharacter = characters.find((item) => item.id === canonicalCharacterId);
+    if (!targetCharacter) return { record: undefined, history: [] as InnerVoiceRecord[] };
+    const relationId = activeRelationship?.id;
+    const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
+    const conversationId = relationId ? activeRelationship?.conversationId : triggerMessage.conversationId || groupId;
+    if (!conversationId || (!relationId && !groupId)) return { record: undefined, history: [] as InnerVoiceRecord[] };
+    const scope: InnerVoiceScope = relationId
+      ? { kind: "direct", relationId, messageId: triggerMessage.id }
+      : { kind: "group", groupId: groupId!, conversationId, characterId: canonicalCharacterId, messageId: triggerMessage.id };
+    const stored = loadInnerVoiceRecords([]).value;
+    const scopedHistory = relationId
+      ? listInnerVoicesByRelation(stored, relationId)
+      : listInnerVoicesByGroup(stored, groupId!, conversationId, canonicalCharacterId);
+    const existing = findInnerVoiceByMessage(stored, scope);
+    const triggerSummary = serializeMessageContentForPrompt(triggerMessage, {
+      mode: "history",
+      userName: settings.name,
+      characterName: targetCharacter.name,
+    }).slice(0, 120);
+    return {
+      record: existing || scopedHistory.find((item) => item.triggerMessageSummary === triggerSummary),
+      history: scopedHistory,
+    };
+  };
+
   const refreshHistory = () => {
     const lastOpen = lastOpenRef.current;
     if (!lastOpen) return;
@@ -48,7 +75,29 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
 
   const changeMode = (nextMode: "current" | "history") => {
     setMode(nextMode);
-    if (nextMode === "history") refreshHistory();
+    const lastOpen = lastOpenRef.current;
+    if (!lastOpen) return;
+    if (nextMode === "history") {
+      refreshHistory();
+      return;
+    }
+    const current = resolveStoredRecord(lastOpen.targetCharacterId, lastOpen.triggerMessage);
+    setRecord(current.record || null);
+    setError(null);
+  };
+
+  /** Synchronizes an inline record that finished after the modal was opened. */
+  const syncInlineRecord = (generated: InnerVoiceRecord) => {
+    const lastOpen = lastOpenRef.current;
+    if (!lastOpen) return;
+    const current = resolveStoredRecord(lastOpen.targetCharacterId, lastOpen.triggerMessage);
+    const isCurrentRecord = current.record?.id === generated.id
+      || (generated.messageId === lastOpen.triggerMessage.id
+        && (generated.relationId === activeRelationship?.id
+          || generated.groupId === (activeCharacter?.isGroupChat ? activeCharacter.id : undefined)));
+    if (!isCurrentRecord) return;
+    setRecord(generated);
+    setHistory((previous) => [generated, ...previous.filter((item) => item.id !== generated.id)]);
   };
 
   const open = async (targetCharacterId: string, triggerMessage: Message, force = false) => {
@@ -68,19 +117,12 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const listHistory = (records: readonly InnerVoiceRecord[]) => relationId ? listInnerVoicesByRelation(records, relationId) : listInnerVoicesByGroup(records, groupId!, conversationId, canonicalCharacterId);
     lastOpenRef.current = { targetCharacterId: canonicalCharacterId, triggerMessage };
     setCharacter(targetCharacter); setMode("current"); setError(null);
-    const stored = loadInnerVoiceRecords([]).value;
-    const existing = findInnerVoiceByMessage(stored, scope);
-    const scopedHistory = listHistory(stored);
-    setHistory(scopedHistory);
+    const current = resolveStoredRecord(canonicalCharacterId, triggerMessage);
+    setHistory(current.history);
     // Some legacy/segmented replies persisted a different message id while
     // retaining the same message summary. Recover only within this exact
     // relationship/group scope; never fall back to the newest voice.
-    const triggerSummary = serializeMessageContentForPrompt(triggerMessage, {
-      mode: "history",
-      userName: settings.name,
-      characterName: targetCharacter.name,
-    }).slice(0, 120);
-    const compatibleExisting = existing || scopedHistory.find((item) => item.triggerMessageSummary === triggerSummary);
+    const compatibleExisting = current.record;
     // Current voice must belong to the message that was clicked. Never use a
     // different message's newest record as a fallback, otherwise every
     // message without an exact match would display the same inner voice.
@@ -141,5 +183,5 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     await open(lastOpen.targetCharacterId, lastOpen.triggerMessage, true);
   };
 
-  return { record, character, mode, setMode: changeMode, loading, error, history, open, refresh, close, getEmotion };
+  return { record, character, mode, setMode: changeMode, loading, error, history, open, refresh, close, getEmotion, syncInlineRecord };
 }

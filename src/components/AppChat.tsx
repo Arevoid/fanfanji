@@ -1460,6 +1460,7 @@ export default function AppChat({
               settings,
             }));
           if (additions.length) saveInnerVoiceRecords([...latest, ...additions]);
+          additions.forEach((record) => innerVoiceController.syncInlineRecord(record));
         }
         repliesScheduled = false;
         const validReplies = groupResult.messages
@@ -2226,6 +2227,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   settings,
                 });
                 saveInnerVoiceRecords([...latest, record]);
+                innerVoiceController.syncInlineRecord(record);
               }
             }
             recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
@@ -6037,6 +6039,19 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                 : null;
               const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? settings.avatar : activeCharacter.avatar);
               const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : activeCharacterDisplayName;
+              // A direct AI turn can be split into several consecutive bubbles,
+              // while the collapsed avatar is rendered only on the first one.
+              // Inline inner voice records are attached to the last delivered
+              // bubble, so use that bubble as the lookup key when the avatar is
+              // clicked. This keeps the visible avatar aligned with the record.
+              let innerVoiceTriggerMessage = msg;
+              if (!isSelf && !activeCharacter.isGroupChat) {
+                for (let nextIndex = idx + 1; nextIndex < visibleChatMessages.length; nextIndex += 1) {
+                  const candidate = visibleChatMessages[nextIndex];
+                  if (candidate.isNarration || candidate.sender !== msg.sender) break;
+                  innerVoiceTriggerMessage = candidate;
+                }
+              }
               const renderBubbleInner = () => {
                 return (
                   <div 
@@ -6436,7 +6451,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                           name={isSelf ? settings.name : msgName}
                           onClick={() => {
                             if (!isSelf) {
-                              void openInnerVoice(groupSenderChar ? groupSenderChar.id : activeCharacter.id, msg);
+                              void openInnerVoice(groupSenderChar ? groupSenderChar.id : activeCharacter.id, innerVoiceTriggerMessage);
                             }
                           }}
                           className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
@@ -6478,7 +6493,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                         name={isSelf ? settings.name : msgName}
                         onClick={() => {
                           if (!isSelf) {
-                            void openInnerVoice(groupSenderChar ? groupSenderChar.id : activeCharacter.id, msg);
+                            void openInnerVoice(groupSenderChar ? groupSenderChar.id : activeCharacter.id, innerVoiceTriggerMessage);
                           }
                         }}
                         className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
@@ -6637,7 +6652,6 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
               }
               isTyping={isTyping}
               isReplyInFlight={isReplyInFlight}
-              isOfflineMode={isOfflineModeActive}
               showAttachPanel={showAttachPanel}
               onToggleAttach={() => {
                 setShowAttachPanel(!showAttachPanel);

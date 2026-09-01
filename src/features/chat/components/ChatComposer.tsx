@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import type { FormEvent } from "react";
 import { ArrowUp, Plus, Send, Square } from "lucide-react";
 import ChatIcon from "../../../components/ChatIcon";
-import { ChatTextInput } from "./ChatTextInput";
 
 interface ChatComposerProps {
   className: string;
@@ -18,7 +17,6 @@ interface ChatInputBarProps {
   placeholder: string;
   isTyping: boolean;
   isReplyInFlight: boolean;
-  isOfflineMode: boolean;
   showAttachPanel: boolean;
   onToggleAttach: () => void;
   onSendOnly: (inputText: string, event?: FormEvent) => void | Promise<void>;
@@ -35,7 +33,6 @@ export function ChatInputBar({
   placeholder,
   isTyping,
   isReplyInFlight,
-  isOfflineMode,
   showAttachPanel,
   onToggleAttach,
   onSendOnly,
@@ -81,23 +78,13 @@ export function ChatInputBar({
         </span>
       </button>
 
-      {isOfflineMode ? (
-        <textarea
-          value={inputText}
-          onChange={(event) => setInputText(event.target.value)}
-          placeholder={placeholder}
-          rows={1}
-          className="min-w-0 w-0 flex-1 min-h-10 max-h-24 resize-none overflow-y-auto px-4 py-2 text-xs leading-5 chat-input chat-composer__input"
-        />
-      ) : (
-        <ChatTextInput
-          type="text"
-          value={inputText}
-          onChange={(event) => setInputText(event.target.value)}
-          placeholder={placeholder}
-          className="min-w-0 w-0 flex-1 h-10 px-4 text-xs chat-input chat-composer__input"
-        />
-      )}
+      <textarea
+        value={inputText}
+        onChange={(event) => setInputText(event.target.value)}
+        placeholder={placeholder}
+        rows={1}
+        className="min-w-0 w-0 flex-1 min-h-10 max-h-24 resize-none overflow-y-auto px-4 py-2 text-xs leading-5 chat-input chat-composer__input"
+      />
 
       <button
         type="button"
