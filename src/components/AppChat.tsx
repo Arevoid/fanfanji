@@ -1167,6 +1167,7 @@ export default function AppChat({
   const estimatedLongTermPrompt = React.useMemo(() => {
     if (!activeCharacter || activeCharacter.isGroupChat) return "";
     const recallLimit = resolveChatLongTermMemoryLimit(draftRetrievalHistoryLimit);
+    const previewPromptedMessages = currentChatMessages.slice(-resolveChatContextMemoryLimit(draftContextMemoryLimit));
     const latestUserMessage = [...currentChatMessages].reverse().find((message) => message.sender === "user");
     const queryText = latestUserMessage?.content || "";
     const relevantMemories = MemoryService.retrieveRelevantMemories({
@@ -1191,6 +1192,12 @@ export default function AppChat({
         queryText,
         limit: recallLimit,
         maxCharacters: 4800,
+        alreadyPromptedMessageIds: previewPromptedMessages.map((message) => message.id),
+        alreadyPromptedTexts: previewPromptedMessages.map((message) => serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: settings.name,
+          characterName: activeCharacter.name,
+        })),
         claims: loadKnowledgeClaims().value,
         summaries: loadConversationSummaries().value,
         corrections: loadBehaviorCorrections().value,
@@ -1212,7 +1219,7 @@ export default function AppChat({
       : "";
     const truthPrompt = truthRetrieval ? formatTruthRetrievalForPrompt(truthRetrieval) : "";
     return `${legacyPrompt}${truthPrompt}`;
-  }, [activeCharacter, activeRelationship, currentChatMessages, draftRetrievalHistoryLimit, memories]);
+  }, [activeCharacter, activeRelationship, currentChatMessages, draftContextMemoryLimit, draftRetrievalHistoryLimit, memories, settings.name]);
   const estimatedTokens = React.useMemo(() => estimateChatTokens({
     character: activeCharacter,
     relationshipCompressedMemory: activeRelationship?.compressedMemory,
@@ -1804,6 +1811,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           queryText: currentMessageContextText,
           limit: topK,
           maxCharacters: 4800,
+          alreadyPromptedMessageIds: [...slicedMsgs, ...(userMsg ? [userMsg] : [])].map((message) => message.id),
+          alreadyPromptedTexts: [...slicedMsgs, ...(userMsg ? [userMsg] : [])].map((message) => serializeMessageContentForPrompt(message, {
+            mode: "history",
+            userName: settings.name,
+            characterName: activeCharacter.name,
+          })),
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
           corrections: loadBehaviorCorrections().value,
@@ -3049,6 +3062,12 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
         },
         queryText: recentConversation.recentMessages.slice(-2).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: friend.name })).join(" "),
         limit: resolveChatLongTermMemoryLimit(friend.retrievalHistoryLimit),
+        alreadyPromptedMessageIds: recentConversation.recentMessages.map((message) => message.id),
+        alreadyPromptedTexts: recentConversation.recentMessages.map((message) => serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: settings.name,
+          characterName: friend.name,
+        })),
         claims: loadKnowledgeClaims().value,
         summaries: loadConversationSummaries().value,
         corrections: loadBehaviorCorrections().value,

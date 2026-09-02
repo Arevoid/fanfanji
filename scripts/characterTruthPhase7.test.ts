@@ -90,8 +90,8 @@ const result = retrieveTruthForPrivatePrompt({
 assert.deepEqual(result.projection.futurePlans.map((item) => item.id), ["future-fact"], "future temporal status wins over fact kind");
 assert.deepEqual(result.projection.openBeliefsAndHypotheses.map((item) => item.id), ["inferred-fact"], "inferred facts stay cautious");
 assert.equal(result.projection.confirmedFacts.some((item) => item.id === "superseded-fact"), false, "superseded claims do not re-enter prompt truth");
-assert.equal(result.summaries.length, 1);
-assert.match(formatTruthRetrievalForPrompt(result), /对话摘要（非权威补充）/);
+assert.equal(result.summaries.length, 0, "the source-backed summary yields to its selected Truth claim");
+assert.doesNotMatch(formatTruthRetrievalForPrompt(result), /对话摘要（非权威补充）/);
 
 const diagnostics = explainTruthProjection({
   scope,

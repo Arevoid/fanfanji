@@ -22,10 +22,17 @@ assert.match(source, /filteredMemoryCenterRecords\.map\(renderMemoryCenterRecord
 assert.doesNotMatch(source, /filteredCompatibilityMemories\.map/);
 assert.match(source, /requestDeleteMemoryCenterRecord/);
 assert.match(source, /deleteMemoryCenterRecord/);
+assert.match(source, /requestEditMemoryCenterRecord/);
+assert.match(source, /saveMemoryCenterEdit/);
+assert.match(source, /编辑\{typeLabel\}/);
+assert.match(source, /memory-center-edit-content/);
+assert.match(source, /memoryCenterActionMenuId/);
+assert.match(source, /更多记忆操作/);
+assert.match(source, /Detail stays visible on the card/);
 assert.match(source, /removeKnowledgeClaim/);
 assert.match(source, /deleteMode/);
 assert.match(source, /撤回长期事实/);
-assert.match(source, /永久删除长期事实/);
+assert.match(source, /永久删除/);
 assert.match(source, /召回状态：\$\{recallDisplay\.label\}/);
 assert.match(source, /bg-emerald-500/);
 assert.match(source, /role="alertdialog"/);

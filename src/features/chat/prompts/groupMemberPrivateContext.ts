@@ -24,6 +24,7 @@ export interface GroupMemberPrivateContextInput {
   corrections: readonly BehaviorCorrectionRecord[];
   queryText: string;
   limit: number;
+  alreadyPromptedTexts?: readonly string[];
 }
 
 export function buildIsolatedGroupMemberDefinitions(input: {
@@ -54,6 +55,7 @@ export function buildGroupMemberPrivateContext(input: GroupMemberPrivateContextI
     scope,
     queryText: input.queryText,
     limit: input.limit,
+    alreadyPromptedTexts: input.alreadyPromptedTexts,
     claims: input.claims,
     summaries: input.summaries,
     corrections: input.corrections,

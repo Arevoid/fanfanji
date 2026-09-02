@@ -19,6 +19,10 @@ export interface TruthRetrievalInput {
   limit?: number;
   /** Soft prompt budget for Truth and behavior-correction blocks. */
   maxCharacters?: number;
+  /** Message IDs whose content is already present in the current prompt. */
+  alreadyPromptedMessageIds?: readonly string[];
+  /** Serialized message text already present in the current prompt. */
+  alreadyPromptedTexts?: readonly string[];
   now?: number;
   claims: readonly KnowledgeClaim[];
   summaries: readonly ConversationSummaryRecord[];
@@ -98,6 +102,36 @@ const claimImportance = (claim: KnowledgeClaim): number => claim.importance ?? (
             : 3
 );
 
+const normalizeForPromptDedup = (text: string): string => text
+  .toLocaleLowerCase()
+  .normalize("NFKC")
+  .replace(/[\s\p{P}\p{S}]+/gu, "");
+
+/**
+ * Suppress only strong duplicate evidence.  This is intentionally exact or
+ * source-based rather than a loose similarity threshold: removing a useful
+ * long-term fact because it merely shares a topic with a recent message is
+ * worse than spending a few extra tokens.
+ */
+const isTextAlreadyPrompted = (candidate: string, promptedTexts: readonly string[]): boolean => {
+  const normalizedCandidate = normalizeForPromptDedup(candidate);
+  if (normalizedCandidate.length < 8) return false;
+  return promptedTexts.some((text) => {
+    const normalizedText = normalizeForPromptDedup(text);
+    return normalizedText === normalizedCandidate || normalizedText.includes(normalizedCandidate);
+  });
+};
+
+const projectionClaims = (projection: KnowledgePromptProjection): KnowledgeClaim[] => [
+  ...projection.confirmedFacts,
+  ...projection.userAssertions,
+  ...projection.preferences,
+  ...projection.futurePlans,
+  ...projection.openBeliefsAndHypotheses,
+  ...projection.disputed,
+  ...projection.legacyUnverified,
+];
+
 const rankClaims = (claims: readonly KnowledgeClaim[], queryText: string, limit: number): KnowledgeClaim[] => {
   const truthWeight: Record<KnowledgeClaim["truthStatus"], number> = {
     confirmed: 6,
@@ -137,7 +171,12 @@ export function retrieveTruthForPrivatePrompt(input: TruthRetrievalInput): Truth
   const now = input.now ?? Date.now();
   const limit = Math.max(1, input.limit ?? 8);
   const scenario = input.scenario ?? "private";
-  const scopedClaims = scenario === "public"
+  const alreadyPromptedMessageIds = new Set(input.alreadyPromptedMessageIds?.filter(Boolean) ?? []);
+  const alreadyPromptedTexts = (input.alreadyPromptedTexts ?? []).filter((text) => text.trim().length > 0);
+  const isClaimAlreadyPrompted = (claim: KnowledgeClaim): boolean =>
+    claim.source.messageIds?.some((messageId) => alreadyPromptedMessageIds.has(messageId)) === true
+    || isTextAlreadyPrompted(claim.statement, alreadyPromptedTexts);
+  const scopedClaimCandidates = scenario === "public"
     ? []
     : input.claims.filter((claim) =>
       isExactTruthScope(claim, input.scope)
@@ -145,13 +184,25 @@ export function retrieveTruthForPrivatePrompt(input: TruthRetrievalInput): Truth
         && !claim.recallDisabled
         && !claim.supersededById,
     );
+  const alreadyPromptedClaimIds = new Set(scopedClaimCandidates
+    .filter(isClaimAlreadyPrompted)
+    .map((claim) => claim.id));
+  const scopedClaims = scopedClaimCandidates.filter((claim) => !alreadyPromptedClaimIds.has(claim.id));
   const ranked = rankClaims(scopedClaims, input.queryText || "", limit);
   const projection = selectKnowledgeForPrivatePrompt(ranked, input.scope, now);
+  const selectedClaimIds = new Set(projectionClaims(projection).map((claim) => claim.id));
   const candidateSummaries = input.summaries
     .filter((summary) => scenario !== "public"
       && isExactTruthScope(summary, input.scope)
       && summary.status === "active"
-      && isConversationSummarySourceValid(summary, input.claims))
+      && isConversationSummarySourceValid(summary, input.claims)
+      // A summary whose complete source window is already in this request is
+      // a compressed copy of the live conversation, not additional context.
+      && !(summary.sourceMessageIds.length > 0
+        && summary.sourceMessageIds.every((messageId) => alreadyPromptedMessageIds.has(messageId)))
+      // Truth claims are authoritative.  Do not append a derived summary that
+      // repeats any claim already selected for this same request.
+      && !summary.sourceClaimIds.some((claimId) => selectedClaimIds.has(claimId) || alreadyPromptedClaimIds.has(claimId)))
     .sort((left, right) =>
       scoreText(right.summary, input.queryText || "") - scoreText(left.summary, input.queryText || "")
       || right.generatedAt - left.generatedAt

@@ -191,6 +191,12 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           queryText: currentMessageContextText,
           limit: topK,
           maxCharacters: 4800,
+          alreadyPromptedMessageIds: [...slicedMsgs, lastUserMsg].map((message) => message.id),
+          alreadyPromptedTexts: [...slicedMsgs, lastUserMsg].map((message) => serializeMessageContentForPrompt(message, {
+            mode: "history",
+            userName: settings.name,
+            characterName: activeCharacter.name,
+          })),
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
           corrections: loadBehaviorCorrections().value,

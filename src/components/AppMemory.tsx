@@ -106,6 +106,7 @@ export default function AppMemory({
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
   const [showTypeFilter, setShowTypeFilter] = useState(false);
   const [selectedMemoryCenterRecord, setSelectedMemoryCenterRecord] = useState<MemoryCenterRecord | null>(null);
+  const [memoryCenterActionMenuId, setMemoryCenterActionMenuId] = useState<string | null>(null);
   const restoreBackupRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -169,6 +170,10 @@ export default function AppMemory({
   // Delete Confirmation State
   const [deleteTarget, setDeleteTarget] = useState<MemoryCenterRecord | null>(null);
   const [deleteMode, setDeleteMode] = useState<MemoryCenterDeleteMode | null>(null);
+
+  // Unified memory center edit state
+  const [editingMemoryCenterRecord, setEditingMemoryCenterRecord] = useState<MemoryCenterRecord | null>(null);
+  const [editMemoryCenterContent, setEditMemoryCenterContent] = useState("");
 
   // Inline edit state
   const [editContent, setEditContent] = useState("");
@@ -318,6 +323,15 @@ export default function AppMemory({
   };
 
   const getMemoryCenterRecallDisplay = (record: MemoryCenterRecord) => {
+    if (record.status === "retracted") {
+      return { label: "已撤回", dotClass: "bg-slate-300", textClass: "text-slate-400" };
+    }
+    if (record.status === "superseded") {
+      return { label: "已替代", dotClass: "bg-slate-300", textClass: "text-slate-400" };
+    }
+    if (record.status === "stale") {
+      return { label: "已过期", dotClass: "bg-slate-300", textClass: "text-slate-400" };
+    }
     if (record.status !== "active") {
       return { label: "不参与召回", dotClass: "bg-slate-300", textClass: "text-slate-400" };
     }
@@ -330,9 +344,10 @@ export default function AppMemory({
     return { label: "参与召回（系统）", dotClass: "bg-emerald-500", textClass: "text-emerald-600" };
   };
 
-  const requestDeleteMemoryCenterRecord = (record: MemoryCenterRecord) => {
+  const requestDeleteMemoryCenterRecord = (record: MemoryCenterRecord, mode: MemoryCenterDeleteMode) => {
+    setMemoryCenterActionMenuId(null);
     setDeleteTarget(record);
-    setDeleteMode(record.recordType === "truth" ? null : "permanent");
+    setDeleteMode(mode);
   };
 
   const closeDeleteDialog = () => {
@@ -516,51 +531,40 @@ export default function AppMemory({
     setNewImportance(5);
   };
 
-  // Handle Edit Memory
-  const handleStartEdit = (item: MemoryItem) => {
-    setEditingItem(item);
-    setEditContent(item.content);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editingItem || !editContent.trim()) return;
-
-    const relation = editingItem.relationId
-      ? relationships.find((item) => item.id === editingItem.relationId && item.characterId === normalizeCharacterId(editingItem.characterId))
+  const saveCompatibilityMemoryEdit = async (item: MemoryItem, content: string): Promise<boolean> => {
+    const relation = item.relationId
+      ? relationships.find((candidate) => candidate.id === item.relationId && candidate.characterId === normalizeCharacterId(item.characterId))
       : undefined;
     if (!relation) {
       alert("当前关系作用域无效，无法修改长期认知。");
-      return;
+      return false;
     }
     const now = Date.now();
     const replacement = createManualKnowledgeClaim({
-      id: `claim:manual:${editingItem.id}:${now}`,
+      id: `claim:manual:${item.id}:${now}`,
       scope: toTruthScope(relation),
-      statement: editContent.trim(),
-      sourceRecordId: editingItem.id,
+      statement: content.trim(),
+      sourceRecordId: item.id,
       recordedAt: now,
       sourceApp: "memory",
     });
     if (!replacement) {
       alert("修改内容未通过长期认知审核。");
-      return;
+      return false;
     }
-    const previousClaimIds = editingItem.sourceKnowledgeClaimIds || [];
+    const previousClaimIds = item.sourceKnowledgeClaimIds || [];
     const primaryClaimId = previousClaimIds[0];
-    const updated = memories.map(item => {
-      if (item.id === editingItem.id) {
-        return {
-          ...item,
-          userIdentityId: relation.userIdentityId,
-          conversationId: relation.conversationId,
-          content: editContent.trim(),
-          timestamp: now,
-          isManual: true,
-          sourceKnowledgeClaimIds: [replacement.id],
-        };
+    const updated = memories.map((candidate) => candidate.id === item.id
+      ? {
+        ...candidate,
+        userIdentityId: relation.userIdentityId,
+        conversationId: relation.conversationId,
+        content: content.trim(),
+        timestamp: now,
+        isManual: true,
+        sourceKnowledgeClaimIds: [replacement.id],
       }
-      return item;
-    });
+      : candidate);
 
     const write = await commitMemoryWriteBundle({
       claims: [replacement],
@@ -582,10 +586,102 @@ export default function AppMemory({
     });
     if (!write.complete) {
       alert("长期认知修改失败，兼容记忆保持不变。");
+      return false;
+    }
+    return true;
+  };
+
+  // Handle Edit Memory
+  const handleStartEdit = (item: MemoryItem) => {
+    setEditingItem(item);
+    setEditContent(item.content);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingItem || !editContent.trim()) return;
+    if (await saveCompatibilityMemoryEdit(editingItem, editContent)) {
+      setEditingItem(null);
+      setEditContent("");
+    }
+  };
+
+  const requestEditMemoryCenterRecord = (record: MemoryCenterRecord) => {
+    setMemoryCenterActionMenuId(null);
+    setSelectedMemoryCenterRecord(null);
+    setEditingMemoryCenterRecord(record);
+    setEditMemoryCenterContent(getMemoryDisplayContent(record.content));
+  };
+
+  const closeMemoryCenterEdit = () => {
+    setEditingMemoryCenterRecord(null);
+    setEditMemoryCenterContent("");
+  };
+
+  const saveMemoryCenterEdit = async () => {
+    const record = editingMemoryCenterRecord;
+    const content = editMemoryCenterContent.trim();
+    if (!record || !content) return;
+
+    if (record.recordType === "compatibility") {
+      const item = memories.find((candidate) => candidate.id === record.id);
+      if (!item || !(await saveCompatibilityMemoryEdit(item, content))) return;
+      closeMemoryCenterEdit();
       return;
     }
-    setEditingItem(null);
-    setEditContent("");
+
+    if (record.recordType === "truth") {
+      const claim = knowledgeClaims.find((candidate) => candidate.id === record.id);
+      if (!claim) {
+        alert("未找到对应的 Truth 原记录，无法编辑。");
+        return;
+      }
+      const scope = {
+        relationId: claim.relationId,
+        characterId: claim.characterId,
+        userIdentityId: claim.userIdentityId,
+        conversationId: claim.conversationId,
+      };
+      const replacement = createManualKnowledgeClaim({
+        id: `claim:manual:memory-center:${claim.id}:${Date.now()}`,
+        scope,
+        statement: content,
+        sourceRecordId: claim.source.sourceRecordId || claim.id,
+        recordedAt: Date.now(),
+        sourceApp: "memory",
+      });
+      if (!replacement) {
+        alert("修改内容未通过长期认知审核。");
+        return;
+      }
+      const write = claim.status === "active"
+        ? supersedeKnowledgeClaim(scope, claim.id, replacement)
+        : appendKnowledgeClaim(replacement);
+      if (!write.success) {
+        alert("长期事实修改失败，原记录保持不变。");
+        return;
+      }
+      closeMemoryCenterEdit();
+      return;
+    }
+
+    if (record.recordType === "summary") {
+      const write = saveConversationSummaries(conversationSummaries.map((summary) => summary.id === record.id
+        ? { ...summary, summary: content, generatedAt: Date.now(), generator: "memory-ui.manual.v1", status: "active" as const }
+        : summary));
+      if (!write.success) {
+        alert("对话摘要修改失败，原记录保持不变。");
+        return;
+      }
+    } else {
+      const write = saveBehaviorCorrections(behaviorCorrections.map((correction) => correction.id === record.id
+        ? { ...correction, instruction: content, updatedAt: Date.now(), status: "active" as const }
+        : correction));
+      if (!write.success) {
+        alert("规则记忆修改失败，原记录保持不变。");
+        return;
+      }
+    }
+    closeMemoryCenterEdit();
   };
 
   // Helper: Format relative time
@@ -606,29 +702,9 @@ export default function AppMemory({
     const character = record.scope.characterId
       ? displayCharacters.find((candidate) => candidate.id === normalizeCharacterId(record.scope.characterId!))
       : undefined;
-    const statusLabel: Record<MemoryCenterRecord["status"], string> = {
-      active: "启用",
-      candidate: "候选",
-      stale: "已过期",
-      superseded: "已替代",
-      retracted: "已撤回",
-    };
-    const truthLabel = record.truthStatus === "confirmed"
-      ? "已确认"
-      : record.truthStatus === "asserted"
-        ? "用户陈述"
-        : record.truthStatus === "inferred"
-          ? "推断"
-          : record.truthStatus === "disputed" ? "有争议" : undefined;
-    const temporalLabel = record.temporalStatus === "future"
-      ? "未来"
-      : record.temporalStatus === "past"
-        ? "过去"
-        : record.temporalStatus === "present"
-          ? "当前"
-          : record.temporalStatus === "timeless" ? "长期" : undefined;
     const recallDisplay = getMemoryCenterRecallDisplay(record);
-    const deleteActionLabel = record.recordType === "truth" ? "撤回" : "删除";
+    const actionMenuKey = `${record.recordType}-${record.id}`;
+    const isActionMenuOpen = memoryCenterActionMenuId === actionMenuKey;
     return (
       <motion.div
         key={`${record.recordType}-${record.id}`}
@@ -636,7 +712,7 @@ export default function AppMemory({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -10 }}
-        className="rounded-[22px] border border-slate-100 bg-white p-4 shadow-sm"
+        className="relative rounded-[22px] border border-slate-100 bg-white p-4 shadow-sm"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -645,6 +721,7 @@ export default function AppMemory({
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <span className="rounded-full bg-slate-100 px-2 py-1 text-[9px] font-bold text-slate-600">{MEMORY_CENTER_TYPE_LABELS[record.recordType]}</span>
+            {/* Detail stays visible on the card; state-changing actions live in the overflow menu. */}
             <button
               type="button"
               onClick={() => setSelectedMemoryCenterRecord(record)}
@@ -655,21 +732,57 @@ export default function AppMemory({
             </button>
             <button
               type="button"
-              onClick={() => requestDeleteMemoryCenterRecord(record)}
-              className="rounded-md bg-rose-50 p-1 text-rose-500 transition-colors hover:bg-rose-100"
-              aria-label={`${deleteActionLabel}${MEMORY_CENTER_TYPE_LABELS[record.recordType]}`}
-              title={`${deleteActionLabel}${MEMORY_CENTER_TYPE_LABELS[record.recordType]}`}
+              onClick={() => setMemoryCenterActionMenuId(isActionMenuOpen ? null : actionMenuKey)}
+              className="rounded-lg bg-slate-50 p-1.5 text-slate-500 transition-colors hover:bg-slate-100"
+              aria-label="更多记忆操作"
+              aria-expanded={isActionMenuOpen}
             >
-              <Trash2 className="h-3 w-3" />
+              <MoreVertical className="h-3.5 w-3.5" />
             </button>
+            {isActionMenuOpen && (
+              <div className="absolute right-4 top-11 z-20 min-w-32 rounded-xl border border-slate-100 bg-white p-1.5 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => requestEditMemoryCenterRecord(record)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-slate-600 hover:bg-slate-50"
+                >
+                  <Edit3 className="h-3 w-3" />
+                  编辑
+                </button>
+                {isMemoryCenterRecallEligible(record) && (
+                  <button
+                    type="button"
+                    onClick={() => { setMemoryCenterActionMenuId(null); toggleMemoryCenterRecall(record); }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-slate-600 hover:bg-slate-50"
+                  >
+                    {getMemoryCenterRecallDisabled(record) ? <RotateCcw className="h-3 w-3" /> : <PauseCircle className="h-3 w-3" />}
+                    {getMemoryCenterRecallDisabled(record) ? "恢复召回" : "暂停召回"}
+                  </button>
+                )}
+                {record.recordType === "truth" && record.status === "active" && (
+                  <button
+                    type="button"
+                    onClick={() => requestDeleteMemoryCenterRecord(record, "retract")}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-amber-700 hover:bg-amber-50"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    撤回长期事实
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => requestDeleteMemoryCenterRecord(record, "permanent")}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-rose-600 hover:bg-rose-50"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  {record.recordType === "truth" ? "永久删除" : "删除"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <p className="mt-3 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">{getMemoryDisplayContent(record.content)}</p>
         <div className="mt-3 flex flex-wrap gap-1.5">
-          <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{MEMORY_CENTER_LAYER_LABELS[record.layer]}</span>
-          <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{statusLabel[record.status]}</span>
-          {truthLabel && <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{truthLabel}</span>}
-          {temporalLabel && <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{temporalLabel}</span>}
           <span className={`inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold ${recallDisplay.textClass}`} title={`召回状态：${recallDisplay.label}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${recallDisplay.dotClass}`} aria-hidden="true" />
             {recallDisplay.label}
@@ -1080,6 +1193,82 @@ export default function AppMemory({
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
+
+      {/* MODAL: Edit memory center record */}
+      <AnimatePresence>
+        {editingMemoryCenterRecord && (() => {
+          const record = editingMemoryCenterRecord;
+          const typeLabel = MEMORY_CENTER_TYPE_LABELS[record.recordType];
+          const description = record.recordType === "truth"
+            ? "保存后会保留原事实，并生成一条新的确认事实。"
+            : record.recordType === "compatibility"
+              ? "保存后会更新兼容记忆，并保留原 Truth 的替代关系。"
+              : record.recordType === "summary"
+                ? "这是系统摘要的人工修订，后续自动总结可能再次更新它。"
+                : "这是规则内容的人工修订。";
+          return (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="w-full max-w-md rounded-[24px] border border-slate-100 bg-white p-5 shadow-2xl"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="memory-center-edit-title"
+              >
+                <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 id="memory-center-edit-title" className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
+                      <Edit3 className="h-4 w-4 text-neutral-800" />
+                      编辑{typeLabel}
+                    </h3>
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">{description}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeMemoryCenterEdit}
+                    className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    aria-label="关闭记忆编辑"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="mt-4 space-y-1.5">
+                  <label htmlFor="memory-center-edit-content" className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    记忆内容
+                  </label>
+                  <textarea
+                    id="memory-center-edit-content"
+                    value={editMemoryCenterContent}
+                    onChange={(event) => setEditMemoryCenterContent(event.target.value)}
+                    rows={5}
+                    autoFocus
+                    className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-medium leading-relaxed text-slate-700 outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300"
+                  />
+                </div>
+                <div className="mt-4 flex gap-2.5">
+                  <button
+                    type="button"
+                    onClick={closeMemoryCenterEdit}
+                    className="flex-1 rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-200"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveMemoryCenterEdit}
+                    disabled={!editMemoryCenterContent.trim()}
+                    className="flex-1 rounded-xl bg-neutral-950 py-2.5 text-xs font-bold text-white transition-colors hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    保存修改
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* MODAL: Memory diagnostics */}
@@ -1639,10 +1828,9 @@ export default function AppMemory({
       <AnimatePresence>
         {deleteTarget && (() => {
           const isTruth = deleteTarget.recordType === "truth";
-          const isChoosingTruthAction = isTruth && !deleteMode;
           const actionLabel = deleteMode === "retract" ? "撤回" : isTruth ? "永久删除" : "删除";
           const typeLabel = MEMORY_CENTER_TYPE_LABELS[deleteTarget.recordType];
-          const description = deleteMode === "permanent"
+          const description = deleteMode === "permanent" && isTruth
             ? "这会从记忆库永久删除这条长期事实；原聊天记录和来源信息会保留，删除后不能从记忆库恢复。"
             : deleteMode === "retract"
               ? "这会撤回 Truth，使它不再参与召回；原聊天记录和来源信息会保留。"
@@ -1663,62 +1851,26 @@ export default function AppMemory({
                 <div className="w-12 h-12 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 text-xl font-bold mx-auto">
                   <Trash2 className="w-5 h-5 text-rose-600" />
                 </div>
-                {isChoosingTruthAction ? (
-                  <>
-                    <div>
-                      <h4 id="memory-delete-title" className="text-sm font-bold text-slate-800">处理长期事实</h4>
-                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">请选择处理方式：撤回可保留记录，永久删除只保留原聊天来源。</p>
-                    </div>
-                    <div className="flex flex-col gap-2 text-left">
-                      <button
-                        type="button"
-                        onClick={() => setDeleteMode("retract")}
-                        className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5 transition-colors hover:bg-amber-100"
-                      >
-                        <span className="block text-xs font-bold text-amber-700">撤回长期事实</span>
-                        <span className="mt-0.5 block text-[10px] leading-relaxed text-amber-600">停止召回，保留记忆记录、来源和聊天内容。</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteMode("permanent")}
-                        className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2.5 transition-colors hover:bg-rose-100"
-                      >
-                        <span className="block text-xs font-bold text-rose-700">永久删除长期事实</span>
-                        <span className="mt-0.5 block text-[10px] leading-relaxed text-rose-600">从记忆库移除这条事实，原聊天记录和来源仍保留。</span>
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={closeDeleteDialog}
-                      className="w-full rounded-xl bg-slate-100 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-200"
-                    >
-                      取消
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <h4 id="memory-delete-title" className="text-sm font-bold text-slate-800">确认{actionLabel}{typeLabel}</h4>
-                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">{description}</p>
-                    </div>
-                    <div className="flex gap-2.5">
-                      <button
-                        type="button"
-                        onClick={isTruth ? () => setDeleteMode(null) : closeDeleteDialog}
-                        className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
-                      >
-                        {isTruth ? "返回" : "取消"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={confirmDeleteMemoryCenterRecord}
-                        className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
-                      >
-                        确认{actionLabel}
-                      </button>
-                    </div>
-                  </>
-                )}
+                <div>
+                  <h4 id="memory-delete-title" className="text-sm font-bold text-slate-800">确认{actionLabel}{typeLabel}</h4>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">{description}</p>
+                </div>
+                <div className="flex gap-2.5">
+                  <button
+                    type="button"
+                    onClick={closeDeleteDialog}
+                    className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmDeleteMemoryCenterRecord}
+                    className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
+                  >
+                    确认{actionLabel}
+                  </button>
+                </div>
               </motion.div>
             </div>
           );

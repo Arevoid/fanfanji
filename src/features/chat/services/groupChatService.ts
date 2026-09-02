@@ -117,6 +117,7 @@ export function buildGroupMemberPromptContexts(input: {
       corrections: input.corrections,
       queryText: input.scanText,
       limit: input.recallLimit,
+      alreadyPromptedTexts: input.scanText ? [input.scanText] : [],
     });
     if (privateContext) privateContextByMemberId.set(member.id, privateContext);
     const memberWorldBookText = memberOnlyWorldBook.length
