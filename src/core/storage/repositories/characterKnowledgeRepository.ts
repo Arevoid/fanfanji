@@ -39,7 +39,7 @@ const saveKnowledgeClaimsAfterMutation = (
   if (!write.success) return write;
   const nextById = new Map(next.map((claim) => [claim.id, claim]));
   const invalidatedSummaryClaimIds = previous
-    .filter((claim) => claim.status === "active" && nextById.get(claim.id)?.status === "retracted")
+    .filter((claim) => claim.status === "active" && (!nextById.has(claim.id) || nextById.get(claim.id)?.status === "retracted"))
     .map((claim) => claim.id);
   if (invalidatedSummaryClaimIds.length > 0) {
     const summaryWrite = markConversationSummariesStaleBySourceClaimIds(invalidatedSummaryClaimIds);
@@ -102,6 +102,16 @@ export const retract = (
   return saveKnowledgeClaimsAfterMutation(previous, retractKnowledgeClaim(previous, scope, claimId, reason));
 };
 
+export const remove = (
+  scope: CharacterTruthScope,
+  claimId: string,
+): StorageWriteResult => {
+  const previous = loadKnowledgeClaims().value;
+  const target = previous.find((claim) => claim.id === claimId && isExactTruthScope(claim, scope));
+  if (!target) return { success: false, error: "missing" };
+  return saveKnowledgeClaimsAfterMutation(previous, previous.filter((claim) => claim.id !== claimId));
+};
+
 export const removeByRelations = (relationIds: readonly string[]): StorageWriteResult =>
   saveKnowledgeClaims(removeKnowledgeClaimsByRelations(loadKnowledgeClaims().value, relationIds));
 export const retractBySourceMessageIds = (messageIds: readonly string[], scope?: CharacterTruthScope): StorageWriteResult =>
@@ -123,6 +133,7 @@ export const characterKnowledgeRepository = {
   appendMany,
   supersede,
   retract,
+  remove,
   removeByRelations,
   retractBySourceMessageIds,
   retractBySourceStoryIds,

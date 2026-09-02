@@ -22,6 +22,10 @@ assert.match(source, /filteredMemoryCenterRecords\.map\(renderMemoryCenterRecord
 assert.doesNotMatch(source, /filteredCompatibilityMemories\.map/);
 assert.match(source, /requestDeleteMemoryCenterRecord/);
 assert.match(source, /deleteMemoryCenterRecord/);
+assert.match(source, /removeKnowledgeClaim/);
+assert.match(source, /deleteMode/);
+assert.match(source, /撤回长期事实/);
+assert.match(source, /永久删除长期事实/);
 assert.match(source, /召回状态：\$\{recallDisplay\.label\}/);
 assert.match(source, /bg-emerald-500/);
 assert.match(source, /role="alertdialog"/);

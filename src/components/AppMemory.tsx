@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Character, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask } from "../types";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
-import { append as appendKnowledgeClaim, appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retract as retractKnowledgeClaim, saveKnowledgeClaims, supersede as supersedeKnowledgeClaim } from "../core/storage/repositories/characterKnowledgeRepository";
+import { append as appendKnowledgeClaim, appendMany as appendKnowledgeClaims, loadKnowledgeClaims, remove as removeKnowledgeClaim, retract as retractKnowledgeClaim, saveKnowledgeClaims, supersede as supersedeKnowledgeClaim } from "../core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections, saveBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
 import type { BehaviorCorrectionRecord, ConversationSummaryRecord, KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
@@ -65,6 +65,8 @@ const MEMORY_CENTER_TYPE_OPTIONS: Array<{ value: MemoryCenterRecordType | "all";
   { value: "rule", label: MEMORY_CENTER_TYPE_LABELS.rule },
   { value: "compatibility", label: MEMORY_CENTER_TYPE_LABELS.compatibility },
 ];
+
+type MemoryCenterDeleteMode = "retract" | "permanent";
 
 export default function AppMemory({
   characters,
@@ -166,6 +168,7 @@ export default function AppMemory({
 
   // Delete Confirmation State
   const [deleteTarget, setDeleteTarget] = useState<MemoryCenterRecord | null>(null);
+  const [deleteMode, setDeleteMode] = useState<MemoryCenterDeleteMode | null>(null);
 
   // Inline edit state
   const [editContent, setEditContent] = useState("");
@@ -329,23 +332,32 @@ export default function AppMemory({
 
   const requestDeleteMemoryCenterRecord = (record: MemoryCenterRecord) => {
     setDeleteTarget(record);
+    setDeleteMode(record.recordType === "truth" ? null : "permanent");
   };
 
-  const deleteMemoryCenterRecord = (record: MemoryCenterRecord): boolean => {
+  const closeDeleteDialog = () => {
+    setDeleteTarget(null);
+    setDeleteMode(null);
+  };
+
+  const deleteMemoryCenterRecord = (record: MemoryCenterRecord, mode: MemoryCenterDeleteMode): boolean => {
     if (record.recordType === "truth") {
       const claim = knowledgeClaims.find((candidate) => candidate.id === record.id);
       if (!claim) {
-        alert("未找到对应的 Truth 原记录，无法撤回。");
+        alert("未找到对应的 Truth 原记录，无法处理。");
         return false;
       }
-      const write = retractKnowledgeClaim({
+      const scope = {
         relationId: claim.relationId,
         characterId: claim.characterId,
         userIdentityId: claim.userIdentityId,
         conversationId: claim.conversationId,
-      }, claim.id, "memory_center_deleted");
+      };
+      const write = mode === "permanent"
+        ? removeKnowledgeClaim(scope, claim.id)
+        : retractKnowledgeClaim(scope, claim.id, "memory_center_retracted");
       if (!write.success) {
-        alert("Truth 撤回失败，记录未改变。");
+        alert(mode === "permanent" ? "Truth 永久删除失败，记录未改变。" : "Truth 撤回失败，记录未改变。");
         return false;
       }
     } else if (record.recordType === "summary") {
@@ -384,8 +396,8 @@ export default function AppMemory({
   };
 
   const confirmDeleteMemoryCenterRecord = () => {
-    if (!deleteTarget) return;
-    if (deleteMemoryCenterRecord(deleteTarget)) setDeleteTarget(null);
+    if (!deleteTarget || !deleteMode) return;
+    if (deleteMemoryCenterRecord(deleteTarget, deleteMode)) closeDeleteDialog();
   };
 
   const downloadMemoryBackup = () => {
@@ -644,11 +656,11 @@ export default function AppMemory({
             <button
               type="button"
               onClick={() => requestDeleteMemoryCenterRecord(record)}
-              className="rounded-lg bg-rose-50 p-1.5 text-rose-500 transition-colors hover:bg-rose-100"
+              className="rounded-md bg-rose-50 p-1 text-rose-500 transition-colors hover:bg-rose-100"
               aria-label={`${deleteActionLabel}${MEMORY_CENTER_TYPE_LABELS[record.recordType]}`}
               title={`${deleteActionLabel}${MEMORY_CENTER_TYPE_LABELS[record.recordType]}`}
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3 w-3" />
             </button>
           </div>
         </div>
@@ -1626,13 +1638,17 @@ export default function AppMemory({
       {/* MODAL: Delete Confirmation */}
       <AnimatePresence>
         {deleteTarget && (() => {
-          const actionLabel = deleteTarget.recordType === "truth" ? "撤回" : "删除";
+          const isTruth = deleteTarget.recordType === "truth";
+          const isChoosingTruthAction = isTruth && !deleteMode;
+          const actionLabel = deleteMode === "retract" ? "撤回" : isTruth ? "永久删除" : "删除";
           const typeLabel = MEMORY_CENTER_TYPE_LABELS[deleteTarget.recordType];
-          const description = deleteTarget.recordType === "truth"
-            ? "这会撤回 Truth，使它不再参与召回；原聊天记录和来源信息会保留。"
-            : deleteTarget.recordType === "compatibility"
-              ? "这会删除兼容记忆；如果它关联 Truth，关联 Truth 也会一并撤回。"
-              : "这会从记忆库中删除这条记录，但不会删除原聊天记录。";
+          const description = deleteMode === "permanent"
+            ? "这会从记忆库永久删除这条长期事实；原聊天记录和来源信息会保留，删除后不能从记忆库恢复。"
+            : deleteMode === "retract"
+              ? "这会撤回 Truth，使它不再参与召回；原聊天记录和来源信息会保留。"
+              : deleteTarget.recordType === "compatibility"
+                ? "这会删除兼容记忆；如果它关联 Truth，关联 Truth 也会一并撤回。"
+                : "这会从记忆库中删除这条记录，但不会删除原聊天记录。";
           return (
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <motion.div
@@ -1647,24 +1663,62 @@ export default function AppMemory({
                 <div className="w-12 h-12 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 text-xl font-bold mx-auto">
                   <Trash2 className="w-5 h-5 text-rose-600" />
                 </div>
-                <div>
-                  <h4 id="memory-delete-title" className="text-sm font-bold text-slate-800">确认{actionLabel}{typeLabel}</h4>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">{description}</p>
-                </div>
-                <div className="flex gap-2.5">
-                  <button
-                    onClick={() => setDeleteTarget(null)}
-                    className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={confirmDeleteMemoryCenterRecord}
-                    className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
-                  >
-                    确认{actionLabel}
-                  </button>
-                </div>
+                {isChoosingTruthAction ? (
+                  <>
+                    <div>
+                      <h4 id="memory-delete-title" className="text-sm font-bold text-slate-800">处理长期事实</h4>
+                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">请选择处理方式：撤回可保留记录，永久删除只保留原聊天来源。</p>
+                    </div>
+                    <div className="flex flex-col gap-2 text-left">
+                      <button
+                        type="button"
+                        onClick={() => setDeleteMode("retract")}
+                        className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5 transition-colors hover:bg-amber-100"
+                      >
+                        <span className="block text-xs font-bold text-amber-700">撤回长期事实</span>
+                        <span className="mt-0.5 block text-[10px] leading-relaxed text-amber-600">停止召回，保留记忆记录、来源和聊天内容。</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteMode("permanent")}
+                        className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2.5 transition-colors hover:bg-rose-100"
+                      >
+                        <span className="block text-xs font-bold text-rose-700">永久删除长期事实</span>
+                        <span className="mt-0.5 block text-[10px] leading-relaxed text-rose-600">从记忆库移除这条事实，原聊天记录和来源仍保留。</span>
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeDeleteDialog}
+                      className="w-full rounded-xl bg-slate-100 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-200"
+                    >
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <h4 id="memory-delete-title" className="text-sm font-bold text-slate-800">确认{actionLabel}{typeLabel}</h4>
+                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">{description}</p>
+                    </div>
+                    <div className="flex gap-2.5">
+                      <button
+                        type="button"
+                        onClick={isTruth ? () => setDeleteMode(null) : closeDeleteDialog}
+                        className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
+                      >
+                        {isTruth ? "返回" : "取消"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={confirmDeleteMemoryCenterRecord}
+                        className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
+                      >
+                        确认{actionLabel}
+                      </button>
+                    </div>
+                  </>
+                )}
               </motion.div>
             </div>
           );
