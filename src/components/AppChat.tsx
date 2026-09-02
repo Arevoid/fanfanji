@@ -182,9 +182,14 @@ import { buildRelationMomentContext, formatMomentSourceText } from "../features/
 import { generateCharacterMomentPipeline } from "../features/moments/services/characterMomentGenerationPipeline";
 import { generateAutomaticMomentComment } from "../features/moments/services/automaticMomentCommentPipeline";
 import {
+  findRelationshipNetworkCharacterMomentCommentCandidate,
+  generateRelationshipNetworkCharacterMomentComment,
+  generateRelationshipNetworkCharacterMomentReply,
   generateRelationshipNetworkNpcMomentComment,
   generateRelationshipNetworkNpcMomentReply,
+  listRelationshipNetworkCharacterMomentCommentCandidates,
   listRelationshipNetworkMomentCommentCandidates,
+  type RelationshipNetworkCharacterMomentCommentCandidate,
   type RelationshipNetworkMomentCommentCandidate,
 } from "../features/moments/services/relationshipNetworkMomentCommentService";
 import { generateAutomaticMomentReply } from "../features/moments/services/automaticMomentReplyPipeline";
@@ -223,7 +228,7 @@ import {
   LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS,
   LIQUID_GLASS_DEFAULT_TEXT_COLOR,
 } from "../features/chat/styles/liquidGlassDefaults";
-import { sanitizeMomentPublishText } from "../features/moments/services/momentContent";
+import { isShortMomentImageDescription, sanitizeMomentPublishText } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
 import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, findMomentRelationshipCharacter, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
 import { generateMomentImage } from "../features/moments/services/momentImageGenerationService";
@@ -354,6 +359,7 @@ interface AppChatProps {
 }
 
 const PRESEED_MOMENTS: Moment[] = [];
+const MAX_RELATIONSHIP_NETWORK_MOMENT_CONVERSATION_COMMENTS = 8;
 
 const isOfflineStoryActiveFor = (relationId: string) =>
   readString(getOfflineModeStorageKey(relationId)).value === "true";
@@ -1256,6 +1262,10 @@ export default function AppChat({
   // or invalid provider key cannot create a repeated request/logging loop.
   const backgroundGenerationBlockedRef = useRef(false);
   const relationshipNetworkCommentInFlightRef = useRef<Set<string>>(new Set());
+  const relationshipNetworkCharacterInteractionInFlightRef = useRef<Set<string>>(new Set());
+  const relationshipNetworkNpcMomentsSeenRef = useRef(new Set(
+    moments.filter((moment) => Boolean(moment.relationshipNetworkNpcId)).map((moment) => moment.id),
+  ));
   const relationshipNetworkCommentBlockedRef = useRef(false);
   // Prevent a burst of streamed/direct replies from opening duplicate offline
   // stories before the navigation state has caught up.
@@ -3383,6 +3393,21 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       timestamp: Date.now(),
     };
     onAddCommentToMoment(pending.targetMomentId, comment);
+    if (pending.targetCharacterId) {
+      const characterCandidate = findRelationshipNetworkCharacterMomentCommentCandidate({
+        ownerIdentityId: activeIdentityId,
+        npcId: pending.sourceNpcId,
+        targetCharacterId: pending.targetCharacterId,
+        characters,
+        relationships,
+      });
+      if (characterCandidate) {
+        void handleCharacterReplyToNetworkNpcComment({
+          ...targetMoment,
+          comments: [...targetMoment.comments, comment],
+        }, comment, characterCandidate);
+      }
+    }
     const auditResult = upsertRelationshipNetworkInteractionRecord({
       id: `${pending.id}:interaction`,
       ownerIdentityId: activeIdentityId,
@@ -3551,6 +3576,138 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     }, delay);
   };
 
+  const getMomentThreadComments = (moment: Moment, commentId: string): MomentComment[] => {
+    const comments = getMomentComments(moment);
+    const commentsById = new Map(comments.map((comment) => [comment.id, comment]));
+    const thread: MomentComment[] = [];
+    const visited = new Set<string>();
+    let current = commentsById.get(commentId);
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id);
+      thread.unshift(current);
+      current = current.replyToCommentId ? commentsById.get(current.replyToCommentId) : undefined;
+    }
+    return thread;
+  };
+
+  const handleCharacterReplyToNetworkNpcComment = async (
+    targetMoment: Moment,
+    npcComment: MomentComment,
+    candidate: RelationshipNetworkCharacterMomentCommentCandidate,
+  ) => {
+    if (relationshipNetworkCommentBlockedRef.current) return;
+    const comments = getMomentComments(targetMoment);
+    const parentComment = npcComment.replyToCommentId
+      ? comments.find((comment) => comment.id === npcComment.replyToCommentId)
+      : undefined;
+    // A character answers an NPC's top-level comment on their own Moment, or
+    // an NPC reply to that character. Do not turn an NPC reply to the user
+    // into an unrelated character/NPC conversation.
+    if (npcComment.replyToCommentId && (!parentComment || !parentComment.characterId
+      || resolveCanonicalCharacterId(parentComment.characterId, characters)
+        !== resolveCanonicalCharacterId(candidate.targetCharacter.id, characters))) return;
+    if (getMomentThreadComments(targetMoment, npcComment.id).length >= MAX_RELATIONSHIP_NETWORK_MOMENT_CONVERSATION_COMMENTS) return;
+
+    const requestKey = `${targetMoment.id}:character-reply:${candidate.targetCharacter.id}:${npcComment.id}`;
+    if (relationshipNetworkCharacterInteractionInFlightRef.current.has(requestKey)) return;
+    relationshipNetworkCharacterInteractionInFlightRef.current.add(requestKey);
+    try {
+      const reply = await generateRelationshipNetworkCharacterMomentReply({
+        candidate,
+        moment: targetMoment,
+        targetDescription: getMomentTargetDescription(targetMoment),
+        replyingTo: npcComment,
+        worldBookEntries: worldBookEntries || [],
+        topicHistory: loadMomentTopicRecords().value,
+        knowledgeClaims: loadKnowledgeClaims().value,
+        memories: memories || [],
+        events: listCharacterEventsByRelation(candidate.targetRelationship.id),
+        settings,
+        requestAi: apiChat,
+        cleanText: (text) => cleanOnlineMessage(text, true),
+        characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
+      });
+      if (!reply) return;
+      const characterReply: MomentComment = {
+        ...reply,
+        authorName: candidate.targetCharacter.remark || candidate.targetCharacter.name,
+        authorAvatar: candidate.targetCharacter.avatar,
+        characterId: candidate.targetCharacter.id,
+        relationId: candidate.targetRelationship.id,
+        replyToCommentId: npcComment.id,
+      };
+      onAddCommentToMoment(targetMoment.id, characterReply);
+      const momentWithReply: Moment = {
+        ...targetMoment,
+        comments: [...targetMoment.comments, characterReply],
+      };
+      // A role reply can invite one more NPC reply. The same thread guard and
+      // the model's optional [SKIP] decision control whether it continues.
+      void handleRelationshipNetworkReplyToComment(targetMoment.id, characterReply, { force: true }, momentWithReply);
+    } catch (err) {
+      console.error(`Failed to generate character reply to ${candidate.npc.name}:`, err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (/401|api[_ -]?key|authentication fails|invalid.*key/i.test(errorMessage)) {
+        relationshipNetworkCommentBlockedRef.current = true;
+      }
+    } finally {
+      relationshipNetworkCharacterInteractionInFlightRef.current.delete(requestKey);
+    }
+  };
+
+  const handleRelationshipNetworkCharacterCommentsOnMoment = async (newMo: Moment) => {
+    if (relationshipNetworkCommentBlockedRef.current || !newMo.relationshipNetworkNpcId) return;
+    const candidates = listRelationshipNetworkCharacterMomentCommentCandidates({
+      ownerIdentityId: activeIdentityId,
+      moment: newMo,
+      characters,
+      relationships,
+    });
+    for (const candidate of candidates) {
+      const requestKey = `${newMo.id}:character-comment:${candidate.targetCharacter.id}`;
+      if (relationshipNetworkCharacterInteractionInFlightRef.current.has(requestKey)) continue;
+      relationshipNetworkCharacterInteractionInFlightRef.current.add(requestKey);
+      try {
+        const comment = await generateRelationshipNetworkCharacterMomentComment({
+          candidate,
+          moment: newMo,
+          targetDescription: getMomentTargetDescription(newMo),
+          worldBookEntries: worldBookEntries || [],
+          topicHistory: loadMomentTopicRecords().value,
+          knowledgeClaims: loadKnowledgeClaims().value,
+          memories: memories || [],
+          events: listCharacterEventsByRelation(candidate.targetRelationship.id),
+          settings,
+          requestAi: apiChat,
+          cleanText: (text) => cleanOnlineMessage(text, true),
+          characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
+        });
+        if (!comment) continue;
+        const characterComment: MomentComment = {
+          ...comment,
+          authorName: candidate.targetCharacter.remark || candidate.targetCharacter.name,
+          authorAvatar: candidate.targetCharacter.avatar,
+          characterId: candidate.targetCharacter.id,
+          relationId: candidate.targetRelationship.id,
+        };
+        onAddCommentToMoment(newMo.id, characterComment);
+        const momentWithComment: Moment = {
+          ...newMo,
+          comments: [...newMo.comments, characterComment],
+        };
+        void handleRelationshipNetworkReplyToComment(newMo.id, characterComment, { force: true }, momentWithComment);
+      } catch (err) {
+        console.error(`Failed to generate character comment on ${candidate.npc.name}'s Moment:`, err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (/401|api[_ -]?key|authentication fails|invalid.*key/i.test(errorMessage)) {
+          relationshipNetworkCommentBlockedRef.current = true;
+        }
+      } finally {
+        relationshipNetworkCharacterInteractionInFlightRef.current.delete(requestKey);
+      }
+    }
+  };
+
   const handleRelationshipNetworkCommentsOnMoment = async (newMo: Moment, options: { force?: boolean; showEmptyToast?: boolean } = {}): Promise<number> => {
     if (relationshipNetworkCommentBlockedRef.current
       || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
@@ -3613,7 +3770,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
           if (candidate.socialLink.interactionApprovalMode === "confirm") {
             queueRelationshipNetworkInteraction(candidate, newMo, "comment", requestKey, comment.content);
           } else {
-            onAddCommentToMoment(newMo.id, {
+            const npcComment: MomentComment = {
               ...comment,
               // Keep the relationship-network NPC's own display identity instead
               // of exposing the linked chat role's remark as the public author.
@@ -3621,7 +3778,22 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
               authorAvatar: candidate.npc.avatar || candidate.sourceCharacter.avatar,
               characterId: candidate.sourceCharacter.id,
               relationId: candidate.sourceRelationship.id,
-            });
+            };
+            onAddCommentToMoment(newMo.id, npcComment);
+            const targetRelationship = candidate.targetCharacter
+              ? relationForCharacter(candidate.targetCharacter.id)
+              : undefined;
+            if (candidate.targetCharacter && targetRelationship) {
+              void handleCharacterReplyToNetworkNpcComment({
+                ...newMo,
+                comments: [...newMo.comments, npcComment],
+              }, npcComment, {
+                socialLink: candidate.socialLink,
+                npc: candidate.npc,
+                targetCharacter: candidate.targetCharacter,
+                targetRelationship,
+              });
+            }
             recordInteraction("completed", { content: comment.content });
             const targetName = candidate.targetCharacter?.remark
               || candidate.targetCharacter?.name
@@ -3705,10 +3877,22 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
   const handleRelationshipNetworkRepliesOnMoment = async (newMo: Moment, options: { force?: boolean } = {}): Promise<number> => {
     if (relationshipNetworkCommentBlockedRef.current
       || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
+    const npcAuthorCanonicalId = newMo.characterId
+      ? resolveCanonicalCharacterId(newMo.characterId, characters)
+      : undefined;
+    const replyTargetCharacterId = newMo.relationshipNetworkNpcId
+      ? getMomentComments(newMo)
+        .filter((comment) => comment.characterId
+          && (!npcAuthorCanonicalId
+            || resolveCanonicalCharacterId(comment.characterId, characters) !== npcAuthorCanonicalId))
+        .sort((left, right) => left.timestamp - right.timestamp)
+        .at(-1)?.characterId
+      : newMo.characterId;
+    if (newMo.relationshipNetworkNpcId && !replyTargetCharacterId) return 0;
     const candidates = listRelationshipNetworkMomentCommentCandidates({
       ownerIdentityId: activeIdentityId,
-      ...(newMo.characterId
-        ? { targetCharacterId: newMo.characterId }
+      ...(replyTargetCharacterId
+        ? { targetCharacterId: replyTargetCharacterId }
         : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: settings.name }),
       characters,
       relationships,
@@ -3764,14 +3948,29 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
           if (candidate.socialLink.interactionApprovalMode === "confirm") {
             queueRelationshipNetworkInteraction(candidate, newMo, "reply", requestKey, reply.content);
           } else {
-            onAddCommentToMoment(newMo.id, {
+            const npcReply: MomentComment = {
               ...reply,
               authorName: candidate.npc.name,
               authorAvatar: candidate.npc.avatar || candidate.sourceCharacter.avatar,
               characterId: candidate.sourceCharacter.id,
               relationId: candidate.sourceRelationship.id,
               replyToCommentId: replyingTo.id,
-            });
+            };
+            onAddCommentToMoment(newMo.id, npcReply);
+            const targetRelationship = candidate.targetCharacter
+              ? relationForCharacter(candidate.targetCharacter.id)
+              : undefined;
+            if (candidate.targetCharacter && targetRelationship) {
+              void handleCharacterReplyToNetworkNpcComment({
+                ...newMo,
+                comments: [...newMo.comments, npcReply],
+              }, npcReply, {
+                socialLink: candidate.socialLink,
+                npc: candidate.npc,
+                targetCharacter: candidate.targetCharacter,
+                targetRelationship,
+              });
+            }
             recordInteraction("completed", { content: reply.content });
             showToast(`↩️ ${candidate.npc.name} 回复了 ${replyingTo.authorName} 的评论`);
           }
@@ -3793,8 +3992,13 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     return candidates.length;
   };
 
-  const handleRelationshipNetworkReplyToComment = async (momentId: string, comment: MomentComment, options: { force?: boolean } = {}): Promise<number> => {
-    const targetMoment = moments.find((moment) => moment.id === momentId);
+  const handleRelationshipNetworkReplyToComment = async (
+    momentId: string,
+    comment: MomentComment,
+    options: { force?: boolean } = {},
+    momentOverride?: Moment,
+  ): Promise<number> => {
+    const targetMoment = momentOverride || latestMomentsRef.current.find((moment) => moment.id === momentId);
     if (!targetMoment) return 0;
     return handleRelationshipNetworkRepliesOnMoment({
       ...targetMoment,
@@ -3812,6 +4016,18 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       showToast("当前没有符合权限和关系条件的 NPC 可参与这条朋友圈");
     }
   };
+
+  useEffect(() => {
+    const newlyPublishedNpcMoments = moments.filter((moment) =>
+      Boolean(moment.relationshipNetworkNpcId)
+      && !relationshipNetworkNpcMomentsSeenRef.current.has(moment.id),
+    );
+    if (newlyPublishedNpcMoments.length === 0) return;
+    newlyPublishedNpcMoments.forEach((moment) => relationshipNetworkNpcMomentsSeenRef.current.add(moment.id));
+    newlyPublishedNpcMoments.forEach((moment) => {
+      void handleRelationshipNetworkCharacterCommentsOnMoment(moment);
+    });
+  }, [moments]);
 
   const generateCharacterMoment = async (relationship: CharacterRelationship, occurredAt: number): Promise<boolean> => {
     const friend = findMomentRelationshipCharacter(characters, relationship);
@@ -8818,6 +9034,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                     const momAuthorName = momChar ? (momChar.remark || momChar.name) : mom.authorName;
                     const momAuthorAvatar = momChar ? momChar.avatar : mom.authorAvatar;
                     const textImageDescription = mom.imageDescription || cleanAndExtractMoment(mom.content).imageDescription;
+                    const isShortTextImageDescription = isShortMomentImageDescription(textImageDescription || "");
                     const isGeneratingMomentImage = Boolean(momentImageGenerationIds[mom.id]);
                     const momentImageAction = momChar && textImageDescription ? (
                       <button
@@ -8890,10 +9107,10 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
 
                           {/* Photo if attached */}
                           {textImageDescription && !mom.image && (
-                            <div className="relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm">
+                            <div className="relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-[0_2px_8px_rgba(15,23,42,0.08)]">
                               <span className="absolute left-4 top-2 text-[10px] leading-5 text-slate-400">文字图</span>
-                              <button type="button" onClick={() => setViewingImageDescription(textImageDescription)} className="block w-full pt-5 text-left">
-                                <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{textImageDescription}</p>
+                              <button type="button" onClick={() => setViewingImageDescription(textImageDescription)} className={`block w-full ${isShortTextImageDescription ? "flex min-h-[5rem] items-center justify-center pt-5 text-center" : "pt-5 text-left"}`}>
+                                <p className={`text-xs leading-relaxed text-slate-600 line-clamp-3 ${isShortTextImageDescription ? "text-center" : ""}`}>{textImageDescription}</p>
                               </button>
                               {momentImageAction}
                             </div>

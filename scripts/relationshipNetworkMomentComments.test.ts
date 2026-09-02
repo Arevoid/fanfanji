@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import type { Character, Moment } from "../src/types";
 import { createRelationship } from "../src/domain/relationship/characterRelationship";
 import {
+  findRelationshipNetworkCharacterMomentCommentCandidate,
+  listRelationshipNetworkCharacterMomentCommentCandidates,
   listRelationshipNetworkMomentCommentCandidates,
   shouldGenerateRelationshipNetworkMomentComment,
 } from "../src/features/moments/services/relationshipNetworkMomentCommentService";
@@ -59,6 +61,13 @@ const sourceRelationship = createRelationship({
   now: 2,
   relationship: "friend",
 });
+const targetRelationship = createRelationship({
+  id: "relation-target-a",
+  characterId: "character-target-a",
+  userIdentityId: ownerIdentityId,
+  now: 2,
+  relationship: "friend",
+});
 const targetMoment: Moment = {
   id: "moment-target-a-1",
   characterId: targetCharacter.id,
@@ -108,6 +117,30 @@ assert.equal(candidates.length, 1);
 assert.equal(candidates[0]?.npc.name, "周医生");
 assert.equal(candidates[0]?.sourceRelationship.id, sourceRelationship.id);
 assert.equal(candidates[0]?.targetCharacter?.id, targetCharacter.id);
+
+const npcMoment: Moment = {
+  ...targetMoment,
+  id: "moment-npc-a-1",
+  characterId: sourceCharacter.id,
+  relationshipNetworkNpcId: npc.id,
+  authorName: npc.name,
+  authorAvatar: npc.avatar || "👤",
+};
+const characterCommentCandidates = listRelationshipNetworkCharacterMomentCommentCandidates({
+  ownerIdentityId,
+  moment: npcMoment,
+  characters: [sourceCharacter, targetCharacter],
+  relationships: [sourceRelationship, targetRelationship],
+});
+assert.equal(characterCommentCandidates.length, 1, "a linked character can be selected to comment on an NPC Moment");
+assert.equal(characterCommentCandidates[0]?.targetCharacter.id, targetCharacter.id);
+assert.equal(findRelationshipNetworkCharacterMomentCommentCandidate({
+  ownerIdentityId,
+  npcId: npc.id,
+  targetCharacterId: targetCharacter.id,
+  characters: [sourceCharacter, targetCharacter],
+  relationships: [sourceRelationship, targetRelationship],
+})?.targetRelationship.id, targetRelationship.id);
 
 assert.equal(upsertRelationshipNetworkSocialLink({
   id: "social-identity-a",
@@ -300,6 +333,39 @@ const replyCandidates = listRelationshipNetworkMomentCommentCandidates({
 });
 assert.equal(replyCandidates.length, 1);
 assert.equal(replyCandidates[0]?.replyingTo?.id, userComment.id);
+const characterComment = {
+  id: "comment-character-a-1",
+  characterId: targetCharacter.id,
+  relationId: targetRelationship.id,
+  authorName: targetCharacter.name,
+  authorAvatar: targetCharacter.avatar,
+  content: "你说得对，整理完确实舒服多了。",
+  timestamp: 33,
+};
+const replyToCharacterCandidates = listRelationshipNetworkMomentCommentCandidates({
+  ownerIdentityId,
+  targetCharacterId: targetCharacter.id,
+  characters: [sourceCharacter, targetCharacter],
+  relationships: [sourceRelationship, targetRelationship],
+  existingMoments: [],
+  currentMoment: { ...targetMoment, timestamp: 30, comments: [characterComment] },
+  force: true,
+  action: "reply",
+});
+assert.equal(replyToCharacterCandidates.length, 1, "an NPC can continue a thread after the linked character replies");
+assert.equal(replyToCharacterCandidates[0]?.replyingTo?.id, characterComment.id);
+const npcPostReplyCandidates = listRelationshipNetworkMomentCommentCandidates({
+  ownerIdentityId,
+  targetCharacterId: targetCharacter.id,
+  characters: [sourceCharacter, targetCharacter],
+  relationships: [sourceRelationship, targetRelationship],
+  existingMoments: [],
+  currentMoment: { ...npcMoment, comments: [characterComment] },
+  force: true,
+  action: "reply",
+});
+assert.equal(npcPostReplyCandidates.length, 1, "an NPC can reply after a character comments on the NPC's Moment");
+assert.equal(npcPostReplyCandidates[0]?.replyingTo?.id, characterComment.id);
 assert.equal(listRelationshipNetworkMomentCommentCandidates({
   ownerIdentityId,
   targetCharacterId: targetCharacter.id,

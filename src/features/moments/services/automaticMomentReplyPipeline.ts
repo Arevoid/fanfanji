@@ -33,6 +33,8 @@ export async function generateAutomaticMomentReply(input: {
   characterExpressionPrompt: string;
   /** Public world settings belonging to the person whose Moment is being read. */
   additionalWorldKnowledge?: readonly { title: string; content: string }[];
+  /** Allows a public interaction to end naturally without a generated reply. */
+  allowSkip?: boolean;
 }): Promise<Awaited<ReturnType<typeof requestMomentCommentReply>>> {
   const temporalContext = createMomentTemporalContext(new Date());
   const relationContext = buildRelationMomentContext({
@@ -78,6 +80,7 @@ export async function generateAutomaticMomentReply(input: {
 4. You may naturally reference only confirmed material from this supplied relationship context. Never invent shared experiences or use another relationship's information.
 ${input.characterExpressionPrompt}
 ${CHARACTER_LANGUAGE_POLICY}
+${input.allowSkip ? "5. This interaction is optional. If the conversation feels complete or a reply would be forced, output exactly [SKIP] and nothing else." : ""}
 
 ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(input.character, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 `;

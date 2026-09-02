@@ -3,7 +3,7 @@ import { Camera, ChevronLeft, FileText, Heart, Image as ImageIcon, Languages, Lo
 import type { Character, Moment, MomentComment, UserSettings } from "../../types";
 import type { RelationshipNetworkPendingInteraction, RelationshipNetworkPendingMoment } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
 import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
-import { cleanAndExtractMoment, getMomentComments, renderMomentContent, sanitizeMomentPublishText } from "./services/momentContent";
+import { cleanAndExtractMoment, getMomentComments, isShortMomentImageDescription, renderMomentContent, sanitizeMomentPublishText } from "./services/momentContent";
 
 export interface MomentsAppProps {
   moments: Moment[];
@@ -213,6 +213,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
             const authorName = character ? character.remark || character.name : moment.authorName;
             const authorAvatar = character ? character.avatar : moment.authorAvatar;
             const textImageDescription = moment.imageDescription || cleanAndExtractMoment(moment.content).imageDescription;
+            const isShortTextImageDescription = isShortMomentImageDescription(textImageDescription || "");
             const isGeneratingMomentImage = Boolean(generatingMomentIds[moment.id]);
             const momentImageAction = character && onGenerateMomentImage && textImageDescription ? (
               <button
@@ -246,10 +247,10 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                     </div>
                   )}
                   {textImageDescription && !moment.image && (
-                    <div className="moment-media-placeholder relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-sm">
+                    <div className="moment-media-placeholder relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-[0_2px_8px_rgba(15,23,42,0.08)]">
                       <span className="absolute left-4 top-2 text-[10px] leading-5 text-[var(--media-placeholder-text)]">文字图</span>
-                      <button type="button" onClick={() => setViewingDescription(textImageDescription)} className="block w-full pt-5 text-left">
-                        <p className="text-xs leading-relaxed text-[var(--text-primary)] line-clamp-3">{textImageDescription}</p>
+                      <button type="button" onClick={() => setViewingDescription(textImageDescription)} className={`block w-full ${isShortTextImageDescription ? "flex min-h-[5rem] items-center justify-center pt-5 text-center" : "pt-5 text-left"}`}>
+                        <p className={`text-xs leading-relaxed text-[var(--text-primary)] line-clamp-3 ${isShortTextImageDescription ? "text-center" : ""}`}>{textImageDescription}</p>
                       </button>
                       {momentImageAction}
                     </div>

@@ -4,7 +4,7 @@ import type { MomentPublicCognitiveContext } from "../../../domain/momentCogniti
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { CognitivePromptWorldSetting } from "../../characterCognitive/promptAdapters/types";
 import { appendMomentPublicPromptContext } from "../../characterCognitive/promptAdapters/momentPromptAdapter";
-import { sanitizeMomentPublishText } from "./momentContent";
+import { isMomentSkipResponse, sanitizeMomentPublishText } from "./momentContent";
 import { findMomentTemporalConflicts, type MomentTemporalContext } from "./momentTemporalContext";
 
 type ChatRequest = Parameters<typeof apiChat>[0];
@@ -33,6 +33,7 @@ export async function requestMomentCommentReply(input: {
   const random = input.random || Math.random;
   let content = sanitizeMomentPublishText(input.cleanText(response.text.trim())).replace(/^["'“‘]+|["'”’]+$/g, "").trim();
   content = content.replace(/^回复\s*[\(（].*?[\)）]\s*[:：]\s*/, "").replace(/^回复\s*.*?\s*[:：]\s*/, "");
+  if (!content || isMomentSkipResponse(content)) return undefined;
   if (input.temporalContext && findMomentTemporalConflicts(content, input.temporalContext, input.character).length > 0) {
     console.warn("[moments] Rejected temporally inconsistent generated reply.");
     return undefined;
