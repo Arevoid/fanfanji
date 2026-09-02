@@ -165,7 +165,7 @@ export default function AppMemory({
   const [newImportance, setNewImportance] = useState(5);
 
   // Delete Confirmation State
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MemoryCenterRecord | null>(null);
 
   // Inline edit state
   const [editContent, setEditContent] = useState("");
@@ -314,6 +314,80 @@ export default function AppMemory({
     alert("摘要和规则记录目前由系统统一管理，暂不支持单条暂停；查看详情不会改变任何数据。");
   };
 
+  const getMemoryCenterRecallDisplay = (record: MemoryCenterRecord) => {
+    if (record.status !== "active") {
+      return { label: "不参与召回", dotClass: "bg-slate-300", textClass: "text-slate-400" };
+    }
+    if (record.recordType === "truth" || record.recordType === "compatibility") {
+      const disabled = getMemoryCenterRecallDisabled(record);
+      return disabled
+        ? { label: "已暂停", dotClass: "bg-amber-400", textClass: "text-amber-600" }
+        : { label: "参与召回", dotClass: "bg-emerald-500", textClass: "text-emerald-600" };
+    }
+    return { label: "参与召回（系统）", dotClass: "bg-emerald-500", textClass: "text-emerald-600" };
+  };
+
+  const requestDeleteMemoryCenterRecord = (record: MemoryCenterRecord) => {
+    setDeleteTarget(record);
+  };
+
+  const deleteMemoryCenterRecord = (record: MemoryCenterRecord): boolean => {
+    if (record.recordType === "truth") {
+      const claim = knowledgeClaims.find((candidate) => candidate.id === record.id);
+      if (!claim) {
+        alert("未找到对应的 Truth 原记录，无法撤回。");
+        return false;
+      }
+      const write = retractKnowledgeClaim({
+        relationId: claim.relationId,
+        characterId: claim.characterId,
+        userIdentityId: claim.userIdentityId,
+        conversationId: claim.conversationId,
+      }, claim.id, "memory_center_deleted");
+      if (!write.success) {
+        alert("Truth 撤回失败，记录未改变。");
+        return false;
+      }
+    } else if (record.recordType === "summary") {
+      const write = saveConversationSummaries(conversationSummaries.filter((summary) => summary.id !== record.id));
+      if (!write.success) {
+        alert("对话摘要删除失败，记录未改变。");
+        return false;
+      }
+    } else if (record.recordType === "rule") {
+      const write = saveBehaviorCorrections(behaviorCorrections.filter((correction) => correction.id !== record.id));
+      if (!write.success) {
+        alert("规则记忆删除失败，记录未改变。");
+        return false;
+      }
+    } else {
+      const memory = memories.find((candidate) => candidate.id === record.id);
+      if (!memory) {
+        alert("未找到对应的兼容记忆原记录，无法删除。");
+        return false;
+      }
+      const linkedClaims = knowledgeClaims.filter((claim) => memory.sourceKnowledgeClaimIds?.includes(claim.id));
+      const failedClaim = linkedClaims.find((claim) => !retractKnowledgeClaim({
+        relationId: claim.relationId,
+        characterId: claim.characterId,
+        userIdentityId: claim.userIdentityId,
+        conversationId: claim.conversationId,
+      }, claim.id, "compatibility_memory_deleted").success);
+      if (failedClaim) {
+        alert("关联 Truth 撤回失败，兼容记忆未删除。");
+        return false;
+      }
+      onSaveMemories(memories.filter((candidate) => candidate.id !== record.id));
+    }
+    setSelectedMemoryCenterRecord(null);
+    return true;
+  };
+
+  const confirmDeleteMemoryCenterRecord = () => {
+    if (!deleteTarget) return;
+    if (deleteMemoryCenterRecord(deleteTarget)) setDeleteTarget(null);
+  };
+
   const downloadMemoryBackup = () => {
     const payload = {
       format: "fanfanji-memory-backup",
@@ -430,29 +504,6 @@ export default function AppMemory({
     setNewImportance(5);
   };
 
-  // Handle Delete Memory
-  const handleDeleteMemory = (id: string) => {
-    setDeleteConfirmId(id);
-  };
-
-  const confirmDeleteMemory = () => {
-    if (deleteConfirmId) {
-      const memory = memories.find((item) => item.id === deleteConfirmId);
-      const relation = memory?.relationId ? relationships.find((item) => item.id === memory.relationId && item.characterId === normalizeCharacterId(memory.characterId)) : undefined;
-      if (memory?.sourceKnowledgeClaimIds?.length && relation) {
-        const failed = memory.sourceKnowledgeClaimIds.some((claimId) =>
-          !retractKnowledgeClaim(toTruthScope(relation), claimId, "compatibility_memory_deleted").success,
-        );
-        if (failed) {
-          alert("长期认知撤回失败，未删除兼容记忆。");
-          return;
-        }
-      }
-      onSaveMemories(memories.filter(item => item.id !== deleteConfirmId));
-      setDeleteConfirmId(null);
-    }
-  };
-
   // Handle Edit Memory
   const handleStartEdit = (item: MemoryItem) => {
     setEditingItem(item);
@@ -564,6 +615,8 @@ export default function AppMemory({
         : record.temporalStatus === "present"
           ? "当前"
           : record.temporalStatus === "timeless" ? "长期" : undefined;
+    const recallDisplay = getMemoryCenterRecallDisplay(record);
+    const deleteActionLabel = record.recordType === "truth" ? "撤回" : "删除";
     return (
       <motion.div
         key={`${record.recordType}-${record.id}`}
@@ -588,6 +641,15 @@ export default function AppMemory({
             >
               详情
             </button>
+            <button
+              type="button"
+              onClick={() => requestDeleteMemoryCenterRecord(record)}
+              className="rounded-lg bg-rose-50 p-1.5 text-rose-500 transition-colors hover:bg-rose-100"
+              aria-label={`${deleteActionLabel}${MEMORY_CENTER_TYPE_LABELS[record.recordType]}`}
+              title={`${deleteActionLabel}${MEMORY_CENTER_TYPE_LABELS[record.recordType]}`}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
         <p className="mt-3 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">{getMemoryDisplayContent(record.content)}</p>
@@ -596,6 +658,10 @@ export default function AppMemory({
           <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{statusLabel[record.status]}</span>
           {truthLabel && <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{truthLabel}</span>}
           {temporalLabel && <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{temporalLabel}</span>}
+          <span className={`inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold ${recallDisplay.textClass}`} title={`召回状态：${recallDisplay.label}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${recallDisplay.dotClass}`} aria-hidden="true" />
+            {recallDisplay.label}
+          </span>
         </div>
         <p className="mt-2 text-[9px] leading-relaxed text-slate-400">
           {record.scope.relationId ? getRelationLabel(record.scope.relationId) : "未绑定关系"}
@@ -1089,6 +1155,7 @@ export default function AppMemory({
             : undefined;
           const recallEligible = isMemoryCenterRecallEligible(record);
           const recallDisabled = recallEligible && getMemoryCenterRecallDisabled(record);
+          const recallDisplay = getMemoryCenterRecallDisplay(record);
           const statusLabel: Record<MemoryCenterRecord["status"], string> = {
             active: "启用",
             candidate: "候选",
@@ -1143,7 +1210,7 @@ export default function AppMemory({
                     <span>重要性：<strong className="text-slate-600">{record.importance}/10</strong></span>
                     <span>可信度：<strong className="text-slate-600">{Math.round(record.confidence * 100)}%</strong></span>
                     <span>用户确认：<strong className="text-slate-600">{record.userConfirmed ? "是" : "否"}</strong></span>
-                    <span>召回状态：<strong className={!recallEligible || recallDisabled ? "text-amber-600" : "text-emerald-600"}>{!recallEligible ? "不参与召回" : recallDisabled ? "已暂停" : "参与召回"}</strong></span>
+                    <span>召回状态：<strong className={recallDisplay.textClass}>{recallDisplay.label}</strong></span>
                   </div>
 
                   <div className="rounded-xl border border-slate-100 p-3 text-[10px] leading-relaxed text-slate-500">
@@ -1558,40 +1625,50 @@ export default function AppMemory({
 
       {/* MODAL: Delete Confirmation */}
       <AnimatePresence>
-        {deleteConfirmId && (
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl w-full max-w-xs p-5 shadow-2xl flex flex-col gap-4 text-center border border-slate-100"
-            >
-              <div className="w-12 h-12 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 text-xl font-bold mx-auto">
-                <Trash2 className="w-5 h-5 text-rose-600" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-800">确认删除记忆</h4>
-                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  确定要删除这条记忆条目吗？删除后 AI 将不再能召回此记忆。
-                </p>
-              </div>
-              <div className="flex gap-2.5">
-                <button
-                  onClick={() => setDeleteConfirmId(null)}
-                  className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={confirmDeleteMemory}
-                  className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
-                >
-                  确认删除
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
+        {deleteTarget && (() => {
+          const actionLabel = deleteTarget.recordType === "truth" ? "撤回" : "删除";
+          const typeLabel = MEMORY_CENTER_TYPE_LABELS[deleteTarget.recordType];
+          const description = deleteTarget.recordType === "truth"
+            ? "这会撤回 Truth，使它不再参与召回；原聊天记录和来源信息会保留。"
+            : deleteTarget.recordType === "compatibility"
+              ? "这会删除兼容记忆；如果它关联 Truth，关联 Truth 也会一并撤回。"
+              : "这会从记忆库中删除这条记录，但不会删除原聊天记录。";
+          return (
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white rounded-3xl w-full max-w-xs p-5 shadow-2xl flex flex-col gap-4 text-center border border-slate-100"
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby="memory-delete-title"
+              >
+                <div className="w-12 h-12 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 text-xl font-bold mx-auto">
+                  <Trash2 className="w-5 h-5 text-rose-600" />
+                </div>
+                <div>
+                  <h4 id="memory-delete-title" className="text-sm font-bold text-slate-800">确认{actionLabel}{typeLabel}</h4>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">{description}</p>
+                </div>
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={() => setDeleteTarget(null)}
+                    className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={confirmDeleteMemoryCenterRecord}
+                    className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
+                  >
+                    确认{actionLabel}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
     </div>
   );
