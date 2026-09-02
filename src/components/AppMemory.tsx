@@ -705,6 +705,7 @@ export default function AppMemory({
     const recallDisplay = getMemoryCenterRecallDisplay(record);
     const actionMenuKey = `${record.recordType}-${record.id}`;
     const isActionMenuOpen = memoryCenterActionMenuId === actionMenuKey;
+    const memoryCenterHeaderControlClass = "inline-flex h-5 w-10 shrink-0 items-center justify-center rounded-lg px-0.5 text-[9px] leading-none";
     return (
       <motion.div
         key={`${record.recordType}-${record.id}`}
@@ -720,12 +721,12 @@ export default function AppMemory({
             <p className="mt-0.5 text-[9px] text-slate-400">{MEMORY_CENTER_SOURCE_LABELS[record.provenance.app]} · {formatTime(record.recordedAt)}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-[9px] font-bold text-slate-600">{MEMORY_CENTER_TYPE_LABELS[record.recordType]}</span>
+            <span className={`${memoryCenterHeaderControlClass} bg-slate-100 font-bold text-slate-600`}>{MEMORY_CENTER_TYPE_LABELS[record.recordType]}</span>
             {/* Detail stays visible on the card; state-changing actions live in the overflow menu. */}
             <button
               type="button"
               onClick={() => setSelectedMemoryCenterRecord(record)}
-              className="rounded-lg bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500 hover:bg-slate-100"
+              className={`${memoryCenterHeaderControlClass} bg-slate-50 font-bold text-slate-500 hover:bg-slate-100`}
               aria-label={`查看${MEMORY_CENTER_TYPE_LABELS[record.recordType]}详情`}
             >
               详情
@@ -733,7 +734,7 @@ export default function AppMemory({
             <button
               type="button"
               onClick={() => setMemoryCenterActionMenuId(isActionMenuOpen ? null : actionMenuKey)}
-              className="rounded-lg bg-slate-50 p-1.5 text-slate-500 transition-colors hover:bg-slate-100"
+              className={`${memoryCenterHeaderControlClass} bg-slate-50 p-0 text-slate-500 transition-colors hover:bg-slate-100`}
               aria-label="更多记忆操作"
               aria-expanded={isActionMenuOpen}
             >

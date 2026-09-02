@@ -29,6 +29,7 @@ assert.match(source, /memory-center-edit-content/);
 assert.match(source, /memoryCenterActionMenuId/);
 assert.match(source, /更多记忆操作/);
 assert.match(source, /Detail stays visible on the card/);
+assert.match(source, /memoryCenterHeaderControlClass = "inline-flex h-5 w-10/);
 assert.match(source, /removeKnowledgeClaim/);
 assert.match(source, /deleteMode/);
 assert.match(source, /撤回长期事实/);
