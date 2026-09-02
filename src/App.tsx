@@ -15,6 +15,7 @@ import { removeMemoriesForMoment } from "./features/moments/services/momentMemor
 import { sanitizeMomentPublishText } from "./features/moments/services/momentContent";
 import { cleanAndExtractMoment } from "./features/moments/services/chatMomentUtils";
 import { generateRelationshipNetworkNpcMoment } from "./features/moments/services/relationshipNetworkNpcMomentService";
+import { upsertMomentPreservingOrder } from "./features/moments/services/momentState";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
@@ -2530,22 +2531,7 @@ export default function App() {
     };
     // Publishing is immediate; background photo understanding later upserts
     // the same Moment with semantic/aspect metadata instead of duplicating it.
-    setMoments((prev) => {
-      const existing = prev.find((moment) => moment.id === normalized.id);
-      if (!existing) return [normalized, ...prev];
-      const comments = [...existing.comments];
-      for (const comment of normalized.comments) {
-        const index = comments.findIndex((candidate) => candidate.id === comment.id);
-        if (index >= 0) comments[index] = comment;
-        else comments.push(comment);
-      }
-      return [{
-        ...existing,
-        ...normalized,
-        likes: [...new Set([...existing.likes, ...normalized.likes])],
-        comments,
-      }, ...prev.filter((moment) => moment.id !== normalized.id)];
-    });
+    setMoments((prev) => upsertMomentPreservingOrder(prev, normalized));
   };
 
   const handleLikeMoment = (id: string, userName: string) => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MomentsApp } from "../src/features/moments/MomentsApp";
 import { cleanAndExtractMoment, getMomentComments, stripMomentVoiceMarkup } from "../src/features/moments/services/momentContent";
+import { upsertMomentPreservingOrder } from "../src/features/moments/services/momentState";
 import type { Character, Moment, UserSettings } from "../src/types";
 
 const character: Character = { id: "char-a", name: "阿岚", avatar: "avatar.png", personality: "温柔", backstory: "测试" };
@@ -24,4 +25,11 @@ assert.match(markup, />文字图<\/span>/);
 assert.match(markup, /aria-label="生成朋友圈图片"/);
 assert.equal(markup.includes("文字图 · 点击查看"), false);
 assert.ok(markup.includes("moments-comment-list") === false);
+
+const newerMoment = { ...moment, id: "moment-newer", timestamp: 2, likes: [], comments: [] };
+const imageUpdated = { ...moment, image: "data:image/png;base64,updated", imageType: "photo" as const };
+const updatedOrder = upsertMomentPreservingOrder([newerMoment, moment], imageUpdated);
+assert.deepEqual(updatedOrder.map((item) => item.id), ["moment-newer", "moment-1"], "updating an old Moment must preserve feed order");
+assert.equal(updatedOrder[1].image, "data:image/png;base64,updated");
+assert.deepEqual(upsertMomentPreservingOrder([moment], newerMoment).map((item) => item.id), ["moment-newer", "moment-1"], "new Moments still appear at the top");
 console.log("PASS moments content normalization, legacy comments, feed card, and preserved class names");
