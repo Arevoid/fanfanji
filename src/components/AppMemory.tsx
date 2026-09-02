@@ -11,6 +11,7 @@ import { createManualKnowledgeClaim } from "../features/characterKnowledge/servi
 import { getMemoryDisplayContent } from "../domain/memory/offlineMemorySync";
 import { commitMemoryWriteBundle } from "../domain/memory/memoryWriteCoordinator";
 import { rankRelevantMemories } from "../domain/memory/MemoryRetriever";
+import { buildMemoryCenterRecords, filterMemoryCenterRecords, MEMORY_CENTER_LAYER_LABELS, MEMORY_CENTER_SOURCE_LABELS, MEMORY_CENTER_TYPE_LABELS, type MemoryCenterRecord, type MemoryCenterRecordType } from "../domain/memory/memoryCenterModel";
 import { 
   ChevronLeft,
   Search, 
@@ -57,6 +58,14 @@ const normalizeAutoSummaryRounds = (value: number | undefined): number =>
     ? Math.min(100, Math.max(10, Math.round(value as number)))
     : DEFAULT_AUTO_SUMMARY_ROUNDS;
 
+const MEMORY_CENTER_TYPE_OPTIONS: Array<{ value: MemoryCenterRecordType | "all"; label: string }> = [
+  { value: "all", label: "全部类型" },
+  { value: "truth", label: MEMORY_CENTER_TYPE_LABELS.truth },
+  { value: "summary", label: MEMORY_CENTER_TYPE_LABELS.summary },
+  { value: "rule", label: MEMORY_CENTER_TYPE_LABELS.rule },
+  { value: "compatibility", label: MEMORY_CENTER_TYPE_LABELS.compatibility },
+];
+
 export default function AppMemory({
   characters,
   relationships,
@@ -84,6 +93,7 @@ export default function AppMemory({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>("all");
   const [selectedRelationId, setSelectedRelationId] = useState<string>("all");
+  const [activeRecordType, setActiveRecordType] = useState<MemoryCenterRecordType | "all">("all");
   
   // Modals / Dialog States
   const [showMenu, setShowMenu] = useState(false);
@@ -92,6 +102,8 @@ export default function AppMemory({
   const [showApiPoolModal, setShowApiPoolModal] = useState(false);
   const [showRecallModal, setShowRecallModal] = useState(false);
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [showTypeFilter, setShowTypeFilter] = useState(false);
+  const [selectedMemoryCenterRecord, setSelectedMemoryCenterRecord] = useState<MemoryCenterRecord | null>(null);
   const restoreBackupRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -179,6 +191,19 @@ export default function AppMemory({
   const knowledgeClaims = loadKnowledgeClaims().value;
   const conversationSummaries = loadConversationSummaries().value;
   const behaviorCorrections = loadBehaviorCorrections().value;
+  const memoryCenterRecords = buildMemoryCenterRecords({
+    memories: normalizedMemories,
+    claims: knowledgeClaims,
+    summaries: conversationSummaries,
+    corrections: behaviorCorrections,
+  });
+  const baseFilteredMemoryCenterRecords = filterMemoryCenterRecords(memoryCenterRecords, {
+    recordType: activeRecordType,
+    characterId: selectedCharacterId,
+    relationId: selectedRelationId,
+    searchQuery,
+  });
+  const filteredMemoryCenterRecords = baseFilteredMemoryCenterRecords;
   const getClaimForMemory = (item: MemoryItem): KnowledgeClaim | undefined =>
     item.sourceKnowledgeClaimIds?.map((claimId) => knowledgeClaims.find((claim) => claim.id === claimId)).find(Boolean);
   const getRelationLabel = (relationId?: string): string => {
@@ -241,6 +266,52 @@ export default function AppMemory({
       }
     }
     onSaveMemories(memories.map((candidate) => candidate.id === item.id ? { ...candidate, recallDisabled: nextDisabled } : candidate));
+  };
+
+  const getMemoryCenterRecallDisabled = (record: MemoryCenterRecord): boolean => {
+    if (record.status !== "active") return true;
+    if (record.recordType === "truth") {
+      return Boolean(knowledgeClaims.find((claim) => claim.id === record.id)?.recallDisabled);
+    }
+    if (record.recordType === "compatibility") {
+      const item = memories.find((candidate) => candidate.id === record.id);
+      return Boolean(item?.recallDisabled || (item && getClaimForMemory(item)?.recallDisabled));
+    }
+    return false;
+  };
+
+  const isMemoryCenterRecallEligible = (record: MemoryCenterRecord): boolean =>
+    record.status === "active" && (record.recordType === "truth" || record.recordType === "compatibility");
+
+  const toggleMemoryCenterRecall = (record: MemoryCenterRecord) => {
+    if (record.recordType === "truth") {
+      const claim = knowledgeClaims.find((candidate) => candidate.id === record.id);
+      if (!claim) {
+        alert("未找到对应的 Truth 原记录，无法修改召回状态。");
+        return;
+      }
+      const nextDisabled = !claim.recallDisabled;
+      const write = saveKnowledgeClaims(knowledgeClaims.map((candidate) => candidate.id === claim.id
+        ? { ...candidate, recallDisabled: nextDisabled }
+        : candidate));
+      if (!write.success) {
+        alert("Truth 召回状态保存失败，记录未改变。");
+        return;
+      }
+      setSelectedMemoryCenterRecord({ ...record });
+      return;
+    }
+    if (record.recordType === "compatibility") {
+      const item = memories.find((candidate) => candidate.id === record.id);
+      if (!item) {
+        alert("未找到对应的兼容记忆原记录，无法修改召回状态。");
+        return;
+      }
+      toggleMemoryRecall(item);
+      setSelectedMemoryCenterRecord({ ...record });
+      return;
+    }
+    alert("摘要和规则记录目前由系统统一管理，暂不支持单条暂停；查看详情不会改变任何数据。");
   };
 
   const downloadMemoryBackup = () => {
@@ -468,6 +539,72 @@ export default function AppMemory({
     });
   };
 
+  const renderMemoryCenterRecord = (record: MemoryCenterRecord) => {
+    const character = record.scope.characterId
+      ? displayCharacters.find((candidate) => candidate.id === normalizeCharacterId(record.scope.characterId!))
+      : undefined;
+    const statusLabel: Record<MemoryCenterRecord["status"], string> = {
+      active: "启用",
+      candidate: "候选",
+      stale: "已过期",
+      superseded: "已替代",
+      retracted: "已撤回",
+    };
+    const truthLabel = record.truthStatus === "confirmed"
+      ? "已确认"
+      : record.truthStatus === "asserted"
+        ? "用户陈述"
+        : record.truthStatus === "inferred"
+          ? "推断"
+          : record.truthStatus === "disputed" ? "有争议" : undefined;
+    const temporalLabel = record.temporalStatus === "future"
+      ? "未来"
+      : record.temporalStatus === "past"
+        ? "过去"
+        : record.temporalStatus === "present"
+          ? "当前"
+          : record.temporalStatus === "timeless" ? "长期" : undefined;
+    return (
+      <motion.div
+        key={`${record.recordType}-${record.id}`}
+        layout
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        className="rounded-[22px] border border-slate-100 bg-white p-4 shadow-sm"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-xs font-black text-slate-800">{character?.name || "未绑定角色"}</p>
+            <p className="mt-0.5 text-[9px] text-slate-400">{MEMORY_CENTER_SOURCE_LABELS[record.provenance.app]} · {formatTime(record.recordedAt)}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-[9px] font-bold text-slate-600">{MEMORY_CENTER_TYPE_LABELS[record.recordType]}</span>
+            <button
+              type="button"
+              onClick={() => setSelectedMemoryCenterRecord(record)}
+              className="rounded-lg bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500 hover:bg-slate-100"
+              aria-label={`查看${MEMORY_CENTER_TYPE_LABELS[record.recordType]}详情`}
+            >
+              详情
+            </button>
+          </div>
+        </div>
+        <p className="mt-3 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">{getMemoryDisplayContent(record.content)}</p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{MEMORY_CENTER_LAYER_LABELS[record.layer]}</span>
+          <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{statusLabel[record.status]}</span>
+          {truthLabel && <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{truthLabel}</span>}
+          {temporalLabel && <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold text-slate-500">{temporalLabel}</span>}
+        </div>
+        <p className="mt-2 text-[9px] leading-relaxed text-slate-400">
+          {record.scope.relationId ? getRelationLabel(record.scope.relationId) : "未绑定关系"}
+          {record.provenance.sourceMessageIds?.length ? ` · 来源消息 ${record.provenance.sourceMessageIds.length} 条` : " · 暂无直接消息链接"}
+        </p>
+      </motion.div>
+    );
+  };
+
   return (
     <div data-theme-page="memory" className="w-full h-full bg-[var(--app-bg)] text-[var(--text-primary)] flex flex-col font-sans select-none relative overflow-hidden">
       {/* Upper Navigation Bar */}
@@ -590,8 +727,12 @@ export default function AppMemory({
               <div className="min-w-0">
                 <p className="text-xs font-bold truncate">记忆提炼完成！</p>
                 <p className="text-[10px] text-emerald-600">
-                  成功为 {displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name || "角色"} 提炼了 {immediateSummaryTask.extractedCount} 条新记忆
+                  成功为 {displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name || "角色"} 提炼了 {immediateSummaryTask.extractedCount} 条长期内容
+                  {immediateSummaryTask.archiveStats && ` · 事实 ${immediateSummaryTask.archiveStats.acceptedTruthCount} · 摘要 ${immediateSummaryTask.archiveStats.summaryCount} · 兼容 ${immediateSummaryTask.archiveStats.compatibilityCount}`}
                 </p>
+                {immediateSummaryTask.archiveStats && immediateSummaryTask.archiveStats.rejectedCandidateCount > 0 && (
+                  <p className="text-[9px] text-amber-600">另有 {immediateSummaryTask.archiveStats.rejectedCandidateCount} 条候选未写入，原聊天记录未受影响。</p>
+                )}
               </div>
             </div>
             <button
@@ -627,61 +768,100 @@ export default function AppMemory({
           </div>
         )}
 
-        {/* Filter and Search Row */}
-        <div className="space-y-3">
-          {/* Search Box */}
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索记忆条目..."
-              className="w-full bg-white pl-10 pr-4 py-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950/10 focus:border-neutral-950 transition-all font-medium placeholder-slate-400 shadow-sm"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Character Filtering Scroller */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar select-none">
+        {/* Character filter stays above search, matching the offline app selector. */}
+        <div className="flex items-start gap-3 overflow-x-auto pb-1 no-scrollbar select-none">
+          <button
+            onClick={() => setSelectedCharacterId("all")}
+            className={`group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 transition-all ${
+              selectedCharacterId === "all" ? "text-slate-900" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <span className={`relative rounded-full p-0.5 transition-all ${selectedCharacterId === "all" ? "bg-slate-300" : "bg-transparent"}`}>
+              <span className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-slate-100">
+                <User className="h-4 w-4" />
+              </span>
+              {selectedCharacterId === "all" && <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-slate-700 text-[7px] font-bold text-white">✓</span>}
+            </span>
+            <span className="max-w-full truncate text-[9px] font-bold leading-3">全部角色</span>
+          </button>
+          {displayCharacters.map((char) => (
             <button
-              onClick={() => setSelectedCharacterId("all")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all shrink-0 ${
-                selectedCharacterId === "all"
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+              key={char.id}
+              onClick={() => setSelectedCharacterId(char.id)}
+              className={`group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 transition-all ${
+                selectedCharacterId === char.id ? "text-slate-900" : "text-slate-600 hover:bg-slate-50"
               }`}
             >
-              <User className="w-3.5 h-3.5" />
-              全部角色
-            </button>
-            {displayCharacters.map((char) => (
-              <button
-                key={char.id}
-                onClick={() => setSelectedCharacterId(char.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all shrink-0 ${
-                  selectedCharacterId === char.id
-                    ? "bg-slate-900 text-white shadow-sm"
-                    : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-                }`}
-              >
+              <span className={`relative rounded-full p-0.5 transition-all ${selectedCharacterId === char.id ? "bg-slate-300" : "bg-transparent"}`}>
                 <img
                   src={char.avatar}
                   alt={char.name}
-                  className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
+                  className="h-8 w-8 rounded-full border border-slate-200 object-cover"
                   referrerPolicy="no-referrer"
                 />
-                {char.name}
-              </button>
-            ))}
+                {selectedCharacterId === char.id && <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-slate-700 text-[7px] font-bold text-white">✓</span>}
+              </span>
+              <span className="max-w-full truncate text-[9px] font-bold leading-3">{char.name}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Search and optional type filter */}
+        <div className="relative">
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索记忆条目..."
+                className="h-10 w-full bg-white pl-10 pr-10 py-0 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950/10 focus:border-neutral-950 transition-all font-medium placeholder-slate-400 shadow-sm"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  aria-label="清除搜索"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowTypeFilter((current) => !current)}
+              aria-label={`筛选记忆类型${activeRecordType === "all" ? "" : `：${MEMORY_CENTER_TYPE_LABELS[activeRecordType]}`}`}
+              aria-expanded={showTypeFilter}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50"
+            >
+              <Sliders className="h-4 w-4" />
+            </button>
           </div>
+          {showTypeFilter && (
+            <div className="absolute right-0 top-full z-30 mt-2 w-48 rounded-2xl border border-slate-100 bg-white p-2 shadow-xl">
+              <p className="px-2 py-1.5 text-[10px] font-black text-slate-400">筛选记忆类型</p>
+              {MEMORY_CENTER_TYPE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    setActiveRecordType(option.value);
+                    setShowTypeFilter(false);
+                  }}
+                  className={`flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-[11px] font-bold transition-colors ${
+                    activeRecordType === option.value ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <span>{option.label}</span>
+                  {activeRecordType === option.value && <Check className="h-3.5 w-3.5" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3">
           {selectedCharacterId !== "all" && (
             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
               <button onClick={() => setSelectedRelationId("all")} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === "all" ? "bg-slate-700 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>全部关系</button>
@@ -694,133 +874,25 @@ export default function AppMemory({
           )}
         </div>
 
-        {/* Memories List */}
+        {/* Unified memory center list */}
         <div className="space-y-3">
           <h2 className="text-xs font-black text-slate-400 uppercase tracking-wider pl-1 flex items-center gap-1.5">
-            记忆条目 ({filteredMemories.length})
+            长期记忆内容 ({filteredMemoryCenterRecords.length})
           </h2>
-
           <AnimatePresence mode="popLayout">
-            {filteredMemories.length === 0 ? (
+            {filteredMemoryCenterRecords.length === 0 ? (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="bg-white rounded-3xl p-8 border border-slate-100 text-center space-y-3 shadow-sm"
+                className="rounded-3xl border border-slate-100 bg-white p-8 text-center shadow-sm"
               >
-                <Brain className="w-10 h-10 text-slate-300 mx-auto" />
-                <div className="space-y-1">
-                  <p className="text-xs font-bold text-slate-700">暂无符合条件的记忆</p>
-                  <p className="text-[11px] text-slate-400 max-w-xs mx-auto leading-relaxed">
-                    您可以点击上方按钮手动添加一条，或者在和角色聊天时自动生成，AI 会把精彩瞬间拆成独立记忆点噢。
-                  </p>
-                </div>
+                <Brain className="mx-auto h-10 w-10 text-slate-300" />
+                <p className="mt-3 text-xs font-bold text-slate-700">暂无符合条件的记忆</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">可以继续聊天并使用总结归档，新的长期内容会按类型出现在这里。</p>
               </motion.div>
             ) : (
-              filteredMemories.map((item) => {
-                const char = displayCharacters.find(c => c.id === item.characterId);
-                const isEditing = editingItem?.id === item.id;
-
-                return (
-                  <motion.div
-                    key={item.id}
-                    layout
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    transition={{ duration: 0.2 }}
-                    className="bg-white rounded-[24px] p-4 border border-slate-100/80 shadow-sm flex gap-3.5 relative hover:shadow-md transition-shadow"
-                  >
-                    {/* Character Avatar */}
-                    <div className="shrink-0">
-                      <img
-                        src={char?.avatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop"}
-                        alt={char?.name || "未知角色"}
-                        className="w-10 h-10 rounded-full object-cover border border-slate-100"
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-
-                    {/* Content Section */}
-                    <div className="flex-1 min-w-0 space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-slate-800">
-                          {char?.name || "未知角色"}
-                        </span>
-                        <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold font-mono">
-                          <Clock className="w-3 h-3 text-slate-300" />
-                          {formatTime(item.timestamp)}
-                        </div>
-                      </div>
-
-                      {/* Editing View */}
-                      {isEditing ? (
-                        <div className="space-y-2">
-                          <textarea
-                            value={editContent}
-                            onChange={(e) => setEditContent(e.target.value)}
-                            rows={5}
-                            className="w-full min-h-[132px] bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 resize-y leading-relaxed font-medium"
-                          />
-                          <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => setEditingItem(null)}
-                              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg text-[10px] transition-all"
-                            >
-                              取消
-                            </button>
-                            <button
-                              onClick={handleSaveEdit}
-                              className="px-2.5 py-1 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-lg text-[10px] transition-all flex items-center gap-0.5"
-                            >
-                              <Check className="w-3 h-3" />
-                              保存
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        /* Read-only view */
-                        <div>
-                          <p className="text-xs text-slate-600 leading-relaxed font-medium break-all whitespace-pre-wrap">
-                            {getMemoryDisplayContent(item.content)}
-                          </p>
-                          <div className="flex items-center justify-between pt-2">
-                            {/* Manual tag */}
-                            {item.isManual ? (
-                              <span className="text-[9px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded-full">
-                                手动录入
-                              </span>
-                            ) : (
-                              <span className="text-[9px] bg-neutral-100 text-neutral-700 font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                                <Sparkles className="w-2.5 h-2.5 text-neutral-800" />
-                                自动提取
-                              </span>
-                            )}
-
-                            {/* Actions */}
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => handleStartEdit(item)}
-                                className="text-slate-400 hover:text-neutral-950 p-1 rounded-lg hover:bg-slate-50 transition-all"
-                                title="编辑记忆"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteMemory(item.id)}
-                                className="text-slate-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 transition-all"
-                                title="删除记忆"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                );
-              })
+              filteredMemoryCenterRecords.map(renderMemoryCenterRecord)
             )}
           </AnimatePresence>
         </div>
@@ -1006,6 +1078,110 @@ export default function AppMemory({
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
+
+      {/* MODAL: Memory center record detail */}
+      <AnimatePresence>
+        {selectedMemoryCenterRecord && (() => {
+          const record = selectedMemoryCenterRecord;
+          const character = record.scope.characterId
+            ? displayCharacters.find((candidate) => candidate.id === normalizeCharacterId(record.scope.characterId!))
+            : undefined;
+          const recallEligible = isMemoryCenterRecallEligible(record);
+          const recallDisabled = recallEligible && getMemoryCenterRecallDisabled(record);
+          const statusLabel: Record<MemoryCenterRecord["status"], string> = {
+            active: "启用",
+            candidate: "候选",
+            stale: "已过期",
+            superseded: "已替代",
+            retracted: "已撤回",
+          };
+          return (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="flex max-h-[90%] w-full max-w-md flex-col overflow-hidden rounded-[24px] border border-slate-100 bg-white shadow-2xl"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="memory-center-detail-title"
+              >
+                <div className="flex shrink-0 items-start justify-between border-b border-slate-100 p-5 pb-3">
+                  <div>
+                    <h3 id="memory-center-detail-title" className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
+                      <Info className="h-4 w-4 text-neutral-800" />
+                      记忆详情
+                    </h3>
+                    <p className="mt-1 text-[10px] text-slate-400">这里展示来源和召回状态，不会自动修改记忆内容。</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMemoryCenterRecord(null)}
+                    className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    aria-label="关闭记忆详情"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto p-5 pt-3">
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="rounded-full bg-white px-2 py-1 text-[9px] font-bold text-slate-600">{MEMORY_CENTER_TYPE_LABELS[record.recordType]}</span>
+                      <span className="rounded-full bg-white px-2 py-1 text-[9px] font-bold text-slate-600">{MEMORY_CENTER_LAYER_LABELS[record.layer]}</span>
+                      <span className="rounded-full bg-white px-2 py-1 text-[9px] font-bold text-slate-600">{statusLabel[record.status]}</span>
+                    </div>
+                    <p className="mt-3 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">{getMemoryDisplayContent(record.content)}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[10px] text-slate-400">
+                    <span>所属角色：<strong className="text-slate-600">{character?.name || "未绑定角色"}</strong></span>
+                    <span>来源应用：<strong className="text-slate-600">{MEMORY_CENTER_SOURCE_LABELS[record.provenance.app]}</strong></span>
+                    <span>所属关系：<strong className="text-slate-600">{record.scope.relationId ? getRelationLabel(record.scope.relationId) : "未绑定关系"}</strong></span>
+                    <span>记录时间：<strong className="text-slate-600">{new Date(record.recordedAt).toLocaleString("zh-CN")}</strong></span>
+                    <span>重要性：<strong className="text-slate-600">{record.importance}/10</strong></span>
+                    <span>可信度：<strong className="text-slate-600">{Math.round(record.confidence * 100)}%</strong></span>
+                    <span>用户确认：<strong className="text-slate-600">{record.userConfirmed ? "是" : "否"}</strong></span>
+                    <span>召回状态：<strong className={!recallEligible || recallDisabled ? "text-amber-600" : "text-emerald-600"}>{!recallEligible ? "不参与召回" : recallDisabled ? "已暂停" : "参与召回"}</strong></span>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-100 p-3 text-[10px] leading-relaxed text-slate-500">
+                    <p className="font-bold text-slate-700">来源追溯</p>
+                    <p className="mt-1 break-all">来源记录：{record.provenance.sourceRecordId || "暂无直接记录 ID"}</p>
+                    <p className="mt-1 break-all">来源消息：{record.provenance.sourceMessageIds?.length ? record.provenance.sourceMessageIds.join("、") : "暂无直接消息链接"}</p>
+                    <p className="mt-1 break-all">来源 Truth：{record.provenance.sourceClaimIds?.length ? record.provenance.sourceClaimIds.join("、") : "无"}</p>
+                    {(record.supersedesId || record.supersededById) && (
+                      <p className="mt-1 break-all">替代关系：{record.supersedesId ? `替代 ${record.supersedesId}` : `被 ${record.supersededById} 替代`}</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-amber-50/50 p-3 text-[10px] leading-relaxed text-slate-500">
+                    <span>
+                      {recallEligible
+                        ? "暂停只影响未来检索，原文、来源和历史记录都会保留。"
+                        : record.status !== "active"
+                          ? `当前记录为${statusLabel[record.status]}，不会参与未来检索。`
+                          : "摘要和规则由系统统一管理，当前支持查看来源，不提供单条暂停。"}
+                    </span>
+                      {recallEligible ? (
+                        <button
+                        type="button"
+                        onClick={() => toggleMemoryCenterRecall(record)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 shadow-sm hover:bg-slate-100"
+                      >
+                        {recallDisabled ? <RotateCcw className="h-3 w-3" /> : <PauseCircle className="h-3 w-3" />}
+                        {recallDisabled ? "恢复召回" : "暂停召回"}
+                        </button>
+                      ) : (
+                        <span className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-400">状态不可召回</span>
+                      )}
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* MODAL: Extract API Pool (抽取 API 池) */}
@@ -1260,8 +1436,16 @@ export default function AppMemory({
                   <div>
                     <h4 className="text-sm font-bold text-slate-800">总结提炼完成！</h4>
                     <p className="text-xs text-emerald-600 mt-1">
-                      成功为 <span className="font-semibold text-slate-700">{displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name}</span> 提炼了 <span className="font-bold">{immediateSummaryTask.extractedCount}</span> 条新记忆。
+                      成功为 <span className="font-semibold text-slate-700">{displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name}</span> 提炼了 <span className="font-bold">{immediateSummaryTask.extractedCount}</span> 条长期内容。
                     </p>
+                    {immediateSummaryTask.archiveStats && (
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        来源消息 {immediateSummaryTask.archiveStats.sourceMessageCount} 条 · 长期事实 {immediateSummaryTask.archiveStats.acceptedTruthCount} 条 · 摘要 {immediateSummaryTask.archiveStats.summaryCount} 条 · 兼容 {immediateSummaryTask.archiveStats.compatibilityCount} 条
+                      </p>
+                    )}
+                    {immediateSummaryTask.archiveStats && immediateSummaryTask.archiveStats.rejectedCandidateCount > 0 && (
+                      <p className="mt-1 text-[10px] text-amber-600">未采纳候选 {immediateSummaryTask.archiveStats.rejectedCandidateCount} 条，未删除原聊天记录。</p>
+                    )}
                   </div>
                   <button
                     onClick={() => {

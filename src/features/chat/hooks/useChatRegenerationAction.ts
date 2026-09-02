@@ -10,7 +10,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     latestActiveCharacterRef, settings, serializeMessageContentForPrompt, shouldUseCrossDayHistoryBoundary,
     activeAttachModal, callingStatus, callTranscript, detectCallTopicShift, partitionDirectChatHistoryByCurrentDay,
     formatHistoricalMessageForPrompt, describeHistoricalRelativeTime, serializeMessageToPromptTurns, buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt,
-    projectCharacterPrompt, MemoryService, memories, retrieveTruthForPrivatePrompt,
+    projectCharacterPrompt, MemoryService, memories, retrieveTruthForPrivatePrompt, countTruthRetrievalRecords,
     loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatMemoriesForPrompt, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
     getPendingOfflineHandoff, buildPendingOfflineTimelineHandoff, isOfflineStoryHandoffMemory,
@@ -197,9 +197,15 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         })
         : undefined;
       const shadowedLegacyMemoryIds = new Set(truthRetrieval?.shadowedLegacyMemoryIds || []);
+      const relationshipSummaryCount = activeRelationship?.compressedMemory?.trim() ? 1 : 0;
       const visibleLegacyMemories = relevantMemories.filter((memory) =>
         !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
-      );
+      ).slice(0, Math.max(
+        0,
+        topK
+          - (truthRetrieval ? countTruthRetrievalRecords(truthRetrieval) : 0)
+          - relationshipSummaryCount,
+      ));
       if (visibleLegacyMemories.length > 0) {
         characterContextText += formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆:\n");
       }

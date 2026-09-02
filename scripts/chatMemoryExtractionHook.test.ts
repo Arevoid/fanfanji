@@ -15,5 +15,9 @@ assert.match(hook, /kind: "automatic_summary"/);
 assert.match(hook, /summaries,/);
 assert.match(hook, /Do not move the archive marker past a batch/);
 assert.match(hook, /setIsCompressingMemory\(false\)/);
+assert.match(hook, /lastArchiveFeedbackRef/);
+assert.match(hook, /acceptedTruthCount/);
+assert.match(hook, /rejectedCandidateCount/);
+assert.match(appChat, /getLastArchiveFeedback/);
 
 console.log("PASS chat memory extraction is isolated behind a relationship-scoped hook");

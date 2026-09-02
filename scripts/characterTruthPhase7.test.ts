@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { explainTruthProjection, formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../src/features/characterKnowledge/services/truthRetrievalService";
-import type { ConversationSummaryRecord, KnowledgeClaim } from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+import { countTruthRetrievalRecords, explainTruthProjection, formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../src/features/characterKnowledge/services/truthRetrievalService";
+import type { BehaviorCorrectionRecord, ConversationSummaryRecord, KnowledgeClaim } from "../src/domain/characterKnowledge/characterKnowledgeTypes";
 
 const scope = { relationId: "relation-phase7", characterId: "character-phase7", userIdentityId: "identity-phase7", conversationId: "direct:phase7" };
 
@@ -66,6 +66,17 @@ const sourceBackedSummary: ConversationSummaryRecord = {
   schemaVersion: 1,
 };
 
+const correction: BehaviorCorrectionRecord = {
+  ...scope,
+  id: "correction-phase7",
+  instruction: "保持角色边界，不替用户做决定",
+  sourceMessageIds: ["message-default"],
+  createdAt: 100,
+  updatedAt: 130,
+  status: "active",
+  schemaVersion: 1,
+};
+
 const result = retrieveTruthForPrivatePrompt({
   scope,
   queryText: "看展",
@@ -99,5 +110,17 @@ const publicResult = retrieveTruthForPrivatePrompt({
 });
 assert.equal(Object.values(publicResult.projection).every((items) => items.length === 0), true, "relation-private Truth is denied in public scenario");
 assert.equal(publicResult.summaries.length, 0);
+
+const boundedResult = retrieveTruthForPrivatePrompt({
+  scope,
+  queryText: "看展",
+  limit: 3,
+  claims: [futureFact, claim({ id: "claim-bounded" })],
+  summaries: [sourceBackedSummary, { ...sourceBackedSummary, id: "summary-bounded" }],
+  corrections: [correction, { ...correction, id: "correction-bounded" }],
+});
+assert.equal(countTruthRetrievalRecords(boundedResult), 3, "Truth, correction, and summary records share one total retrieval budget");
+assert.equal(boundedResult.summaries.length, 0, "non-authoritative summaries yield to claims and corrections when the budget is full");
+assert.equal(boundedResult.corrections.length, 1);
 
 console.log("PASS Phase 7 semantic projection, supersession, source-aware summary, and scenario visibility checks");

@@ -8,6 +8,7 @@ import type {
   KnowledgeClaim,
 } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import {
+  countTruthRetrievalRecords,
   formatTruthRetrievalForPrompt,
   retrieveTruthForPrivatePrompt,
 } from "../../characterKnowledge/services/truthRetrievalService";
@@ -58,20 +59,24 @@ export function buildGroupMemberPrivateContext(input: GroupMemberPrivateContextI
     corrections: input.corrections,
   });
   const shadowedLegacyMemoryIds = new Set(truth.shadowedLegacyMemoryIds);
-  const legacyMemories = MemoryService.retrieveRelevantMemories({
-    characterId: input.member.id,
-    relationId: relationship.id,
-    userIdentityId: relationship.userIdentityId,
-    conversationId: relationship.conversationId,
-    queryText: input.queryText,
-    existingMemories: input.memories,
-    limit: input.limit,
-    maxCharacters: 2400,
-    excludeCanonicalMirrors: true,
-    scenario: "group-chat",
-  }).filter((memory) =>
-    !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
-  );
+  const relationshipSummaryCount = relationship.compressedMemory?.trim() ? 1 : 0;
+  const legacyMemoryLimit = Math.max(0, input.limit - countTruthRetrievalRecords(truth) - relationshipSummaryCount);
+  const legacyMemories = legacyMemoryLimit > 0
+    ? MemoryService.retrieveRelevantMemories({
+      characterId: input.member.id,
+      relationId: relationship.id,
+      userIdentityId: relationship.userIdentityId,
+      conversationId: relationship.conversationId,
+      queryText: input.queryText,
+      existingMemories: input.memories,
+      limit: legacyMemoryLimit,
+      maxCharacters: 2400,
+      excludeCanonicalMirrors: true,
+      scenario: "group-chat",
+    }).filter((memory) =>
+      !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
+    ).slice(0, legacyMemoryLimit)
+    : [];
 
   const privateParts = [
     relationship.compressedMemory?.trim()

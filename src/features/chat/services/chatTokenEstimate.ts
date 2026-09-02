@@ -30,6 +30,8 @@ export function estimateChatRequestTokens(input: {
   message: string;
   historyInjections?: readonly { content: string }[];
   retrievalText?: string;
+  /** Set when retrievalText is already part of systemInstruction. */
+  retrievalIncludedInSystem?: boolean;
   hasImage?: boolean;
 }): ChatTokenEstimate {
   const historyText = input.history.map((turn) => `${turn.role}: ${turn.text}`).join("\n");
@@ -43,8 +45,8 @@ export function estimateChatRequestTokens(input: {
   // AppChat already appends the retrieval block into systemInstruction. Keep
   // retrieval in the breakdown, but only add it to the total when a caller
   // supplied it separately; this prevents both under-counting and double-counting.
-  const retrievalIncludedInSystem = Boolean(input.retrievalText?.trim())
-    && input.systemInstruction.includes(input.retrievalText!.trim());
+  const retrievalIncludedInSystem = input.retrievalIncludedInSystem ?? (Boolean(input.retrievalText?.trim())
+    && input.systemInstruction.includes(input.retrievalText!.trim()));
   const standaloneRetrievalTokens = retrievalIncludedInSystem ? 0 : retrievalTokens;
   const total = Math.max(250, systemTokens + contextTokens + injectionTokens + standaloneRetrievalTokens + imageTokens + envelopeTokens);
   return {
@@ -67,6 +69,8 @@ export function estimateChatTokens(input: {
   recallCount?: number;
   /** Additional dynamic prompt blocks available to the settings preview. */
   additionalPromptText?: string;
+  /** The exact long-term prompt projection available to the settings preview. */
+  retrievalText?: string;
   /** Optional unsent user text; omitted when the composer keeps it local. */
   currentMessageText?: string;
 }): ChatTokenEstimate {
@@ -93,7 +97,7 @@ export function estimateChatTokens(input: {
     maxItems: input.recallCount ?? 5,
     maxCharacters: DEFAULT_MEMORY_RECALL_CHARACTER_LIMIT,
   });
-  const memoryText = selectedMemories.map((memory) => memory.content).join("\n");
+  const memoryText = input.retrievalText?.trim() || selectedMemories.map((memory) => memory.content).join("\n");
   const contextText = [historyText, input.currentMessageText || ""].filter(Boolean).join("\n");
   const tokenEstimate = estimatePromptTextTokens([
     "[prompt envelope]",

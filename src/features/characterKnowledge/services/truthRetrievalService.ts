@@ -33,6 +33,17 @@ export interface TruthRetrievalResult {
   promptCharacterLimit?: number;
 }
 
+const countProjectionClaims = (projection: KnowledgePromptProjection): number => Object.values(projection)
+  .reduce((count, claims) => count + claims.length, 0);
+
+/**
+ * Count every Truth-side record that can be rendered into the prompt. The
+ * user-facing long-term recall limit is a total prompt-record budget, not a
+ * separate limit for each storage table.
+ */
+export const countTruthRetrievalRecords = (result: Pick<TruthRetrievalResult, "projection" | "summaries" | "corrections">): number =>
+  countProjectionClaims(result.projection) + result.summaries.length + result.corrections.length;
+
 export type TruthProjectionDiagnosticReason =
   | "included"
   | "scope_mismatch"
@@ -136,7 +147,7 @@ export function retrieveTruthForPrivatePrompt(input: TruthRetrievalInput): Truth
     );
   const ranked = rankClaims(scopedClaims, input.queryText || "", limit);
   const projection = selectKnowledgeForPrivatePrompt(ranked, input.scope, now);
-  const summaries = input.summaries
+  const candidateSummaries = input.summaries
     .filter((summary) => scenario !== "public"
       && isExactTruthScope(summary, input.scope)
       && summary.status === "active"
@@ -146,10 +157,18 @@ export function retrieveTruthForPrivatePrompt(input: TruthRetrievalInput): Truth
       || right.generatedAt - left.generatedAt
       || left.id.localeCompare(right.id))
     .slice(0, Math.max(1, Math.min(3, limit)));
-  const corrections = input.corrections
+  const candidateCorrections = input.corrections
     .filter((correction) => isExactTruthScope(correction, input.scope) && correction.status === "active")
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, Math.max(1, Math.min(5, limit)));
+  // Claims are authoritative. Fill remaining slots with behavior corrections
+  // before rebuildable summaries, keeping the Truth-side result within the
+  // caller's total long-term recall budget.
+  const claimCount = countProjectionClaims(projection);
+  const correctionCount = Math.min(candidateCorrections.length, Math.max(0, limit - claimCount));
+  const corrections = candidateCorrections.slice(0, correctionCount);
+  const summaryCount = Math.min(candidateSummaries.length, Math.max(0, limit - claimCount - corrections.length));
+  const summaries = candidateSummaries.slice(0, summaryCount);
   return {
     projection,
     summaries,

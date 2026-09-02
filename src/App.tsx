@@ -1486,6 +1486,14 @@ export default function App() {
         status: "completed",
         rounds,
         extractedCount: processedCount,
+        archiveStats: {
+          sourceMessageCount: msgsToSummarize.length,
+          acceptedTruthCount: result.acceptedClaims.length,
+          summaryCount: write.summaryWritten ? 1 : 0,
+          ruleCount: 0,
+          compatibilityCount: addedCount,
+          rejectedCandidateCount: result.rejectedCandidateCount,
+        },
       });
 
       // Direct-chat summary markers belong to the relationship. Character keeps no

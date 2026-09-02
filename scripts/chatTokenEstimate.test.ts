@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { estimateChatRequestTokens, estimateChatTokens } from "../src/features/chat/services/chatTokenEstimate";
+import { estimateChatRequestTokens, estimateChatTokens, estimatePromptTextTokens } from "../src/features/chat/services/chatTokenEstimate";
 
 const character = { id: "c1", name: "范千", backstory: "背景", personality: "温柔" } as any;
 const messages = [{ id: "m1", content: "你好" }, { id: "m2", content: "很长的消息" }] as any;
@@ -9,6 +9,17 @@ const estimate = estimateChatTokens({ character, relationshipCompressedMemory: "
 assert.equal(estimate.context, Math.round("很长的消息".length * 1.6));
 assert.equal(estimate.retrieval, Math.round("关系记忆".length * 1.6));
 assert.ok(estimate.total >= 250);
+const canonicalPreviewText = "[已确认事实]\n用户确认喜欢电影\n[行为修正]\n保持克制";
+const canonicalPreview = estimateChatTokens({
+  character,
+  messages,
+  contextLimit: 1,
+  memories,
+  relationId: "r1",
+  recallCount: 1,
+  retrievalText: canonicalPreviewText,
+});
+assert.equal(canonicalPreview.retrieval, estimatePromptTextTokens(canonicalPreviewText), "preview includes canonical Truth-side prompt records");
 const fullRequest = estimateChatRequestTokens({
   systemInstruction: "角色人设\n长期记忆\n世界书动态区块".repeat(80),
   history: [{ role: "user", text: "之前的消息" }],
@@ -41,4 +52,16 @@ assert.equal(withEmbeddedRetrieval.total, estimateChatRequestTokens({
   history: [],
   message: "当前消息",
 }).total, "已经属于 system 的检索块不得重复计数");
+const withExplicitlyEmbeddedRetrieval = estimateChatRequestTokens({
+  systemInstruction: "角色人设\n格式化后的 Truth 检索块",
+  history: [],
+  message: "当前消息",
+  retrievalText: "Truth 检索块",
+  retrievalIncludedInSystem: true,
+});
+assert.equal(withExplicitlyEmbeddedRetrieval.total, estimateChatRequestTokens({
+  systemInstruction: "角色人设\n格式化后的 Truth 检索块",
+  history: [],
+  message: "当前消息",
+}).total, "explicit embedding metadata prevents retrieval double counting even when formatting differs");
 console.log("PASS chat token estimation is pure, bounded by the active history window, and relation-aware");

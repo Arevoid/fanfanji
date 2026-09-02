@@ -927,6 +927,15 @@ export interface MemoryVaultSettings {
   extractInterval: number;
 }
 
+export interface MemoryArchiveStats {
+  sourceMessageCount: number;
+  acceptedTruthCount: number;
+  summaryCount: number;
+  ruleCount: number;
+  compatibilityCount: number;
+  rejectedCandidateCount: number;
+}
+
 export interface ImmediateSummaryTask {
   characterId: string;
   relationId?: string;
@@ -934,6 +943,7 @@ export interface ImmediateSummaryTask {
   status: "idle" | "summarizing" | "completed" | "error";
   rounds: number;
   extractedCount: number;
+  archiveStats?: MemoryArchiveStats;
   error?: string;
 }
 

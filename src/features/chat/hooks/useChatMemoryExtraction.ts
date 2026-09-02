@@ -1,4 +1,6 @@
 import { Character, Message, UserSettings } from "../../../types";
+import type { MemoryArchiveStats } from "../../../types";
+import { useRef } from "react";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { findRelationshipForCanonicalCharacter } from "../../../domain/relationship/characterRelationship";
 import { createId } from "../../../core/id/createId";
@@ -76,9 +78,12 @@ export function useChatMemoryExtraction({
   relationships = [],
   activeIdentityId,
 }: ChatMemoryExtractionOptions) {
+  const lastArchiveFeedbackRef = useRef<MemoryArchiveStats | null>(null);
+
   const handleExtractMemories = async (manualMessagesOverride?: Message[]) => {
     if (!activeChatCharId || !activeCharacter) return 0;
 
+    lastArchiveFeedbackRef.current = null;
     setIsCompressingMemory(true);
     try {
       const activeRelationship = activeDirectScope
@@ -102,6 +107,14 @@ export function useChatMemoryExtraction({
       const archiveBatches = splitChatArchiveBatches(unarchivedMessages, archiveBatchSize);
       let workingMemories = [...(memories || [])];
       let totalExtracted = 0;
+      const archiveStats: MemoryArchiveStats = {
+        sourceMessageCount: 0,
+        acceptedTruthCount: 0,
+        summaryCount: 0,
+        ruleCount: 0,
+        compatibilityCount: 0,
+        rejectedCandidateCount: 0,
+      };
       const markArchiveProgress = async (lastMessage: Message) => {
         if (activeCharacter.isGroupChat) {
           if (onUpdateCharacter) {
@@ -118,6 +131,7 @@ export function useChatMemoryExtraction({
 
       if (activeCharacter.isGroupChat) {
         for (const messagesToCompress of archiveBatches) {
+          archiveStats.sourceMessageCount += messagesToCompress.length;
           const transcript = messagesToCompress.map((message) => `${message.sender === "user" ? settings.name : message.senderId || "成员"}：${message.content}`).join("\n");
           const summary = await apiChat({
             message: `请把下面这段群聊整理成一段简短、具体、可长期记忆的摘要。只保留已经发生的事实、重要决定和关系变化，不要逐句复述，不要添加推测，不要输出标题或解释。\n\n${transcript.slice(-12000)}`,
@@ -191,6 +205,9 @@ export function useChatMemoryExtraction({
           const claims = groupRecords.map((record) => record.claim);
           const summaries = groupRecords.flatMap((record) => record.summary ? [record.summary] : []);
           const additions = groupRecords.map((record) => record.addition);
+          archiveStats.acceptedTruthCount += claims.length;
+          archiveStats.summaryCount += summaries.length;
+          archiveStats.compatibilityCount += additions.length;
           if (additions.length > 0) {
             const nextMemories = MemoryService.mergeMemories(workingMemories, additions);
             const write = await commitMemoryWriteBundle({
@@ -213,6 +230,7 @@ export function useChatMemoryExtraction({
           totalExtracted += additions.length;
           await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
         }
+        lastArchiveFeedbackRef.current = { ...archiveStats };
         return totalExtracted;
       }
 
@@ -220,6 +238,7 @@ export function useChatMemoryExtraction({
       const extractionScope = activeDirectScope;
 
       for (const messagesToCompress of archiveBatches) {
+        archiveStats.sourceMessageCount += messagesToCompress.length;
         const isDelicate = activeCharacter.archiveTemplateType === "delicate";
         const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
         const result = await MemoryService.extractMemories({
@@ -283,10 +302,15 @@ export function useChatMemoryExtraction({
           console.error("Compatibility memories could not be persisted:", write.memoriesError);
           return -1;
         }
+        archiveStats.acceptedTruthCount += result.acceptedClaims.length;
+        archiveStats.summaryCount += write.summaryWritten ? 1 : 0;
+        archiveStats.compatibilityCount += result.extractedMemories.length;
+        archiveStats.rejectedCandidateCount += result.rejectedCandidateCount;
         if (nextMemories) workingMemories = nextMemories;
         totalExtracted += Math.max(result.extractedMemories.length, result.acceptedClaims.length);
         await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
       }
+      lastArchiveFeedbackRef.current = { ...archiveStats };
       return totalExtracted;
     } catch (err: any) {
       console.error("Memory extraction error:", err);
@@ -296,5 +320,8 @@ export function useChatMemoryExtraction({
     return -1;
   };
 
-  return { handleExtractMemories };
+  return {
+    handleExtractMemories,
+    getLastArchiveFeedback: () => lastArchiveFeedbackRef.current,
+  };
 }

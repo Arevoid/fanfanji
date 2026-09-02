@@ -135,7 +135,7 @@ import { loadKnowledgeClaims } from "../core/storage/repositories/characterKnowl
 import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
 import { behaviorCorrectionRepository } from "../core/storage/repositories/behaviorCorrectionRepository";
-import { formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
+import { countTruthRetrievalRecords, formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
 import { createConversationSummaryRecord } from "../features/characterKnowledge/services/conversationSummaryService";
 import { createDeterministicArtifactClaim } from "../features/characterKnowledge/services/deterministicKnowledgeCapture";
 import { buildRelationshipCognitiveProjection } from "../features/characterLife/services/relationshipCognitiveProjectionService";
@@ -1164,6 +1164,55 @@ export default function AppChat({
     longTermMemoryLimit: number;
   }) | null>(null);
   const tokenEstimateScopeKey = `${activeCharacter?.id || ""}:${activeRelationship?.id || "group"}`;
+  const estimatedLongTermPrompt = React.useMemo(() => {
+    if (!activeCharacter || activeCharacter.isGroupChat) return "";
+    const recallLimit = resolveChatLongTermMemoryLimit(draftRetrievalHistoryLimit);
+    const latestUserMessage = [...currentChatMessages].reverse().find((message) => message.sender === "user");
+    const queryText = latestUserMessage?.content || "";
+    const relevantMemories = MemoryService.retrieveRelevantMemories({
+      characterId: activeCharacter.id,
+      relationId: activeRelationship?.id,
+      userIdentityId: activeRelationship?.userIdentityId,
+      queryText,
+      existingMemories: memories || [],
+      limit: recallLimit,
+      maxCharacters: 3600,
+      excludeCanonicalMirrors: true,
+      scenario: "chat",
+    });
+    const truthRetrieval = activeRelationship
+      ? retrieveTruthForPrivatePrompt({
+        scope: {
+          relationId: activeRelationship.id,
+          characterId: activeRelationship.characterId,
+          userIdentityId: activeRelationship.userIdentityId,
+          conversationId: activeRelationship.conversationId,
+        },
+        queryText,
+        limit: recallLimit,
+        maxCharacters: 4800,
+        claims: loadKnowledgeClaims().value,
+        summaries: loadConversationSummaries().value,
+        corrections: loadBehaviorCorrections().value,
+      })
+      : undefined;
+    const shadowedLegacyMemoryIds = new Set(truthRetrieval?.shadowedLegacyMemoryIds || []);
+    const relationshipSummaryCount = activeRelationship?.compressedMemory?.trim() ? 1 : 0;
+    const availableLegacyLimit = Math.max(
+      0,
+      recallLimit
+        - (truthRetrieval ? countTruthRetrievalRecords(truthRetrieval) : 0)
+        - relationshipSummaryCount,
+    );
+    const visibleLegacyMemories = relevantMemories
+      .filter((memory) => !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length))
+      .slice(0, availableLegacyLimit);
+    const legacyPrompt = visibleLegacyMemories.length > 0
+      ? formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆（仅作补充）:\n")
+      : "";
+    const truthPrompt = truthRetrieval ? formatTruthRetrievalForPrompt(truthRetrieval) : "";
+    return `${legacyPrompt}${truthPrompt}`;
+  }, [activeCharacter, activeRelationship, currentChatMessages, draftRetrievalHistoryLimit, memories]);
   const estimatedTokens = React.useMemo(() => estimateChatTokens({
     character: activeCharacter,
     relationshipCompressedMemory: activeRelationship?.compressedMemory,
@@ -1174,7 +1223,8 @@ export default function AppChat({
     userIdentityId: activeRelationship?.userIdentityId,
     isGroupChat: activeCharacter?.isGroupChat,
     recallCount: resolveChatLongTermMemoryLimit(draftRetrievalHistoryLimit),
-  }), [draftContextMemoryLimit, draftRetrievalHistoryLimit, activeCharacter, activeRelationship?.compressedMemory, activeRelationship?.id, currentChatMessages, memories]);
+    retrievalText: estimatedLongTermPrompt || undefined,
+  }), [draftContextMemoryLimit, draftRetrievalHistoryLimit, activeCharacter, activeRelationship?.compressedMemory, activeRelationship?.id, currentChatMessages, estimatedLongTermPrompt, memories]);
   const isShowingLastChatRequestEstimate = Boolean(lastChatRequestEstimate
     && lastChatRequestEstimate.scopeKey === tokenEstimateScopeKey
     && lastChatRequestEstimate.contextLimit === resolveChatContextMemoryLimit(activeCharacter?.contextMemoryLimit ?? draftContextMemoryLimit)
@@ -1760,20 +1810,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         })
         : undefined;
       const shadowedLegacyMemoryIds = new Set(truthRetrieval?.shadowedLegacyMemoryIds || []);
-      const truthClaimCount = truthRetrieval
-        ? [
-          ...truthRetrieval.projection.confirmedFacts,
-          ...truthRetrieval.projection.userAssertions,
-          ...truthRetrieval.projection.preferences,
-          ...truthRetrieval.projection.futurePlans,
-          ...truthRetrieval.projection.openBeliefsAndHypotheses,
-          ...truthRetrieval.projection.disputed,
-          ...truthRetrieval.projection.legacyUnverified,
-        ].length
-        : 0;
+      const truthRecordCount = truthRetrieval ? countTruthRetrievalRecords(truthRetrieval) : 0;
+      const relationshipSummaryCount = activeRelationship?.compressedMemory?.trim() ? 1 : 0;
       const visibleLegacyMemories = relevantMemories.filter((memory) =>
         !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
-      ).slice(0, Math.max(0, topK - truthClaimCount));
+      ).slice(0, Math.max(0, topK - truthRecordCount - relationshipSummaryCount));
       const legacyMemoryPrompt = visibleLegacyMemories.length > 0
         ? formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆（仅作补充）:\n")
         : "";
@@ -1856,10 +1897,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const relationshipContext = characterProjection.relationship?.content || "";
       const chatPromptContext = cognitiveContext
         ? buildChatPromptContext(cognitiveContext, {
-          maxFacts: topK,
-          // Truth-derived compatibility mirrors remain visible in the Memory
-          // UI, but must not become a third prompt representation of one fact.
-          relevantMemoryIds: visibleLegacyMemories.map((memory) => memory.id),
+          // Legacy memories are rendered once by characterContextText below.
+          // Do not add the same records again through the cognitive supplement.
+          maxFacts: 0,
+          relevantMemoryIds: [],
           hasConfirmedClaim: Boolean(truthRetrieval?.projection.confirmedFacts.length),
           hasDerivedSummary: Boolean(truthRetrieval?.summaries.length),
         })
@@ -2114,7 +2155,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
         history,
         message: `${promptMessage}${imageInstruction}`,
         historyInjections: wbBlocks.at_depth,
-        retrievalText: `${legacyMemoryPrompt}\n${truthRetrievalPrompt}`,
+        retrievalText: `${legacyMemoryPrompt}${truthRetrievalPrompt}`,
+        retrievalIncludedInSystem: true,
         hasImage: Boolean(imageDataUrl),
       });
       setLastChatRequestEstimate({
@@ -2897,7 +2939,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     }
   };
 
-  const { handleExtractMemories } = useChatMemoryExtraction({
+  const { handleExtractMemories, getLastArchiveFeedback } = useChatMemoryExtraction({
     activeChatCharId,
     activeCharacter,
     activeDirectScope,
@@ -2924,7 +2966,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     latestActiveCharacterRef, settings, serializeMessageContentForPrompt, shouldUseCrossDayHistoryBoundary,
     activeAttachModal, callingStatus, callTranscript, detectCallTopicShift, partitionDirectChatHistoryByCurrentDay,
     formatHistoricalMessageForPrompt, describeHistoricalRelativeTime, serializeMessageToPromptTurns, buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt,
-    projectCharacterPrompt, recallSettings, MemoryService, memories, retrieveTruthForPrivatePrompt,
+    projectCharacterPrompt, recallSettings, MemoryService, memories, retrieveTruthForPrivatePrompt, countTruthRetrievalRecords,
     loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatMemoriesForPrompt, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
     getPendingOfflineHandoff, buildPendingOfflineTimelineHandoff, isOfflineStoryHandoffMemory,
@@ -5410,10 +5452,16 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                             try {
                               setIsManualArchiving(true);
                               const count = await handleExtractMemories();
+                              const feedback = getLastArchiveFeedback();
                               if (count > 0) {
-                                showToast(`🎉 已识别并归档 ${count} 条新记忆，已存入“${activeCharacter.name}”的记忆档案馆`);
+                                const breakdown = feedback
+                                  ? `长期事实 ${feedback.acceptedTruthCount} 条 · 摘要 ${feedback.summaryCount} 条 · 兼容 ${feedback.compatibilityCount} 条`
+                                  : `新记忆 ${count} 条`;
+                                showToast(`🎉 已识别并归档 ${breakdown}，已存入“${activeCharacter.name}”的记忆档案馆`);
                               } else {
-                                showToast("当前没有待归档的新聊天内容，或未识别到新的长期记忆。");
+                                showToast(feedback && feedback.sourceMessageCount > 0
+                                  ? `归档完成：本次分析了 ${feedback.sourceMessageCount} 条消息，但没有识别到可保存的长期记忆。`
+                                  : "当前没有待归档的新聊天内容，或未识别到新的长期记忆。");
                               }
                             } catch (err) {
                               showToast("一键归档时发生未知错误，请重试");
