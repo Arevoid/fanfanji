@@ -5,6 +5,7 @@ import { generateCharacterImage, resolveCharacterImageContext } from "./characte
 
 export type CharacterImageDeliveryResult =
   | { status: "missing-context" }
+  | { status: "cancelled" }
   | { status: "stale" }
   | { status: "generated"; message: Message; record: Awaited<ReturnType<typeof generateCharacterImage>>["record"] };
 
@@ -19,6 +20,7 @@ export async function generateCharacterImageForDelivery(input: {
   userText: string;
   createId: () => string;
   isRuntimeCurrent: () => boolean;
+  signal?: AbortSignal;
 }): Promise<CharacterImageDeliveryResult> {
   if (!input.activeCharacter) return { status: "missing-context" };
   const imageContext = resolveCharacterImageContext({
@@ -38,7 +40,12 @@ export async function generateCharacterImageForDelivery(input: {
     trigger: input.trigger,
     userText: input.userText,
     createId: input.createId,
+    signal: input.signal,
   });
+  if (input.signal?.aborted) {
+    await imageAssetDb.deleteImage(generated.record.imageAssetId).catch(() => undefined);
+    return { status: "cancelled" };
+  }
   if (input.isRuntimeCurrent()) return { status: "generated", ...generated };
   await imageAssetDb.deleteImage(generated.record.imageAssetId).catch(() => undefined);
   return { status: "stale" };

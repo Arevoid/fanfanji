@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCharacterImagePrompt } from "../src/domain/prompt/characterImagePrompt";
+import { buildCharacterImagePrompt, buildMomentImagePrompt } from "../src/domain/prompt/characterImagePrompt";
 import { assertReferenceImageCapability, imageProtocolCapabilities, inferGeminiImageAuthMode, inferImageProtocol, resolveImageProtocol, supportsReferenceImageForModel } from "../src/features/chat/services/imageProtocol";
 
 const prompt = buildCharacterImagePrompt({
@@ -12,6 +12,15 @@ const prompt = buildCharacterImagePrompt({
 assert.match(prompt, /黑发，白衬衫/);
 assert.match(prompt, /Avoid: 水印/);
 assert.match(prompt, /Current relationship context only: partner/);
+const momentPrompt = buildMomentImagePrompt({
+  character: { id: "char", name: "祁澈", avatar: "", personality: "冷静", backstory: "", imageAppearancePrompt: "黑发，白衬衫", imageNegativePrompt: "水印" },
+  postContent: "今天在雨后的街头散步。",
+  imageDescription: "雨后的街道和一盏温暖的路灯",
+});
+assert.match(momentPrompt, /雨后的街道和一盏温暖的路灯/);
+assert.match(momentPrompt, /黑发，白衬衫/);
+assert.match(momentPrompt, /Avoid: 水印/);
+assert.match(momentPrompt, /do not render this text inside the image/i);
 assert.equal(resolveImageProtocol({ protocol: undefined }), "openai-images", "old presets remain compatible");
 assert.equal(inferImageProtocol("gemini-2.5-flash-image"), "gemini-native-image");
 assert.equal(inferImageProtocol("gemini-3.1-flash-image-preview"), "gemini-native-image");

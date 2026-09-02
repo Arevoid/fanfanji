@@ -226,6 +226,7 @@ import {
 import { sanitizeMomentPublishText } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
 import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, findMomentRelationshipCharacter, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
+import { generateMomentImage } from "../features/moments/services/momentImageGenerationService";
 import { useMomentComposerState } from "../features/moments/hooks/useMomentComposerState";
 import {
   MessageSquare,
@@ -261,6 +262,7 @@ import {
   Copy,
   BookOpen,
   RefreshCw,
+  Sparkles,
   Languages,
   Wallet,
   ChevronRight,
@@ -418,6 +420,10 @@ export default function AppChat({
     setIsShowingAddFriendDialog,
   } = useChatNavigationState();
   const diaryShareReplyInFlightRef = useRef<Set<string>>(new Set());
+  const momentImageGenerationInFlightRef = useRef<Set<string>>(new Set());
+  const [momentImageGenerationIds, setMomentImageGenerationIds] = useState<Record<string, boolean>>({});
+  const latestMomentsRef = useRef(moments);
+  latestMomentsRef.current = moments;
 
   // MiniMax Real-time TTS Playback States
   const {
@@ -799,7 +805,14 @@ export default function AppChat({
   // Keep their typing state attached to the captured conversation instead of
   // relabelling a global boolean with whichever contact is currently visible.
   const activeTypingScopeKey = getChatTypingScopeKey(activeRuntimeContext);
-  const { setIsTyping, setTypingCharacterOverride, isTyping, typingCharacterOverride } = useChatTypingState(activeTypingScopeKey);
+  const {
+    setIsTyping,
+    setIsGeneratingImage: setImageGenerationActive,
+    setTypingCharacterOverride,
+    isTyping,
+    isGeneratingImage,
+    typingCharacterOverride,
+  } = useChatTypingState(activeTypingScopeKey);
 
   const innerVoiceController = useInnerVoice({
     characters,
@@ -1108,7 +1121,7 @@ export default function AppChat({
   const { handleDraftChatBgUpload } = useChatBackgroundDraftUpload({ setDraftChatBg });
   const {
     showImageGenerator, setShowImageGenerator, imageRequestText, setImageRequestText,
-    isGeneratingImage, setIsGeneratingImage, imageGenerationError, setImageGenerationError,
+    imageGenerationError, setImageGenerationError,
     showAttachPanel, setShowAttachPanel, activeAttachModal, setActiveAttachModal,
     voiceText, setVoiceText, callingStatus, setCallingStatus, callingDuration, setCallingDuration,
     isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,
@@ -2612,13 +2625,12 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     }
   };
 
-  /** This is the only AppChat path that imports the image-generation service.
-   * Normal reply, proactive, memory, Moment and Inner Voice paths never call it. */
-  const generateAndSendCharacterImage = async (trigger: "manual" | "explicit-user-text", userText: string): Promise<boolean> => {
+  /** Chat image requests remain isolated from normal text replies and other AI paths. */
+  const generateAndSendCharacterImage = async (trigger: "manual" | "explicit-user-text", userText: string, signal?: AbortSignal): Promise<boolean> => {
     if (!activeCharacter) return false;
-    setIsGeneratingImage(true);
-    setImageGenerationError(null);
     const capturedContext = activeRuntimeContext;
+    setImageGenerationActive(true);
+    setImageGenerationError(null);
     try {
       const result = await generateCharacterImageForDelivery({
         activeCharacter,
@@ -2630,6 +2642,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
         userText,
         createId: () => createId("image"),
         isRuntimeCurrent: () => isCapturedRuntimeCurrent(capturedContext),
+        signal,
       });
       if (result.status === "missing-context") {
         showToast("群聊图片需要先有一位角色发言，以确定生成图片的角色。");
@@ -2639,6 +2652,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
         showToast("关系已切换，已取消发送刚生成的图片。");
         return false;
       }
+      if (result.status === "cancelled") return false;
       onSendMessage(result.message);
       const records = loadImageGenerationRecords([]).value;
       saveImageGenerationRecords([...records, result.record]);
@@ -2646,12 +2660,13 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       showToast("角色图片已生成并发送。");
       return true;
     } catch (error: any) {
+      if (signal?.aborted) return false;
       const message = error.message || "图片生成失败，请检查图片 API 配置。";
       setImageGenerationError(message);
       showToast(message);
       return false;
     } finally {
-      setIsGeneratingImage(false);
+      setImageGenerationActive(false);
     }
   };
 
@@ -2681,6 +2696,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     runtimeContext: activeRuntimeContext,
     onReplyStopped: () => {
       setIsTyping(false);
+      setImageGenerationActive(false);
       setTypingCharacterOverride(null);
     },
   });
@@ -3882,6 +3898,62 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     }
     await handleAutoCommentOnUserMoment(enriched);
     await handleRelationshipNetworkInteractionsOnMoment(enriched);
+  };
+
+  const generateMomentImageFromFeature = async (moment: Moment) => {
+    if (momentImageGenerationInFlightRef.current.has(moment.id)) return;
+    const canonicalCharacterId = moment.characterId
+      ? resolveCanonicalCharacterId(moment.characterId, characters)
+      : undefined;
+    const character = canonicalCharacterId
+      ? characters.find((item) => item.id === canonicalCharacterId)
+      : undefined;
+    const imageDescription = moment.imageDescription?.trim()
+      || cleanAndExtractMoment(moment.content).imageDescription?.trim();
+    if (!character) {
+      showToast("只有角色发布的文字图可以生成图片。");
+      return;
+    }
+    if (!imageDescription) {
+      showToast("这条文字图没有可用的图片描述。");
+      return;
+    }
+
+    momentImageGenerationInFlightRef.current.add(moment.id);
+    setMomentImageGenerationIds((current) => ({ ...current, [moment.id]: true }));
+    try {
+      const generated = await generateMomentImage({
+        settings,
+        character,
+        moment: {
+          content: renderMomentContent(moment.content),
+          imageDescription,
+        },
+      });
+      if (!latestMomentsRef.current.some((current) => current.id === moment.id)) {
+        showToast("这条朋友圈已不存在，已放弃更新图片。");
+        return;
+      }
+      const imageSize = await readMomentImageSize(generated.image);
+      onAddMoment({
+        ...moment,
+        image: generated.image,
+        imageType: "photo",
+        imageDescription,
+        imageWidth: imageSize?.width,
+        imageHeight: imageSize?.height,
+      });
+      showToast(moment.image ? "朋友圈图片已刷新。" : "已根据文字图描述生成图片。");
+    } catch (error: any) {
+      showToast(error?.message || "朋友圈图片生成失败，请检查图片 API 配置。");
+    } finally {
+      momentImageGenerationInFlightRef.current.delete(moment.id);
+      setMomentImageGenerationIds((current) => {
+        const next = { ...current };
+        delete next[moment.id];
+        return next;
+      });
+    }
   };
 
   const checkAndTriggerCharacterMoments = async () => {
@@ -6663,15 +6735,25 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                           }`} 
                         />
                         <div className="flex flex-col items-start text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header">
-                          <span className="text-[9px] text-slate-400 font-bold">{typingName} 正在输入...</span>
+                          <span className="text-[9px] text-slate-400 font-bold">{typingName} {isGeneratingImage ? "Image..." : "正在输入..."}</span>
                         </div>
                       </div>
                     )}
                     {settings.hideNicknames && <div className="max-w-[85%]">
                       <div className="bg-white border border-slate-100 text-slate-400 px-4 py-2.5 shadow-sm text-xs flex items-center space-x-1 chat-bubble-other message-bubble">
-                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                        {isGeneratingImage ? (
+                          <span className="flex items-center gap-1.5 whitespace-nowrap">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                            <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span>Image...</span>
+                          </span>
+                        ) : (
+                          <>
+                            <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                            <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                            <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                          </>
+                        )}
                       </div>
                     </div>}
                   </div>
@@ -7990,6 +8072,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
               onLikeMoment={onLikeMoment}
               onSaveSettings={onSaveSettings}
               onPublishUserMoment={publishMomentFromFeature}
+              onGenerateMomentImage={generateMomentImageFromFeature}
               onPublishComment={publishMomentCommentFromFeature}
               onTriggerRelationshipNetworkComments={(moment) => { void handleRelationshipNetworkInteractionsOnMoment(moment, { force: true }); }}
               pendingRelationshipNetworkInteractions={relationshipNetworkPendingInteractions}
@@ -8729,10 +8812,25 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
                   .filter(m => m.characterId === singleCharacterMomentsId)
                   .map((mom) => {
                     const hasLiked = mom.likes.includes(settings.name);
-                    const momChar = mom.characterId ? characters.find((c) => c.id === mom.characterId) : null;
+                    const momChar = mom.characterId
+                      ? characters.find((c) => c.id === resolveCanonicalCharacterId(mom.characterId!, characters))
+                      : null;
                     const momAuthorName = momChar ? (momChar.remark || momChar.name) : mom.authorName;
                     const momAuthorAvatar = momChar ? momChar.avatar : mom.authorAvatar;
                     const textImageDescription = mom.imageDescription || cleanAndExtractMoment(mom.content).imageDescription;
+                    const isGeneratingMomentImage = Boolean(momentImageGenerationIds[mom.id]);
+                    const momentImageAction = momChar && textImageDescription ? (
+                      <button
+                        type="button"
+                        aria-label={isGeneratingMomentImage ? "正在生成朋友圈图片" : mom.image ? "刷新朋友圈图片" : "生成朋友圈图片"}
+                        title={isGeneratingMomentImage ? "正在生成图片…" : mom.image ? "刷新图片" : "根据文字图生成图片"}
+                        disabled={isGeneratingMomentImage}
+                        onClick={() => { void generateMomentImageFromFeature(mom); }}
+                        className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center border-0 bg-transparent p-0 text-slate-400 transition-colors hover:bg-transparent hover:text-blue-500 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        {isGeneratingMomentImage ? <Loader2 className="h-3 w-3 animate-spin" /> : mom.image ? <RefreshCw className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+                      </button>
+                    ) : null;
                     return (
                       <div key={mom.id} className="py-5 flex gap-3">
                         
@@ -8792,19 +8890,18 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
 
                           {/* Photo if attached */}
                           {textImageDescription && !mom.image && (
-                            <button
-                              type="button"
-                              onClick={() => setViewingImageDescription(textImageDescription)}
-                              className="mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm"
-                            >
-                              <ImageIcon className="w-4 h-4 text-slate-400 mb-4" />
-                              <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{textImageDescription}</p>
-                              <span className="block mt-2 text-[10px] text-slate-400">文字图 · 点击查看</span>
-                            </button>
+                            <div className="relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-sm">
+                              <span className="absolute left-4 top-2 text-[10px] leading-5 text-slate-400">文字图</span>
+                              <button type="button" onClick={() => setViewingImageDescription(textImageDescription)} className="block w-full pt-5 text-left">
+                                <p className="text-xs leading-relaxed text-slate-600 line-clamp-3">{textImageDescription}</p>
+                              </button>
+                              {momentImageAction}
+                            </div>
                           )}
                           {mom.image && (
-                            <div className="mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
+                            <div className="relative mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
                               <img src={mom.image} alt={mom.imageDescription || "朋友圈配图"} width={mom.imageWidth} height={mom.imageHeight} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />
+                              {momentImageAction}
                             </div>
                           )}
 

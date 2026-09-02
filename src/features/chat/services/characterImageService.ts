@@ -94,19 +94,16 @@ function dataUrlToBlob(value: string): Blob {
   return new Blob([bytes], { type: mimeType });
 }
 
-export async function generateCharacterImage(input: {
+/** Shared image request boundary for chat messages and other visual features. */
+export async function requestCharacterImageData(input: {
   settings: UserSettings;
   character: Character;
-  relationship?: CharacterRelationship;
-  recentMessages: readonly Message[];
-  scope: ImageScope;
   trigger: "manual" | "explicit-user-text";
   userText: string;
-  createId: () => string;
-}): Promise<{ message: Message; record: ImageGenerationRecord }> {
-  assertImageGenerationTrigger(input.trigger, input.userText);
+  prompt: string;
+  signal?: AbortSignal;
+}): Promise<{ dataUrl: string; imageBlob: Blob }> {
   const preset = assertImageGenerationConfiguration(input.settings, input.character);
-
   const reference = input.character.imageReferenceAssetId
     ? await imageAssetDb.getImage(input.character.imageReferenceAssetId)
     : null;
@@ -116,6 +113,7 @@ export async function generateCharacterImage(input: {
   const response = await fetchWithTimeout("/api/image/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: input.signal,
     body: JSON.stringify({
       apiKey: preset.apiKey,
       apiEndpoint: preset.apiEndpoint,
@@ -123,20 +121,45 @@ export async function generateCharacterImage(input: {
       protocol,
       geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(preset.apiEndpoint) : undefined,
       referenceImageSupported,
-      prompt: buildCharacterImagePrompt({ ...input, userRequest: input.userText }),
+      prompt: input.prompt,
       trigger: input.trigger,
       userText: input.userText,
       ...(reference ? { referenceImage: { mimeType: reference.type || input.character.imageReferenceMimeType || "image/png", base64: await blobToBase64(reference) } } : {}),
     }),
   }, API_REQUEST_TIMEOUTS.imageGeneration);
+  if (input.signal?.aborted) throw new Error("图片生成已取消。");
   const data = await response.json().catch(() => ({}));
   if (!response.ok || typeof data.dataUrl !== "string" || !data.dataUrl.startsWith("data:image/")) {
     throw new Error(data.error || "服务返回成功但未返回图片数据。");
   }
+  if (input.signal?.aborted) throw new Error("图片生成已取消。");
+  return { dataUrl: data.dataUrl, imageBlob: dataUrlToBlob(data.dataUrl) };
+}
+
+export async function generateCharacterImage(input: {
+  settings: UserSettings;
+  character: Character;
+  relationship?: CharacterRelationship;
+  recentMessages: readonly Message[];
+  scope: ImageScope;
+  trigger: "manual" | "explicit-user-text";
+  userText: string;
+  createId: () => string;
+  signal?: AbortSignal;
+}): Promise<{ message: Message; record: ImageGenerationRecord }> {
+  assertImageGenerationTrigger(input.trigger, input.userText);
+  const { imageBlob } = await requestCharacterImageData({
+    settings: input.settings,
+    character: input.character,
+    trigger: input.trigger,
+    userText: input.userText,
+    prompt: buildCharacterImagePrompt({ ...input, userRequest: input.userText }),
+    signal: input.signal,
+  });
 
   const messageId = input.createId();
   const imageAssetId = `generated-image-${messageId}`;
-  const imageBlob = dataUrlToBlob(data.dataUrl);
+  if (input.signal?.aborted) throw new Error("图片生成已取消。");
   await imageAssetDb.saveImage(imageAssetId, imageBlob);
   return createGeneratedImageMessages({ messageId, characterId: input.character.id, imageAssetId, imageMimeType: imageBlob.type, trigger: input.trigger, scope: input.scope, timestamp: Date.now() });
 }

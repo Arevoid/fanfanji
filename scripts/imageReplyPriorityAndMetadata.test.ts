@@ -57,7 +57,7 @@ const priorityStart = chatController.indexOf("if (shouldGenerateExplicitImage)")
 const priorityEnd = chatController.indexOf("const updatedOfflineMessages", priorityStart);
 assert.ok(priorityStart >= 0 && priorityEnd > priorityStart, "explicit image branch must precede normal reply");
 const priorityBranch = chatController.slice(priorityStart, priorityEnd);
-assert.match(priorityBranch, /await generateAndSendCharacterImage\("explicit-user-text", pendingImageRequest!\)/);
+assert.match(priorityBranch, /await generateAndSendCharacterImage\("explicit-user-text", pendingImageRequest!, abortController\.signal\)/);
 assert.match(priorityBranch, /return;/);
 assert.doesNotMatch(priorityBranch, /generateResponseForUserMessage/);
 assert.match(appChat, /messages=\{visibleChatMessages\}/);

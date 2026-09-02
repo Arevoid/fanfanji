@@ -2,6 +2,7 @@ import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 
 export interface ChatTypingScopeEntry<TCharacter> {
   isTyping: boolean;
+  activity: "typing" | "generating-image";
   characterOverride: TCharacter | null;
 }
 
@@ -28,6 +29,30 @@ export function setChatScopeTyping<TCharacter>(
       ...state,
       [scopeKey]: {
         isTyping: true,
+        activity: state[scopeKey]?.activity === "generating-image" ? "generating-image" : "typing",
+        characterOverride: state[scopeKey]?.characterOverride || null,
+      },
+    };
+  }
+
+  if (!state[scopeKey]) return state;
+  if (state[scopeKey].activity === "generating-image") return state;
+  const next = { ...state };
+  delete next[scopeKey];
+  return next;
+}
+
+export function setChatScopeImageGeneration<TCharacter>(
+  state: ChatTypingScopeState<TCharacter>,
+  scopeKey: string,
+  isGeneratingImage: boolean,
+): ChatTypingScopeState<TCharacter> {
+  if (isGeneratingImage) {
+    return {
+      ...state,
+      [scopeKey]: {
+        isTyping: true,
+        activity: "generating-image",
         characterOverride: state[scopeKey]?.characterOverride || null,
       },
     };
@@ -50,6 +75,7 @@ export function setChatScopeCharacterOverride<TCharacter>(
     ...state,
     [scopeKey]: {
       isTyping: current?.isTyping || false,
+      activity: current?.activity || "typing",
       characterOverride,
     },
   };

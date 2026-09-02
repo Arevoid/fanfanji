@@ -3,6 +3,7 @@ import type { Character } from "../../../types";
 import {
   getVisibleChatTyping,
   setChatScopeCharacterOverride,
+  setChatScopeImageGeneration,
   setChatScopeTyping,
   type ChatTypingScopeState,
 } from "../services/chatTypingScope";
@@ -15,6 +16,10 @@ export function useChatTypingState(activeScopeKey: string) {
     setTypingByScope((previous) => setChatScopeTyping(previous, activeScopeKey, isTyping));
   };
 
+  const setIsGeneratingImage = (isGeneratingImage: boolean) => {
+    setTypingByScope((previous) => setChatScopeImageGeneration(previous, activeScopeKey, isGeneratingImage));
+  };
+
   const setTypingCharacterOverride = (character: Character | null) => {
     setTypingByScope((previous) => setChatScopeCharacterOverride(previous, activeScopeKey, character));
   };
@@ -22,8 +27,10 @@ export function useChatTypingState(activeScopeKey: string) {
   const visibleTypingState = getVisibleChatTyping<Character>(typingByScope, activeScopeKey);
   return {
     setIsTyping,
+    setIsGeneratingImage,
     setTypingCharacterOverride,
     isTyping: Boolean(visibleTypingState),
+    isGeneratingImage: visibleTypingState?.activity === "generating-image",
     typingCharacterOverride: visibleTypingState?.characterOverride || null,
   };
 }

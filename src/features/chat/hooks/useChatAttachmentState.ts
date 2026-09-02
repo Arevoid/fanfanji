@@ -8,7 +8,6 @@ export type ChatAttachmentModal = "redpacket" | "music" | "location" | "file" | 
 export function useChatAttachmentState() {
   const [showImageGenerator, setShowImageGenerator] = useState(false);
   const [imageRequestText, setImageRequestText] = useState("");
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [imageGenerationError, setImageGenerationError] = useState<string | null>(null);
   const [showAttachPanel, setShowAttachPanel] = useState(false);
   const [activeAttachModal, setActiveAttachModal] = useState<ChatAttachmentModal>(null);
@@ -41,7 +40,7 @@ export function useChatAttachmentState() {
 
   return {
     showImageGenerator, setShowImageGenerator, imageRequestText, setImageRequestText,
-    isGeneratingImage, setIsGeneratingImage, imageGenerationError, setImageGenerationError,
+    imageGenerationError, setImageGenerationError,
     showAttachPanel, setShowAttachPanel, activeAttachModal, setActiveAttachModal,
     voiceText, setVoiceText, callingStatus, setCallingStatus, callingDuration, setCallingDuration,
     isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,

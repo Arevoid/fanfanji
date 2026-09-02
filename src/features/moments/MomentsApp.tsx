@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { Camera, ChevronLeft, FileText, Heart, Image as ImageIcon, Languages, MessageCircle, Plus, Sparkles, X } from "lucide-react";
+import { Camera, ChevronLeft, FileText, Heart, Image as ImageIcon, Languages, Loader2, MessageCircle, Plus, RefreshCw, Sparkles, X } from "lucide-react";
 import type { Character, Moment, MomentComment, UserSettings } from "../../types";
 import type { RelationshipNetworkPendingInteraction, RelationshipNetworkPendingMoment } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
+import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 import { cleanAndExtractMoment, getMomentComments, renderMomentContent, sanitizeMomentPublishText } from "./services/momentContent";
 
 export interface MomentsAppProps {
@@ -19,6 +20,7 @@ export interface MomentsAppProps {
   onLikeMoment: (momentId: string, userName: string) => void;
   onSaveSettings: (settings: UserSettings) => void;
   onPublishUserMoment: (input: { content: string; image: string | null; imageDescription: string }) => void;
+  onGenerateMomentImage?: (moment: Moment) => Promise<void>;
   onPublishComment: (momentId: string, content: string, replyingTo?: MomentComment) => void;
   onTriggerRelationshipNetworkComments?: (moment: Moment) => void;
   pendingRelationshipNetworkInteractions?: RelationshipNetworkPendingInteraction[];
@@ -39,7 +41,7 @@ export interface MomentsAppProps {
   showToast: (message: string) => void;
 }
 
-export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, settings, translations, filterCharacterId, onClearFilter, onClose, onAddMoment: _onAddMoment, onAddComment: _onAddComment, onDeleteComment, onDeleteMoment, onLikeMoment, onSaveSettings, onPublishUserMoment, onPublishComment, onUploadImage, onTriggerRelationshipNetworkComments, pendingRelationshipNetworkInteractions = [], onApproveRelationshipNetworkInteraction, onRejectRelationshipNetworkInteraction, pendingRelationshipNetworkMoments = [], onApproveRelationshipNetworkNpcMoment, onRejectRelationshipNetworkNpcMoment, showToast, onMomentTextContextMenu, onMomentTextPointerDown, onMomentTextPointerUpOrLeave, onMomentTextPointerMove, onCommentClick, onCommentPointerDown, onClearCommentLongPress }) => {
+export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, settings, translations, filterCharacterId, onClearFilter, onClose, onAddMoment: _onAddMoment, onAddComment: _onAddComment, onDeleteComment, onDeleteMoment, onLikeMoment, onSaveSettings, onPublishUserMoment, onGenerateMomentImage, onPublishComment, onUploadImage, onTriggerRelationshipNetworkComments, pendingRelationshipNetworkInteractions = [], onApproveRelationshipNetworkInteraction, onRejectRelationshipNetworkInteraction, pendingRelationshipNetworkMoments = [], onApproveRelationshipNetworkNpcMoment, onRejectRelationshipNetworkNpcMoment, showToast, onMomentTextContextMenu, onMomentTextPointerDown, onMomentTextPointerUpOrLeave, onMomentTextPointerMove, onCommentClick, onCommentPointerDown, onClearCommentLongPress }) => {
   const [showPublisher, setShowPublisher] = useState(false);
   const [content, setContent] = useState("");
   const [image, setImage] = useState<string | null>(null);
@@ -51,6 +53,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
   const [viewingDescription, setViewingDescription] = useState<string | null>(null);
   const [showPendingInteractions, setShowPendingInteractions] = useState(false);
   const [showPendingMoments, setShowPendingMoments] = useState(false);
+  const [generatingMomentIds, setGeneratingMomentIds] = useState<Record<string, boolean>>({});
 
   const filterCharacter = filterCharacterId ? characters.find((character) => character.id === filterCharacterId) : null;
   const tabName = filterCharacter ? filterCharacter.remark || filterCharacter.name : settings.name;
@@ -85,6 +88,20 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
       delete next[momentId];
       return next;
     });
+  };
+
+  const generateMomentImage = async (moment: Moment) => {
+    if (!onGenerateMomentImage || generatingMomentIds[moment.id]) return;
+    setGeneratingMomentIds((current) => ({ ...current, [moment.id]: true }));
+    try {
+      await onGenerateMomentImage(moment);
+    } finally {
+      setGeneratingMomentIds((current) => {
+        const next = { ...current };
+        delete next[moment.id];
+        return next;
+      });
+    }
   };
 
   return (
@@ -190,10 +207,25 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
         ) : (
           visibleMoments.map((moment) => {
             const isRelationshipNetworkNpcMoment = Boolean(moment.relationshipNetworkNpcId);
-            const character = !isRelationshipNetworkNpcMoment && moment.characterId ? characters.find((item) => item.id === moment.characterId) : undefined;
+            const character = !isRelationshipNetworkNpcMoment && moment.characterId
+              ? characters.find((item) => item.id === resolveCanonicalCharacterId(moment.characterId!, characters))
+              : undefined;
             const authorName = character ? character.remark || character.name : moment.authorName;
             const authorAvatar = character ? character.avatar : moment.authorAvatar;
             const textImageDescription = moment.imageDescription || cleanAndExtractMoment(moment.content).imageDescription;
+            const isGeneratingMomentImage = Boolean(generatingMomentIds[moment.id]);
+            const momentImageAction = character && onGenerateMomentImage && textImageDescription ? (
+              <button
+                type="button"
+                aria-label={isGeneratingMomentImage ? "正在生成朋友圈图片" : moment.image ? "刷新朋友圈图片" : "生成朋友圈图片"}
+                title={isGeneratingMomentImage ? "正在生成图片…" : moment.image ? "刷新图片" : "根据文字图生成图片"}
+                disabled={isGeneratingMomentImage}
+                onClick={() => { void generateMomentImage(moment); }}
+                className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center border-0 bg-transparent p-0 text-slate-400 transition-colors hover:bg-transparent hover:text-blue-500 disabled:cursor-wait disabled:opacity-70"
+              >
+                {isGeneratingMomentImage ? <Loader2 className="h-3 w-3 animate-spin" /> : moment.image ? <RefreshCw className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+              </button>
+            ) : null;
             const comments = getMomentComments(moment);
             const liked = moment.likes.includes(settings.name);
             return (
@@ -213,16 +245,19 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                       <p className="whitespace-pre-wrap">{translations[moment.id]}</p>
                     </div>
                   )}
-          {textImageDescription && !moment.image && (
-                    <button type="button" onClick={() => setViewingDescription(textImageDescription)} className="moment-media-placeholder mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-sm">
-                      <ImageIcon className="w-4 h-4 text-[var(--media-placeholder-text)] mb-4" />
-                      <p className="text-xs leading-relaxed text-[var(--text-primary)] line-clamp-3">{textImageDescription}</p>
-                      <span className="block mt-2 text-[10px] text-[var(--media-placeholder-text)]">文字图 · 点击查看</span>
-                    </button>
+                  {textImageDescription && !moment.image && (
+                    <div className="moment-media-placeholder relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-sm">
+                      <span className="absolute left-4 top-2 text-[10px] leading-5 text-[var(--media-placeholder-text)]">文字图</span>
+                      <button type="button" onClick={() => setViewingDescription(textImageDescription)} className="block w-full pt-5 text-left">
+                        <p className="text-xs leading-relaxed text-[var(--text-primary)] line-clamp-3">{textImageDescription}</p>
+                      </button>
+                      {momentImageAction}
+                    </div>
                   )}
                   {moment.image && (
-                    <div className="mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
+                    <div className="relative mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
                       <img src={moment.image} alt={moment.imageDescription || "朋友圈配图"} width={moment.imageWidth} height={moment.imageHeight} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />
+                      {momentImageAction}
                     </div>
                   )}
                   <div className="flex justify-between items-center mt-3">

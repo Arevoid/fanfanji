@@ -6,8 +6,8 @@ import type { Character, Moment, UserSettings } from "../src/types";
 
 const character: Character = { id: "char-a", name: "阿岚", avatar: "avatar.png", personality: "温柔", backstory: "测试" };
 const settings: UserSettings = { name: "小林", avatar: "user.png", bio: "测试用户", apiKey: "", selectedModel: "" } as UserSettings;
-const moment: Moment = { id: "moment-1", characterId: character.id, authorName: character.name, authorAvatar: character.avatar, content: "今天很开心", timestamp: 1, likes: [settings.name], comments: [] };
-const markup = renderToStaticMarkup(<MomentsApp moments={[moment]} characters={[character]} settings={settings} translations={{}} filterCharacterId={null} onClearFilter={() => undefined} onClose={() => undefined} onAddMoment={() => undefined} onAddComment={() => undefined} onDeleteComment={() => undefined} onLikeMoment={() => undefined} onSaveSettings={() => undefined} onPublishUserMoment={() => undefined} onPublishComment={() => undefined} onUploadImage={async () => undefined} showToast={() => undefined} onMomentTextContextMenu={() => undefined} onMomentTextPointerDown={() => undefined} onMomentTextPointerUpOrLeave={() => undefined} onMomentTextPointerMove={() => undefined} onCommentClick={() => undefined} onCommentPointerDown={() => undefined} onClearCommentLongPress={() => undefined} />);
+const moment: Moment = { id: "moment-1", characterId: character.id, authorName: character.name, authorAvatar: character.avatar, content: "今天很开心", timestamp: 1, likes: [settings.name], comments: [], imageDescription: "雨后的街道和一盏温暖的路灯" };
+const markup = renderToStaticMarkup(<MomentsApp moments={[moment]} characters={[character]} settings={settings} translations={{}} filterCharacterId={null} onClearFilter={() => undefined} onClose={() => undefined} onAddMoment={() => undefined} onAddComment={() => undefined} onDeleteComment={() => undefined} onLikeMoment={() => undefined} onSaveSettings={() => undefined} onPublishUserMoment={() => undefined} onGenerateMomentImage={async () => undefined} onPublishComment={() => undefined} onUploadImage={async () => undefined} showToast={() => undefined} onMomentTextContextMenu={() => undefined} onMomentTextPointerDown={() => undefined} onMomentTextPointerUpOrLeave={() => undefined} onMomentTextPointerMove={() => undefined} onCommentClick={() => undefined} onCommentPointerDown={() => undefined} onClearCommentLongPress={() => undefined} />);
 
 const parsed = cleanAndExtractMoment("正文\n评论：补充");
 assert.equal(parsed.content, "正文");
@@ -19,5 +19,9 @@ assert.equal(stripMomentVoiceMarkup('[语音: "普通文字" (3秒)]'), "普通�
 assert.equal(getMomentComments({ ...moment, comments: [{ id: "voice-comment", authorName: "阿岚", authorAvatar: "avatar.png", content: "[voice|3]评论文字", timestamp: 2 }] })[0].content, "评论文字");
 assert.ok(markup.includes("今天很开心"));
 assert.ok(markup.includes("w-10 h-10 rounded-[6px]"));
+assert.ok(markup.includes("生成图片"));
+assert.match(markup, />文字图<\/span>/);
+assert.match(markup, /aria-label="生成朋友圈图片"/);
+assert.equal(markup.includes("文字图 · 点击查看"), false);
 assert.ok(markup.includes("moments-comment-list") === false);
 console.log("PASS moments content normalization, legacy comments, feed card, and preserved class names");

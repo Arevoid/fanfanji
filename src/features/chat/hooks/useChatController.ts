@@ -17,6 +17,7 @@ export type ChatResponseHandler = (
 export type CharacterImageHandler = (
   trigger: "manual" | "explicit-user-text",
   userText: string,
+  signal?: AbortSignal,
 ) => Promise<boolean>;
 
 export interface UseChatControllerOptions {
@@ -153,7 +154,7 @@ export function useChatController({
       // An explicit image request is an image-only turn: the real image must be
       // persisted before any character text is allowed.
       if (shouldGenerateExplicitImage) {
-        await generateAndSendCharacterImage("explicit-user-text", pendingImageRequest!);
+        await generateAndSendCharacterImage("explicit-user-text", pendingImageRequest!, abortController.signal);
         return;
       }
 
