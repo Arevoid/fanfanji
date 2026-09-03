@@ -90,7 +90,7 @@ import { TimeWidget } from "./HomeScreenWidgets";
 import { resolveDesktopBackground } from "../features/theme/desktopBackground";
 import type { ResolvedTheme } from "../features/theme/theme";
 import { StoredCharacterPhoneImage } from "../features/characterPhone/components/StoredCharacterPhoneImage";
-import { ensureCharacterPhoneContent, normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
+import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
 
 interface AppCharacterPhoneProps {
   userIdentityId: string;
@@ -575,26 +575,6 @@ export default function AppCharacterPhone({
     [phone, selectedCharacter, userIdentityId],
   );
   const currentUserAvatar = activeIdentity?.avatar || settings?.avatar;
-  useEffect(() => {
-    // A locked phone must not materialize visible content. Synchronization is
-    // intentionally tied to a successful unlock so every character phone can
-    // generate/append from its own context at the moment it is opened.
-    if (!unlocked || isAdvancing || !selectedCharacter || !currentPhone) return;
-    const synchronized = ensureCharacterPhoneContent({
-      phone: currentPhone,
-      character: selectedCharacter,
-      characters,
-      activeIdentity,
-      relationships,
-      messages,
-      moments,
-      worldBookEntries,
-      musicTracks,
-    });
-    if (synchronized === currentPhone) return;
-    saveCharacterPhone(synchronized);
-    setPhone(synchronized);
-  }, [activeIdentity, characters, currentPhone, isAdvancing, messages, moments, musicTracks, relationships, selectedCharacter, unlocked, worldBookEntries]);
   const phoneCharacterLocation = useMemo(
     () => inferCharacterPhoneLocation([
       selectedCharacter?.personality,

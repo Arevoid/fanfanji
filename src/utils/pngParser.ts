@@ -1,7 +1,9 @@
 import { Character, WorldBookEntry } from "../types";
 import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
-import JSZip from "jszip";
+import * as JSZipModule from "jszip";
 import { createId } from "../core/id/createId";
+
+const JSZip = ((JSZipModule as typeof JSZipModule & { default?: typeof JSZipModule }).default ?? JSZipModule) as typeof import("jszip");
 
 // PNG Character Card text chunk parser
 export async function parsePngChunks(file: File): Promise<string | null> {

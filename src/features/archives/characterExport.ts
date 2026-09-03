@@ -36,9 +36,11 @@ export const createCharacterFromImportedProfile = (value: unknown, id: string): 
       ? profile.age
       : "";
 
+  const sourceFileName = readString(profile.sourceFileName);
   return {
     id,
     name: readString(profile.name) || "未命名角色",
+    ...(sourceFileName ? { sourceFileName } : {}),
     age: importedAge,
     avatar: readString(profile.avatar),
     gender: readString(profile.gender),
@@ -66,7 +68,7 @@ const readRawDocumentField = (text: string, labels: string): string => {
 };
 
 export const extractRawDocumentCharacterMetadata = (text: string) => {
-  const name = readRawDocumentField(text, "姓名|角色名|name|character\\s*name");
+  const name = readRawDocumentField(text, "姓名|名字|昵称|角色名|人物名|name|character\\s*name");
   const ageValue = readRawDocumentField(text, "年龄|age");
   const ageMatch = ageValue.match(/\d{1,3}/);
   return {
@@ -84,7 +86,10 @@ export const createCharacterFromRawDocument = (text: string, filename: string, i
   const metadata = extractRawDocumentCharacterMetadata(text);
   return {
     id,
-    name: metadata.name || filename.replace(/\.[^/.]+$/, "").trim() || "未命名角色",
+    // The filename is source metadata only. It must never become the
+    // character's identity or leak into generated phone content.
+    name: metadata.name || "未命名角色",
+    sourceFileName: filename,
     age: metadata.age,
     avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
     gender: metadata.gender,

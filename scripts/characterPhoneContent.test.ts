@@ -100,6 +100,7 @@ const phoneB = ensureCharacterPhoneContent({
 
 assert.equal(phoneA.contacts[0].name, identity.name);
 assert.ok(phoneA.contacts.some((contact) => contact.name === "林晓"));
+assert.ok(!phoneA.contacts.some((contact) => contact.name === "周岚"), "does not add hard-coded contacts without context");
 assert.ok(phoneA.threadMessages.some((message) => message.sourceMessageId === "message-a"));
 assert.ok(!phoneA.threadMessages.some((message) => message.content.includes("另一条关系")));
 assert.ok(phoneA.posts.some((post) => post.sourceMomentId === "moment-a"));
@@ -107,7 +108,8 @@ assert.ok(phoneA.posts.some((post) => post.sourceMomentId === "moment-user"));
 assert.ok(!phoneA.posts.some((post) => post.sourceMomentId === "moment-b"));
 assert.ok(phoneA.contentSeededAt);
 assert.notEqual(phoneA.posts.find((post) => post.sourceMomentId === "moment-a")?.id, phoneB.posts.find((post) => post.sourceMomentId === "moment-b")?.id);
-assert.ok(phoneA.diaryEntries.length > 0 && phoneA.scheduleItems.length > 0);
+assert.equal(phoneA.diaryEntries.length, 0, "does not seed a synthetic diary before a life event is generated");
+assert.equal(phoneA.scheduleItems.length, 0, "does not seed a synthetic schedule before a life event is generated");
 
 const duplicatePhoneAlert = {
   id: "phone-discovery-action-2",
@@ -123,7 +125,12 @@ const normalizedPhoneMessages = normalizeCharacterPhoneMessages([
 ]);
 assert.equal(normalizedPhoneMessages.length, 2, "collapses duplicate generated alerts but preserves normal messages");
 
-const duplicateSearch = phoneA.browserHistory[0];
+const duplicateSearch = {
+  id: "phone-generated-search-legacy",
+  query: "旧版搜索",
+  title: "旧版搜索标题",
+  timestamp: 2,
+};
 const normalizedHistoryPhone = ensureCharacterPhoneContent({
   phone: {
     ...phoneA,
@@ -142,13 +149,14 @@ const normalizedHistoryPhone = ensureCharacterPhoneContent({
   worldBookEntries: worldBook,
   now: 200,
 });
-assert.equal(
-  normalizedHistoryPhone.browserHistory.filter((entry) => entry.title === duplicateSearch.title).length,
-  1,
-  "removes legacy seed history while preserving the explicit user search",
-);
+assert.equal(normalizedHistoryPhone.browserHistory.length, 1, "removes legacy generated history while preserving the explicit user search");
 
-const duplicateSchedule = phoneA.scheduleItems[0];
+const duplicateSchedule = {
+  id: "phone-generated-schedule-legacy",
+  title: "旧版日程",
+  detail: "旧版日程详情",
+  timestamp: 2,
+};
 const normalizedSchedulePhone = ensureCharacterPhoneContent({
   phone: {
     ...phoneA,
@@ -167,10 +175,45 @@ const normalizedSchedulePhone = ensureCharacterPhoneContent({
   worldBookEntries: worldBook,
   now: 300,
 });
-assert.equal(
-  normalizedSchedulePhone.scheduleItems.filter((entry) => entry.title === duplicateSchedule.title).length,
-  1,
-  "removes legacy seed schedules while preserving the explicit user schedule",
-);
+assert.equal(normalizedSchedulePhone.scheduleItems.length, 1, "removes legacy generated schedules while preserving the explicit user schedule");
+
+const legacyPhone = ensureCharacterPhoneContent({
+  phone: {
+    ...phoneA,
+    contacts: [
+      { id: "phone-contact-old", name: "林晓", relation: "现实朋友", isLongTerm: true, isNpc: true },
+      phoneA.contacts[0],
+    ],
+    threadMessages: [{ id: "phone-thread-message-old", contactId: "phone-contact-old", sender: "contact", content: "旧模板消息", timestamp: 2 }],
+    browserHistory: [{ id: "phone-search-old", query: "旧模板搜索", title: "旧模板标题", timestamp: 2 }],
+    diaryEntries: [{ id: "phone-diary-old", title: "旧模板日记", body: "旧模板内容", timestamp: 2 }],
+    notes: [{ id: "phone-note-old", title: "旧模板备忘录", content: "旧模板内容", timestamp: 2 }],
+    todos: [{ id: "phone-todo-old", text: "旧模板待办", checked: false, source: "generated" }],
+    scheduleItems: [{ id: "phone-schedule-old", title: "旧模板日程", detail: "旧模板内容", timestamp: 2 }],
+    posts: [{ id: "phone-post-old", author: characterA.name, content: "旧模板朋友圈", timestamp: 2, likes: 0, comments: [], source: "generated" }],
+    galleryItems: [
+      { id: "phone-gallery-old", title: "旧模板相册", caption: "旧模板内容", timestamp: 2, source: "generated" },
+      { id: "phone-gallery-received", title: "用户发送的图片", caption: "保留", timestamp: 3, source: "received" },
+    ],
+  },
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 400,
+});
+assert.ok(!legacyPhone.contacts.some((contact) => contact.id === "phone-contact-old"), "removes legacy generated contacts");
+assert.ok(!legacyPhone.threadMessages.some((message) => message.id === "phone-thread-message-old"), "removes orphaned legacy contact messages");
+assert.equal(legacyPhone.browserHistory.some((entry) => entry.id === "phone-search-old"), false);
+assert.equal(legacyPhone.diaryEntries.some((entry) => entry.id === "phone-diary-old"), false);
+assert.equal(legacyPhone.notes?.some((note) => note.id === "phone-note-old"), false);
+assert.equal(legacyPhone.todos?.some((todo) => todo.id === "phone-todo-old"), false);
+assert.equal(legacyPhone.scheduleItems.some((entry) => entry.id === "phone-schedule-old"), false);
+assert.equal(legacyPhone.posts.some((post) => post.id === "phone-post-old"), false);
+assert.equal(legacyPhone.galleryItems.some((item) => item.id === "phone-gallery-old"), false);
+assert.equal(legacyPhone.galleryItems.some((item) => item.id === "phone-gallery-received"), true, "preserves received photos");
 
 console.log("character phone content isolation tests passed");

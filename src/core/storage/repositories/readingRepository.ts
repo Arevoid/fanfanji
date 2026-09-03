@@ -1,10 +1,12 @@
-import LZString from "lz-string";
+import * as LZStringModule from "lz-string";
 import { normalizeReadingStore } from "../../../domain/reading/normalization";
 import { createEmptyReadingStore, type ReadingStore } from "../../../domain/reading/types";
 import { readingAssetDb } from "../readingAssetDb";
 import { readJson, readString, remove, writeString } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageErrorKind, StorageResult, StorageWriteResult } from "../storageTypes";
+
+const LZString = ((LZStringModule as typeof LZStringModule & { default?: typeof LZStringModule }).default ?? LZStringModule) as typeof import("lz-string");
 
 export function loadReadingStore(): StorageResult<ReadingStore> {
   if (metadataReady && cachedReadingStore) {

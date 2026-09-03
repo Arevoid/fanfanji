@@ -9,17 +9,13 @@ import type {
 import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
 import type {
   CharacterPhoneContact,
-  CharacterPhoneDiaryEntry,
   CharacterPhoneMessage,
-  CharacterPhoneNote,
   CharacterPhonePost,
   CharacterPhoneRecord,
   CharacterPhoneMusicPlaylist,
   CharacterPhoneMusicTrack,
   CharacterPhoneListeningRecord,
-  CharacterPhoneScheduleItem,
   CharacterPhoneThreadMessage,
-  CharacterPhoneTodo,
 } from "../../domain/characterPhone/types";
 
 export interface CharacterPhoneContentInput {
@@ -35,7 +31,6 @@ export interface CharacterPhoneContentInput {
   now?: number;
 }
 
-const DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_MUSIC_LIBRARY = [
   { id: "night-mood", title: "Night Mood", artist: "角色的深夜歌单", duration: "4:39" },
   { id: "quiet-city-lights", title: "Quiet City Lights", artist: "City Pop Radio", duration: "3:58" },
@@ -49,6 +44,10 @@ function scopedId(phoneId: string, kind: string, key: string): string {
 
 function includesAny(text: string, words: string[]): boolean {
   return words.some((word) => text.includes(word));
+}
+
+function contactKey(name: string): string {
+  return name.trim().toLocaleLowerCase();
 }
 
 function relevantWorldBookEntries(entries: WorldBookEntry[], characterId: string): WorldBookEntry[] {
@@ -68,14 +67,12 @@ function buildContext(character: Character, entries: WorldBookEntry[]): string {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
-function contextPhrase(character: Character, context: string): string {
-  const source = [character.personality, character.backstory, context]
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const phrase = source.split(/[。！？.!?]/)[0]?.trim();
-  return (phrase || `${character.name}的近况`).slice(0, 32);
+function buildRawContext(character: Character, entries: WorldBookEntry[]): string {
+  return [
+    character.personality,
+    character.backstory,
+    ...relevantWorldBookEntries(entries, character.id).flatMap((entry) => [entry.title, entry.content]),
+  ].filter(Boolean).join("\n");
 }
 
 function toCharacterMessage(message: Message, phoneId: string, contactId: string): CharacterPhoneThreadMessage {
@@ -109,25 +106,32 @@ function makeUserContact(phone: CharacterPhoneRecord, identity?: UserIdentity): 
   };
 }
 
-function buildGeneratedContacts(
+function buildContextContacts(
   phone: CharacterPhoneRecord,
   character: Character,
-  context: string,
+  entries: WorldBookEntry[],
 ): CharacterPhoneContact[] {
-  const relationshipLabel = includesAny(context, ["同事", "公司", "工作", "学校", "老师", "同学"])
-    ? "工作或学习上的联系人"
-    : includesAny(context, ["家人", "妹妹", "姐姐", "哥哥", "父亲", "母亲"])
-      ? "家人"
-      : "认识很久的朋友";
-  const candidates = [
-    { name: "林晓", relation: relationshipLabel },
-    { name: "周岚", relation: includesAny(context, ["任务", "组织", "行动", "秘密"]) ? "一起处理事情的人" : "偶尔联系的人" },
-  ];
-  const existingNames = new Set((phone.contacts ?? []).map((contact) => contact.name));
+  const rawContext = buildRawContext(character, entries);
+  const candidates: Array<{ name: string; relation: string }> = [];
+  const addCandidate = (name: string, relation: string) => {
+    const normalizedName = name.replace(/[“”‘’"']/g, "").trim();
+    if (normalizedName.length < 2 || normalizedName.length > 16) return;
+    if (normalizedName === character.name || candidates.some((candidate) => candidate.name === normalizedName)) return;
+    candidates.push({ name: normalizedName, relation });
+  };
+  const relationPattern = /(?:家人|父亲|母亲|爸爸|妈妈|哥哥|姐姐|弟弟|妹妹|朋友|好友|同事|同学|老师|上司|邻居|前任|恋人|队友|搭档)\s*[：:]\s*([^\n。；;,，]+)/g;
+  for (const match of rawContext.matchAll(relationPattern)) {
+    const label = match[0].split(/[：:]/)[0]?.trim() || "联系人";
+    match[1].split(/[、，,及和与]/).forEach((name) => addCandidate(name, label));
+  }
+  const describedRelationPattern = /([A-Za-z\u4e00-\u9fff·]{2,16})\s*(?:是|为)[^\n。；;]{0,12}(家人|朋友|好友|同事|同学|老师|上司|邻居|前任|恋人|队友|搭档)/g;
+  for (const match of rawContext.matchAll(describedRelationPattern)) addCandidate(match[1], match[2]);
+
+  const existingNames = new Set((phone.contacts ?? []).map((contact) => contactKey(contact.name)));
   return candidates
-    .filter((candidate) => !existingNames.has(candidate.name) && candidate.name !== character.name)
+    .filter((candidate) => !existingNames.has(contactKey(candidate.name)) && candidate.name !== character.name)
     .map((candidate, index) => ({
-      id: scopedId(phone.id, "contact", `generated-${index}`),
+      id: scopedId(phone.id, "contact", `context-${candidate.name}`),
       name: candidate.name,
       relation: candidate.relation,
       isLongTerm: index === 0,
@@ -136,7 +140,7 @@ function buildGeneratedContacts(
     }));
 }
 
-function syncContacts(input: CharacterPhoneContentInput, seeded: boolean): CharacterPhoneContact[] {
+function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[] {
   const userContact = makeUserContact(input.phone, input.activeIdentity);
   // Keep removed contacts in the record. They are a soft-unlink: the contact
   // disappears from the visible inbox but its old thread and deletion fact
@@ -167,7 +171,7 @@ function syncContacts(input: CharacterPhoneContentInput, seeded: boolean): Chara
       avatar: candidate.avatar,
       source: "linked" as const,
     }));
-  const generated = seeded ? buildGeneratedContacts(input.phone, input.character, buildContext(input.character, input.worldBookEntries)) : [];
+  const generated = buildContextContacts(input.phone, input.character, input.worldBookEntries);
   return [userContact, ...normalizedExisting, ...linkedContacts, ...generated];
 }
 
@@ -198,83 +202,6 @@ function syncUserChat(
   return {
     threadMessages: threadMessages.sort((left, right) => left.timestamp - right.timestamp),
     lastMessageId: sourceMessages.at(-1)?.id,
-  };
-}
-
-function createSeedDiary(phoneId: string, character: Character, now: number, context: string): CharacterPhoneDiaryEntry[] {
-  const phrase = contextPhrase(character, context);
-  const privateThought = includesAny(context, ["敏感", "克制", "沉默", "孤独"])
-    ? `${phrase}。明明已经想好要说什么，真正面对那个人的时候，还是把话咽了回去。`
-    : `今天仍在处理“${phrase}”带来的情绪，只有那句想说的话，还停在输入框里。`;
-  return [
-    { id: scopedId(phoneId, "diary", "private-1"), title: `${character.name}没有说出口的话`, body: privateThought, timestamp: now - 4 * 60 * 60 * 1000 },
-    { id: scopedId(phoneId, "diary", "private-2"), title: `只留给${character.name}的记录`, body: `${phrase}。这段记录不想让任何人看见，至少现在还不能急着给它下结论。`, timestamp: now - DAY, hidden: true },
-  ];
-}
-
-function createSeedPosts(phoneId: string, character: Character, now: number, context: string): CharacterPhonePost[] {
-  const content = includesAny(context, ["旅行", "城市", "在外", "住在"])
-    ? "路过一个没在地图上标记出来的地方，风很大，刚好适合把一些事想清楚。"
-    : "有些心情不适合发给特定的人，只适合留在这里。";
-  return [
-    {
-      id: scopedId(phoneId, "moment", "character-1"),
-      author: character.name,
-      authorId: character.id,
-      content,
-      timestamp: now - 2 * 60 * 60 * 1000,
-      likes: 1,
-      comments: [],
-      source: "generated",
-      authorAvatar: character.avatar,
-    },
-  ];
-}
-
-function createSeedBrowserHistory(phoneId: string, character: Character, now: number, context: string) {
-  const phrase = contextPhrase(character, context);
-  const entries = includesAny(context, ["工作", "公司", "学校", "任务"])
-    ? [
-        [`${character.name} 明天如何安排 ${phrase}`, `关于${phrase}的安排`],
-        [`${phrase} 附近安静适合工作的地方`, `适合${phrase}的安静地点`],
-        [`${character.name} 如何在忙碌时保持专注`, `${character.name}的专注方法`],
-      ]
-    : [
-        [`${character.name} 适合一个人去哪里`, `适合${character.name}的安静路线`],
-        [`${phrase} 会让人开心吗`, `关于${phrase}的相处方式`],
-        [`${character.name} 最近为什么睡不着`, `${character.name}的夜晚记录`],
-      ];
-  return entries.map(([query, title], index) => ({
-    id: scopedId(phoneId, "search", `seed-${index}`),
-    query,
-    title,
-    timestamp: now - (index + 1) * 2 * 60 * 60 * 1000,
-  }));
-}
-
-function createSeedSchedule(phoneId: string, character: Character, now: number, context: string): CharacterPhoneScheduleItem[] {
-  const phrase = contextPhrase(character, context);
-  const firstTitle = includesAny(context, ["工作", "公司", "学校", "上班"])
-    ? `${character.name}的工作或学习安排`
-    : `整理与${phrase}有关的事情`;
-  return [
-    { id: scopedId(phoneId, "schedule", "seed-today"), title: firstTitle, detail: `按${character.name}的日常节奏处理这件事。`, timestamp: now + 3 * 60 * 60 * 1000 },
-    { id: scopedId(phoneId, "schedule", "seed-evening"), title: `${character.name}的个人时间`, detail: `给${character.name}留一点不被打扰的时间。`, timestamp: now + 7 * 60 * 60 * 1000 },
-    { id: scopedId(phoneId, "schedule", "seed-next"), title: `${character.name}需要提前准备的事`, detail: `与${phrase}有关的一件待办。`, timestamp: now + DAY + 10 * 60 * 60 * 1000 },
-  ];
-}
-
-function createSeedNotes(phoneId: string, character: Character, context: string, now: number): { notes: CharacterPhoneNote[]; todos: CharacterPhoneTodo[] } {
-  const phrase = contextPhrase(character, context);
-  const noteContent = includesAny(context, ["用户", "朋友", "关系", "喜欢"])
-    ? `下次和重要的人聊到${phrase}时，记得问问对方最近有没有好好休息。`
-    : `把与${phrase}有关的想法整理一下，别让它们一直堆在心里。`;
-  return {
-    notes: [{ id: scopedId(phoneId, "note", "seed-1"), title: `${character.name}需要记住的事`, content: noteContent, timestamp: now }],
-    todos: [
-      { id: scopedId(phoneId, "todo", "seed-1"), text: `准备处理${phrase}`, checked: false, source: "generated" },
-      { id: scopedId(phoneId, "todo", "seed-2"), text: `${character.name}留一点时间给自己`, checked: false, source: "generated" },
-    ],
   };
 }
 
@@ -316,7 +243,7 @@ function syncMusic(
       }));
   const playlist: CharacterPhoneMusicPlaylist = {
     id: scopedId(phone.id, "playlist", "daily"),
-    name: includesAny(context, ["夜", "夜晚", "失眠", "安静"]) ? "角色的深夜歌单" : `${character.name} 的日常歌单`,
+    name: includesAny(context, ["夜", "夜晚", "失眠", "安静"]) ? "深夜歌单" : "最近常听",
     trackIds: musicTracks.map((track) => track.id),
     source: sourceTracks && sourceTracks.length > 0 ? "user-library" : "generated",
   };
@@ -371,23 +298,51 @@ function syncMoments(
 
 function removeLegacyPresetContent(phone: CharacterPhoneRecord): CharacterPhoneRecord {
   const hasScopedSeed = (id: string, kind: string) => id.includes(`:${kind}:seed-`);
+  const isLegacyGenerated = (id: string) => id.startsWith("phone-generated-") || id.startsWith("phone-message-");
+  const isLegacyContact = (id: string) => id.startsWith("phone-contact-") || id.includes(":contact:generated-");
+  const isLegacyBrowserEntry = (id: string) => hasScopedSeed(id, "search")
+    || (id.startsWith("phone-search-") && !id.startsWith("phone-search-user-"));
+  const isLegacyDiaryEntry = (id: string) => hasScopedSeed(id, "diary")
+    || id.includes(":diary:private-")
+    || (id.startsWith("phone-diary-") && !id.startsWith("phone-diary-user-"));
+  const isLegacyScheduleItem = (id: string) => hasScopedSeed(id, "schedule") || id.startsWith("phone-schedule-");
+  const isLegacyNote = (id: string) => hasScopedSeed(id, "note") || id.startsWith("phone-note-");
+  const isLegacyTodo = (id: string) => hasScopedSeed(id, "todo") || id.startsWith("phone-todo-");
+  const isLegacyPost = (id: string) => hasScopedSeed(id, "moment")
+    || id.includes(":moment:character-1")
+    || (id.startsWith("phone-post-") && !id.startsWith("phone-post-user-"));
+  const legacyContactIds = new Set(
+    phone.contacts
+      .filter((contact) => isLegacyContact(contact.id) && contact.source !== "user")
+      .filter((contact) => !(phone.threadMessages ?? []).some((message) => message.contactId === contact.id && (message.operatedByUser || message.sourceMessageId)))
+      .map((contact) => contact.id),
+  );
   return {
     ...phone,
-    // These were generated by the old demo fallback, never by the user's
-    // chat. Keep awareness alerts because they represent real phone events.
-    messages: phone.messages.filter((message) => !message.id.startsWith("phone-message-")),
+    // These IDs belonged to the old demo fallback. User-authored messages and
+    // awareness alerts use different IDs and are intentionally preserved.
+    messages: phone.messages.filter((message) => !isLegacyGenerated(message.id) || message.id.startsWith("phone-message-user-")),
+    contacts: phone.contacts.filter((contact) => !legacyContactIds.has(contact.id)),
     threadMessages: phone.threadMessages.filter((message) => {
-      const isLegacyGenerated = hasScopedSeed(message.id, "message")
+      const isLegacyMessage = hasScopedSeed(message.id, "message")
         || message.id.includes(":message:legacy-")
-        || message.id.startsWith("phone-thread-message-");
-      return !isLegacyGenerated || Boolean(message.operatedByUser || message.sourceMessageId);
+        || message.id.startsWith("phone-thread-message-")
+        || isLegacyGenerated(message.id)
+        || legacyContactIds.has(message.contactId);
+      return !isLegacyMessage || Boolean(message.operatedByUser || message.sourceMessageId);
     }),
-    browserHistory: phone.browserHistory.filter((entry) => !hasScopedSeed(entry.id, "search") && (!entry.id.startsWith("phone-search-") || entry.id.startsWith("phone-search-user-"))),
-    diaryEntries: phone.diaryEntries.filter((entry) => !hasScopedSeed(entry.id, "diary") && !entry.id.includes(":diary:private-") && !entry.id.startsWith("phone-diary-")),
-    notes: (phone.notes ?? []).filter((note) => !hasScopedSeed(note.id, "note")),
-    todos: (phone.todos ?? []).filter((todo) => !hasScopedSeed(todo.id, "todo")),
-    scheduleItems: phone.scheduleItems.filter((entry) => !hasScopedSeed(entry.id, "schedule") && !entry.id.startsWith("phone-schedule-")),
-    posts: phone.posts.filter((post) => !hasScopedSeed(post.id, "moment") && !post.id.includes(":moment:character-1") && (!post.id.startsWith("phone-post-") || post.id.startsWith("phone-post-user-"))),
+    browserHistory: phone.browserHistory.filter((entry) => !isLegacyBrowserEntry(entry.id) && !isLegacyGenerated(entry.id)),
+    diaryEntries: phone.diaryEntries.filter((entry) => !isLegacyDiaryEntry(entry.id) && !isLegacyGenerated(entry.id)),
+    notes: (phone.notes ?? []).filter((note) => !isLegacyNote(note.id) && !isLegacyGenerated(note.id)),
+    todos: (phone.todos ?? []).filter((todo) => !isLegacyTodo(todo.id) && !isLegacyGenerated(todo.id) && todo.source !== "generated"),
+    scheduleItems: phone.scheduleItems.filter((entry) => !isLegacyScheduleItem(entry.id) && !isLegacyGenerated(entry.id)),
+    // Old demo gallery items used phone-gallery-* without a real asset. Keep
+    // received photos and any real/generated image that has an asset or a
+    // locally rendered text-image representation.
+    galleryItems: phone.galleryItems.filter((item) => item.source !== "generated"
+      || !item.id.startsWith("phone-gallery-")
+      || Boolean(item.imageAssetId || item.dataUrl || item.textImageForId)),
+    posts: phone.posts.filter((post) => !isLegacyPost(post.id) && !isLegacyGenerated(post.id)),
   };
 }
 
@@ -492,7 +447,7 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   const seeded = Boolean(sourcePhone.contentSeededAt);
   const context = buildContext(input.character, input.worldBookEntries);
   const scopedInput = { ...input, phone: sourcePhone };
-  const contacts = syncContacts(scopedInput, !seeded);
+  const contacts = syncContacts(scopedInput);
   const userContact = contacts[0];
   const relationIds = input.relationships
     .filter((relation) => relation.userIdentityId === sourcePhone.ownerIdentityId && relation.characterId === input.character.id)
@@ -520,32 +475,9 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   };
 
   if (!seeded) {
-    const seedDiary = createSeedDiary(sourcePhone.id, input.character, now, context);
-    const seedPosts = createSeedPosts(sourcePhone.id, input.character, now, context);
-    const seedBrowserHistory = createSeedBrowserHistory(sourcePhone.id, input.character, now, context);
-    const seedSchedule = createSeedSchedule(sourcePhone.id, input.character, now, context);
-    const seedNotes = createSeedNotes(sourcePhone.id, input.character, context, now);
-    const generatedContacts = contacts.filter((contact) => contact.source === "generated");
     next = {
       ...next,
       contentSeededAt: now,
-      lastGeneratedAt: now,
-      browserHistory: normalizeCharacterPhoneBrowserHistory([...seedBrowserHistory, ...next.browserHistory]),
-      diaryEntries: [...seedDiary, ...next.diaryEntries],
-      scheduleItems: normalizeScheduleItems([...seedSchedule, ...next.scheduleItems]),
-      notes: [...seedNotes.notes, ...(next.notes ?? [])],
-      todos: [...seedNotes.todos, ...(next.todos ?? [])],
-      posts: [...seedPosts, ...next.posts],
-      activities: [
-        ...next.activities,
-        ...generatedContacts.map((contact) => ({
-          id: scopedId(input.phone.id, "activity", `contact-${contact.id}`),
-          type: "user_edit" as const,
-          label: `生成角色联系人：${contact.name}`,
-          timestamp: now,
-          relatedToUser: false,
-        })),
-      ],
     };
   }
 

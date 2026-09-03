@@ -100,6 +100,11 @@ assert.equal(rawDocument.gender, "女");
 assert.equal(rawDocument.personality, rawText, "TXT/DOCX source text must remain byte-for-byte unchanged after extraction");
 assert.equal(rawDocument.backstory, "");
 assert.deepEqual(rawDocument.references, []);
+assert.equal(rawDocument.sourceFileName, "完整角色.docx");
+
+const unnamedRawDocument = createCharacterFromRawDocument("性格：安静、克制。", "不应成为角色名.txt", "unnamed-raw-character");
+assert.equal(unnamedRawDocument.name, "未命名角色");
+assert.equal(unnamedRawDocument.sourceFileName, "不应成为角色名.txt");
 
 const markdownProfile = "解之遥-人设卡\n\n### 【基本信息】\n\n**姓名**：解之遥\n**性别**：男\n**年龄**：24岁\n\n其余原文必须完整保留。";
 const markdownDocument = createCharacterFromRawDocument(markdownProfile, "解之遥-人设卡.docx", "markdown-character");

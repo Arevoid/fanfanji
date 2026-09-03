@@ -24,6 +24,8 @@ export function sanitizeChatIcons(value: unknown): ChatIconOverrides {
 export interface Character {
   id: string;
   name: string;
+  /** Original import filename kept as source metadata, never as a display name. */
+  sourceFileName?: string;
   age?: number | "" | "∞";
   avatar: string; // URL, emoji, or base64
   gender?: string;
